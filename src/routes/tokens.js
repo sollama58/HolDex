@@ -119,31 +119,6 @@ function init(deps) {
         }
     });
 
-    // Get single token
-    router.get('/token/:mint', async (req, res) => {
-        try {
-            const { mint } = req.params;
-            const cacheKey = `api:token:${mint}`;
-            const result = await smartCache(cacheKey, 30, async () => {
-                const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
-                if (!token) return null;
-                return { 
-                    success: true, 
-                    token: {
-                        ...token,
-                        marketCap: token.marketcap,
-                        volume24h: token.volume24h,
-                        priceUsd: token.priceusd,
-                        change1h: token.change1h,
-                        change24h: token.change24h
-                    } 
-                };
-            });
-            if (!result) return res.status(404).json({ success: false, error: "Not found" });
-            res.json(result);
-        } catch (e) { res.status(500).json({ success: false, error: "DB Error" }); }
-    });
-
     // REMOVED: /check-holder endpoint
 
     return router;

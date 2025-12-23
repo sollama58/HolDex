@@ -8,7 +8,7 @@ const { initDB, getDB } = require('./services/database');
 const { initRedis } = require('./services/redis');
 const tokenRoutes = require('./routes/tokens');
 const metadataUpdater = require('./tasks/metadataUpdater');
-// REMOVED: holderScanner import
+// REMOVED: holderScanner
 const newTokenListener = require('./tasks/newTokenListener');
 const autoSeeder = require('./tasks/autoSeeder'); 
 
@@ -35,8 +35,8 @@ async function startServer() {
 
     // --- START BACKGROUND TASKS ---
     console.log('🚀 Starting Background Tasks...');
-    autoSeeder.start(deps);        // 1. Seed DB with existing tokens > 10k
-    newTokenListener.start(deps);  // 2. Listen for high-value new mints
+    autoSeeder.start(deps);        // 1. Seed DB
+    newTokenListener.start(deps);  // 2. Listen for new mints
     metadataUpdater.start(deps);   // 3. Keep prices fresh
     // REMOVED: holderScanner start
 

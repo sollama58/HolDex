@@ -81,7 +81,6 @@
                 <div class="flex bg-slate-900/50 p-1 rounded-xl border border-slate-800">
                     <button class="tab-btn active" onclick="setSort('newest', this)">Fresh Mints</button>
                     <button class="tab-btn" onclick="setSort('leaders', this)">Leaders</button>
-                    <button class="tab-btn" onclick="setSort('holders', this)">Holders</button>
                 </div>
                 <div class="relative">
                     <i data-lucide="search" width="14" class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"></i>
@@ -155,7 +154,7 @@
 </div>
 
 <script>
-    const API_URL = 'http://localhost:3000'; 
+    const API_URL = 'https://asdev-backend.onrender.com'; 
     let currentSort = 'newest';
     let searchQuery = '';
     let pollingInterval;

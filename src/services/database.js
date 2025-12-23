@@ -1,6 +1,6 @@
 /**
  * Database Service (PostgreSQL + Redis Version)
- * Optimized: Added Transaction Support and Batch Operations
+ * Optimized: Added Transaction Support
  */
 const { Pool } = require('pg');
 const config = require('../config/env');
@@ -9,7 +9,6 @@ const { getRedis } = require('./redis');
 
 let pool = null;
 
-// --- COMPATIBILITY WRAPPER ---
 const dbWrapper = {
     async query(text, params) {
         if (!pool) throw new Error("DB not initialized");
@@ -34,7 +33,6 @@ const dbWrapper = {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            // Create a mini-db interface for the transaction client
             const trxDb = {
                 query: (t, p) => client.query(t, p),
                 get: async (t, p) => (await client.query(t, p)).rows[0],
@@ -53,11 +51,8 @@ const dbWrapper = {
     }
 };
 
-// --- CACHING HELPER ---
 async function smartCache(key, ttlSeconds, fetchFunction) {
     const redis = getRedis();
-    
-    // 1. Try Redis
     if (redis) {
         try {
             const cached = await redis.get(key);
@@ -66,14 +61,9 @@ async function smartCache(key, ttlSeconds, fetchFunction) {
             logger.warn(`Redis Cache Miss/Error for ${key}: ${e.message}`);
         }
     }
-
-    // 2. Fetch Fresh
     try {
         const value = await fetchFunction();
-        
-        // 3. Store in Redis
         if (value !== undefined && value !== null && redis) {
-            // 'EX' sets expiry in seconds
             await redis.set(key, JSON.stringify(value), 'EX', ttlSeconds);
         }
         return value;
@@ -82,25 +72,20 @@ async function smartCache(key, ttlSeconds, fetchFunction) {
     }
 }
 
-// --- INITIALIZATION ---
 async function initDB() {
-    if (!config.DATABASE_URL) {
-        throw new Error("DATABASE_URL is missing in .env");
-    }
+    if (!config.DATABASE_URL) throw new Error("DATABASE_URL is missing in .env");
 
     try {
         pool = new Pool({
             connectionString: config.DATABASE_URL,
-            ssl: { rejectUnauthorized: false }, // Required for most cloud Postgres
-            max: 20, // Limit connection pool size
+            ssl: { rejectUnauthorized: false }, 
+            max: 20, 
             idleTimeoutMillis: 30000
         });
 
-        // Test connection
         await pool.query('SELECT NOW()');
         logger.info('Connected to PostgreSQL');
 
-        // Initialize Tables
         await pool.query(`
             CREATE TABLE IF NOT EXISTS tokens (
                 id SERIAL PRIMARY KEY,
@@ -129,27 +114,13 @@ async function initDB() {
             );
         `);
 
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS token_holders (
-                id SERIAL PRIMARY KEY,
-                mint TEXT,
-                holderPubkey TEXT,
-                balance DOUBLE PRECISION, 
-                rank INTEGER,
-                updatedAt BIGINT,
-                UNIQUE(mint, holderPubkey)
-            );
-        `);
-        // Changed balance to DOUBLE PRECISION above for easier sorting, assuming raw amount isn't needed for strict math here.
-        // If strict precision is needed, keep as TEXT or NUMERIC.
+        // Removed token_holders table creation since it's no longer used
 
-        // Index Creation (Crucial for performance)
+        // Create Indexes
         try {
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_volume ON tokens(volume24h DESC)`);
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_mcap ON tokens(marketCap DESC)`);
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_time ON tokens(timestamp DESC)`);
-            await pool.query(`CREATE INDEX IF NOT EXISTS idx_holders_mint ON token_holders(mint)`);
-            await pool.query(`CREATE INDEX IF NOT EXISTS idx_holders_pubkey ON token_holders(holderPubkey)`); // Added for check-holder
         } catch (idxErr) {
             logger.warn('Index creation notice:', idxErr.message);
         }
@@ -162,11 +133,8 @@ async function initDB() {
     }
 }
 
-// --- DATA ACCESS ---
-
 async function saveTokenData(pubkey, mint, metadata) {
     if (!pool) return;
-    
     try {
         await pool.query(`
             INSERT INTO tokens (userPubkey, mint, ticker, name, description, twitter, website, metadataUri, image, isMayhemMode, marketCap, timestamp)
@@ -181,20 +149,11 @@ async function saveTokenData(pubkey, mint, metadata) {
                 image = EXCLUDED.image,
                 marketCap = GREATEST(tokens.marketCap, EXCLUDED.marketCap) 
         `, [
-            pubkey, 
-            mint, 
-            metadata.ticker, 
-            metadata.name, 
-            metadata.description,
-            metadata.twitter, 
-            metadata.website, 
-            metadata.metadataUri,
-            metadata.image, 
-            metadata.isMayhemMode ? true : false,
-            metadata.marketCap || 0,
-            Date.now()
+            pubkey, mint, metadata.ticker, metadata.name, metadata.description,
+            metadata.twitter, metadata.website, metadata.metadataUri,
+            metadata.image, metadata.isMayhemMode ? true : false,
+            metadata.marketCap || 0, Date.now()
         ]);
-
     } catch (e) {
         logger.error("Save Token Error", { error: e.message });
     }
