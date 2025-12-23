@@ -17,6 +17,7 @@ async function seedHighValueTokens(deps) {
     let limit = 50;
     let keepScanning = true;
     let addedCount = 0;
+    let retryCount = 0;
 
     while (keepScanning) {
         try {
@@ -28,6 +29,13 @@ async function seedHighValueTokens(deps) {
                     sort: 'market_cap',
                     order: 'DESC',
                     includeNsfw: true
+                },
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/json',
+                    'Origin': 'https://pump.fun',
+                    'Referer': 'https://pump.fun/',
+                    'Cache-Control': 'no-cache'
                 },
                 timeout: 10000
             });
@@ -44,12 +52,10 @@ async function seedHighValueTokens(deps) {
                 
                 if (mcap < MIN_MARKET_CAP) {
                     // Since we sort DESC, once we hit < 10k, all subsequent coins are also < 10k.
-                    // We can safely stop scanning.
                     keepScanning = false;
-                    break; // Break the for-loop
+                    break;
                 }
 
-                // Prepare Metadata
                 const metadata = {
                     ticker: coin.symbol,
                     name: coin.name,
@@ -60,11 +66,9 @@ async function seedHighValueTokens(deps) {
                     metadataUri: coin.uri,
                     image: coin.image_uri,
                     isMayhemMode: false,
-                    marketCap: mcap // Pass initial mcap
+                    marketCap: mcap
                 };
 
-                // Save (Upsert)
-                // The DB logic ensures we don't delete existing tokens, complying with "once in, stay in"
                 await saveTokenData(coin.creator, coin.mint, metadata);
                 addedCount++;
             }
@@ -72,27 +76,38 @@ async function seedHighValueTokens(deps) {
             if (!keepScanning) break;
 
             offset += limit;
+            retryCount = 0; // Reset retries on success
             
-            // Safety break to prevent infinite loops in weird API states
+            // Safety break
             if (offset > 5000) {
                 logger.info("🌱 AutoSeeder: Reached safety limit (5000 tokens). Stopping.");
                 break;
             }
 
             // Respect Rate Limits
-            await new Promise(r => setTimeout(r, 500)); 
+            await new Promise(r => setTimeout(r, 1000)); 
 
         } catch (e) {
             logger.error(`🌱 AutoSeeder Error at offset ${offset}: ${e.message}`);
-            // If API fails, stop this cycle
-            keepScanning = false;
+            
+            // Handle 530/403/429 specifically with retries
+            if (e.response && [403, 429, 530].includes(e.response.status)) {
+                retryCount++;
+                if (retryCount > 3) {
+                    logger.warn("🌱 AutoSeeder: Too many blocks/errors. Aborting this cycle.");
+                    keepScanning = false;
+                } else {
+                    logger.warn(`🌱 AutoSeeder: Hit block/limit (${e.response.status}). Waiting 10s...`);
+                    await new Promise(r => setTimeout(r, 10000));
+                }
+            } else {
+                keepScanning = false;
+            }
         }
     }
 
     if (addedCount > 0) {
         logger.info(`🌱 AutoSeeder: Cycle Complete. Synced ${addedCount} tokens > $10k.`);
-    } else {
-        logger.info("🌱 AutoSeeder: Cycle Complete. No new tokens found.");
     }
 }
 
@@ -100,8 +115,8 @@ function start(deps) {
     // Run 5 seconds after boot
     setTimeout(() => seedHighValueTokens(deps), 5000);
 
-    // Run every 2 minutes to catch tokens that just pumped
-    setInterval(() => seedHighValueTokens(deps), 120000);
+    // Run every 5 minutes to catch tokens that just pumped
+    setInterval(() => seedHighValueTokens(deps), 300000);
 }
 
 module.exports = { start };
