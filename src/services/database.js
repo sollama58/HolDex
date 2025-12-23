@@ -1,6 +1,5 @@
 /**
  * Database Service (PostgreSQL + Redis Version)
- * Optimized: Added Transaction Support & Custom Timestamp
  */
 const { Pool } = require('pg');
 const config = require('../config/env');
@@ -127,7 +126,6 @@ async function initDB() {
     }
 }
 
-// UPDATED: Accepts customTimestamp to accurately record Mint Date
 async function saveTokenData(pubkey, mint, metadata, customTimestamp = null) {
     if (!pool) return;
     try {

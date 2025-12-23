@@ -1,6 +1,6 @@
 /**
  * New Token Listener (DexScreener Version)
- * Optimized memory handling & Accurate Age Calculation.
+ * Fix: Allows tracking of tokens that grow in Market Cap.
  */
 const axios = require('axios');
 const { logger } = require('../services');
@@ -33,14 +33,18 @@ async function checkNewTokens(deps) {
         for (const pair of pairs) {
             const mint = pair.baseToken.address;
 
-            // Skip if seen or not Solana
-            if (knownMints.has(mint) || pair.chainId !== 'solana') continue;
+            // 1. Skip non-Solana
+            if (pair.chainId !== 'solana') continue;
+
+            // 2. Skip if we have already SAVED this token (in memory cache)
+            if (knownMints.has(mint)) continue;
 
             const mcap = pair.fdv || pair.marketCap || 0;
 
+            // 3. CRITICAL FIX: Do NOT mark as known if we skip due to low mcap.
+            // This allows us to catch it on the next loop if it pumps.
             if (mcap < MIN_MARKET_CAP) {
-                knownMints.add(mint); 
-                continue;
+                continue; 
             }
 
             const metadata = {
@@ -58,15 +62,17 @@ async function checkNewTokens(deps) {
                 priceUsd: pair.priceUsd
             };
 
-            // UPDATED: Pass pairCreatedAt as the timestamp to get accurate Age
+            // 4. Pass Creation Time for accurate "Age"
             const createdAt = pair.pairCreatedAt || Date.now();
             await saveTokenData(null, mint, metadata, createdAt);
             
+            // 5. NOW we mark it as known/processed
             knownMints.add(mint);
             addedCount++;
-            logger.info(`💎 DEXSCREENER DETECT: ${pair.baseToken.symbol} ($${Math.floor(mcap)})`);
+            logger.info(`💎 NEW FIND: ${pair.baseToken.symbol} ($${Math.floor(mcap)})`);
         }
 
+        // Memory Cleanup
         if (knownMints.size > MAX_HISTORY) {
             const it = knownMints.values();
             for (let i = 0; i < 500; i++) {

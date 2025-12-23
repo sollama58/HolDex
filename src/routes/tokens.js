@@ -1,5 +1,5 @@
 /**
- * Token Routes (Correctly Mapped for Detail View)
+ * Token Routes (Updated for Header Sorting)
  */
 const express = require('express');
 const axios = require('axios');
@@ -25,12 +25,34 @@ function init(deps) {
             const result = await smartCache(cacheKey, 5, async () => {
                 const limitVal = Math.min(parseInt(limit) || 100, 100);
                 
+                // --- DYNAMIC SORT LOGIC ---
                 let orderByClause = 'ORDER BY timestamp DESC'; 
 
-                if (sort === 'leaders' || sort === 'mcap') {
-                    orderByClause = 'ORDER BY marketCap DESC';
-                } else if (sort === 'gainers') {
-                    orderByClause = 'ORDER BY change24h DESC';
+                switch (sort) {
+                    case 'mcap':
+                        orderByClause = 'ORDER BY marketCap DESC';
+                        break;
+                    case 'volume':
+                        orderByClause = 'ORDER BY volume24h DESC';
+                        break;
+                    case 'gainers':
+                    case '24h':
+                        orderByClause = 'ORDER BY change24h DESC';
+                        break;
+                    case '1h':
+                        orderByClause = 'ORDER BY change1h DESC';
+                        break;
+                    case '5m':
+                        orderByClause = 'ORDER BY change5m DESC';
+                        break;
+                    case 'price':
+                        orderByClause = 'ORDER BY priceUsd DESC';
+                        break;
+                    case 'newest':
+                    case 'age':
+                    default:
+                        orderByClause = 'ORDER BY timestamp DESC';
+                        break;
                 }
 
                 let query = `SELECT * FROM tokens`;
@@ -47,13 +69,15 @@ function init(deps) {
                     ? await db.all(query, params) 
                     : await db.all(query);
 
-                // External Search Fallback
-                if (rows.length === 0 && search && search.trim().length > 2) {
+                // --- EXTERNAL SEARCH FALLBACK ---
+                if (rows.length < 5 && search && search.trim().length > 2) {
                     try {
                         const dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(search)}`, { timeout: 3000 });
                         if (dexRes.data && dexRes.data.pairs) {
                             const validPairs = dexRes.data.pairs.filter(p => p.chainId === 'solana').slice(0, 5);
                             for (const pair of validPairs) {
+                                if (rows.some(r => r.mint === pair.baseToken.address)) continue;
+
                                 const metadata = {
                                     ticker: pair.baseToken.symbol,
                                     name: pair.baseToken.name,
@@ -67,8 +91,10 @@ function init(deps) {
                                     volume24h: pair.volume?.h24 || 0,
                                     priceUsd: pair.priceUsd
                                 };
+                                
                                 const createdAt = pair.pairCreatedAt || Date.now();
                                 await saveTokenData(null, pair.baseToken.address, metadata, createdAt);
+                                
                                 rows.push({
                                     mint: pair.baseToken.address,
                                     userPubkey: null,
@@ -87,6 +113,13 @@ function init(deps) {
                             }
                         }
                     } catch (extErr) { console.error("External search failed:", extErr.message); }
+                }
+
+                // If sorting was requested, re-sort combined list just in case new items were added
+                // (Note: This is a simple JS sort for the mixed list)
+                if (rows.length > 0) {
+                     if (sort === 'newest' || sort === 'age') rows.sort((a, b) => parseInt(b.timestamp) - parseInt(a.timestamp));
+                     else if (sort === 'mcap') rows.sort((a, b) => (b.marketcap || b.marketCap) - (a.marketcap || a.marketCap));
                 }
 
                 return {
@@ -115,7 +148,7 @@ function init(deps) {
         }
     });
 
-    // Get single token (Correctly mapped for frontend detail view)
+    // Get single token
     router.get('/token/:mint', async (req, res) => {
         try {
             const { mint } = req.params;
@@ -124,18 +157,17 @@ function init(deps) {
                 const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
                 if (!token) return null;
                 
-                // MAPPING FIX: Ensure DB lowercase columns map to frontend camelCase
                 return { 
                     success: true, 
                     token: {
                         ...token,
-                        marketCap: token.marketcap, 
-                        volume24h: token.volume24h,
-                        priceUsd: token.priceusd,
-                        change1h: token.change1h,
-                        change24h: token.change24h,
+                        marketCap: token.marketcap || 0, 
+                        volume24h: token.volume24h || 0,
+                        priceUsd: token.priceusd || 0,
+                        change1h: token.change1h || 0,
+                        change24h: token.change24h || 0,
+                        change5m: token.change5m || 0,
                         userPubkey: token.userpubkey,
-                        // Ensure timestamp is a number for date math
                         timestamp: parseInt(token.timestamp) 
                     } 
                 };
