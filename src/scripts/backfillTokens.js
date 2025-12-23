@@ -1,7 +1,6 @@
 /**
- * Auto Seeder Task (Hybrid Mode)
- * 1. Backfills history using offsets (every 10s).
- * 2. Syncs Top 100 Winners every 15 minutes to catch missed high-volume tokens.
+ * Auto Seeder Task (Bonded/Complete Only)
+ * Updated: Only indexes tokens with 'complete: true' (Graduated to Raydium).
  */
 const axios = require('axios');
 const { logger } = require('../services');
@@ -13,10 +12,9 @@ const BATCH_SIZE = 50;
 let currentOffset = 0;
 let isRunning = false;
 
-// Pump.fun Endpoints
 const PUMP_LIST_URL = 'https://frontend-api.pump.fun/coins';
 
-// --- TASK 1: BACKFILL HISTORY (Deep Scan) ---
+// --- TASK 1: BACKFILL HISTORY ---
 async function seedHistory(deps) {
     if (isRunning) return; 
     isRunning = true;
@@ -29,16 +27,18 @@ async function seedHistory(deps) {
         const coins = response.data;
 
         if (!coins || coins.length === 0) {
-            currentOffset = 0; // Reset to start
+            currentOffset = 0; // Reset
             isRunning = false;
             return;
         }
 
         for (const coin of coins) {
-            await processCoin(coin);
+            // ONLY Process Bonded Tokens
+            if (coin.complete) {
+                await processCoin(coin);
+            }
         }
 
-        // logger.info(`🌱 AutoSeeder: Backfill offset ${currentOffset} complete.`);
         currentOffset += BATCH_SIZE;
 
     } catch (e) {
@@ -48,12 +48,11 @@ async function seedHistory(deps) {
     }
 }
 
-// --- TASK 2: TOP 100 WINNERS (Volume/MCap Sync) ---
+// --- TASK 2: TOP 100 WINNERS ---
 async function syncTopWinners(deps) {
-    logger.info("🏆 AutoSeeder: Syncing Top 100 High-Volume Tokens...");
+    logger.info("🏆 AutoSeeder: Syncing Top 100 Bonded Tokens...");
     
     try {
-        // Sort by Market Cap to find the "winners" regardless of age
         const response = await axios.get(`${PUMP_LIST_URL}?offset=0&limit=100&sort=market_cap&order=DESC&includeNsfw=true`, {
             timeout: 15000
         });
@@ -63,18 +62,19 @@ async function syncTopWinners(deps) {
 
         let newCount = 0;
         for (const coin of coins) {
-            await processCoin(coin);
-            newCount++;
+            if (coin.complete) {
+                await processCoin(coin);
+                newCount++;
+            }
         }
         
-        logger.info(`🏆 AutoSeeder: Synced ${newCount} Top Tokens.`);
+        if (newCount > 0) logger.info(`🏆 AutoSeeder: Synced ${newCount} Bonded Winners.`);
 
     } catch (e) {
         logger.error(`🏆 AutoSeeder Top Sync Error: ${e.message}`);
     }
 }
 
-// Helper to save coin data
 async function processCoin(coin) {
     const mcap = coin.usd_market_cap || coin.market_cap || 0;
 
@@ -100,13 +100,13 @@ async function processCoin(coin) {
 }
 
 function start(deps) {
-    // 1. Backfill Loop (Fast)
+    // Backfill (Fast)
     setTimeout(() => seedHistory(deps), 5000);
     setInterval(() => seedHistory(deps), 10000);
 
-    // 2. Top Winners Loop (Every 15 Minutes)
-    setTimeout(() => syncTopWinners(deps), 10000); // Run once shortly after boot
-    setInterval(() => syncTopWinners(deps), 15 * 60 * 1000); // 15 mins
+    // Top Winners (Slow)
+    setTimeout(() => syncTopWinners(deps), 10000); 
+    setInterval(() => syncTopWinners(deps), 15 * 60 * 1000); 
 }
 
 module.exports = { start };

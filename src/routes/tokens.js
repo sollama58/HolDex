@@ -1,6 +1,6 @@
 /**
  * Token Routes
- * Added: Update Request & Admin Endpoints
+ * Updated: Admin Delete & Manual Update Features
  */
 const express = require('express');
 const axios = require('axios');
@@ -15,7 +15,6 @@ function getSocialLink(pair, type) {
     return social ? social.url : null;
 }
 
-// Middleware for Admin Auth
 const requireAdmin = (req, res, next) => {
     const authHeader = req.headers['x-admin-auth'];
     if (!authHeader || authHeader !== config.ADMIN_PASSWORD) {
@@ -29,34 +28,22 @@ function init(deps) {
 
     // --- PUBLIC ENDPOINTS ---
 
-    // Submit Update Request
     router.post('/request-update', async (req, res) => {
         try {
             const { mint, twitter, website, telegram } = req.body;
-
-            if (!mint || mint.length < 30) {
-                return res.status(400).json({ success: false, error: "Invalid Mint Address" });
-            }
-
-            // Basic validation
+            if (!mint || mint.length < 30) return res.status(400).json({ success: false, error: "Invalid Mint" });
             const hasData = (twitter && twitter.length > 0) || (website && website.length > 0) || (telegram && telegram.length > 0);
-            if (!hasData) {
-                return res.status(400).json({ success: false, error: "At least one link is required" });
-            }
+            if (!hasData) return res.status(400).json({ success: false, error: "No links provided" });
 
-            await db.run(`
-                INSERT INTO token_updates (mint, twitter, website, telegram, submittedAt, status)
-                VALUES ($1, $2, $3, $4, $5, 'pending')
-            `, [mint, twitter, website, telegram, Date.now()]);
+            await db.run(`INSERT INTO token_updates (mint, twitter, website, telegram, submittedAt, status) VALUES ($1, $2, $3, $4, $5, 'pending')`, 
+                [mint, twitter, website, telegram, Date.now()]);
 
-            res.json({ success: true, message: "Update queued for approval" });
+            res.json({ success: true, message: "Update queued" });
         } catch (e) {
-            console.error("Update Request Error:", e);
             res.status(500).json({ success: false, error: "Submission failed" });
         }
     });
 
-    // Get Tokens (Existing Logic with Pagination)
     router.get('/tokens', async (req, res) => {
         const { sort = 'newest', limit = 100, page = 1, search = '' } = req.query;
         const limitVal = Math.min(parseInt(limit) || 100, 100);
@@ -89,7 +76,7 @@ function init(deps) {
 
                 let rows = params.length > 0 ? await db.all(query, params) : await db.all(query);
 
-                // External Search (Page 1 Only)
+                // --- EXTERNAL SEARCH FALLBACK ---
                 if (pageVal === 1 && rows.length < 5 && search && search.trim().length > 2) {
                     try {
                         const dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(search)}`, { timeout: 3000 });
@@ -97,6 +84,9 @@ function init(deps) {
                             const validPairs = dexRes.data.pairs.filter(p => p.chainId === 'solana').slice(0, 5);
                             for (const pair of validPairs) {
                                 if (rows.some(r => r.mint === pair.baseToken.address)) continue;
+                                const exists = await db.get('SELECT id FROM tokens WHERE mint = $1', [pair.baseToken.address]);
+                                if (exists) continue; 
+
                                 const metadata = {
                                     ticker: pair.baseToken.symbol,
                                     name: pair.baseToken.name,
@@ -112,6 +102,7 @@ function init(deps) {
                                 };
                                 const createdAt = pair.pairCreatedAt || Date.now();
                                 await saveTokenData(null, pair.baseToken.address, metadata, createdAt);
+                                
                                 rows.push({
                                     mint: pair.baseToken.address,
                                     userPubkey: null,
@@ -183,7 +174,10 @@ function init(deps) {
                         change24h: token.change24h || 0,
                         change5m: token.change5m || 0,
                         userPubkey: token.userpubkey,
-                        timestamp: parseInt(token.timestamp) 
+                        timestamp: parseInt(token.timestamp),
+                        twitter: token.twitter,
+                        website: token.website,
+                        telegram: token.tweeturl 
                     } 
                 };
             });
@@ -194,10 +188,9 @@ function init(deps) {
 
     // --- ADMIN ENDPOINTS ---
 
-    // Get Pending Updates
+    // 1. Get Pending Updates
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         try {
-            // Join with tokens table to get useful context (name/ticker)
             const updates = await db.all(`
                 SELECT u.*, t.name, t.ticker, t.image 
                 FROM token_updates u
@@ -206,50 +199,80 @@ function init(deps) {
                 ORDER BY u.submittedAt ASC
             `);
             res.json({ success: true, updates });
-        } catch (e) {
-            res.status(500).json({ success: false, error: e.message });
-        }
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
-    // Approve Update
+    // 2. Approve Update
     router.post('/admin/approve-update', requireAdmin, async (req, res) => {
         const { id } = req.body;
         try {
             const update = await db.get('SELECT * FROM token_updates WHERE id = $1', [id]);
             if (!update) return res.status(404).json({ success: false, error: 'Request not found' });
 
-            // Build dynamic update query based on provided fields
             const fields = [];
             const params = [];
             let idx = 1;
 
             if (update.twitter) { fields.push(`twitter = $${idx++}`); params.push(update.twitter); }
             if (update.website) { fields.push(`website = $${idx++}`); params.push(update.website); }
-            if (update.telegram) { fields.push(`tweetUrl = $${idx++}`); params.push(update.telegram); } // Assuming 'tweetUrl' stores generic social or rename col
+            if (update.telegram) { fields.push(`tweetUrl = $${idx++}`); params.push(update.telegram); } 
 
             if (fields.length > 0) {
                 params.push(update.mint);
                 await db.run(`UPDATE tokens SET ${fields.join(', ')} WHERE mint = $${idx}`, params);
             }
-
-            // Remove from queue
             await db.run('DELETE FROM token_updates WHERE id = $1', [id]);
-
             res.json({ success: true, message: 'Approved' });
-        } catch (e) {
-            res.status(500).json({ success: false, error: e.message });
-        }
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
-    // Reject Update
+    // 3. Reject Update
     router.post('/admin/reject-update', requireAdmin, async (req, res) => {
         const { id } = req.body;
         try {
             await db.run('DELETE FROM token_updates WHERE id = $1', [id]);
             res.json({ success: true, message: 'Rejected' });
-        } catch (e) {
-            res.status(500).json({ success: false, error: e.message });
-        }
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+    });
+
+    // 4. Fetch Token for Manual Admin Edit
+    router.get('/admin/token/:mint', requireAdmin, async (req, res) => {
+        try {
+            const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [req.params.mint]);
+            if (!token) return res.status(404).json({ success: false, error: "Not Found" });
+            
+            // Map to standard format
+            res.json({ 
+                success: true, 
+                token: {
+                    mint: token.mint,
+                    ticker: token.ticker,
+                    twitter: token.twitter,
+                    website: token.website,
+                    telegram: token.tweeturl // Assuming mapped to tweeturl column
+                }
+            });
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+    });
+
+    // 5. Manual Admin Update
+    router.post('/admin/update-token', requireAdmin, async (req, res) => {
+        const { mint, twitter, website, telegram } = req.body;
+        try {
+            await db.run(`
+                UPDATE tokens SET twitter = $1, website = $2, tweetUrl = $3 WHERE mint = $4
+            `, [twitter, website, telegram, mint]);
+            res.json({ success: true, message: "Token Updated Successfully" });
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+    });
+
+    // 6. Delete Token
+    router.post('/admin/delete-token', requireAdmin, async (req, res) => {
+        const { mint } = req.body;
+        try {
+            await db.run('DELETE FROM tokens WHERE mint = $1', [mint]);
+            res.json({ success: true, message: "Token Deleted Successfully" });
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     return router;

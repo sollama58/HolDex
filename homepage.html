@@ -80,11 +80,11 @@
         .sort-header { position: relative; }
         .sort-header:active { transform: translateY(1px); }
         .table-scroll-container { max-height: 70vh; overflow-y: auto; border-radius: 0 0 16px 16px; }
-        
-        /* Form Inputs */
         .form-input { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; padding: 12px; border-radius: 8px; width: 100%; font-family: 'JetBrains Mono'; margin-bottom: 16px; outline: none; transition: border-color 0.2s; }
         .form-input:focus { border-color: #ea580c; }
         .form-label { display: block; color: #9a3412; font-size: 12px; font-weight: bold; margin-bottom: 6px; text-transform: uppercase; }
+        .social-btn { display: flex; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 12px; border: 2px solid #7c2d12; background: #451a03; color: #ea580c; transition: all 0.2s; }
+        .social-btn:hover { border-color: #ea580c; color: #fff; background: #582206; transform: translateY(-2px); }
     </style>
 </head>
 <body>
@@ -203,7 +203,7 @@
         </div>
     </div>
 
-    <!-- UPDATE VIEW (New) -->
+    <!-- UPDATE VIEW -->
     <div id="view-update" class="view-section px-4 md:px-0">
         <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 shadow-2xl max-w-2xl mx-auto">
             <div class="text-center mb-8">
@@ -250,9 +250,8 @@
                     </div>
                 </div>
                 <div class="flex-1"></div>
-                <div class="flex gap-3 w-full md:w-auto">
-                    <a id="link-pump" href="#" target="_blank" class="action-btn flex-1 md:flex-none flex items-center justify-center gap-2">Pump.fun</a>
-                    <a id="link-solscan" href="#" target="_blank" class="action-btn flex-1 md:flex-none flex items-center justify-center gap-2">Solscan</a>
+                <div class="flex flex-wrap gap-3 w-full md:w-auto" id="detail-actions">
+                    <!-- Dynamic Buttons Injected Here -->
                 </div>
             </div>
             <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4 mb-6 md:mb-8">
@@ -354,7 +353,6 @@
         }
     }
 
-    // --- Update Form Logic ---
     async function submitUpdate(e) {
         e.preventDefault();
         const mint = document.getElementById('update-mint').value;
@@ -389,7 +387,6 @@
         }
     }
 
-    // --- Standard Functions ---
     function toggleStatusModal() {
         const modal = document.getElementById('status-modal');
         isModalOpen = !isModalOpen;
@@ -529,8 +526,23 @@
                 document.getElementById('detail-name').innerText = t.name;
                 document.getElementById('detail-mint').innerText = t.mint;
                 document.getElementById('detail-img').src = t.image || 'https://placehold.co/80x80/2a1005/7c2d12?text=?';
-                document.getElementById('link-pump').href = `https://pump.fun/coin/${t.mint}`;
-                document.getElementById('link-solscan').href = `https://solscan.io/token/${t.mint}`;
+                
+                // --- Social Links Injection ---
+                const actionsDiv = document.getElementById('detail-actions');
+                let linksHtml = '';
+                
+                // Standard Links
+                linksHtml += `<a href="https://pump.fun/coin/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><img src="https://pump.fun/logo.png" width="16" class="rounded-full" onerror="this.style.display='none'"> Pump.fun</a>`;
+                linksHtml += `<a href="https://solscan.io/token/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><i data-lucide="search" width="16"></i> Solscan</a>`;
+                
+                // Conditional Socials
+                if (t.twitter) linksHtml += `<a href="${t.twitter}" target="_blank" class="social-btn"><i data-lucide="twitter" width="20"></i></a>`;
+                if (t.website) linksHtml += `<a href="${t.website}" target="_blank" class="social-btn"><i data-lucide="globe" width="20"></i></a>`;
+                if (t.telegram) linksHtml += `<a href="${t.telegram}" target="_blank" class="social-btn"><i data-lucide="send" width="20"></i></a>`;
+                
+                actionsDiv.innerHTML = linksHtml;
+                lucide.createIcons();
+
                 document.getElementById('stat-price').innerText = formatMoney(t.priceUsd);
                 document.getElementById('stat-mcap').innerText = formatCompact(t.marketCap);
                 document.getElementById('stat-vol').innerText = formatCompact(t.volume24h);

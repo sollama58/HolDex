@@ -1,6 +1,6 @@
 /**
- * New Token Listener (DexScreener Version)
- * Fix: Allows tracking of tokens that grow in Market Cap.
+ * New Token Listener (Bonded Only)
+ * Updated: Filters out 'pump' DEX pairs. Only indexes tokens once they reach Raydium (Bonded).
  */
 const axios = require('axios');
 const { logger } = require('../services');
@@ -18,6 +18,7 @@ function getSocialLink(pair, type) {
 
 async function checkNewTokens(deps) {
     try {
+        // Search for 'pump' to find Pump.fun tokens that have made it to DexScreener
         const response = await axios.get('https://api.dexscreener.com/latest/dex/search?q=pump', {
             timeout: 5000
         });
@@ -36,21 +37,21 @@ async function checkNewTokens(deps) {
             // 1. Skip non-Solana
             if (pair.chainId !== 'solana') continue;
 
-            // 2. Skip if we have already SAVED this token (in memory cache)
+            // 2. EXCLUDE PRE-BONDED (Pump.fun internal DEX)
+            // We only want to add tokens when they "Bond" (graduate to Raydium/etc)
+            if (pair.dexId === 'pump') continue;
+
+            // 3. Skip if we have already processed this session
             if (knownMints.has(mint)) continue;
 
             const mcap = pair.fdv || pair.marketCap || 0;
 
-            // 3. CRITICAL FIX: Do NOT mark as known if we skip due to low mcap.
-            // This allows us to catch it on the next loop if it pumps.
-            if (mcap < MIN_MARKET_CAP) {
-                continue; 
-            }
+            if (mcap < MIN_MARKET_CAP) continue;
 
             const metadata = {
                 ticker: pair.baseToken.symbol,
                 name: pair.baseToken.name,
-                description: 'Pump.fun Token',
+                description: 'Pump.fun Token (Bonded)',
                 twitter: getSocialLink(pair, 'twitter'),
                 website: pair.info?.websites?.[0]?.url || null,
                 telegram: getSocialLink(pair, 'telegram'),
@@ -62,14 +63,13 @@ async function checkNewTokens(deps) {
                 priceUsd: pair.priceUsd
             };
 
-            // 4. Pass Creation Time for accurate "Age"
+            // Pass Creation Time
             const createdAt = pair.pairCreatedAt || Date.now();
             await saveTokenData(null, mint, metadata, createdAt);
             
-            // 5. NOW we mark it as known/processed
             knownMints.add(mint);
             addedCount++;
-            logger.info(`💎 NEW FIND: ${pair.baseToken.symbol} ($${Math.floor(mcap)})`);
+            logger.info(`🎓 BONDED DETECT: ${pair.baseToken.symbol} on ${pair.dexId} ($${Math.floor(mcap)})`);
         }
 
         // Memory Cleanup
@@ -86,7 +86,7 @@ async function checkNewTokens(deps) {
 }
 
 function start(deps) {
-    logger.info("🚀 New Token Listener started (DexScreener Mode)");
+    logger.info("🚀 New Token Listener started (Bonded Mode)");
     checkNewTokens(deps);
     setInterval(() => checkNewTokens(deps), 60000);
 }
