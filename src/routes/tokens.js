@@ -1,5 +1,5 @@
 /**
- * Token Routes (Updated for Header Sorting)
+ * Token Routes (Updated for Pagination)
  */
 const express = require('express');
 const axios = require('axios');
@@ -18,41 +18,34 @@ function init(deps) {
 
     // MAIN ENDPOINT: /api/tokens
     router.get('/tokens', async (req, res) => {
-        const { sort = 'newest', limit = 100, search = '' } = req.query;
-        const cacheKey = `api:tokens:${sort}:${limit}:${search || 'all'}`;
+        // Added 'page' parameter
+        const { sort = 'newest', limit = 100, page = 1, search = '' } = req.query;
+        
+        // Ensure valid integers
+        const limitVal = Math.min(parseInt(limit) || 100, 100);
+        const pageVal = Math.max(parseInt(page) || 1, 1);
+        const offsetVal = (pageVal - 1) * limitVal;
+
+        // Cache Key must include page
+        const cacheKey = `api:tokens:${sort}:${limitVal}:${pageVal}:${search || 'all'}`;
 
         try {
             const result = await smartCache(cacheKey, 5, async () => {
-                const limitVal = Math.min(parseInt(limit) || 100, 100);
                 
                 // --- DYNAMIC SORT LOGIC ---
                 let orderByClause = 'ORDER BY timestamp DESC'; 
 
                 switch (sort) {
-                    case 'mcap':
-                        orderByClause = 'ORDER BY marketCap DESC';
-                        break;
-                    case 'volume':
-                        orderByClause = 'ORDER BY volume24h DESC';
-                        break;
+                    case 'mcap': orderByClause = 'ORDER BY marketCap DESC'; break;
+                    case 'volume': orderByClause = 'ORDER BY volume24h DESC'; break;
                     case 'gainers':
-                    case '24h':
-                        orderByClause = 'ORDER BY change24h DESC';
-                        break;
-                    case '1h':
-                        orderByClause = 'ORDER BY change1h DESC';
-                        break;
-                    case '5m':
-                        orderByClause = 'ORDER BY change5m DESC';
-                        break;
-                    case 'price':
-                        orderByClause = 'ORDER BY priceUsd DESC';
-                        break;
+                    case '24h': orderByClause = 'ORDER BY change24h DESC'; break;
+                    case '1h': orderByClause = 'ORDER BY change1h DESC'; break;
+                    case '5m': orderByClause = 'ORDER BY change5m DESC'; break;
+                    case 'price': orderByClause = 'ORDER BY priceUsd DESC'; break;
                     case 'newest':
                     case 'age':
-                    default:
-                        orderByClause = 'ORDER BY timestamp DESC';
-                        break;
+                    default: orderByClause = 'ORDER BY timestamp DESC'; break;
                 }
 
                 let query = `SELECT * FROM tokens`;
@@ -63,14 +56,16 @@ function init(deps) {
                     params.push(`%${search}%`);
                 }
 
-                query += ` ${orderByClause} LIMIT ${limitVal}`;
+                // Add OFFSET for pagination
+                query += ` ${orderByClause} LIMIT ${limitVal} OFFSET ${offsetVal}`;
 
                 let rows = params.length > 0 
                     ? await db.all(query, params) 
                     : await db.all(query);
 
-                // --- EXTERNAL SEARCH FALLBACK ---
-                if (rows.length < 5 && search && search.trim().length > 2) {
+                // --- EXTERNAL SEARCH FALLBACK (Page 1 Only) ---
+                // We only search externally on the first page to avoid weird pagination issues with external APIs
+                if (pageVal === 1 && rows.length < 5 && search && search.trim().length > 2) {
                     try {
                         const dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(search)}`, { timeout: 3000 });
                         if (dexRes.data && dexRes.data.pairs) {
@@ -115,15 +110,16 @@ function init(deps) {
                     } catch (extErr) { console.error("External search failed:", extErr.message); }
                 }
 
-                // If sorting was requested, re-sort combined list just in case new items were added
-                // (Note: This is a simple JS sort for the mixed list)
-                if (rows.length > 0) {
+                // Re-sort in JS if we added external items on page 1
+                if (pageVal === 1 && rows.length > 0) {
                      if (sort === 'newest' || sort === 'age') rows.sort((a, b) => parseInt(b.timestamp) - parseInt(a.timestamp));
                      else if (sort === 'mcap') rows.sort((a, b) => (b.marketcap || b.marketCap) - (a.marketcap || a.marketCap));
                 }
 
                 return {
                     success: true,
+                    page: pageVal,
+                    limit: limitVal,
                     tokens: rows.map(r => ({
                         mint: r.mint,
                         userPubkey: r.userpubkey,

@@ -75,6 +75,7 @@
             white-space: nowrap; 
             text-transform: uppercase;
             transition: color 0.2s, background 0.2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2); /* Separate header from scroll content */
         }
         .holdex-table th:hover {
             background: #582206;
@@ -135,6 +136,30 @@
             border: 1px solid #7c2d12; 
             box-shadow: 2px 2px 0 #7c2d12;
             transform: translateY(-1px);
+        }
+
+        /* Pagination Buttons */
+        .page-btn {
+            background: #2a1005;
+            border: 2px solid #7c2d12;
+            color: #fb923c;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-family: 'JetBrains Mono', monospace;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        .page-btn:hover:not(:disabled) {
+            border-color: #ea580c;
+            color: #fff;
+            background: #451a03;
+        }
+        .page-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            border-color: #451a03;
+            color: #7c2d12;
         }
         
         .view-section { display: none; }
@@ -226,6 +251,13 @@
         .sort-header:active {
             transform: translateY(1px);
         }
+        
+        /* SCROLLABLE TABLE CONTAINER */
+        .table-scroll-container {
+            max-height: 70vh; /* Adjust this value to control how many rows are visible before scroll */
+            overflow-y: auto;
+            border-radius: 0 0 16px 16px; /* Rounded bottom if table has rounded corners */
+        }
     </style>
 </head>
 <body>
@@ -245,7 +277,6 @@
         
         <div class="flex items-center gap-4 w-full md:w-auto">
             <div id="nav-controls" class="flex flex-col md:flex-row items-center gap-4 w-full">
-                <!-- REMOVED LEADERS TAB, KEPT FRESH MINTS AS DEFAULT -->
                 <div class="flex bg-[#451a03] p-1.5 rounded-xl border border-[#7c2d12] w-full md:w-auto shadow-inner">
                     <button class="tab-btn active flex-1 md:flex-none text-center w-full" onclick="setSort('newest', this)">Fresh Mints (Reset)</button>
                 </div>
@@ -263,8 +294,9 @@
 
 <main class="max-w-[1800px] mx-auto px-0 md:px-6 py-4 md:py-8">
     <div id="view-dashboard" class="view-section active">
-        <div class="bg-[#2a1005] border-y md:border-2 border-[#7c2d12] md:rounded-2xl overflow-hidden shadow-2xl">
-            <div class="overflow-x-auto">
+        <div class="bg-[#2a1005] border-y md:border-2 border-[#7c2d12] md:rounded-2xl overflow-hidden shadow-2xl flex flex-col">
+            <!-- Scrollable Container -->
+            <div class="table-scroll-container overflow-x-auto">
                 <table class="holdex-table">
                     <thead>
                         <tr>
@@ -282,6 +314,22 @@
                         <tr><td colspan="7" class="text-center py-20 text-orange-700 font-mono animate-pulse">Scanning Solana Mempool...</td></tr>
                     </tbody>
                 </table>
+            </div>
+            
+            <!-- Pagination Controls -->
+            <div class="bg-[#451a03] p-4 border-t-2 border-[#7c2d12] flex justify-between items-center">
+                <div class="text-xs text-[#9a3412] font-mono font-bold uppercase tracking-wider hidden md:block">
+                    Showing 100 results per page
+                </div>
+                <div class="flex items-center gap-4 mx-auto md:mx-0">
+                    <button id="btn-prev" onclick="changePage(-1)" class="page-btn flex items-center gap-2" disabled>
+                        <i data-lucide="chevron-left" width="16"></i> Previous
+                    </button>
+                    <span id="page-display" class="text-[#fb923c] font-mono font-bold text-lg">Page 1</span>
+                    <button id="btn-next" onclick="changePage(1)" class="page-btn flex items-center gap-2">
+                        Next <i data-lucide="chevron-right" width="16"></i>
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -372,6 +420,7 @@
     let pollingInterval;
     let isConnected = true;
     let isModalOpen = false;
+    let currentPage = 1;
 
     // SAFE FORMATTERS
     const formatMoney = (val) => {
@@ -457,16 +506,43 @@
 
     async function fetchList() {
         try {
-            const endpoint = `${API_URL}/api/tokens?sort=${currentSort}&search=${encodeURIComponent(searchQuery)}&limit=100`;
+            // Update UI page number
+            document.getElementById('page-display').innerText = `Page ${currentPage}`;
+            document.getElementById('btn-prev').disabled = currentPage <= 1;
+
+            const endpoint = `${API_URL}/api/tokens?sort=${currentSort}&search=${encodeURIComponent(searchQuery)}&limit=100&page=${currentPage}`;
             const res = await fetch(endpoint);
             if (!res.ok) throw new Error("API Error");
             const data = await res.json();
             updateStatus(true);
-            if (data.success) renderTable(data.tokens);
+            if (data.success) {
+                renderTable(data.tokens);
+                
+                // If we get fewer results than the limit, disable next button
+                document.getElementById('btn-next').disabled = data.tokens.length < 100;
+            }
         } catch (e) {
             console.error("API Connection Failed", e);
             updateStatus(false);
         }
+    }
+
+    function changePage(delta) {
+        currentPage += delta;
+        if (currentPage < 1) currentPage = 1;
+        
+        // Clear interval so we don't refresh while user is navigating pages rapidly
+        if (pollingInterval) clearInterval(pollingInterval);
+        
+        // Add Loading State to table
+        document.getElementById('table-body').innerHTML = `<tr><td colspan="7" class="text-center py-20 text-orange-700 font-mono animate-pulse">Loading Page ${currentPage}...</td></tr>`;
+        
+        fetchList().then(() => {
+            // Re-enable polling only on page 1 (live data)
+            if (currentPage === 1) {
+                pollingInterval = setInterval(fetchList, 5000);
+            }
+        });
     }
 
     function renderTable(tokens) {
@@ -556,9 +632,10 @@
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
         }
+        currentPage = 1; // Reset to page 1 on sort change
         fetchList();
     };
-    window.handleSearch = (e) => { searchQuery = e.target.value; clearTimeout(window.searchTimeout); window.searchTimeout = setTimeout(fetchList, 1000); };
+    window.handleSearch = (e) => { searchQuery = e.target.value; currentPage = 1; clearTimeout(window.searchTimeout); window.searchTimeout = setTimeout(fetchList, 1000); };
     window.copyMint = () => navigator.clipboard.writeText(document.getElementById('detail-mint').innerText);
     lucide.createIcons();
 </script>
