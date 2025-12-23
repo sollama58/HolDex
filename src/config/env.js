@@ -8,6 +8,5 @@ module.exports = {
     CORS_ORIGINS: process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : '*',
     METADATA_UPDATE_INTERVAL: parseInt(process.env.METADATA_UPDATE_INTERVAL) || 60000,
     HOLDER_SCAN_INTERVAL: parseInt(process.env.HOLDER_SCAN_INTERVAL) || 300000,
-    // Default password for the new admin panel
-    ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'admin123'
+    ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'asdf'
 };
