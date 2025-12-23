@@ -8,9 +8,9 @@ const { initDB, getDB } = require('./services/database');
 const { initRedis } = require('./services/redis');
 const tokenRoutes = require('./routes/tokens');
 const metadataUpdater = require('./tasks/metadataUpdater');
-const holderScanner = require('./tasks/holderScanner');
+// REMOVED: holderScanner import
 const newTokenListener = require('./tasks/newTokenListener');
-const autoSeeder = require('./tasks/autoSeeder'); // <--- IMPORT SEEDER
+const autoSeeder = require('./tasks/autoSeeder'); 
 
 const globalState = {
     asdfTop50Holders: new Set(),
@@ -38,7 +38,7 @@ async function startServer() {
     autoSeeder.start(deps);        // 1. Seed DB with existing tokens > 10k
     newTokenListener.start(deps);  // 2. Listen for high-value new mints
     metadataUpdater.start(deps);   // 3. Keep prices fresh
-    holderScanner.start(deps);     // 4. Scan holders for top tokens
+    // REMOVED: holderScanner start
 
     const server = http.createServer(app);
     server.listen(config.PORT, () => {

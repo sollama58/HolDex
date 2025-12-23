@@ -1,8 +1,6 @@
 /**
  * New Token Listener (DexScreener Version)
- * Watches for active Pump.fun tokens via DexScreener.
- * FILTER: Only allows tokens > $10k Market Cap.
- * INTERVAL: Checks every 60 seconds.
+ * Optimized memory handling.
  */
 const axios = require('axios');
 const { logger } = require('../services');
@@ -10,7 +8,7 @@ const { saveTokenData } = require('../services/database');
 
 const MIN_MARKET_CAP = 10000;
 const knownMints = new Set();
-const MAX_HISTORY = 1000;
+const MAX_HISTORY = 2000;
 
 function getSocialLink(pair, type) {
     if (!pair.info || !pair.info.socials) return null;
@@ -20,7 +18,6 @@ function getSocialLink(pair, type) {
 
 async function checkNewTokens(deps) {
     try {
-        // Specifically search for "pump" to get tokens on the bonding curve or graduated
         const response = await axios.get('https://api.dexscreener.com/latest/dex/search?q=pump', {
             timeout: 5000
         });
@@ -28,12 +25,10 @@ async function checkNewTokens(deps) {
         const pairs = response.data.pairs;
         if (!pairs) return;
 
-        // Sort by creation time (DexScreener sends pairCreatedAt)
-        // We want the newest first
+        // Sort newest first
         pairs.sort((a, b) => (b.pairCreatedAt || 0) - (a.pairCreatedAt || 0));
 
         let addedCount = 0;
-        let skippedCount = 0;
 
         for (const pair of pairs) {
             const mint = pair.baseToken.address;
@@ -44,14 +39,9 @@ async function checkNewTokens(deps) {
             const mcap = pair.fdv || pair.marketCap || 0;
 
             if (mcap < MIN_MARKET_CAP) {
-                knownMints.add(mint);
-                skippedCount++;
+                knownMints.add(mint); // Still track it so we don't process it again next loop
                 continue;
             }
-
-            // Extract Creator (Not provided by DexScreener Search directly, send null)
-            // Ideally we fetch this from RPC, but for speed we leave it null for now.
-            const creator = null; 
 
             const metadata = {
                 ticker: pair.baseToken.symbol,
@@ -68,20 +58,21 @@ async function checkNewTokens(deps) {
                 priceUsd: pair.priceUsd
             };
 
-            await saveTokenData(creator, mint, metadata);
+            await saveTokenData(null, mint, metadata);
             
             knownMints.add(mint);
             addedCount++;
             logger.info(`💎 DEXSCREENER DETECT: ${pair.baseToken.symbol} ($${Math.floor(mcap)})`);
         }
 
-        if (addedCount > 0) {
-            logger.info(`Listener: Added ${addedCount} tokens. Skipped ${skippedCount} low-cap.`);
-        }
-
-        // Cleanup memory
+        // Cleanup memory (FIFO approach - delete oldest is hard with Set, 
+        // so we just clear half if it gets too big to prevent total amnesia)
         if (knownMints.size > MAX_HISTORY) {
-            knownMints.clear();
+            const it = knownMints.values();
+            // Remove first 500 items (oldest inserted)
+            for (let i = 0; i < 500; i++) {
+                knownMints.delete(it.next().value);
+            }
         }
 
     } catch (e) {
@@ -91,10 +82,7 @@ async function checkNewTokens(deps) {
 
 function start(deps) {
     logger.info("🚀 New Token Listener started (DexScreener Mode)");
-    
     checkNewTokens(deps);
-    
-    // Poll every 60 seconds (DexScreener allows 300 req/min, so this is safe)
     setInterval(() => checkNewTokens(deps), 60000);
 }
 

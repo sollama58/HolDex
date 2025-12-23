@@ -1,5 +1,5 @@
 /**
- * Token Routes (Optimized + Search & Save + New Sorts)
+ * Token Routes (Cleaned)
  */
 const express = require('express');
 const axios = require('axios');
@@ -32,8 +32,7 @@ function init(deps) {
                     // Leaders: Sort by Market Cap (or volume)
                     orderByClause = 'ORDER BY marketCap DESC';
                 } else if (sort === 'holders') {
-                    // Holders: Placeholder for K-Score (Currently defaults to Newest)
-                    // TODO: Implement K-Score sorting here once column exists
+                    // Holders: Logic removed, defaults to timestamp
                     orderByClause = 'ORDER BY timestamp DESC'; 
                 } else if (sort === 'gainers') {
                     orderByClause = 'ORDER BY change24h DESC';
@@ -145,23 +144,7 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "DB Error" }); }
     });
 
-    // Check holder status
-    router.get('/check-holder', async (req, res) => {
-        const { userPubkey } = req.query;
-        if (!userPubkey || !isValidPubkey(userPubkey)) return res.status(400).json({ isHolder: false, error: "Invalid address" });
-        try {
-            const top10 = await db.all('SELECT mint FROM tokens ORDER BY volume24h DESC LIMIT 10');
-            const top10Mints = top10.map(t => t.mint);
-            let heldPositionsCount = 0;
-            if (top10Mints.length > 0) {
-                const placeholders = top10Mints.map((_, i) => `$${i + 2}`).join(',');
-                const query = `SELECT COUNT(*) as count FROM token_holders WHERE holderPubkey = $1 AND mint IN (${placeholders})`;
-                const result = await db.get(query, [userPubkey, ...top10Mints]);
-                heldPositionsCount = parseInt(result?.count || 0);
-            }
-            res.json({ isHolder: heldPositionsCount > 0, heldPositionsCount });
-        } catch (e) { res.status(500).json({ error: "DB Error" }); }
-    });
+    // REMOVED: /check-holder endpoint
 
     return router;
 }
