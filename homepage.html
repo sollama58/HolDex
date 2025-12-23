@@ -85,6 +85,11 @@
         .form-label { display: block; color: #9a3412; font-size: 12px; font-weight: bold; margin-bottom: 6px; text-transform: uppercase; }
         .social-btn { display: flex; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 12px; border: 2px solid #7c2d12; background: #451a03; color: #ea580c; transition: all 0.2s; }
         .social-btn:hover { border-color: #ea580c; color: #fff; background: #582206; transform: translateY(-2px); }
+        
+        /* New Pool Tabs */
+        .pool-tab { padding: 8px 16px; font-size: 12px; font-weight: bold; color: #9a3412; cursor: pointer; border-bottom: 2px solid transparent; }
+        .pool-tab.active { color: #ea580c; border-bottom-color: #ea580c; }
+        .pool-tab:hover:not(.active) { color: #fb923c; }
     </style>
 </head>
 <body>
@@ -203,7 +208,6 @@
         </div>
     </div>
 
-    <!-- UPDATE VIEW -->
     <div id="view-update" class="view-section px-4 md:px-0">
         <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 shadow-2xl max-w-2xl mx-auto">
             <div class="text-center mb-8">
@@ -251,16 +255,21 @@
                 </div>
                 <div class="flex-1"></div>
                 <div class="flex flex-wrap gap-3 w-full md:w-auto" id="detail-actions">
-                    <!-- Dynamic Buttons Injected Here -->
+                    <!-- Dynamic Buttons -->
                 </div>
             </div>
-            <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4 mb-6 md:mb-8">
+            
+            <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4 mb-6">
                 <div class="stat-card"><span class="stat-label">Current Price</span><span id="stat-price" class="stat-value text-[#ffedd5]">-</span></div>
                 <div class="stat-card"><span class="stat-label">Market Cap</span><span id="stat-mcap" class="stat-value text-[#ea580c]">-</span></div>
                 <div class="stat-card col-span-2 md:col-span-1"><span class="stat-label">Alpha (24h Vol)</span><span id="stat-vol" class="stat-value text-[#22c55e]">-</span></div>
                 <div class="stat-card"><span class="stat-label">1H Swing</span><span id="stat-chg1h" class="stat-value">-</span></div>
                 <div class="stat-card"><span class="stat-label">24H Trend</span><span id="stat-chg24h" class="stat-value">-</span></div>
             </div>
+
+            <!-- Pool Tabs Container -->
+            <div id="pool-tabs-container" class="flex gap-4 border-b border-[#7c2d12] mb-4 overflow-x-auto"></div>
+
             <div class="chart-container"><iframe id="detail-iframe" src="about:blank"></iframe></div>
         </div>
     </div>
@@ -506,6 +515,18 @@
         lucide.createIcons();
     }
 
+    // --- Switch Pool Tabs ---
+    window.switchPool = (pairAddress, dexId) => {
+        // Highlight active tab
+        document.querySelectorAll('.pool-tab').forEach(t => t.classList.remove('active'));
+        const tab = document.getElementById(`tab-${pairAddress}`);
+        if(tab) tab.classList.add('active');
+
+        // Update iframe
+        const frame = document.getElementById('detail-iframe');
+        frame.src = `https://dexscreener.com/solana/${pairAddress}?embed=1&theme=dark&info=0`;
+    };
+
     async function showDetailView(mint) {
         clearInterval(pollingInterval); pollingInterval = null;
         document.getElementById('view-dashboard').classList.remove('active');
@@ -527,19 +548,13 @@
                 document.getElementById('detail-mint').innerText = t.mint;
                 document.getElementById('detail-img').src = t.image || 'https://placehold.co/80x80/2a1005/7c2d12?text=?';
                 
-                // --- Social Links Injection ---
                 const actionsDiv = document.getElementById('detail-actions');
                 let linksHtml = '';
-                
-                // Standard Links
                 linksHtml += `<a href="https://pump.fun/coin/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><img src="https://pump.fun/logo.png" width="16" class="rounded-full" onerror="this.style.display='none'"> Pump.fun</a>`;
                 linksHtml += `<a href="https://solscan.io/token/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><i data-lucide="search" width="16"></i> Solscan</a>`;
-                
-                // Conditional Socials
                 if (t.twitter) linksHtml += `<a href="${t.twitter}" target="_blank" class="social-btn"><i data-lucide="twitter" width="20"></i></a>`;
                 if (t.website) linksHtml += `<a href="${t.website}" target="_blank" class="social-btn"><i data-lucide="globe" width="20"></i></a>`;
                 if (t.telegram) linksHtml += `<a href="${t.telegram}" target="_blank" class="social-btn"><i data-lucide="send" width="20"></i></a>`;
-                
                 actionsDiv.innerHTML = linksHtml;
                 lucide.createIcons();
 
@@ -548,7 +563,27 @@
                 document.getElementById('stat-vol').innerText = formatCompact(t.volume24h);
                 document.getElementById('stat-chg1h').innerHTML = formatPct(t.change1h);
                 document.getElementById('stat-chg24h').innerHTML = formatPct(t.change24h);
-                document.getElementById('detail-iframe').src = `https://dexscreener.com/solana/${t.mint}?embed=1&theme=dark&info=0`;
+
+                // --- POOL TABS LOGIC ---
+                const tabsContainer = document.getElementById('pool-tabs-container');
+                tabsContainer.innerHTML = '';
+                
+                if (t.pairs && t.pairs.length > 0) {
+                    t.pairs.forEach((pair, idx) => {
+                        const tab = document.createElement('div');
+                        tab.className = `pool-tab ${idx === 0 ? 'active' : ''}`;
+                        tab.id = `tab-${pair.pairAddress}`;
+                        tab.innerText = `${pair.dexId.toUpperCase()} ($${formatCompact(pair.liquidity)} Liq)`;
+                        tab.onclick = () => switchPool(pair.pairAddress, pair.dexId);
+                        tabsContainer.appendChild(tab);
+                    });
+                    // Default load first pair
+                    document.getElementById('detail-iframe').src = `https://dexscreener.com/solana/${t.pairs[0].pairAddress}?embed=1&theme=dark&info=0`;
+                } else {
+                    // Fallback to mint address if no pairs found (DexScreener usually handles this redirect)
+                    document.getElementById('detail-iframe').src = `https://dexscreener.com/solana/${t.mint}?embed=1&theme=dark&info=0`;
+                }
+
                 loadingDiv.style.display = 'none';
                 contentDiv.style.display = 'block';
             }

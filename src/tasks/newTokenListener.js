@@ -1,94 +1,114 @@
 /**
- * New Token Listener (Bonded Only)
- * Updated: Filters out 'pump' DEX pairs. Only indexes tokens once they reach Raydium (Bonded).
+ * Auto Seeder (Pump.fun Logic)
+ * Ensures we only index the primary Pump.fun bonding curve pool initially.
  */
 const axios = require('axios');
 const { logger } = require('../services');
 const { saveTokenData } = require('../services/database');
 
-const MIN_MARKET_CAP = 10000;
-const knownMints = new Set();
-const MAX_HISTORY = 2000;
+const MIN_MARKET_CAP = 10000; 
+const BATCH_SIZE = 50;
+let currentOffset = 0;
+let isRunning = false;
 
-function getSocialLink(pair, type) {
-    if (!pair.info || !pair.info.socials) return null;
-    const social = pair.info.socials.find(s => s.type === type);
-    return social ? social.url : null;
-}
+const PUMP_LIST_URL = 'https://frontend-api.pump.fun/coins';
 
-async function checkNewTokens(deps) {
+// --- TASK 1: BACKFILL HISTORY ---
+async function seedHistory(deps) {
+    if (isRunning) return; 
+    isRunning = true;
+
     try {
-        // Search for 'pump' to find Pump.fun tokens that have made it to DexScreener
-        const response = await axios.get('https://api.dexscreener.com/latest/dex/search?q=pump', {
-            timeout: 5000
+        const response = await axios.get(`${PUMP_LIST_URL}?offset=${currentOffset}&limit=${BATCH_SIZE}&sort=created_timestamp&order=DESC&includeNsfw=true`, {
+            timeout: 10000
         });
 
-        const pairs = response.data.pairs;
-        if (!pairs) return;
+        const coins = response.data;
 
-        // Sort newest first
-        pairs.sort((a, b) => (b.pairCreatedAt || 0) - (a.pairCreatedAt || 0));
-
-        let addedCount = 0;
-
-        for (const pair of pairs) {
-            const mint = pair.baseToken.address;
-
-            // 1. Skip non-Solana
-            if (pair.chainId !== 'solana') continue;
-
-            // 2. EXCLUDE PRE-BONDED (Pump.fun internal DEX)
-            // We only want to add tokens when they "Bond" (graduate to Raydium/etc)
-            if (pair.dexId === 'pump') continue;
-
-            // 3. Skip if we have already processed this session
-            if (knownMints.has(mint)) continue;
-
-            const mcap = pair.fdv || pair.marketCap || 0;
-
-            if (mcap < MIN_MARKET_CAP) continue;
-
-            const metadata = {
-                ticker: pair.baseToken.symbol,
-                name: pair.baseToken.name,
-                description: 'Pump.fun Token (Bonded)',
-                twitter: getSocialLink(pair, 'twitter'),
-                website: pair.info?.websites?.[0]?.url || null,
-                telegram: getSocialLink(pair, 'telegram'),
-                metadataUri: null,
-                image: pair.info?.imageUrl,
-                isMayhemMode: false,
-                marketCap: mcap,
-                volume24h: pair.volume?.h24 || 0,
-                priceUsd: pair.priceUsd
-            };
-
-            // Pass Creation Time
-            const createdAt = pair.pairCreatedAt || Date.now();
-            await saveTokenData(null, mint, metadata, createdAt);
-            
-            knownMints.add(mint);
-            addedCount++;
-            logger.info(`🎓 BONDED DETECT: ${pair.baseToken.symbol} on ${pair.dexId} ($${Math.floor(mcap)})`);
+        if (!coins || coins.length === 0) {
+            currentOffset = 0; 
+            isRunning = false;
+            return;
         }
 
-        // Memory Cleanup
-        if (knownMints.size > MAX_HISTORY) {
-            const it = knownMints.values();
-            for (let i = 0; i < 500; i++) {
-                knownMints.delete(it.next().value);
+        for (const coin of coins) {
+            // Strict: Only process if it's the official pump curve state
+            // (Pump API implies this, but we filter for completeness/bonding)
+            if (coin.complete) {
+                await processCoin(coin);
             }
         }
 
+        currentOffset += BATCH_SIZE;
+
     } catch (e) {
-        logger.error('NewTokenListener Error:', { error: e.message });
+        logger.error(`🌱 AutoSeeder Error: ${e.message}`);
+    } finally {
+        isRunning = false;
     }
 }
 
+// --- TASK 2: TOP 100 WINNERS ---
+async function syncTopWinners(deps) {
+    logger.info("🏆 AutoSeeder: Syncing Top 100 Bonded Tokens...");
+    
+    try {
+        const response = await axios.get(`${PUMP_LIST_URL}?offset=0&limit=100&sort=market_cap&order=DESC&includeNsfw=true`, {
+            timeout: 15000
+        });
+
+        const coins = response.data;
+        if (!coins) return;
+
+        let newCount = 0;
+        for (const coin of coins) {
+            if (coin.complete) {
+                await processCoin(coin);
+                newCount++;
+            }
+        }
+        
+        if (newCount > 0) logger.info(`🏆 AutoSeeder: Synced ${newCount} Bonded Winners.`);
+
+    } catch (e) {
+        logger.error(`🏆 AutoSeeder Top Sync Error: ${e.message}`);
+    }
+}
+
+async function processCoin(coin) {
+    const mcap = coin.usd_market_cap || coin.market_cap || 0;
+
+    if (mcap < MIN_MARKET_CAP) return;
+
+    const metadata = {
+        ticker: coin.symbol,
+        name: coin.name,
+        description: coin.description || '',
+        twitter: coin.twitter || null,
+        website: coin.website || null,
+        telegram: coin.telegram || null,
+        metadataUri: coin.uri,
+        image: coin.image_uri,
+        isMayhemMode: false,
+        marketCap: mcap,
+        volume24h: 0, 
+        priceUsd: 0   
+    };
+
+    // Use creation timestamp.
+    // Since this is the Pump API, we are guaranteed this is the Pump contract/pool.
+    const createdAt = coin.created_timestamp || Date.now();
+    
+    // Save/Upsert based on MINT address (Unique Key)
+    await saveTokenData(coin.creator, coin.mint, metadata, createdAt);
+}
+
 function start(deps) {
-    logger.info("🚀 New Token Listener started (Bonded Mode)");
-    checkNewTokens(deps);
-    setInterval(() => checkNewTokens(deps), 60000);
+    setTimeout(() => seedHistory(deps), 5000);
+    setInterval(() => seedHistory(deps), 10000);
+
+    setTimeout(() => syncTopWinners(deps), 10000); 
+    setInterval(() => syncTopWinners(deps), 15 * 60 * 1000); 
 }
 
 module.exports = { start };
