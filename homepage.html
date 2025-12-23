@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HolDex | The Diamond Hand Explorer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        diamond: {
+                            50: '#ecfeff',
+                            100: '#cffafe',
+                            400: '#22d3ee',
+                            500: '#06b6d4',
+                            600: '#0891b2',
+                            900: '#164e63',
+                            950: '#083344',
+                        },
+                        void: '#020617'
+                    },
+                    fontFamily: {
+                        mono: ['JetBrains Mono', 'monospace'],
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* HOLDEX THEME: Diamond Hands (Ice/Cyan/Void) */
+        body { 
+            background-color: #020617; 
+            color: #ecfeff; 
+            font-family: 'Inter', sans-serif; 
+            min-height: 100vh; 
+            font-size: 13px; 
+            overflow-x: hidden; 
+            background-image: 
+                radial-gradient(circle at 50% 0%, rgba(6, 182, 212, 0.15), transparent 40%),
+                radial-gradient(circle at 90% 90%, rgba(59, 130, 246, 0.1), transparent 30%);
+        }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #06b6d4; }
+
+        /* Navigation */
+        nav { 
+            background: rgba(2, 6, 23, 0.85); 
+            backdrop-filter: blur(12px); 
+            border-bottom: 1px solid rgba(6, 182, 212, 0.2);
+        }
+        .brand-text {
+            background: linear-gradient(135deg, #fff 0%, #22d3ee 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 800;
+        }
+
+        /* Table Styles */
+        .holdex-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+        .holdex-table th { 
+            background: rgba(15, 23, 42, 0.95);
+            position: sticky; top: 0; z-index: 20; 
+            padding: 14px 20px; 
+            text-align: right; 
+            font-size: 11px; 
+            font-weight: 600;
+            text-transform: uppercase; 
+            color: #94a3b8; 
+            border-bottom: 1px solid #1e293b;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        .holdex-table th:hover { color: #22d3ee; }
+        .holdex-table th:first-child { text-align: left; }
+        
+        .holdex-table td { 
+            padding: 12px 20px; 
+            border-bottom: 1px solid rgba(30, 41, 59, 0.5); 
+            vertical-align: middle; 
+            transition: background 0.2s;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .holdex-table tr:hover td { background: rgba(6, 182, 212, 0.05); }
+
+        /* UI Elements */
+        .img-token { width: 40px; height: 40px; border-radius: 8px; border: 1px solid #1e293b; object-fit: cover; }
+        
+        .pill { padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; border: 1px solid transparent; }
+        .pill-green { background: rgba(6, 182, 212, 0.1); color: #22d3ee; border-color: rgba(6, 182, 212, 0.3); text-shadow: 0 0 10px rgba(34, 211, 238, 0.2); }
+        .pill-red { background: rgba(239, 68, 68, 0.1); color: #f87171; border-color: rgba(239, 68, 68, 0.3); }
+
+        .search-box {
+            background: #0f172a; border: 1px solid #1e293b; color: #22d3ee; 
+            padding: 10px 16px; border-radius: 8px; outline: none; width: 300px;
+            font-family: 'JetBrains Mono'; transition: all 0.2s;
+        }
+        .search-box:focus { border-color: #06b6d4; box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.2); }
+        .search-box::placeholder { color: #475569; }
+
+        .tab-btn {
+            background: transparent; border: 1px solid transparent; color: #94a3b8;
+            padding: 8px 16px; border-radius: 8px; cursor: pointer; transition: all 0.3s;
+            font-size: 12px; font-weight: 600;
+        }
+        .tab-btn.active { background: rgba(6, 182, 212, 0.1); color: #22d3ee; border: 1px solid rgba(6, 182, 212, 0.3); }
+        .tab-btn:hover:not(.active) { color: #e2e8f0; background: #1e293b; }
+
+        /* Diamond Animation */
+        @keyframes shine {
+            0% { transform: translateX(-100%) rotate(45deg); }
+            100% { transform: translateX(200%) rotate(45deg); }
+        }
+        .diamond-effect { position: relative; overflow: hidden; }
+        .diamond-effect::after {
+            content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transform: skewX(-20deg);
+            animation: shine 3s infinite; pointer-events: none;
+        }
+
+        /* Views */
+        .view-section { display: none; }
+        .view-section.active { display: block; animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+        .chart-container {
+            width: 100%; height: 600px; background: #000; border-radius: 16px; 
+            overflow: hidden; border: 1px solid #1e293b; box-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.8);
+        }
+        .chart-container iframe { width: 100%; height: 100%; border: 0; }
+
+        .stat-card {
+            background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 20px;
+            display: flex; flex-direction: column; gap: 6px; transition: border-color 0.2s;
+        }
+        .stat-card:hover { border-color: #06b6d4; }
+        .stat-label { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+        .stat-value { font-size: 20px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; }
+    </style>
+</head>
+<body>
+
+<!-- Header -->
+<nav class="sticky top-0 z-40">
+    <div class="max-w-[1800px] mx-auto px-6 py-4 flex justify-between items-center">
+        <!-- Logo -->
+        <div class="flex items-center gap-4 cursor-pointer group" onclick="navigateTo('')">
+            <div class="w-10 h-10 rounded-xl flex items-center justify-center bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 group-hover:bg-cyan-500/20 transition diamond-effect">
+                <i data-lucide="gem" width="20"></i>
+            </div>
+            <div>
+                <h1 class="text-2xl brand-text tracking-tight">HolDex</h1>
+                <div class="flex items-center gap-2 text-[10px] text-cyan-500/60 uppercase font-semibold tracking-wider">
+                    Diamond Hand Protocol
+                </div>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="flex items-center gap-6">
+            <div id="nav-controls" class="flex items-center gap-6">
+                <div class="flex bg-slate-900/50 p-1 rounded-xl border border-slate-800">
+                    <button class="tab-btn active" onclick="setSort('newest', this)">Fresh Mints</button>
+                    <button class="tab-btn" onclick="setSort('mcap', this)">Blue Chips</button>
+                    <button class="tab-btn" onclick="setSort('gainers', this)">Diamond Hands</button>
+                </div>
+                
+                <div class="relative">
+                    <i data-lucide="search" width="14" class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"></i>
+                    <input type="text" id="search" placeholder="Search Token..." class="search-box pl-10" onkeyup="handleSearch(event)">
+                </div>
+            </div>
+            
+            <!-- Detail View Controls -->
+            <div id="detail-controls" class="hidden">
+                <button onclick="navigateTo('')" class="tab-btn flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white border-slate-700">
+                    <i data-lucide="arrow-left" width="14"></i> Return to Index
+                </button>
+            </div>
+        </div>
+    </div>
+</nav>
+
+<!-- Main Content -->
+<main class="max-w-[1800px] mx-auto px-6 py-8">
+    
+    <!-- DASHBOARD VIEW -->
+    <div id="view-dashboard" class="view-section active">
+        <div class="bg-slate-900/40 border border-slate-800/60 rounded-2xl overflow-hidden backdrop-blur-sm">
+            <div class="overflow-x-auto">
+                <table class="holdex-table">
+                    <thead>
+                        <tr>
+                            <th width="350">Asset</th>
+                            <th>Price</th>
+                            <th>5m</th>
+                            <th>1h</th>
+                            <th>24h</th>
+                            <th>Market Cap</th>
+                            <th>Alpha (Vol)</th>
+                            <th>Age</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body">
+                        <tr><td colspan="8" class="text-center py-20 text-slate-500 font-mono animate-pulse">Scanning Solana Mempool...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- DETAIL VIEW -->
+    <div id="view-detail" class="view-section">
+        <!-- Header -->
+        <div class="flex flex-col md:flex-row gap-8 mb-8 items-start">
+            <div class="flex items-center gap-6">
+                <div class="relative">
+                    <img id="detail-img" src="" class="w-20 h-20 rounded-2xl border-2 border-slate-800 object-cover bg-slate-900">
+                    <div class="absolute -bottom-2 -right-2 bg-cyan-500 text-black text-[10px] font-bold px-2 py-1 rounded-full">SOL</div>
+                </div>
+                <div>
+                    <div class="flex items-center gap-3 mb-1">
+                        <h2 id="detail-ticker" class="text-4xl font-bold text-white tracking-tight"></h2>
+                        <span id="detail-name" class="text-slate-400 text-sm bg-slate-900 px-3 py-1 rounded-lg border border-slate-800"></span>
+                    </div>
+                    <div class="flex items-center gap-2 cursor-pointer group" onclick="copyMint()">
+                        <span id="detail-mint" class="text-xs text-slate-500 font-mono group-hover:text-cyan-400 transition"></span>
+                        <i data-lucide="copy" width="12" class="text-slate-600 group-hover:text-cyan-400"></i>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flex-1"></div>
+            
+            <div class="flex gap-3">
+                <a id="link-pump" href="#" target="_blank" class="px-5 py-3 bg-[#181a20] border border-slate-700 rounded-xl hover:border-cyan-500/50 hover:text-cyan-400 transition flex items-center gap-2 text-sm font-semibold">
+                    <img src="https://pump.fun/logo.png" width="16" onerror="this.style.display='none'"> Trade on Pump
+                </a>
+                <a id="link-solscan" href="#" target="_blank" class="px-5 py-3 bg-[#181a20] border border-slate-700 rounded-xl hover:border-blue-500/50 hover:text-blue-400 transition flex items-center gap-2 text-sm font-semibold">
+                    <i data-lucide="search" width="16"></i> Solscan
+                </a>
+            </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+            <div class="stat-card">
+                <span class="stat-label">Current Price</span>
+                <span id="stat-price" class="stat-value text-cyan-50">-</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Market Cap</span>
+                <span id="stat-mcap" class="stat-value text-blue-400">-</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Alpha (24h Vol)</span>
+                <span id="stat-vol" class="stat-value text-green-400">-</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">1H Swing</span>
+                <span id="stat-chg1h" class="stat-value">-</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">24H Trend</span>
+                <span id="stat-chg24h" class="stat-value">-</span>
+            </div>
+        </div>
+
+        <!-- Chart -->
+        <div class="chart-container">
+            <iframe id="detail-iframe" src="about:blank"></iframe>
+        </div>
+    </div>
+
+</main>
+
+<script>
+    // --- CONFIG ---
+    // Ensure this points to your deployed Backend URL (e.g., on Render)
+    const API_URL = 'http://localhost:4000'; 
+    
+    let currentSort = 'newest';
+    let searchQuery = '';
+    let pollingInterval;
+
+    // --- UTILS ---
+    const formatMoney = (val) => {
+        if (!val) return '-';
+        if (val < 0.000001) return '$' + val.toExponential(2);
+        if (val < 0.01) return '$' + val.toFixed(6);
+        return '$' + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+    };
+
+    const formatCompact = (val) => {
+        if (!val) return '$0';
+        return '$' + new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val);
+    };
+
+    const formatPct = (val) => {
+        if (!val && val !== 0) return `<span class="text-slate-600">-</span>`;
+        const cls = val > 0 ? 'pill-green' : (val < 0 ? 'pill-red' : 'text-slate-500');
+        const sign = val > 0 ? '+' : '';
+        return `<span class="pill ${cls}">${sign}${val.toFixed(2)}%</span>`;
+    };
+
+    const resolveImage = (url) => {
+        if (!url) return 'https://placehold.co/40x40/1e293b/475569?text=GEM';
+        return `https://wsrv.nl/?url=${encodeURIComponent(url)}&w=128&output=webp&q=80`;
+    };
+
+    const timeAgo = (ts) => {
+        const seconds = Math.floor((Date.now() - ts) / 1000);
+        if (seconds < 60) return `${seconds}s ago`;
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `${minutes}m ago`;
+        const hours = Math.floor(minutes / 60);
+        return `${hours}h ago`;
+    };
+
+    // --- ROUTING ---
+    window.addEventListener('hashchange', handleRoute);
+    window.addEventListener('load', handleRoute);
+
+    function navigateTo(path) {
+        window.location.hash = path;
+    }
+
+    function handleRoute() {
+        const hash = window.location.hash;
+        if (hash.startsWith('#token/')) {
+            const mint = hash.split('/')[1];
+            showDetailView(mint);
+        } else {
+            showDashboardView();
+        }
+    }
+
+    // --- DASHBOARD ---
+    function showDashboardView() {
+        document.getElementById('view-dashboard').classList.add('active');
+        document.getElementById('view-detail').classList.remove('active');
+        document.getElementById('nav-controls').classList.remove('hidden');
+        document.getElementById('detail-controls').classList.add('hidden');
+        
+        if (!pollingInterval) {
+            fetchList();
+            pollingInterval = setInterval(fetchList, 5000);
+        }
+    }
+
+    async function fetchList() {
+        try {
+            const endpoint = `${API_URL}/api/tokens?sort=${currentSort}&search=${searchQuery}&limit=100`;
+            const res = await fetch(endpoint);
+            const data = await res.json();
+            if (data.success) renderTable(data.tokens);
+        } catch (e) { console.error("API Connection Failed", e); }
+    }
+
+    function renderTable(tokens) {
+        const tbody = document.getElementById('table-body');
+        if (tokens.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-slate-500">No active signals found.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = tokens.map(t => `
+            <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group">
+                <td>
+                    <div class="flex items-center gap-4">
+                        <img src="${resolveImage(t.image)}" class="img-token group-hover:border-cyan-500 transition" loading="lazy">
+                        <div class="flex flex-col">
+                            <span class="font-bold text-white text-sm group-hover:text-cyan-400 transition">${t.ticker}</span>
+                            <span class="text-[10px] text-slate-500 truncate max-w-[150px] font-sans">${t.name}</span>
+                        </div>
+                    </div>
+                </td>
+                <td class="text-right text-slate-300 font-mono">${formatMoney(t.priceUsd)}</td>
+                <td class="text-right">${formatPct(t.change5m)}</td>
+                <td class="text-right">${formatPct(t.change1h)}</td>
+                <td class="text-right">${formatPct(t.change24h)}</td>
+                <td class="text-right font-mono text-blue-400 font-bold">${formatCompact(t.marketCap)}</td>
+                <td class="text-right font-mono text-green-400">${formatCompact(t.volume24h)}</td>
+                <td class="text-right text-xs text-slate-500 font-mono">${timeAgo(t.timestamp)}</td>
+            </tr>
+        `).join('');
+        lucide.createIcons();
+    }
+
+    // --- DETAIL VIEW ---
+    async function showDetailView(mint) {
+        clearInterval(pollingInterval);
+        pollingInterval = null;
+
+        document.getElementById('view-dashboard').classList.remove('active');
+        document.getElementById('view-detail').classList.add('active');
+        document.getElementById('nav-controls').classList.add('hidden');
+        document.getElementById('detail-controls').classList.remove('hidden');
+
+        document.getElementById('detail-ticker').innerText = 'LOADING...';
+        document.getElementById('detail-iframe').src = 'about:blank';
+
+        try {
+            const res = await fetch(`${API_URL}/api/token/${mint}`);
+            const data = await res.json();
+            if (data.success) renderDetail(data.token);
+            else { alert("Token not found"); navigateTo(''); }
+        } catch (e) { console.error(e); }
+    }
+
+    function renderDetail(t) {
+        document.getElementById('detail-ticker').innerText = t.ticker;
+        document.getElementById('detail-name').innerText = t.name;
+        document.getElementById('detail-mint').innerText = t.mint;
+        document.getElementById('detail-img').src = resolveImage(t.image);
+
+        document.getElementById('link-pump').href = `https://pump.fun/coin/${t.mint}`;
+        document.getElementById('link-solscan').href = `https://solscan.io/token/${t.mint}`;
+
+        document.getElementById('stat-price').innerText = formatMoney(t.priceUsd);
+        document.getElementById('stat-mcap').innerText = formatCompact(t.marketCap);
+        document.getElementById('stat-vol').innerText = formatCompact(t.volume24h);
+        document.getElementById('stat-chg1h').innerHTML = formatPct(t.change1h);
+        document.getElementById('stat-chg24h').innerHTML = formatPct(t.change24h);
+
+        // Dark Theme Chart
+        const chartUrl = `https://dexscreener.com/solana/${t.mint}?embed=1&theme=dark&info=0`;
+        document.getElementById('detail-iframe').src = chartUrl;
+    }
+
+    // --- HANDLERS ---
+    window.setSort = (sort, btn) => {
+        currentSort = sort;
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        fetchList();
+    };
+
+    window.handleSearch = (e) => {
+        searchQuery = e.target.value;
+        clearTimeout(window.searchTimeout);
+        window.searchTimeout = setTimeout(fetchList, 300);
+    };
+
+    window.copyMint = () => {
+        const mint = document.getElementById('detail-mint').innerText;
+        navigator.clipboard.writeText(mint);
+        // Simple visual feedback could go here
+    };
+
+    // --- INIT ---
+    lucide.createIcons();
+    // Router handles initial load
+</script>
+
+</body>
+</html>
