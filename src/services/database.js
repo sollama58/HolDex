@@ -1,6 +1,6 @@
 /**
  * Database Service (PostgreSQL + Redis Version)
- * Optimized: Added Transaction Support
+ * Optimized: Added Transaction Support & Custom Timestamp
  */
 const { Pool } = require('pg');
 const config = require('../config/env');
@@ -26,8 +26,6 @@ const dbWrapper = {
         const res = await this.query(text, params);
         return { rowCount: res.rowCount };
     },
-    
-    // NEW: Transaction Helper
     async transaction(callback) {
         if (!pool) throw new Error("DB not initialized");
         const client = await pool.connect();
@@ -39,7 +37,6 @@ const dbWrapper = {
                 all: async (t, p) => (await client.query(t, p)).rows,
                 run: async (t, p) => ({ rowCount: (await client.query(t, p)).rowCount })
             };
-            
             await callback(trxDb);
             await client.query('COMMIT');
         } catch (e) {
@@ -114,9 +111,6 @@ async function initDB() {
             );
         `);
 
-        // Removed token_holders table creation since it's no longer used
-
-        // Create Indexes
         try {
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_volume ON tokens(volume24h DESC)`);
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_mcap ON tokens(marketCap DESC)`);
@@ -133,9 +127,13 @@ async function initDB() {
     }
 }
 
-async function saveTokenData(pubkey, mint, metadata) {
+// UPDATED: Accepts customTimestamp to accurately record Mint Date
+async function saveTokenData(pubkey, mint, metadata, customTimestamp = null) {
     if (!pool) return;
     try {
+        // Use provided timestamp (Mint Date) or fallback to Now
+        const ts = customTimestamp || Date.now();
+
         await pool.query(`
             INSERT INTO tokens (userPubkey, mint, ticker, name, description, twitter, website, metadataUri, image, isMayhemMode, marketCap, timestamp)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -152,7 +150,8 @@ async function saveTokenData(pubkey, mint, metadata) {
             pubkey, mint, metadata.ticker, metadata.name, metadata.description,
             metadata.twitter, metadata.website, metadata.metadataUri,
             metadata.image, metadata.isMayhemMode ? true : false,
-            metadata.marketCap || 0, Date.now()
+            metadata.marketCap || 0, 
+            ts 
         ]);
     } catch (e) {
         logger.error("Save Token Error", { error: e.message });

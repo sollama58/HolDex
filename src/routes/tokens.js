@@ -1,5 +1,5 @@
 /**
- * Token Routes (Cleaned)
+ * Token Routes (Correctly Mapped for Detail View)
  */
 const express = require('express');
 const axios = require('axios');
@@ -25,15 +25,10 @@ function init(deps) {
             const result = await smartCache(cacheKey, 5, async () => {
                 const limitVal = Math.min(parseInt(limit) || 100, 100);
                 
-                // --- SORT LOGIC ---
-                let orderByClause = 'ORDER BY timestamp DESC'; // Default: Fresh Mints (newest)
+                let orderByClause = 'ORDER BY timestamp DESC'; 
 
                 if (sort === 'leaders' || sort === 'mcap') {
-                    // Leaders: Sort by Market Cap (or volume)
                     orderByClause = 'ORDER BY marketCap DESC';
-                } else if (sort === 'holders') {
-                    // Holders: Logic removed, defaults to timestamp
-                    orderByClause = 'ORDER BY timestamp DESC'; 
                 } else if (sort === 'gainers') {
                     orderByClause = 'ORDER BY change24h DESC';
                 }
@@ -52,7 +47,7 @@ function init(deps) {
                     ? await db.all(query, params) 
                     : await db.all(query);
 
-                // --- SEARCH & SAVE (External Fallback) ---
+                // External Search Fallback
                 if (rows.length === 0 && search && search.trim().length > 2) {
                     try {
                         const dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(search)}`, { timeout: 3000 });
@@ -72,7 +67,8 @@ function init(deps) {
                                     volume24h: pair.volume?.h24 || 0,
                                     priceUsd: pair.priceUsd
                                 };
-                                await saveTokenData(null, pair.baseToken.address, metadata);
+                                const createdAt = pair.pairCreatedAt || Date.now();
+                                await saveTokenData(null, pair.baseToken.address, metadata, createdAt);
                                 rows.push({
                                     mint: pair.baseToken.address,
                                     userPubkey: null,
@@ -82,7 +78,7 @@ function init(deps) {
                                     marketCap: metadata.marketCap,
                                     volume24h: metadata.volume24h,
                                     priceUsd: metadata.priceUsd,
-                                    timestamp: Date.now(),
+                                    timestamp: createdAt,
                                     change5m: pair.priceChange?.m5 || 0,
                                     change1h: pair.priceChange?.h1 || 0,
                                     change24h: pair.priceChange?.h24 || 0,
@@ -119,7 +115,35 @@ function init(deps) {
         }
     });
 
-    // REMOVED: /check-holder endpoint
+    // Get single token (Correctly mapped for frontend detail view)
+    router.get('/token/:mint', async (req, res) => {
+        try {
+            const { mint } = req.params;
+            const cacheKey = `api:token:${mint}`;
+            const result = await smartCache(cacheKey, 30, async () => {
+                const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+                if (!token) return null;
+                
+                // MAPPING FIX: Ensure DB lowercase columns map to frontend camelCase
+                return { 
+                    success: true, 
+                    token: {
+                        ...token,
+                        marketCap: token.marketcap, 
+                        volume24h: token.volume24h,
+                        priceUsd: token.priceusd,
+                        change1h: token.change1h,
+                        change24h: token.change24h,
+                        userPubkey: token.userpubkey,
+                        // Ensure timestamp is a number for date math
+                        timestamp: parseInt(token.timestamp) 
+                    } 
+                };
+            });
+            if (!result) return res.status(404).json({ success: false, error: "Not found" });
+            res.json(result);
+        } catch (e) { res.status(500).json({ success: false, error: "DB Error" }); }
+    });
 
     return router;
 }

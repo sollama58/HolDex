@@ -1,6 +1,6 @@
 /**
  * New Token Listener (DexScreener Version)
- * Optimized memory handling.
+ * Optimized memory handling & Accurate Age Calculation.
  */
 const axios = require('axios');
 const { logger } = require('../services');
@@ -39,7 +39,7 @@ async function checkNewTokens(deps) {
             const mcap = pair.fdv || pair.marketCap || 0;
 
             if (mcap < MIN_MARKET_CAP) {
-                knownMints.add(mint); // Still track it so we don't process it again next loop
+                knownMints.add(mint); 
                 continue;
             }
 
@@ -58,18 +58,17 @@ async function checkNewTokens(deps) {
                 priceUsd: pair.priceUsd
             };
 
-            await saveTokenData(null, mint, metadata);
+            // UPDATED: Pass pairCreatedAt as the timestamp to get accurate Age
+            const createdAt = pair.pairCreatedAt || Date.now();
+            await saveTokenData(null, mint, metadata, createdAt);
             
             knownMints.add(mint);
             addedCount++;
             logger.info(`💎 DEXSCREENER DETECT: ${pair.baseToken.symbol} ($${Math.floor(mcap)})`);
         }
 
-        // Cleanup memory (FIFO approach - delete oldest is hard with Set, 
-        // so we just clear half if it gets too big to prevent total amnesia)
         if (knownMints.size > MAX_HISTORY) {
             const it = knownMints.values();
-            // Remove first 500 items (oldest inserted)
             for (let i = 0; i < 500; i++) {
                 knownMints.delete(it.next().value);
             }
