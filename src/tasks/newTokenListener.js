@@ -1,79 +1,85 @@
 /**
- * New Token Listener
- * Watches for new launches on Pump.fun and populates the database.
+ * New Token Listener (DexScreener Version)
+ * Watches for active Pump.fun tokens via DexScreener.
  * FILTER: Only allows tokens > $10k Market Cap.
- * INTERVAL: Checks every 2 minutes.
+ * INTERVAL: Checks every 60 seconds.
  */
 const axios = require('axios');
 const { logger } = require('../services');
 const { saveTokenData } = require('../services/database');
 
-const PUMP_LATEST_API = 'https://frontend-api.pump.fun/coins/latest';
 const MIN_MARKET_CAP = 10000;
-
-// Set of known mints to prevent DB hammering
-// We keep a history to avoid reprocessing, but clear it if it gets too large
 const knownMints = new Set();
 const MAX_HISTORY = 1000;
 
+function getSocialLink(pair, type) {
+    if (!pair.info || !pair.info.socials) return null;
+    const social = pair.info.socials.find(s => s.type === type);
+    return social ? social.url : null;
+}
+
 async function checkNewTokens(deps) {
     try {
-        const response = await axios.get(PUMP_LATEST_API, {
-            headers: { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'application/json' 
-            },
-            timeout: 8000
+        // Specifically search for "pump" to get tokens on the bonding curve or graduated
+        const response = await axios.get('https://api.dexscreener.com/latest/dex/search?q=pump', {
+            timeout: 5000
         });
 
-        const newCoins = response.data;
-        if (!Array.isArray(newCoins)) return;
+        const pairs = response.data.pairs;
+        if (!pairs) return;
 
-        // Process oldest first to maintain sequence
-        const reversedCoins = [...newCoins].reverse();
+        // Sort by creation time (DexScreener sends pairCreatedAt)
+        // We want the newest first
+        pairs.sort((a, b) => (b.pairCreatedAt || 0) - (a.pairCreatedAt || 0));
+
         let addedCount = 0;
         let skippedCount = 0;
 
-        for (const coin of reversedCoins) {
-            if (knownMints.has(coin.mint)) continue;
+        for (const pair of pairs) {
+            const mint = pair.baseToken.address;
 
-            // --- FILTER: MARKET CAP > $10,000 ---
-            const mcap = coin.usd_market_cap || 0;
-            
+            // Skip if seen or not Solana
+            if (knownMints.has(mint) || pair.chainId !== 'solana') continue;
+
+            const mcap = pair.fdv || pair.marketCap || 0;
+
             if (mcap < MIN_MARKET_CAP) {
-                // Track that we saw it, but don't save to DB yet
-                // If it pumps later, the 'autoSeeder' task (which sorts by Mcap) should catch it
-                knownMints.add(coin.mint); 
+                knownMints.add(mint);
                 skippedCount++;
-                continue; 
+                continue;
             }
 
-            // Map API data
+            // Extract Creator (Not provided by DexScreener Search directly, send null)
+            // Ideally we fetch this from RPC, but for speed we leave it null for now.
+            const creator = null; 
+
             const metadata = {
-                ticker: coin.symbol,
-                name: coin.name,
-                description: coin.description || '',
-                twitter: coin.twitter || null,
-                website: coin.website || null,
-                telegram: coin.telegram || null,
-                metadataUri: coin.uri,
-                image: coin.image_uri,
+                ticker: pair.baseToken.symbol,
+                name: pair.baseToken.name,
+                description: 'Pump.fun Token',
+                twitter: getSocialLink(pair, 'twitter'),
+                website: pair.info?.websites?.[0]?.url || null,
+                telegram: getSocialLink(pair, 'telegram'),
+                metadataUri: null,
+                image: pair.info?.imageUrl,
                 isMayhemMode: false,
-                marketCap: mcap
+                marketCap: mcap,
+                volume24h: pair.volume?.h24 || 0,
+                priceUsd: pair.priceUsd
             };
 
-            await saveTokenData(coin.creator, coin.mint, metadata);
+            await saveTokenData(creator, mint, metadata);
             
-            knownMints.add(coin.mint);
+            knownMints.add(mint);
             addedCount++;
-            logger.info(`💎 HIGH VALUE MINT: ${coin.symbol} ($${Math.floor(mcap)})`);
+            logger.info(`💎 DEXSCREENER DETECT: ${pair.baseToken.symbol} ($${Math.floor(mcap)})`);
         }
 
         if (addedCount > 0) {
-            logger.info(`Token Scan: Added ${addedCount} high-value tokens. Skipped ${skippedCount} low-cap.`);
+            logger.info(`Listener: Added ${addedCount} tokens. Skipped ${skippedCount} low-cap.`);
         }
 
-        // Memory Management
+        // Cleanup memory
         if (knownMints.size > MAX_HISTORY) {
             knownMints.clear();
         }
@@ -84,13 +90,12 @@ async function checkNewTokens(deps) {
 }
 
 function start(deps) {
-    logger.info("🚀 New Token Listener started (> $10k MC, 2m Interval)");
+    logger.info("🚀 New Token Listener started (DexScreener Mode)");
     
-    // Run immediately
     checkNewTokens(deps);
     
-    // Run every 2 minutes (120,000 ms)
-    setInterval(() => checkNewTokens(deps), 120000);
+    // Poll every 60 seconds (DexScreener allows 300 req/min, so this is safe)
+    setInterval(() => checkNewTokens(deps), 60000);
 }
 
 module.exports = { start };
