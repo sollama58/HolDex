@@ -1,6 +1,7 @@
 /**
- * Metadata Updater (Parallelized)
- * Executes DB updates concurrently for speed.
+ * Metadata Updater (Smart Priority Version)
+ * Optimizes API usage by prioritizing active tokens over dead ones.
+ * Updates: Prices, Volume, Market Cap, AND Creation Timestamp (Age).
  */
 const axios = require('axios');
 const config = require('../config/env');
@@ -68,7 +69,9 @@ async function updateMetadata(deps) {
                         imageUrl: pair.info?.imageUrl,
                         change5m: pair.priceChange?.m5 || 0,
                         change1h: pair.priceChange?.h1 || 0,
-                        change24h: pair.priceChange?.h24 || 0
+                        change24h: pair.priceChange?.h24 || 0,
+                        // Fix Age: Use pairCreatedAt from DexScreener
+                        pairCreatedAt: pair.pairCreatedAt 
                     });
                 }
             }
@@ -78,6 +81,7 @@ async function updateMetadata(deps) {
                 const data = updates.get(t.mint);
                 if (!data) return Promise.resolve(); // Skip if no data
 
+                // We update 'timestamp' with 'pairCreatedAt' if available to ensure "Age" is accurate
                 const updateQuery = `
                     UPDATE tokens SET 
                     volume24h = $1, 
@@ -86,7 +90,8 @@ async function updateMetadata(deps) {
                     change5m = $4, 
                     change1h = $5, 
                     change24h = $6, 
-                    lastUpdated = $7 
+                    lastUpdated = $7,
+                    timestamp = COALESCE($10, timestamp)
                     ${data.imageUrl ? ', image = $9' : ''} 
                     WHERE mint = $8
                 `;
@@ -102,14 +107,44 @@ async function updateMetadata(deps) {
                     t.mint
                 ];
 
-                if (data.imageUrl) params.push(data.imageUrl);
+                if (data.imageUrl) params.push(data.imageUrl); // $9
+                else params.push(null); // Placeholder if we need to keep index alignment, but here we construct query dynamic-ish.
+                // Wait, simplified:
+                // If data.imageUrl is present, params has 9 items. $10 is the timestamp.
+                // If NOT present, params has 8 items. timestamp is $9.
+                // Let's rewrite the query construction to be safer.
+                
+                // RE-WRITING QUERY CONSTRUCTION FOR SAFETY
+                let queryParts = [
+                    "volume24h = $1", "marketCap = $2", "priceUsd = $3", 
+                    "change5m = $4", "change1h = $5", "change24h = $6", 
+                    "lastUpdated = $7"
+                ];
+                let queryParams = [
+                    data.volume24h, data.marketCap, data.priceUsd, 
+                    data.change5m, data.change1h, data.change24h, Date.now()
+                ];
+                let paramIdx = 8;
 
-                return db.run(updateQuery, params);
+                if (data.imageUrl) {
+                    queryParts.push(`image = $${paramIdx++}`);
+                    queryParams.push(data.imageUrl);
+                }
+
+                if (data.pairCreatedAt) {
+                    queryParts.push(`timestamp = $${paramIdx++}`);
+                    queryParams.push(data.pairCreatedAt);
+                }
+
+                queryParams.push(t.mint); // The WHERE clause param
+
+                const safeQuery = `UPDATE tokens SET ${queryParts.join(', ')} WHERE mint = $${paramIdx}`;
+
+                return db.run(safeQuery, queryParams);
             });
 
             await Promise.all(updatePromises);
             
-            // Safer Rate Limit
             await delay(1100);
 
         } catch (e) {
@@ -128,7 +163,7 @@ async function updateMetadata(deps) {
 function start(deps) {
     setTimeout(() => updateMetadata(deps), 5000);
     setInterval(() => updateMetadata(deps), config.METADATA_UPDATE_INTERVAL);
-    logger.info("Metadata updater started (Optimized)");
+    logger.info("Metadata updater started (Age Fix Mode)");
 }
 
 module.exports = { updateMetadata, start };

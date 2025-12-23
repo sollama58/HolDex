@@ -8,7 +8,6 @@ const { initDB, getDB } = require('./services/database');
 const { initRedis } = require('./services/redis');
 const tokenRoutes = require('./routes/tokens');
 const metadataUpdater = require('./tasks/metadataUpdater');
-const holderScanner = require('./tasks/holderScanner');
 const newTokenListener = require('./tasks/newTokenListener');
 // REMOVED: autoSeeder (Deprecated due to 530 Cloudflare blocks)
 

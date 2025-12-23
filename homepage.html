@@ -45,9 +45,7 @@
         .nav-btn { background: transparent; color: #9a3412; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 800; transition: all 0.2s; border: 2px solid transparent; }
         .nav-btn:hover { color: #fb923c; }
         .nav-btn.active { background: #451a03; color: #ea580c; border-color: #7c2d12; box-shadow: 0 4px 0 #2a1005; }
-        .filter-btn { background: transparent; border: 1px solid transparent; color: #9a3412; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 700; white-space: nowrap; transition: all 0.2s; }
-        .filter-btn:hover { color: #fb923c; }
-        .filter-btn.active { background: #ea580c; color: #2a1005; border: 1px solid #7c2d12; }
+        
         .refresh-btn { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; transition: all 0.2s; position: relative; }
         .refresh-btn:hover:not(:disabled) { border-color: #ea580c; color: #fff; background: #582206; }
         .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; border-color: #451a03; color: #7c2d12; }
@@ -112,13 +110,11 @@
         </div>
         
         <div id="table-controls" class="flex items-center gap-3 w-full md:w-auto transition-opacity duration-300">
-            <div class="flex bg-[#451a03] p-1.5 rounded-xl border border-[#7c2d12] shadow-inner">
-                <button class="filter-btn active" onclick="setSort('newest', this)">Fresh Mints</button>
-            </div>
+            <!-- REMOVED FRESH MINTS BUTTON -->
             
             <div class="relative w-full md:w-auto">
-                <i data-lucide="search" width="16" class="absolute left-4 top-1/2 -translate-y-1/2 text-orange-700"></i>
-                <input type="text" id="search" placeholder="Search..." class="search-box pl-10" onkeyup="handleSearch(event)">
+                <!-- REMOVED MAGNIFYING GLASS ICON -->
+                <input type="text" id="search" placeholder="Search..." class="search-box" onkeyup="handleSearch(event)">
             </div>
 
             <button id="manual-refresh" onclick="handleManualRefresh()" class="refresh-btn" title="Refresh Data">
@@ -591,12 +587,10 @@
         }
     }
 
+    // REMOVED 'filter-btn' logic since button is gone
     window.setSort = (sort, btn) => {
         currentSort = sort;
-        if(btn) {
-            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-        }
+        // No buttons to toggle anymore for Fresh Mints
         currentPage = 1; fetchList();
     };
     window.handleSearch = (e) => { searchQuery = e.target.value; currentPage = 1; clearTimeout(window.searchTimeout); window.searchTimeout = setTimeout(fetchList, 1000); };
