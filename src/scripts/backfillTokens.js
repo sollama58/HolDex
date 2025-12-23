@@ -1,134 +1,104 @@
 /**
- * Auto Seeder Task (Top Volume & PumpSwap LP Focus)
- * 1. Fetches "Top" tokens based on volume/mcap from Pump.fun directly.
- * 2. Strict Filter: Only adds tokens if they are active on PumpSwap (raydium/bonded tokens handled by listener).
+ * Auto Seeder Task (DexScreener Top Volume Version)
+ * Replaces the blocked Pump.fun API with DexScreener to fetch top volume tokens.
+ * Focuses on 'pump' DEX pairs to find tokens relevant to the PumpFun ecosystem.
  */
 const axios = require('axios');
 const { logger } = require('../services');
 const { saveTokenData } = require('../services/database');
 
 // Configuration
-const MIN_MARKET_CAP = 10000;
-const BATCH_SIZE = 50;
-let currentOffset = 0;
+const MIN_VOLUME_24H = 5000; // Only index tokens with > $5k daily volume
+const BATCH_SIZE = 50; // DexScreener usually returns 30-50 pairs per search
 let isRunning = false;
 
-// Pump.fun Endpoints
-const PUMP_LIST_URL = 'https://frontend-api.pump.fun/coins';
+// Search terms to find active Pump tokens on DexScreener
+// We rotate these to find "Top" tokens in different clusters
+const SEARCH_TERMS = ['pump', 'solana', 'meme', 'coin', 'moon', 'pepe', 'doge'];
 
-// Standard Browser Headers to avoid 530/403 blocks
-const API_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'application/json, text/plain, */*',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Origin': 'https://pump.fun',
-    'Referer': 'https://pump.fun/',
-    'Sec-Fetch-Dest': 'empty',
-    'Sec-Fetch-Mode': 'cors',
-    'Sec-Fetch-Site': 'same-site'
-};
-
-// --- CORE TASK: SYNC TOP TOKENS ---
 async function syncTopTokens(deps) {
     if (isRunning) return;
     isRunning = true;
 
-    logger.info("🏆 AutoSeeder: Syncing Top Volume Tokens (PumpSwap Only)...");
+    // Rotate search term to diversify "Top" finding
+    const term = SEARCH_TERMS[Math.floor(Math.random() * SEARCH_TERMS.length)];
+    logger.info(`🏆 AutoSeeder: Scanning DexScreener for Top Volume '${term}' tokens...`);
 
     try {
-        // Fetch tokens sorted by Market Cap (Proxy for Volume/Success on Pump.fun)
-        // Pump.fun API doesn't expose a direct 'volume' sort in this endpoint publicly, 
-        // but 'market_cap' is the standard way to find the top active curves.
-        const response = await axios.get(`${PUMP_LIST_URL}?offset=${currentOffset}&limit=${BATCH_SIZE}&sort=market_cap&order=DESC&includeNsfw=true`, {
-            headers: API_HEADERS,
-            timeout: 15000
+        // DexScreener Search API
+        // This returns pairs sorted by relevance/volume usually
+        const response = await axios.get(`https://api.dexscreener.com/latest/dex/search?q=${term}`, {
+            timeout: 10000
         });
 
-        const coins = response.data;
-
-        if (!coins || coins.length === 0) {
-            currentOffset = 0; // Reset pagination to start
+        const pairs = response.data.pairs;
+        if (!pairs || pairs.length === 0) {
             isRunning = false;
             return;
         }
 
         let addedCount = 0;
 
-        for (const coin of coins) {
-            // FILTER: Only add tokens that are on the Pump bonding curve (PumpSwap LP).
-            // 'complete' is false = Bonding Curve Active (PumpSwap)
-            // 'complete' is true  = Raydium/Bonded (We skip these here, handled by NewTokenListener or MetadataUpdater)
-            
-            // NOTE: If you want to index EVERYTHING, remove the !coin.complete check.
-            // But user request specifically said "only ones on the PumpSwap LP" logic implies native curve.
-            // Re-reading request: "add the Top tokens by volume... but only ones on the PumpSwap LP"
-            // This usually means tokens that are *still* trading on the curve.
-            
-            // However, often "PumpSwap LP" is interpreted as "Tokens created on Pump". 
-            // If you want ALL successful pump tokens, we include completed ones.
-            // If you ONLY want pre-bonded curve tokens, we check !coin.complete.
-            
-            // Decision: Based on "auto-adding of pre-bonded tokens" issue earlier, you likely want 
-            // the successful ones. But if the goal is "Only PumpSwap LP", that technically means un-bonded.
-            // I will assume you want **active curve tokens** (pre-bond) that have high volume.
-            
-            if (coin.raydium_pool) continue; // Skip if it has graduated to Raydium
-            
-            // Market Cap Check
-            const mcap = coin.usd_market_cap || coin.market_cap || 0;
-            if (mcap < MIN_MARKET_CAP) continue;
+        for (const pair of pairs) {
+            // 1. Solana Only
+            if (pair.chainId !== 'solana') continue;
 
-            await processCoin(coin);
+            // 2. Strict Filter: PumpSwap LP (Bonding Curve) OR Raydium (Graduated)
+            // If you ONLY want pre-bonded, check for dexId === 'pump'
+            // If you want ALL successful pump tokens, checking for 'pump' in labels or dexId helps.
+            // Note: DexScreener often labels the DEX as 'raydium' if it graduated.
+            // To find "Only PumpSwap LP", we look for dexId 'pump'.
+            if (pair.dexId !== 'pump') continue;
+
+            // 3. Volume Check (Ensure it's a "Top" token)
+            const volume = pair.volume?.h24 || 0;
+            if (volume < MIN_VOLUME_24H) continue;
+
+            // 4. Map & Save
+            await processPair(pair);
             addedCount++;
         }
 
-        logger.info(`🏆 AutoSeeder: Scanned batch. Added ${addedCount} active PumpSwap tokens.`);
-        
-        // Advance offset to scan deeper into the top list
-        currentOffset += BATCH_SIZE;
-        
-        // Reset if we go too deep (e.g. top 1000 is usually enough for "Top")
-        if (currentOffset > 1000) currentOffset = 0;
+        logger.info(`🏆 AutoSeeder: Synced ${addedCount} active PumpSwap pairs from '${term}'.`);
 
     } catch (e) {
-        if (e.response && (e.response.status === 530 || e.response.status === 403)) {
-            logger.warn(`🌱 AutoSeeder Blocked (Status ${e.response.status}). Pausing for 60s...`);
-            await new Promise(r => setTimeout(r, 60000));
-        } else {
-            logger.error(`🏆 AutoSeeder Error: ${e.message}`);
-        }
+        logger.error(`🏆 AutoSeeder Error: ${e.message}`);
     } finally {
         isRunning = false;
     }
 }
 
-// Helper to save coin data
-async function processCoin(coin) {
-    const mcap = coin.usd_market_cap || coin.market_cap || 0;
-
+async function processPair(pair) {
+    const mcap = pair.fdv || pair.marketCap || 0;
+    
     const metadata = {
-        ticker: coin.symbol,
-        name: coin.name,
-        description: coin.description || '',
-        twitter: coin.twitter || null,
-        website: coin.website || null,
-        telegram: coin.telegram || null,
-        metadataUri: coin.uri,
-        image: coin.image_uri,
+        ticker: pair.baseToken.symbol,
+        name: pair.baseToken.name,
+        description: `Discovered via AutoSeeder (${pair.dexId})`,
+        twitter: pair.info?.socials?.find(s => s.type === 'twitter')?.url,
+        website: pair.info?.websites?.[0]?.url,
+        telegram: pair.info?.socials?.find(s => s.type === 'telegram')?.url,
+        metadataUri: null,
+        image: pair.info?.imageUrl,
         isMayhemMode: false,
         marketCap: mcap,
-        volume24h: 0, // Will be updated by metadata scanner later
-        priceUsd: 0   // Will be updated
+        volume24h: pair.volume?.h24 || 0,
+        priceUsd: pair.priceUsd
     };
 
-    const createdAt = coin.created_timestamp || Date.now();
-    await saveTokenData(coin.creator, coin.mint, metadata, createdAt);
+    // Use pair creation time or current time
+    const createdAt = pair.pairCreatedAt || Date.now();
+    
+    // Upsert into DB
+    await saveTokenData(null, pair.baseToken.address, metadata, createdAt);
 }
 
 function start(deps) {
-    // Run frequently to keep the "Top" list fresh
+    // Run immediately
     setTimeout(() => syncTopTokens(deps), 5000);
-    setInterval(() => syncTopTokens(deps), 15000); // Check every 15s (iterating through pages)
+
+    // Run every 60 seconds to keep refreshing/finding new tops
+    setInterval(() => syncTopTokens(deps), 60000);
 }
 
 module.exports = { start };
