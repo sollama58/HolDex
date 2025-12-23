@@ -1,6 +1,6 @@
 /**
- * Token Routes
- * Updated: /token/:mint now fetches pair data for tabs
+ * Token Routes (Search & Save Optimized)
+ * Allows users to seed the DB by searching for tokens or CAs.
  */
 const express = require('express');
 const axios = require('axios');
@@ -49,7 +49,9 @@ function init(deps) {
         const limitVal = Math.min(parseInt(limit) || 100, 100);
         const pageVal = Math.max(parseInt(page) || 1, 1);
         const offsetVal = (pageVal - 1) * limitVal;
-        const cacheKey = `api:tokens:${sort}:${limitVal}:${pageVal}:${search || 'all'}`;
+        
+        // Include search in cache key to cache specific search results
+        const cacheKey = `api:tokens:${sort}:${limitVal}:${pageVal}:${search.trim() || 'all'}`;
 
         try {
             const result = await smartCache(cacheKey, 5, async () => {
@@ -67,30 +69,52 @@ function init(deps) {
                 let query = `SELECT * FROM tokens`;
                 let params = [];
 
+                // 1. Local DB Search
                 if (search && search.trim().length > 0) {
-                    query += ` WHERE ticker ILIKE $1 OR name ILIKE $1 OR mint = $1`;
-                    params.push(`%${search}%`);
+                    // Check if it's a CA (exact match)
+                    if (isValidPubkey(search.trim())) {
+                        query += ` WHERE mint = $1`;
+                        params.push(search.trim());
+                    } else {
+                        // Fuzzy search
+                        query += ` WHERE ticker ILIKE $1 OR name ILIKE $1`;
+                        params.push(`%${search.trim()}%`);
+                    }
                 }
 
                 query += ` ${orderByClause} LIMIT ${limitVal} OFFSET ${offsetVal}`;
 
                 let rows = params.length > 0 ? await db.all(query, params) : await db.all(query);
 
-                // --- EXTERNAL SEARCH FALLBACK ---
-                if (pageVal === 1 && rows.length < 5 && search && search.trim().length > 2) {
+                // 2. EXTERNAL SEARCH FALLBACK (Seeding Logic)
+                // If local results are low OR it's a specific CA search that missed, go fetch it.
+                const needsExternalFetch = (pageVal === 1 && search && search.trim().length > 2 && (rows.length < 5 || isValidPubkey(search.trim())));
+
+                if (needsExternalFetch) {
                     try {
-                        const dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(search)}`, { timeout: 3000 });
+                        let dexUrl = `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(search)}`;
+                        // If it is a CA, use the specific token endpoint for better accuracy
+                        if (isValidPubkey(search.trim())) {
+                            dexUrl = `https://api.dexscreener.com/latest/dex/tokens/${search.trim()}`;
+                        }
+
+                        const dexRes = await axios.get(dexUrl, { timeout: 4000 });
+                        
                         if (dexRes.data && dexRes.data.pairs) {
-                            const validPairs = dexRes.data.pairs.filter(p => p.chainId === 'solana').slice(0, 5);
-                            for (const pair of validPairs) {
+                            // Filter for Solana pairs
+                            const validPairs = dexRes.data.pairs.filter(p => p.chainId === 'solana');
+                            
+                            // Take top 5 (or 1 if exact CA)
+                            const pairsProcess = isValidPubkey(search.trim()) ? validPairs.slice(0, 1) : validPairs.slice(0, 5);
+
+                            for (const pair of pairsProcess) {
+                                // If we already found it locally, skip (unless we want to update it?)
                                 if (rows.some(r => r.mint === pair.baseToken.address)) continue;
-                                const exists = await db.get('SELECT id FROM tokens WHERE mint = $1', [pair.baseToken.address]);
-                                if (exists) continue; 
 
                                 const metadata = {
                                     ticker: pair.baseToken.symbol,
                                     name: pair.baseToken.name,
-                                    description: 'Imported via Search',
+                                    description: `Imported via Search: ${search}`,
                                     twitter: getSocialLink(pair, 'twitter'),
                                     website: pair.info?.websites?.[0]?.url || null,
                                     metadataUri: null,
@@ -101,8 +125,11 @@ function init(deps) {
                                     priceUsd: pair.priceUsd
                                 };
                                 const createdAt = pair.pairCreatedAt || Date.now();
+                                
+                                // SAVE TO DB
                                 await saveTokenData(null, pair.baseToken.address, metadata, createdAt);
                                 
+                                // Add to current response for immediate user feedback
                                 rows.push({
                                     mint: pair.baseToken.address,
                                     userPubkey: null,
@@ -123,6 +150,7 @@ function init(deps) {
                     } catch (extErr) { console.error("External search failed:", extErr.message); }
                 }
 
+                // Re-sort in memory since we might have appended new items
                 if (pageVal === 1 && rows.length > 0) {
                      if (sort === 'newest' || sort === 'age') rows.sort((a, b) => parseInt(b.timestamp) - parseInt(a.timestamp));
                      else if (sort === 'mcap') rows.sort((a, b) => (b.marketcap || b.marketCap) - (a.marketcap || a.marketCap));
@@ -156,7 +184,6 @@ function init(deps) {
         }
     });
 
-    // Updated Token Detail Endpoint
     router.get('/token/:mint', async (req, res) => {
         try {
             const { mint } = req.params;
@@ -176,7 +203,7 @@ function init(deps) {
                             priceUsd: p.priceUsd,
                             liquidity: p.liquidity?.usd || 0,
                             url: p.url
-                        })).sort((a, b) => b.liquidity - a.liquidity); // Sort by liquidity
+                        })).sort((a, b) => b.liquidity - a.liquidity);
                     }
                 } catch (dexErr) { console.warn("Failed to fetch pairs:", dexErr.message); }
 
@@ -195,7 +222,7 @@ function init(deps) {
                         twitter: token.twitter,
                         website: token.website,
                         telegram: token.tweeturl,
-                        pairs: pairs // SEND PAIRS TO FRONTEND
+                        pairs: pairs 
                     } 
                 };
             });
@@ -204,7 +231,7 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "DB Error" }); }
     });
 
-    // --- ADMIN ENDPOINTS (Kept same as before) ---
+    // --- ADMIN ENDPOINTS (Unchanged) ---
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         try {
             const updates = await db.all(`SELECT u.*, t.name, t.ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`);

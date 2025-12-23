@@ -1,138 +1,103 @@
 /**
- * Auto Seeder Task (Hybrid Mode)
- * 1. Backfills history using offsets (every 10s).
- * 2. Syncs Top 100 Winners every 15 minutes to catch missed high-volume tokens.
- * * Update: Added robust headers to bypass Cloudflare 530/403 blocks.
+ * New Token Listener (High Value Filter)
+ * Watches for ANY new pairs on Solana via DexScreener.
+ * STRICT FILTER: Market Cap > $25k AND Liquidity > $5k.
  */
 const axios = require('axios');
 const { logger } = require('../services');
 const { saveTokenData } = require('../services/database');
 
-// Configuration
-const MIN_MARKET_CAP = 10000; 
-const BATCH_SIZE = 50;
-let currentOffset = 0;
-let isRunning = false;
+// Configuration Thresholds
+const MIN_MARKET_CAP = 25000;
+const MIN_LIQUIDITY = 5000;
 
-// Pump.fun Endpoints
-const PUMP_LIST_URL = 'https://frontend-api.pump.fun/coins';
+const knownMints = new Set();
+const MAX_HISTORY = 2000;
 
-// Standard Browser Headers to avoid 530/403 blocks
-const API_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'application/json, text/plain, */*',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Origin': 'https://pump.fun',
-    'Referer': 'https://pump.fun/',
-    'Sec-Fetch-Dest': 'empty',
-    'Sec-Fetch-Mode': 'cors',
-    'Sec-Fetch-Site': 'same-site'
-};
+function getSocialLink(pair, type) {
+    if (!pair.info || !pair.info.socials) return null;
+    const social = pair.info.socials.find(s => s.type === type);
+    return social ? social.url : null;
+}
 
-// --- TASK 1: BACKFILL HISTORY (Deep Scan) ---
-async function seedHistory(deps) {
-    if (isRunning) return; 
-    isRunning = true;
-
+async function checkNewTokens(deps) {
     try {
-        const response = await axios.get(`${PUMP_LIST_URL}?offset=${currentOffset}&limit=${BATCH_SIZE}&sort=created_timestamp&order=DESC&includeNsfw=true`, {
-            headers: API_HEADERS,
-            timeout: 10000
+        // Search generically for "pump" related or just latest profiles to cast a wide net
+        // Note: DexScreener "latest" endpoint isn't fully public/documented for broad scanning without filters.
+        // We continue using a broad search term or specific chain filter if possible. 
+        // Using "pump" search is still effective for finding meme tokens, but we filter purely by stats now.
+        const response = await axios.get('https://api.dexscreener.com/latest/dex/search?q=pump', {
+            timeout: 5000
         });
 
-        const coins = response.data;
+        const pairs = response.data.pairs;
+        if (!pairs) return;
 
-        if (!coins || coins.length === 0) {
-            currentOffset = 0; // Reset to start
-            isRunning = false;
-            return;
+        // Sort by creation time (Newest first)
+        pairs.sort((a, b) => (b.pairCreatedAt || 0) - (a.pairCreatedAt || 0));
+
+        let addedCount = 0;
+
+        for (const pair of pairs) {
+            const mint = pair.baseToken.address;
+
+            // 1. Skip non-Solana
+            if (pair.chainId !== 'solana') continue;
+
+            // 2. Skip if already tracked
+            if (knownMints.has(mint)) continue;
+
+            // 3. STATS FILTERS (Strict)
+            const liquidity = pair.liquidity?.usd || 0;
+            const mcap = pair.fdv || pair.marketCap || 0;
+
+            if (mcap < MIN_MARKET_CAP || liquidity < MIN_LIQUIDITY) {
+                continue; // Skip silently if below thresholds
+            }
+
+            // 4. Map Data
+            const metadata = {
+                ticker: pair.baseToken.symbol,
+                name: pair.baseToken.name,
+                description: `Discovered via Listener (${pair.dexId})`,
+                twitter: getSocialLink(pair, 'twitter'),
+                website: pair.info?.websites?.[0]?.url || null,
+                telegram: getSocialLink(pair, 'telegram'),
+                metadataUri: null,
+                image: pair.info?.imageUrl,
+                isMayhemMode: false,
+                marketCap: mcap,
+                volume24h: pair.volume?.h24 || 0,
+                priceUsd: pair.priceUsd
+            };
+
+            const createdAt = pair.pairCreatedAt || Date.now();
+            
+            await saveTokenData(null, mint, metadata, createdAt);
+            
+            knownMints.add(mint);
+            addedCount++;
+            
+            logger.info(`💎 HIGH VALUE DETECT: ${pair.baseToken.symbol} on ${pair.dexId} | MC: $${Math.floor(mcap)} | Liq: $${Math.floor(liquidity)}`);
         }
 
-        for (const coin of coins) {
-            // Only process if Bonded (complete)
-            if (coin.complete) {
-                await processCoin(coin);
+        // Memory Cleanup
+        if (knownMints.size > MAX_HISTORY) {
+            const it = knownMints.values();
+            for (let i = 0; i < 500; i++) {
+                knownMints.delete(it.next().value);
             }
         }
 
-        // logger.info(`🌱 AutoSeeder: Backfill offset ${currentOffset} complete.`);
-        currentOffset += BATCH_SIZE;
-
     } catch (e) {
-        if (e.response && (e.response.status === 530 || e.response.status === 403)) {
-            logger.warn(`🌱 AutoSeeder Blocked (Status ${e.response.status}). Pausing for 60s...`);
-            // Add a long delay if blocked to reset reputation
-            await new Promise(r => setTimeout(r, 60000));
-        } else {
-            logger.error(`🌱 AutoSeeder Error: ${e.message}`);
-        }
-    } finally {
-        isRunning = false;
+        logger.error('NewTokenListener Error:', { error: e.message });
     }
-}
-
-// --- TASK 2: TOP 100 WINNERS (Volume/MCap Sync) ---
-async function syncTopWinners(deps) {
-    logger.info("🏆 AutoSeeder: Syncing Top 100 High-Volume Tokens...");
-    
-    try {
-        // Sort by Market Cap to find the "winners" regardless of age
-        const response = await axios.get(`${PUMP_LIST_URL}?offset=0&limit=100&sort=market_cap&order=DESC&includeNsfw=true`, {
-            headers: API_HEADERS,
-            timeout: 15000
-        });
-
-        const coins = response.data;
-        if (!coins) return;
-
-        let newCount = 0;
-        for (const coin of coins) {
-            if (coin.complete) {
-                await processCoin(coin);
-                newCount++;
-            }
-        }
-        
-        if (newCount > 0) logger.info(`🏆 AutoSeeder: Synced ${newCount} Bonded Winners.`);
-
-    } catch (e) {
-        logger.error(`🏆 AutoSeeder Top Sync Error: ${e.message}`);
-    }
-}
-
-// Helper to save coin data
-async function processCoin(coin) {
-    const mcap = coin.usd_market_cap || coin.market_cap || 0;
-
-    if (mcap < MIN_MARKET_CAP) return;
-
-    const metadata = {
-        ticker: coin.symbol,
-        name: coin.name,
-        description: coin.description || '',
-        twitter: coin.twitter || null,
-        website: coin.website || null,
-        telegram: coin.telegram || null,
-        metadataUri: coin.uri,
-        image: coin.image_uri,
-        isMayhemMode: false,
-        marketCap: mcap,
-        volume24h: 0, 
-        priceUsd: 0   
-    };
-
-    const createdAt = coin.created_timestamp || Date.now();
-    await saveTokenData(coin.creator, coin.mint, metadata, createdAt);
 }
 
 function start(deps) {
-    // 1. Backfill Loop (Fast)
-    setTimeout(() => seedHistory(deps), 5000);
-    setInterval(() => seedHistory(deps), 10000);
-
-    // 2. Top Winners Loop (Every 15 Minutes)
-    setTimeout(() => syncTopWinners(deps), 10000); // Run once shortly after boot
-    setInterval(() => syncTopWinners(deps), 15 * 60 * 1000); // 15 mins
+    logger.info("🚀 New Token Listener started (Threshold Mode: MC > 25k, Liq > 5k)");
+    checkNewTokens(deps);
+    setInterval(() => checkNewTokens(deps), 30000); // Check every 30s
 }
 
 module.exports = { start };

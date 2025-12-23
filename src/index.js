@@ -8,9 +8,9 @@ const { initDB, getDB } = require('./services/database');
 const { initRedis } = require('./services/redis');
 const tokenRoutes = require('./routes/tokens');
 const metadataUpdater = require('./tasks/metadataUpdater');
-// REMOVED: holderScanner
+const holderScanner = require('./tasks/holderScanner');
 const newTokenListener = require('./tasks/newTokenListener');
-const autoSeeder = require('./tasks/autoSeeder'); 
+// REMOVED: autoSeeder (Deprecated due to 530 Cloudflare blocks)
 
 const globalState = {
     asdfTop50Holders: new Set(),
@@ -35,10 +35,9 @@ async function startServer() {
 
     // --- START BACKGROUND TASKS ---
     console.log('🚀 Starting Background Tasks...');
-    autoSeeder.start(deps);        // 1. Seed DB
-    newTokenListener.start(deps);  // 2. Listen for new mints
-    metadataUpdater.start(deps);   // 3. Keep prices fresh
-    // REMOVED: holderScanner start
+    newTokenListener.start(deps);  // 1. Listen for new/migrated tokens via DexScreener
+    metadataUpdater.start(deps);   // 2. Keep prices/volume fresh
+    holderScanner.start(deps);     // 3. Scan holders for top tokens
 
     const server = http.createServer(app);
     server.listen(config.PORT, () => {
