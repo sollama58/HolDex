@@ -1,33 +1,43 @@
 /**
- * Token Routes (Optimized with Caching)
+ * Token Routes (Optimized + Search & Save + New Sorts)
  */
 const express = require('express');
+const axios = require('axios');
 const { isValidPubkey } = require('../utils/solana');
-const { smartCache } = require('../services/database'); // We use the helper we defined
-
+const { smartCache, saveTokenData } = require('../services/database');
 const router = express.Router();
+
+function getSocialLink(pair, type) {
+    if (!pair.info || !pair.info.socials) return null;
+    const social = pair.info.socials.find(s => s.type === type);
+    return social ? social.url : null;
+}
 
 function init(deps) {
     const { db } = deps;
 
     // MAIN ENDPOINT: /api/tokens
-    // Cached for 5 seconds to prevent DB hammering
     router.get('/tokens', async (req, res) => {
         const { sort = 'newest', limit = 100, search = '' } = req.query;
-        
-        // Create a unique cache key based on query params
         const cacheKey = `api:tokens:${sort}:${limit}:${search || 'all'}`;
 
         try {
-            // smartCache(key, ttl_seconds, callback)
             const result = await smartCache(cacheKey, 5, async () => {
-                
                 const limitVal = Math.min(parseInt(limit) || 100, 100);
-                let orderByClause = 'ORDER BY timestamp DESC'; // Default
+                
+                // --- SORT LOGIC ---
+                let orderByClause = 'ORDER BY timestamp DESC'; // Default: Fresh Mints (newest)
 
-                if (sort === 'mcap') orderByClause = 'ORDER BY marketCap DESC';
-                else if (sort === 'gainers') orderByClause = 'ORDER BY change24h DESC';
-                else if (sort === 'volume') orderByClause = 'ORDER BY volume24h DESC';
+                if (sort === 'leaders' || sort === 'mcap') {
+                    // Leaders: Sort by Market Cap (or volume)
+                    orderByClause = 'ORDER BY marketCap DESC';
+                } else if (sort === 'holders') {
+                    // Holders: Placeholder for K-Score (Currently defaults to Newest)
+                    // TODO: Implement K-Score sorting here once column exists
+                    orderByClause = 'ORDER BY timestamp DESC'; 
+                } else if (sort === 'gainers') {
+                    orderByClause = 'ORDER BY change24h DESC';
+                }
 
                 let query = `SELECT * FROM tokens`;
                 let params = [];
@@ -39,9 +49,50 @@ function init(deps) {
 
                 query += ` ${orderByClause} LIMIT ${limitVal}`;
 
-                const rows = params.length > 0 
+                let rows = params.length > 0 
                     ? await db.all(query, params) 
                     : await db.all(query);
+
+                // --- SEARCH & SAVE (External Fallback) ---
+                if (rows.length === 0 && search && search.trim().length > 2) {
+                    try {
+                        const dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(search)}`, { timeout: 3000 });
+                        if (dexRes.data && dexRes.data.pairs) {
+                            const validPairs = dexRes.data.pairs.filter(p => p.chainId === 'solana').slice(0, 5);
+                            for (const pair of validPairs) {
+                                const metadata = {
+                                    ticker: pair.baseToken.symbol,
+                                    name: pair.baseToken.name,
+                                    description: 'Imported via Search',
+                                    twitter: getSocialLink(pair, 'twitter'),
+                                    website: pair.info?.websites?.[0]?.url || null,
+                                    metadataUri: null,
+                                    image: pair.info?.imageUrl,
+                                    isMayhemMode: false,
+                                    marketCap: pair.fdv || pair.marketCap || 0,
+                                    volume24h: pair.volume?.h24 || 0,
+                                    priceUsd: pair.priceUsd
+                                };
+                                await saveTokenData(null, pair.baseToken.address, metadata);
+                                rows.push({
+                                    mint: pair.baseToken.address,
+                                    userPubkey: null,
+                                    name: metadata.name,
+                                    ticker: metadata.ticker,
+                                    image: metadata.image,
+                                    marketCap: metadata.marketCap,
+                                    volume24h: metadata.volume24h,
+                                    priceUsd: metadata.priceUsd,
+                                    timestamp: Date.now(),
+                                    change5m: pair.priceChange?.m5 || 0,
+                                    change1h: pair.priceChange?.h1 || 0,
+                                    change24h: pair.priceChange?.h24 || 0,
+                                    complete: false
+                                });
+                            }
+                        }
+                    } catch (extErr) { console.error("External search failed:", extErr.message); }
+                }
 
                 return {
                     success: true,
@@ -51,19 +102,17 @@ function init(deps) {
                         name: r.name,
                         ticker: r.ticker,
                         image: r.image,
-                        marketCap: r.marketcap || 0,
+                        marketCap: r.marketcap || r.marketCap || 0,
                         volume24h: r.volume24h || 0,
-                        priceUsd: r.priceusd || 0,
+                        priceUsd: r.priceusd || r.priceUsd || 0,
                         timestamp: parseInt(r.timestamp),
                         change5m: r.change5m || 0,
                         change1h: r.change1h || 0,
-                        change24h: r.change24h || 0,
-                        complete: !!r.complete
+                        change24h: r.change24h || 0
                     })),
                     lastUpdate: Date.now()
                 };
             });
-
             res.json(result);
         } catch (e) {
             console.error("Fetch Tokens Error:", e);
@@ -71,16 +120,14 @@ function init(deps) {
         }
     });
 
-    // Get single token (Cached for 30s)
+    // Get single token
     router.get('/token/:mint', async (req, res) => {
         try {
             const { mint } = req.params;
             const cacheKey = `api:token:${mint}`;
-
             const result = await smartCache(cacheKey, 30, async () => {
                 const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
                 if (!token) return null;
-
                 return { 
                     success: true, 
                     token: {
@@ -93,62 +140,27 @@ function init(deps) {
                     } 
                 };
             });
-            
             if (!result) return res.status(404).json({ success: false, error: "Not found" });
             res.json(result);
-        } catch (e) {
-            res.status(500).json({ success: false, error: "DB Error" });
-        }
+        } catch (e) { res.status(500).json({ success: false, error: "DB Error" }); }
     });
 
-    // KOTH (Cached for 10s)
-    router.get('/koth', async (req, res) => {
-        try {
-            const result = await smartCache('api:koth', 10, async () => {
-                const koth = await db.get(`
-                    SELECT * FROM tokens 
-                    WHERE marketCap > 0 
-                    ORDER BY marketCap DESC 
-                    LIMIT 1
-                `);
-                return koth ? { found: true, token: koth } : { found: false };
-            });
-            res.json(result);
-        } catch (e) {
-            res.status(500).json({ error: "DB Error" });
-        }
-    });
-
-    // Check holder status (No Cache - User Specific)
+    // Check holder status
     router.get('/check-holder', async (req, res) => {
         const { userPubkey } = req.query;
-        if (!userPubkey || !isValidPubkey(userPubkey)) {
-            return res.status(400).json({ isHolder: false, error: "Invalid address" });
-        }
-
+        if (!userPubkey || !isValidPubkey(userPubkey)) return res.status(400).json({ isHolder: false, error: "Invalid address" });
         try {
-            // Get Top 10 Tokens
             const top10 = await db.all('SELECT mint FROM tokens ORDER BY volume24h DESC LIMIT 10');
             const top10Mints = top10.map(t => t.mint);
-
             let heldPositionsCount = 0;
-
             if (top10Mints.length > 0) {
                 const placeholders = top10Mints.map((_, i) => `$${i + 2}`).join(',');
                 const query = `SELECT COUNT(*) as count FROM token_holders WHERE holderPubkey = $1 AND mint IN (${placeholders})`;
                 const result = await db.get(query, [userPubkey, ...top10Mints]);
                 heldPositionsCount = parseInt(result?.count || 0);
             }
-
-            res.json({
-                isHolder: heldPositionsCount > 0,
-                heldPositionsCount,
-                checkedAgainst: top10Mints.length
-            });
-        } catch (e) {
-            console.error(e);
-            res.status(500).json({ error: "DB Error" });
-        }
+            res.json({ isHolder: heldPositionsCount > 0, heldPositionsCount });
+        } catch (e) { res.status(500).json({ error: "DB Error" }); }
     });
 
     return router;

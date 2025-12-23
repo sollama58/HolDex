@@ -53,6 +53,12 @@
         .chart-container iframe { width: 100%; height: 100%; border: 0; }
         .stat-card { background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 6px; }
         .stat-value { font-size: 20px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; }
+        
+        .modal-overlay { position: fixed; inset: 0; background: rgba(2, 6, 23, 0.8); backdrop-filter: blur(4px); z-index: 100; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+        .modal-overlay.open { opacity: 1; pointer-events: auto; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+        .status-dot.green { background: #22d3ee; box-shadow: 0 0 8px #22d3ee; }
+        .status-dot.red { background: #ef4444; box-shadow: 0 0 8px #ef4444; }
     </style>
 </head>
 <body>
@@ -65,19 +71,21 @@
             </div>
             <div>
                 <h1 class="text-2xl brand-text tracking-tight">HolDex</h1>
-                <div class="flex items-center gap-2 text-[10px] text-cyan-500/60 uppercase font-semibold tracking-wider">Diamond Hand Protocol</div>
+                <div class="flex items-center gap-2 text-[10px] text-cyan-500/60 uppercase font-semibold tracking-wider">
+                    <span id="connection-status"><span class="status-dot green"></span>Connected</span>
+                </div>
             </div>
         </div>
         <div class="flex items-center gap-6">
             <div id="nav-controls" class="flex items-center gap-6">
                 <div class="flex bg-slate-900/50 p-1 rounded-xl border border-slate-800">
                     <button class="tab-btn active" onclick="setSort('newest', this)">Fresh Mints</button>
-                    <button class="tab-btn" onclick="setSort('mcap', this)">Blue Chips</button>
-                    <button class="tab-btn" onclick="setSort('gainers', this)">Diamond Hands</button>
+                    <button class="tab-btn" onclick="setSort('leaders', this)">Leaders</button>
+                    <button class="tab-btn" onclick="setSort('holders', this)">Holders</button>
                 </div>
                 <div class="relative">
                     <i data-lucide="search" width="14" class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"></i>
-                    <input type="text" id="search" placeholder="Search Token..." class="search-box pl-10" onkeyup="handleSearch(event)">
+                    <input type="text" id="search" placeholder="Search Token / Mint..." class="search-box pl-10" onkeyup="handleSearch(event)">
                 </div>
             </div>
             <div id="detail-controls" class="hidden">
@@ -124,7 +132,6 @@
                 <a id="link-solscan" href="#" target="_blank" class="px-5 py-3 bg-[#181a20] border border-slate-700 rounded-xl hover:border-blue-500/50 hover:text-blue-400 transition flex items-center gap-2 text-sm font-semibold">Solscan</a>
             </div>
         </div>
-
         <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
             <div class="stat-card"><span class="stat-label">Current Price</span><span id="stat-price" class="stat-value text-cyan-50">-</span></div>
             <div class="stat-card"><span class="stat-label">Market Cap</span><span id="stat-mcap" class="stat-value text-blue-400">-</span></div>
@@ -136,13 +143,23 @@
     </div>
 </main>
 
+<div id="status-modal" class="modal-overlay">
+    <div class="bg-slate-900 border border-slate-800 p-8 rounded-2xl max-w-md w-full text-center shadow-2xl">
+        <div class="w-16 h-16 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4"><i data-lucide="wifi-off" width="32"></i></div>
+        <h3 class="text-xl font-bold text-white mb-2">Connection Lost</h3>
+        <p class="text-slate-400 mb-6">Unable to reach the HolDex Backend. Retrying connection...</p>
+        <div class="w-full bg-slate-800 h-1 rounded-full overflow-hidden">
+            <div class="bg-cyan-500 h-full w-1/3 animate-[shimmer_2s_infinite_linear]" style="width: 30%"></div>
+        </div>
+    </div>
+</div>
+
 <script>
-    // --- CONFIG ---
-    // If running locally, default is usually 3000
     const API_URL = 'http://localhost:3000'; 
     let currentSort = 'newest';
     let searchQuery = '';
     let pollingInterval;
+    let isConnected = true;
 
     const formatMoney = (val) => val < 0.01 ? '$' + val.toExponential(2) : '$' + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 });
     const formatCompact = (val) => '$' + new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val);
@@ -152,6 +169,7 @@
         return `<span class="pill ${cls}">${val > 0 ? '+' : ''}${val.toFixed(2)}%</span>`;
     };
     const timeAgo = (ts) => {
+        if (!ts) return '';
         const seconds = Math.floor((Date.now() - ts) / 1000);
         return seconds < 60 ? `${seconds}s ago` : (seconds < 3600 ? `${Math.floor(seconds/60)}m ago` : `${Math.floor(seconds/3600)}h ago`);
     };
@@ -160,10 +178,26 @@
     window.addEventListener('load', handleRoute);
 
     function navigateTo(path) { window.location.hash = path; }
+    
     function handleRoute() {
         const hash = window.location.hash;
         if (hash.startsWith('#token/')) showDetailView(hash.split('/')[1]);
         else showDashboardView();
+    }
+
+    function updateStatus(online) {
+        const modal = document.getElementById('status-modal');
+        const statusText = document.getElementById('connection-status');
+        if (online) {
+            modal.classList.remove('open');
+            statusText.innerHTML = '<span class="status-dot green"></span>Connected';
+            if (!isConnected) { fetchList(); }
+            isConnected = true;
+        } else {
+            modal.classList.add('open');
+            statusText.innerHTML = '<span class="status-dot red"></span>Disconnected';
+            isConnected = false;
+        }
     }
 
     function showDashboardView() {
@@ -176,25 +210,35 @@
 
     async function fetchList() {
         try {
-            const endpoint = `${API_URL}/api/tokens?sort=${currentSort}&search=${searchQuery}&limit=100`;
+            const endpoint = `${API_URL}/api/tokens?sort=${currentSort}&search=${encodeURIComponent(searchQuery)}&limit=100`;
             const res = await fetch(endpoint);
+            if (!res.ok) throw new Error("API Error");
             const data = await res.json();
+            updateStatus(true);
             if (data.success) renderTable(data.tokens);
-        } catch (e) { console.error("API Connection Failed", e); }
+        } catch (e) {
+            console.error("API Connection Failed", e);
+            updateStatus(false);
+        }
     }
 
     function renderTable(tokens) {
         const tbody = document.getElementById('table-body');
-        if (tokens.length === 0) { tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-slate-500">No tokens found.</td></tr>`; return; }
+        if (tokens.length === 0) { 
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-slate-500">
+                ${searchQuery ? `Searching global network for "${searchQuery}"...` : 'No tokens found in database.'}
+            </td></tr>`; 
+            return; 
+        }
         tbody.innerHTML = tokens.map(t => `
             <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group">
                 <td>
                     <div class="flex items-center gap-4">
-                        <img src="${t.image || 'https://placehold.co/40x40/1e293b/475569?text=GEM'}" class="img-token group-hover:border-cyan-500 transition" loading="lazy">
+                        <img src="${t.image || 'https://placehold.co/40x40/1e293b/475569?text=GEM'}" class="img-token group-hover:border-cyan-500 transition" loading="lazy" onerror="this.src='https://placehold.co/40x40/1e293b/475569?text=?'">
                         <div class="flex flex-col">
                             <div class="flex items-center gap-2">
                                 <span class="font-bold text-white text-sm group-hover:text-cyan-400 transition">${t.ticker}</span>
-                                ${t.marketCap > 500000 ? '<span class="text-[9px] bg-yellow-500/20 text-yellow-500 px-1 rounded border border-yellow-500/30">GOLD</span>' : ''}
+                                ${t.marketCap > 100000 ? '<span class="text-[9px] bg-yellow-500/20 text-yellow-500 px-1 rounded border border-yellow-500/30">GOLD</span>' : ''}
                             </div>
                             <span class="text-[10px] text-slate-500 truncate max-w-[150px] font-sans">${t.name}</span>
                         </div>
@@ -218,10 +262,11 @@
         document.getElementById('view-detail').classList.add('active');
         document.getElementById('nav-controls').classList.add('hidden');
         document.getElementById('detail-controls').classList.remove('hidden');
-
         try {
             const res = await fetch(`${API_URL}/api/token/${mint}`);
+            if(!res.ok) throw new Error("Failed");
             const data = await res.json();
+            updateStatus(true);
             if (data.success) {
                 const t = data.token;
                 document.getElementById('detail-ticker').innerText = t.ticker;
@@ -237,7 +282,7 @@
                 document.getElementById('stat-chg24h').innerHTML = formatPct(t.change24h);
                 document.getElementById('detail-iframe').src = `https://dexscreener.com/solana/${t.mint}?embed=1&theme=dark&info=0`;
             }
-        } catch (e) { console.error(e); }
+        } catch (e) { console.error(e); updateStatus(false); }
     }
 
     window.setSort = (sort, btn) => {
@@ -246,7 +291,7 @@
         btn.classList.add('active');
         fetchList();
     };
-    window.handleSearch = (e) => { searchQuery = e.target.value; clearTimeout(window.searchTimeout); window.searchTimeout = setTimeout(fetchList, 300); };
+    window.handleSearch = (e) => { searchQuery = e.target.value; clearTimeout(window.searchTimeout); window.searchTimeout = setTimeout(fetchList, 1000); };
     window.copyMint = () => navigator.clipboard.writeText(document.getElementById('detail-mint').innerText);
     lucide.createIcons();
 </script>
