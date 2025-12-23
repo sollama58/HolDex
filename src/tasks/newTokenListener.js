@@ -1,59 +1,84 @@
 /**
- * Auto Seeder (Pump.fun Logic)
- * Ensures we only index the primary Pump.fun bonding curve pool initially.
+ * Auto Seeder Task (Hybrid Mode)
+ * 1. Backfills history using offsets (every 10s).
+ * 2. Syncs Top 100 Winners every 15 minutes to catch missed high-volume tokens.
+ * * Update: Added robust headers to bypass Cloudflare 530/403 blocks.
  */
 const axios = require('axios');
 const { logger } = require('../services');
 const { saveTokenData } = require('../services/database');
 
+// Configuration
 const MIN_MARKET_CAP = 10000; 
 const BATCH_SIZE = 50;
 let currentOffset = 0;
 let isRunning = false;
 
+// Pump.fun Endpoints
 const PUMP_LIST_URL = 'https://frontend-api.pump.fun/coins';
 
-// --- TASK 1: BACKFILL HISTORY ---
+// Standard Browser Headers to avoid 530/403 blocks
+const API_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Origin': 'https://pump.fun',
+    'Referer': 'https://pump.fun/',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'same-site'
+};
+
+// --- TASK 1: BACKFILL HISTORY (Deep Scan) ---
 async function seedHistory(deps) {
     if (isRunning) return; 
     isRunning = true;
 
     try {
         const response = await axios.get(`${PUMP_LIST_URL}?offset=${currentOffset}&limit=${BATCH_SIZE}&sort=created_timestamp&order=DESC&includeNsfw=true`, {
+            headers: API_HEADERS,
             timeout: 10000
         });
 
         const coins = response.data;
 
         if (!coins || coins.length === 0) {
-            currentOffset = 0; 
+            currentOffset = 0; // Reset to start
             isRunning = false;
             return;
         }
 
         for (const coin of coins) {
-            // Strict: Only process if it's the official pump curve state
-            // (Pump API implies this, but we filter for completeness/bonding)
+            // Only process if Bonded (complete)
             if (coin.complete) {
                 await processCoin(coin);
             }
         }
 
+        // logger.info(`🌱 AutoSeeder: Backfill offset ${currentOffset} complete.`);
         currentOffset += BATCH_SIZE;
 
     } catch (e) {
-        logger.error(`🌱 AutoSeeder Error: ${e.message}`);
+        if (e.response && (e.response.status === 530 || e.response.status === 403)) {
+            logger.warn(`🌱 AutoSeeder Blocked (Status ${e.response.status}). Pausing for 60s...`);
+            // Add a long delay if blocked to reset reputation
+            await new Promise(r => setTimeout(r, 60000));
+        } else {
+            logger.error(`🌱 AutoSeeder Error: ${e.message}`);
+        }
     } finally {
         isRunning = false;
     }
 }
 
-// --- TASK 2: TOP 100 WINNERS ---
+// --- TASK 2: TOP 100 WINNERS (Volume/MCap Sync) ---
 async function syncTopWinners(deps) {
-    logger.info("🏆 AutoSeeder: Syncing Top 100 Bonded Tokens...");
+    logger.info("🏆 AutoSeeder: Syncing Top 100 High-Volume Tokens...");
     
     try {
+        // Sort by Market Cap to find the "winners" regardless of age
         const response = await axios.get(`${PUMP_LIST_URL}?offset=0&limit=100&sort=market_cap&order=DESC&includeNsfw=true`, {
+            headers: API_HEADERS,
             timeout: 15000
         });
 
@@ -75,6 +100,7 @@ async function syncTopWinners(deps) {
     }
 }
 
+// Helper to save coin data
 async function processCoin(coin) {
     const mcap = coin.usd_market_cap || coin.market_cap || 0;
 
@@ -95,20 +121,18 @@ async function processCoin(coin) {
         priceUsd: 0   
     };
 
-    // Use creation timestamp.
-    // Since this is the Pump API, we are guaranteed this is the Pump contract/pool.
     const createdAt = coin.created_timestamp || Date.now();
-    
-    // Save/Upsert based on MINT address (Unique Key)
     await saveTokenData(coin.creator, coin.mint, metadata, createdAt);
 }
 
 function start(deps) {
+    // 1. Backfill Loop (Fast)
     setTimeout(() => seedHistory(deps), 5000);
     setInterval(() => seedHistory(deps), 10000);
 
-    setTimeout(() => syncTopWinners(deps), 10000); 
-    setInterval(() => syncTopWinners(deps), 15 * 60 * 1000); 
+    // 2. Top Winners Loop (Every 15 Minutes)
+    setTimeout(() => syncTopWinners(deps), 10000); // Run once shortly after boot
+    setInterval(() => syncTopWinners(deps), 15 * 60 * 1000); // 15 mins
 }
 
 module.exports = { start };
