@@ -1,10 +1,12 @@
 /**
- * Token Routes (Updated for Pagination)
+ * Token Routes
+ * Added: Update Request & Admin Endpoints
  */
 const express = require('express');
 const axios = require('axios');
 const { isValidPubkey } = require('../utils/solana');
 const { smartCache, saveTokenData } = require('../services/database');
+const config = require('../config/env');
 const router = express.Router();
 
 function getSocialLink(pair, type) {
@@ -13,39 +15,66 @@ function getSocialLink(pair, type) {
     return social ? social.url : null;
 }
 
+// Middleware for Admin Auth
+const requireAdmin = (req, res, next) => {
+    const authHeader = req.headers['x-admin-auth'];
+    if (!authHeader || authHeader !== config.ADMIN_PASSWORD) {
+        return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+    next();
+};
+
 function init(deps) {
     const { db } = deps;
 
-    // MAIN ENDPOINT: /api/tokens
+    // --- PUBLIC ENDPOINTS ---
+
+    // Submit Update Request
+    router.post('/request-update', async (req, res) => {
+        try {
+            const { mint, twitter, website, telegram } = req.body;
+
+            if (!mint || mint.length < 30) {
+                return res.status(400).json({ success: false, error: "Invalid Mint Address" });
+            }
+
+            // Basic validation
+            const hasData = (twitter && twitter.length > 0) || (website && website.length > 0) || (telegram && telegram.length > 0);
+            if (!hasData) {
+                return res.status(400).json({ success: false, error: "At least one link is required" });
+            }
+
+            await db.run(`
+                INSERT INTO token_updates (mint, twitter, website, telegram, submittedAt, status)
+                VALUES ($1, $2, $3, $4, $5, 'pending')
+            `, [mint, twitter, website, telegram, Date.now()]);
+
+            res.json({ success: true, message: "Update queued for approval" });
+        } catch (e) {
+            console.error("Update Request Error:", e);
+            res.status(500).json({ success: false, error: "Submission failed" });
+        }
+    });
+
+    // Get Tokens (Existing Logic with Pagination)
     router.get('/tokens', async (req, res) => {
-        // Added 'page' parameter
         const { sort = 'newest', limit = 100, page = 1, search = '' } = req.query;
-        
-        // Ensure valid integers
         const limitVal = Math.min(parseInt(limit) || 100, 100);
         const pageVal = Math.max(parseInt(page) || 1, 1);
         const offsetVal = (pageVal - 1) * limitVal;
-
-        // Cache Key must include page
         const cacheKey = `api:tokens:${sort}:${limitVal}:${pageVal}:${search || 'all'}`;
 
         try {
             const result = await smartCache(cacheKey, 5, async () => {
-                
-                // --- DYNAMIC SORT LOGIC ---
                 let orderByClause = 'ORDER BY timestamp DESC'; 
-
                 switch (sort) {
                     case 'mcap': orderByClause = 'ORDER BY marketCap DESC'; break;
                     case 'volume': orderByClause = 'ORDER BY volume24h DESC'; break;
-                    case 'gainers':
-                    case '24h': orderByClause = 'ORDER BY change24h DESC'; break;
+                    case 'gainers': case '24h': orderByClause = 'ORDER BY change24h DESC'; break;
                     case '1h': orderByClause = 'ORDER BY change1h DESC'; break;
                     case '5m': orderByClause = 'ORDER BY change5m DESC'; break;
                     case 'price': orderByClause = 'ORDER BY priceUsd DESC'; break;
-                    case 'newest':
-                    case 'age':
-                    default: orderByClause = 'ORDER BY timestamp DESC'; break;
+                    case 'newest': case 'age': default: orderByClause = 'ORDER BY timestamp DESC'; break;
                 }
 
                 let query = `SELECT * FROM tokens`;
@@ -56,15 +85,11 @@ function init(deps) {
                     params.push(`%${search}%`);
                 }
 
-                // Add OFFSET for pagination
                 query += ` ${orderByClause} LIMIT ${limitVal} OFFSET ${offsetVal}`;
 
-                let rows = params.length > 0 
-                    ? await db.all(query, params) 
-                    : await db.all(query);
+                let rows = params.length > 0 ? await db.all(query, params) : await db.all(query);
 
-                // --- EXTERNAL SEARCH FALLBACK (Page 1 Only) ---
-                // We only search externally on the first page to avoid weird pagination issues with external APIs
+                // External Search (Page 1 Only)
                 if (pageVal === 1 && rows.length < 5 && search && search.trim().length > 2) {
                     try {
                         const dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(search)}`, { timeout: 3000 });
@@ -72,7 +97,6 @@ function init(deps) {
                             const validPairs = dexRes.data.pairs.filter(p => p.chainId === 'solana').slice(0, 5);
                             for (const pair of validPairs) {
                                 if (rows.some(r => r.mint === pair.baseToken.address)) continue;
-
                                 const metadata = {
                                     ticker: pair.baseToken.symbol,
                                     name: pair.baseToken.name,
@@ -86,10 +110,8 @@ function init(deps) {
                                     volume24h: pair.volume?.h24 || 0,
                                     priceUsd: pair.priceUsd
                                 };
-                                
                                 const createdAt = pair.pairCreatedAt || Date.now();
                                 await saveTokenData(null, pair.baseToken.address, metadata, createdAt);
-                                
                                 rows.push({
                                     mint: pair.baseToken.address,
                                     userPubkey: null,
@@ -110,7 +132,6 @@ function init(deps) {
                     } catch (extErr) { console.error("External search failed:", extErr.message); }
                 }
 
-                // Re-sort in JS if we added external items on page 1
                 if (pageVal === 1 && rows.length > 0) {
                      if (sort === 'newest' || sort === 'age') rows.sort((a, b) => parseInt(b.timestamp) - parseInt(a.timestamp));
                      else if (sort === 'mcap') rows.sort((a, b) => (b.marketcap || b.marketCap) - (a.marketcap || a.marketCap));
@@ -144,7 +165,6 @@ function init(deps) {
         }
     });
 
-    // Get single token
     router.get('/token/:mint', async (req, res) => {
         try {
             const { mint } = req.params;
@@ -152,7 +172,6 @@ function init(deps) {
             const result = await smartCache(cacheKey, 30, async () => {
                 const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
                 if (!token) return null;
-                
                 return { 
                     success: true, 
                     token: {
@@ -171,6 +190,66 @@ function init(deps) {
             if (!result) return res.status(404).json({ success: false, error: "Not found" });
             res.json(result);
         } catch (e) { res.status(500).json({ success: false, error: "DB Error" }); }
+    });
+
+    // --- ADMIN ENDPOINTS ---
+
+    // Get Pending Updates
+    router.get('/admin/updates', requireAdmin, async (req, res) => {
+        try {
+            // Join with tokens table to get useful context (name/ticker)
+            const updates = await db.all(`
+                SELECT u.*, t.name, t.ticker, t.image 
+                FROM token_updates u
+                LEFT JOIN tokens t ON u.mint = t.mint
+                WHERE u.status = 'pending'
+                ORDER BY u.submittedAt ASC
+            `);
+            res.json({ success: true, updates });
+        } catch (e) {
+            res.status(500).json({ success: false, error: e.message });
+        }
+    });
+
+    // Approve Update
+    router.post('/admin/approve-update', requireAdmin, async (req, res) => {
+        const { id } = req.body;
+        try {
+            const update = await db.get('SELECT * FROM token_updates WHERE id = $1', [id]);
+            if (!update) return res.status(404).json({ success: false, error: 'Request not found' });
+
+            // Build dynamic update query based on provided fields
+            const fields = [];
+            const params = [];
+            let idx = 1;
+
+            if (update.twitter) { fields.push(`twitter = $${idx++}`); params.push(update.twitter); }
+            if (update.website) { fields.push(`website = $${idx++}`); params.push(update.website); }
+            if (update.telegram) { fields.push(`tweetUrl = $${idx++}`); params.push(update.telegram); } // Assuming 'tweetUrl' stores generic social or rename col
+
+            if (fields.length > 0) {
+                params.push(update.mint);
+                await db.run(`UPDATE tokens SET ${fields.join(', ')} WHERE mint = $${idx}`, params);
+            }
+
+            // Remove from queue
+            await db.run('DELETE FROM token_updates WHERE id = $1', [id]);
+
+            res.json({ success: true, message: 'Approved' });
+        } catch (e) {
+            res.status(500).json({ success: false, error: e.message });
+        }
+    });
+
+    // Reject Update
+    router.post('/admin/reject-update', requireAdmin, async (req, res) => {
+        const { id } = req.body;
+        try {
+            await db.run('DELETE FROM token_updates WHERE id = $1', [id]);
+            res.json({ success: true, message: 'Rejected' });
+        } catch (e) {
+            res.status(500).json({ success: false, error: e.message });
+        }
     });
 
     return router;

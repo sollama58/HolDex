@@ -1,5 +1,6 @@
 /**
  * Database Service (PostgreSQL + Redis Version)
+ * Updated: Added 'token_updates' table for the approval queue.
  */
 const { Pool } = require('pg');
 const config = require('../config/env');
@@ -82,6 +83,7 @@ async function initDB() {
         await pool.query('SELECT NOW()');
         logger.info('Connected to PostgreSQL');
 
+        // Main Token Table
         await pool.query(`
             CREATE TABLE IF NOT EXISTS tokens (
                 id SERIAL PRIMARY KEY,
@@ -110,10 +112,25 @@ async function initDB() {
             );
         `);
 
+        // NEW: Updates Queue Table
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS token_updates (
+                id SERIAL PRIMARY KEY,
+                mint TEXT NOT NULL,
+                twitter TEXT,
+                website TEXT,
+                telegram TEXT,
+                submittedAt BIGINT,
+                status TEXT DEFAULT 'pending' 
+            );
+        `);
+
+        // Indexes
         try {
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_volume ON tokens(volume24h DESC)`);
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_mcap ON tokens(marketCap DESC)`);
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_time ON tokens(timestamp DESC)`);
+            await pool.query(`CREATE INDEX IF NOT EXISTS idx_updates_status ON token_updates(status)`);
         } catch (idxErr) {
             logger.warn('Index creation notice:', idxErr.message);
         }
@@ -129,7 +146,6 @@ async function initDB() {
 async function saveTokenData(pubkey, mint, metadata, customTimestamp = null) {
     if (!pool) return;
     try {
-        // Use provided timestamp (Mint Date) or fallback to Now
         const ts = customTimestamp || Date.now();
 
         await pool.query(`

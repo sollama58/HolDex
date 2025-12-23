@@ -12,301 +12,79 @@
             theme: {
                 extend: {
                     colors: {
-                        fire: { 
-                            bg: '#2a1005', 
-                            panel: '#451a03', 
-                            border: '#7c2d12', 
-                            accent: '#ea580c', 
-                            text: '#ffedd5',
-                            highlight: '#fb923c'
-                        },
+                        fire: { bg: '#2a1005', panel: '#451a03', border: '#7c2d12', accent: '#ea580c', text: '#ffedd5', highlight: '#fb923c' },
                         void: '#0f0502'
                     },
-                    fontFamily: {
-                        mono: ['JetBrains Mono', 'monospace'],
-                        sans: ['Comic Neue', 'cursive'],
-                    }
+                    fontFamily: { mono: ['JetBrains Mono', 'monospace'], sans: ['Comic Neue', 'cursive'] }
                 }
             }
         }
     </script>
     <style>
-        body { 
-            background-color: #2a1005; 
-            color: #ffedd5; 
-            font-family: 'Comic Neue', cursive; 
-            min-height: 100vh; 
-            font-size: 14px; 
-            overflow-x: hidden; 
-            padding-bottom: 50px;
-        }
-        
-        /* Scrollbar */
+        body { background-color: #2a1005; color: #ffedd5; font-family: 'Comic Neue', cursive; min-height: 100vh; font-size: 14px; overflow-x: hidden; padding-bottom: 50px; }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: #2a1005; }
         ::-webkit-scrollbar-thumb { background: #7c2d12; border-radius: 4px; border: 1px solid #451a03; }
         ::-webkit-scrollbar-thumb:hover { background: #ea580c; }
-
-        /* Navigation */
-        nav { 
-            background: rgba(42, 16, 5, 0.95); 
-            backdrop-filter: blur(12px); 
-            border-bottom: 2px solid #7c2d12; 
-        }
-        .brand-text { 
-            color: #ea580c; 
-            text-shadow: 2px 2px 0px #451a03;
-            font-weight: 800; 
-            letter-spacing: 1px;
-        }
-        
-        /* Table Styles */
+        nav { background: rgba(42, 16, 5, 0.95); backdrop-filter: blur(12px); border-bottom: 2px solid #7c2d12; }
+        .brand-text { color: #ea580c; text-shadow: 2px 2px 0px #451a03; font-weight: 800; letter-spacing: 1px; }
         .holdex-table { width: 100%; border-collapse: separate; border-spacing: 0; }
-        .holdex-table th { 
-            background: #451a03; 
-            position: sticky; top: 0; z-index: 20; 
-            padding: 14px 12px; 
-            text-align: right; 
-            font-size: 12px; 
-            font-weight: 700; 
-            color: #fb923c; 
-            border-bottom: 2px solid #7c2d12; 
-            cursor: pointer; 
-            white-space: nowrap; 
-            text-transform: uppercase;
-            transition: color 0.2s, background 0.2s;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2); 
-        }
-        .holdex-table th:hover {
-            background: #582206;
-            color: #fff;
-        }
+        .holdex-table th { background: #451a03; position: sticky; top: 0; z-index: 20; padding: 14px 12px; text-align: right; font-size: 12px; font-weight: 700; color: #fb923c; border-bottom: 2px solid #7c2d12; cursor: pointer; white-space: nowrap; text-transform: uppercase; transition: color 0.2s, background 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        .holdex-table th:hover { background: #582206; color: #fff; }
         .holdex-table th:first-child { text-align: left; padding-left: 20px; }
-        .holdex-table td { 
-            padding: 12px 12px; 
-            border-bottom: 1px solid rgba(124, 45, 18, 0.3); 
-            vertical-align: middle; 
-            font-family: 'JetBrains Mono', monospace; 
-        }
+        .holdex-table td { padding: 12px 12px; border-bottom: 1px solid rgba(124, 45, 18, 0.3); vertical-align: middle; font-family: 'JetBrains Mono', monospace; }
         .holdex-table td:first-child { padding-left: 20px; }
         .holdex-table tr:hover td { background: rgba(234, 88, 12, 0.1); }
-        
-        .img-token { 
-            width: 40px; height: 40px; 
-            border-radius: 8px; 
-            border: 2px solid #7c2d12; 
-            object-fit: cover; flex-shrink: 0; 
-            background: #000;
-        }
-        
+        .img-token { width: 40px; height: 40px; border-radius: 8px; border: 2px solid #7c2d12; object-fit: cover; flex-shrink: 0; background: #000; }
         .pill { padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono'; }
         .pill-green { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4); }
         .pill-red { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
-        
-        .search-box { 
-            background: #451a03; 
-            border: 2px solid #7c2d12; 
-            color: #fb923c; 
-            padding: 10px 16px; 
-            border-radius: 8px; 
-            outline: none; 
-            width: 100%; 
-            font-family: 'JetBrains Mono'; 
-            transition: border-color 0.2s; 
-        }
+        .search-box { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; padding: 10px 16px; border-radius: 8px; outline: none; width: 100%; font-family: 'JetBrains Mono'; transition: border-color 0.2s; }
         .search-box:focus { border-color: #ea580c; }
         .search-box::placeholder { color: #9a3412; }
-        
-        /* Main Navigation Tabs */
-        .nav-btn {
-            background: transparent;
-            color: #9a3412;
-            padding: 8px 20px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 800;
-            transition: all 0.2s;
-            border: 2px solid transparent;
-        }
+        .nav-btn { background: transparent; color: #9a3412; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 800; transition: all 0.2s; border: 2px solid transparent; }
         .nav-btn:hover { color: #fb923c; }
-        .nav-btn.active {
-            background: #451a03;
-            color: #ea580c;
-            border-color: #7c2d12;
-            box-shadow: 0 4px 0 #2a1005; /* Inset look */
-        }
-
-        /* Filter Tabs (Fresh Mints etc) */
-        .filter-btn { 
-            background: transparent; 
-            border: 1px solid transparent; 
-            color: #9a3412; 
-            padding: 8px 16px; 
-            border-radius: 8px; 
-            cursor: pointer; 
-            font-size: 13px; 
-            font-weight: 700; 
-            white-space: nowrap; 
-            transition: all 0.2s;
-        }
+        .nav-btn.active { background: #451a03; color: #ea580c; border-color: #7c2d12; box-shadow: 0 4px 0 #2a1005; }
+        .filter-btn { background: transparent; border: 1px solid transparent; color: #9a3412; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 700; white-space: nowrap; transition: all 0.2s; }
         .filter-btn:hover { color: #fb923c; }
-        .filter-btn.active { 
-            background: #ea580c; 
-            color: #2a1005; 
-            border: 1px solid #7c2d12; 
-        }
-
-        /* Refresh Button */
-        .refresh-btn {
-            background: #451a03;
-            border: 2px solid #7c2d12;
-            color: #fb923c;
-            width: 42px;
-            height: 42px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.2s;
-            position: relative;
-        }
-        .refresh-btn:hover:not(:disabled) {
-            border-color: #ea580c;
-            color: #fff;
-            background: #582206;
-        }
-        .refresh-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            border-color: #451a03;
-            color: #7c2d12;
-        }
-        .refresh-btn:disabled i {
-            animation: spin 1s linear infinite;
-        }
+        .filter-btn.active { background: #ea580c; color: #2a1005; border: 1px solid #7c2d12; }
+        .refresh-btn { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; transition: all 0.2s; position: relative; }
+        .refresh-btn:hover:not(:disabled) { border-color: #ea580c; color: #fff; background: #582206; }
+        .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; border-color: #451a03; color: #7c2d12; }
+        .refresh-btn:disabled i { animation: spin 1s linear infinite; }
         @keyframes spin { 100% { transform: rotate(360deg); } }
-
-        /* Pagination Buttons */
-        .page-btn {
-            background: #2a1005;
-            border: 2px solid #7c2d12;
-            color: #fb923c;
-            padding: 8px 16px;
-            border-radius: 8px;
-            font-weight: bold;
-            font-family: 'JetBrains Mono', monospace;
-            transition: all 0.2s;
-            cursor: pointer;
-        }
-        .page-btn:hover:not(:disabled) {
-            border-color: #ea580c;
-            color: #fff;
-            background: #451a03;
-        }
-        .page-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            border-color: #451a03;
-            color: #7c2d12;
-        }
-        
+        .page-btn { background: #2a1005; border: 2px solid #7c2d12; color: #fb923c; padding: 8px 16px; border-radius: 8px; font-weight: bold; font-family: 'JetBrains Mono', monospace; transition: all 0.2s; cursor: pointer; }
+        .page-btn:hover:not(:disabled) { border-color: #ea580c; color: #fff; background: #451a03; }
+        .page-btn:disabled { opacity: 0.5; cursor: not-allowed; border-color: #451a03; color: #7c2d12; }
         .view-section { display: none; }
         .view-section.active { display: block; animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-        
-        .chart-container { 
-            width: 100%; height: 500px; 
-            background: #1a0a05; 
-            border-radius: 16px; 
-            overflow: hidden; 
-            border: 2px solid #7c2d12; 
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-        }
+        .chart-container { width: 100%; height: 500px; background: #1a0a05; border-radius: 16px; overflow: hidden; border: 2px solid #7c2d12; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
         .chart-container iframe { width: 100%; height: 100%; border: 0; }
-        
-        .stat-card { 
-            background: rgba(69, 26, 3, 0.8); 
-            border: 2px solid #7c2d12; 
-            border-radius: 12px; 
-            padding: 16px; 
-            display: flex; flex-direction: column; gap: 4px; 
-            box-shadow: 4px 4px 0 rgba(0,0,0,0.2);
-        }
+        .stat-card { background: rgba(69, 26, 3, 0.8); border: 2px solid #7c2d12; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 4px; box-shadow: 4px 4px 0 rgba(0,0,0,0.2); }
         .stat-label { font-size: 11px; color: #fb923c; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
         .stat-value { font-size: 18px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
-        
-        /* Modal & Status Bar */
         .modal-overlay { position: fixed; inset: 0; background: rgba(15, 5, 2, 0.95); backdrop-filter: blur(5px); z-index: 100; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
         .modal-overlay.open { opacity: 1; pointer-events: auto; }
-        
-        .status-bar { 
-            position: fixed; bottom: 0; left: 0; width: 100%; 
-            background: #451a03; 
-            border-top: 2px solid #ea580c; 
-            padding: 10px 24px; 
-            display: flex; justify-content: space-between; align-items: center; 
-            z-index: 50; cursor: pointer; transition: background 0.2s; 
-            box-shadow: 0 -5px 20px rgba(234, 88, 12, 0.2);
-        }
+        .status-bar { position: fixed; bottom: 0; left: 0; width: 100%; background: #451a03; border-top: 2px solid #ea580c; padding: 10px 24px; display: flex; justify-content: space-between; align-items: center; z-index: 50; cursor: pointer; transition: background 0.2s; box-shadow: 0 -5px 20px rgba(234, 88, 12, 0.2); }
         .status-bar:hover { background: #582206; }
-        
         .pulse-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 8px; border: 1px solid rgba(255,255,255,0.2); }
         .pulse-dot.green { background: #22c55e; box-shadow: 0 0 12px #22c55e; animation: pulseGlow 2s infinite; }
         .pulse-dot.red { background: #ef4444; box-shadow: 0 0 12px #ef4444; }
         @keyframes pulseGlow { 0% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); } 70% { opacity: 1; box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); } 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); } }
-
-        /* Detail Action Buttons */
-        .action-btn {
-            background: #451a03;
-            border: 2px solid #ea580c;
-            color: #fb923c;
-            padding: 12px 20px;
-            border-radius: 12px;
-            font-weight: 700;
-            text-transform: uppercase;
-            font-size: 13px;
-            transition: all 0.2s;
-            box-shadow: 4px 4px 0 #7c2d12;
-        }
-        .action-btn:hover {
-            transform: translate(-2px, -2px);
-            box-shadow: 6px 6px 0 #7c2d12;
-            background: #582206;
-            color: #fff;
-        }
-        .action-btn:active {
-            transform: translate(2px, 2px);
-            box-shadow: 0 0 0;
-        }
-
-        .back-btn {
-            background: #2a1005;
-            border: 2px solid #7c2d12;
-            color: #9a3412;
-            padding: 10px 16px;
-            border-radius: 8px;
-            font-weight: 700;
-            transition: all 0.2s;
-        }
-        .back-btn:hover {
-            border-color: #ea580c;
-            color: #ea580c;
-        }
+        .action-btn { background: #451a03; border: 2px solid #ea580c; color: #fb923c; padding: 12px 20px; border-radius: 12px; font-weight: 700; text-transform: uppercase; font-size: 13px; transition: all 0.2s; box-shadow: 4px 4px 0 #7c2d12; }
+        .action-btn:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 #7c2d12; background: #582206; color: #fff; }
+        .action-btn:active { transform: translate(2px, 2px); box-shadow: 0 0 0; }
+        .back-btn { background: #2a1005; border: 2px solid #7c2d12; color: #9a3412; padding: 10px 16px; border-radius: 8px; font-weight: 700; transition: all 0.2s; }
+        .back-btn:hover { border-color: #ea580c; color: #ea580c; }
+        .sort-header { position: relative; }
+        .sort-header:active { transform: translateY(1px); }
+        .table-scroll-container { max-height: 70vh; overflow-y: auto; border-radius: 0 0 16px 16px; }
         
-        .sort-header {
-            position: relative;
-        }
-        .sort-header:active {
-            transform: translateY(1px);
-        }
-        
-        .table-scroll-container {
-            max-height: 70vh; 
-            overflow-y: auto;
-            border-radius: 0 0 16px 16px; 
-        }
+        /* Form Inputs */
+        .form-input { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; padding: 12px; border-radius: 8px; width: 100%; font-family: 'JetBrains Mono'; margin-bottom: 16px; outline: none; transition: border-color 0.2s; }
+        .form-input:focus { border-color: #ea580c; }
+        .form-label { display: block; color: #9a3412; font-size: 12px; font-weight: bold; margin-bottom: 6px; text-transform: uppercase; }
     </style>
 </head>
 <body>
@@ -322,17 +100,14 @@
                     <h1 class="text-3xl brand-text tracking-tight font-sans">HolDex</h1>
                 </div>
             </div>
-            <!-- Mobile Menu Trigger could go here -->
         </div>
 
-        <!-- NEW MAIN NAVIGATION TABS -->
         <div class="flex items-center bg-[#451a03]/50 p-1 rounded-lg border border-[#7c2d12]/50">
             <button class="nav-btn active" onclick="navigateTo('')">Home</button>
             <button class="nav-btn" onclick="navigateTo('about')">About</button>
             <button class="nav-btn" onclick="navigateTo('update')">Update</button>
         </div>
         
-        <!-- TABLE CONTROLS (Only visible on Home) -->
         <div id="table-controls" class="flex items-center gap-3 w-full md:w-auto transition-opacity duration-300">
             <div class="flex bg-[#451a03] p-1.5 rounded-xl border border-[#7c2d12] shadow-inner">
                 <button class="filter-btn active" onclick="setSort('newest', this)">Fresh Mints</button>
@@ -348,7 +123,6 @@
             </button>
         </div>
 
-        <!-- DETAIL CONTROLS (Only visible on Detail) -->
         <div id="detail-controls" class="hidden w-full md:w-auto">
             <button onclick="navigateTo('')" class="back-btn flex items-center justify-center gap-2 w-full md:w-auto"><i data-lucide="arrow-left" width="16"></i> Back</button>
         </div>
@@ -357,7 +131,6 @@
 
 <main class="max-w-[1800px] mx-auto px-0 md:px-6 py-4 md:py-8">
     
-    <!-- HOME VIEW (Dashboard) -->
     <div id="view-dashboard" class="view-section active">
         <div class="bg-[#2a1005] border-y md:border-2 border-[#7c2d12] md:rounded-2xl overflow-hidden shadow-2xl flex flex-col">
             <div class="table-scroll-container overflow-x-auto">
@@ -396,7 +169,6 @@
         </div>
     </div>
 
-    <!-- ABOUT VIEW -->
     <div id="view-about" class="view-section px-4 md:px-0">
         <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 md:p-12 shadow-2xl max-w-4xl mx-auto">
             <div class="flex items-center gap-4 mb-8 border-b-2 border-[#7c2d12] pb-6">
@@ -408,13 +180,8 @@
                     <p class="text-[#ea580c] font-mono">The Terminal Fire Explorer</p>
                 </div>
             </div>
-            
             <div class="space-y-6 text-[#ffedd5] font-sans text-lg leading-relaxed">
-                <p>
-                    HolDex is a next-generation Solana data explorer designed for <span class="text-[#ea580c] font-bold">speed</span>, <span class="text-[#ea580c] font-bold">accuracy</span>, and <span class="text-[#ea580c] font-bold">clarity</span>. 
-                    Built on a high-performance backend, we index newly minted tokens instantly, allowing you to track movements before the crowd.
-                </p>
-                
+                <p>HolDex is a next-generation Solana data explorer designed for <span class="text-[#ea580c] font-bold">speed</span> and <span class="text-[#ea580c] font-bold">accuracy</span>.</p>
                 <div class="grid md:grid-cols-3 gap-6 my-8">
                     <div class="bg-[#451a03] p-6 rounded-xl border border-[#7c2d12]">
                         <i data-lucide="zap" class="text-[#fb923c] mb-3" width="24"></i>
@@ -424,38 +191,49 @@
                     <div class="bg-[#451a03] p-6 rounded-xl border border-[#7c2d12]">
                         <i data-lucide="shield-check" class="text-[#22c55e] mb-3" width="24"></i>
                         <h3 class="font-bold text-white mb-2">Verified Data</h3>
-                        <p class="text-sm text-[#9a3412]">Cross-referenced with DexScreener and Pump.fun APIs for accuracy.</p>
+                        <p class="text-sm text-[#9a3412]">Cross-referenced with DexScreener and Pump.fun APIs.</p>
                     </div>
                     <div class="bg-[#451a03] p-6 rounded-xl border border-[#7c2d12]">
                         <i data-lucide="database" class="text-[#3b82f6] mb-3" width="24"></i>
                         <h3 class="font-bold text-white mb-2">Historical Archival</h3>
-                        <p class="text-sm text-[#9a3412]">Deep backlog processing to maintain a complete ledger of meme assets.</p>
+                        <p class="text-sm text-[#9a3412]">Deep backlog processing to maintain a complete ledger.</p>
                     </div>
                 </div>
-
-                <p class="text-[#9a3412] text-sm font-mono border-t border-[#7c2d12] pt-6">
-                    Version 2.0.4 "Magma" &bull; Powered by Solana & Render
-                </p>
             </div>
         </div>
     </div>
 
-    <!-- UPDATE VIEW (Placeholder) -->
+    <!-- UPDATE VIEW (New) -->
     <div id="view-update" class="view-section px-4 md:px-0">
-        <div class="flex flex-col items-center justify-center py-20 bg-[#2a1005] border-2 border-[#7c2d12] border-dashed rounded-2xl max-w-2xl mx-auto">
-            <div class="w-20 h-20 rounded-full bg-[#451a03] flex items-center justify-center text-[#7c2d12] mb-6 animate-pulse">
-                <i data-lucide="hammer" width="40"></i>
+        <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 shadow-2xl max-w-2xl mx-auto">
+            <div class="text-center mb-8">
+                <h2 class="text-3xl font-bold text-white mb-2 font-sans">Update Token Info</h2>
+                <p class="text-[#9a3412]">Submit social links for approval. Updates are processed by admins.</p>
             </div>
-            <h2 class="text-3xl font-bold text-[#fb923c] mb-2 font-mono">System Update</h2>
-            <p class="text-[#9a3412] text-lg">New features are currently being forged in the fire.</p>
-            <p class="text-[#7c2d12] mt-2 font-mono text-sm">Check back soon.</p>
+            
+            <form onsubmit="submitUpdate(event)">
+                <label class="form-label">Token Mint Address</label>
+                <input type="text" id="update-mint" class="form-input" placeholder="Enter Solana Mint Address..." required>
+                
+                <label class="form-label">X (Twitter) Link</label>
+                <input type="url" id="update-twitter" class="form-input" placeholder="https://x.com/...">
+                
+                <label class="form-label">Website Link</label>
+                <input type="url" id="update-website" class="form-input" placeholder="https://...">
+                
+                <label class="form-label">Telegram Link</label>
+                <input type="url" id="update-telegram" class="form-input" placeholder="https://t.me/...">
+                
+                <button type="submit" class="action-btn w-full mt-4 flex items-center justify-center gap-2">
+                    Submit Update <i data-lucide="send" width="16"></i>
+                </button>
+            </form>
+            <div id="update-status" class="mt-4 text-center text-sm font-mono hidden"></div>
         </div>
     </div>
 
-    <!-- TOKEN DETAIL VIEW -->
     <div id="view-detail" class="view-section px-4 md:px-0">
         <div id="detail-loading" class="text-center py-20 text-[#ea580c] font-mono animate-pulse hidden">Fetching Chain Data...</div>
-        
         <div id="detail-content">
             <div class="flex flex-col md:flex-row gap-6 mb-8 items-start">
                 <div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl">
@@ -473,17 +251,10 @@
                 </div>
                 <div class="flex-1"></div>
                 <div class="flex gap-3 w-full md:w-auto">
-                    <a id="link-pump" href="#" target="_blank" class="action-btn flex-1 md:flex-none flex items-center justify-center gap-2">
-                        <img src="https://pump.fun/logo.png" width="16" class="rounded-full" onerror="this.style.display='none'"> 
-                        Pump.fun
-                    </a>
-                    <a id="link-solscan" href="#" target="_blank" class="action-btn flex-1 md:flex-none flex items-center justify-center gap-2">
-                        <i data-lucide="search" width="16"></i> 
-                        Solscan
-                    </a>
+                    <a id="link-pump" href="#" target="_blank" class="action-btn flex-1 md:flex-none flex items-center justify-center gap-2">Pump.fun</a>
+                    <a id="link-solscan" href="#" target="_blank" class="action-btn flex-1 md:flex-none flex items-center justify-center gap-2">Solscan</a>
                 </div>
             </div>
-            
             <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4 mb-6 md:mb-8">
                 <div class="stat-card"><span class="stat-label">Current Price</span><span id="stat-price" class="stat-value text-[#ffedd5]">-</span></div>
                 <div class="stat-card"><span class="stat-label">Market Cap</span><span id="stat-mcap" class="stat-value text-[#ea580c]">-</span></div>
@@ -491,13 +262,11 @@
                 <div class="stat-card"><span class="stat-label">1H Swing</span><span id="stat-chg1h" class="stat-value">-</span></div>
                 <div class="stat-card"><span class="stat-label">24H Trend</span><span id="stat-chg24h" class="stat-value">-</span></div>
             </div>
-            
             <div class="chart-container"><iframe id="detail-iframe" src="about:blank"></iframe></div>
         </div>
     </div>
 </main>
 
-<!-- Status Bar & Modal (Existing Code) -->
 <div class="status-bar" onclick="toggleStatusModal()">
     <div class="flex items-center gap-3">
         <span class="text-[#9a3412] text-xs font-bold tracking-wider uppercase">System Status</span>
@@ -548,25 +317,10 @@
     let currentPage = 1;
     let isRefreshing = false;
 
-    // SAFE FORMATTERS
-    const formatMoney = (val) => {
-        if (val === undefined || val === null) return "$0.00";
-        return val < 0.01 ? '$' + val.toExponential(2) : '$' + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 });
-    };
-    const formatCompact = (val) => {
-        if (val === undefined || val === null) return "$0";
-        return '$' + new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val);
-    };
-    const formatPct = (val) => {
-        if (val === undefined || val === null || val === 0) return `<span class="text-[#9a3412]">-</span>`;
-        const cls = val > 0 ? 'pill-green' : (val < 0 ? 'pill-red' : 'text-[#9a3412]');
-        return `<span class="pill ${cls}">${val > 0 ? '+' : ''}${val.toFixed(2)}%</span>`;
-    };
-    const timeAgo = (ts) => {
-        if (!ts) return '';
-        const seconds = Math.floor((Date.now() - ts) / 1000);
-        return seconds < 60 ? `${seconds}s ago` : (seconds < 3600 ? `${Math.floor(seconds/60)}m ago` : `${Math.floor(seconds/3600)}h ago`);
-    };
+    const formatMoney = (val) => { if (val === undefined || val === null) return "$0.00"; return val < 0.01 ? '$' + val.toExponential(2) : '$' + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }); };
+    const formatCompact = (val) => { if (val === undefined || val === null) return "$0"; return '$' + new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val); };
+    const formatPct = (val) => { if (val === undefined || val === null || val === 0) return `<span class="text-[#9a3412]">-</span>`; const cls = val > 0 ? 'pill-green' : (val < 0 ? 'pill-red' : 'text-[#9a3412]'); return `<span class="pill ${cls}">${val > 0 ? '+' : ''}${val.toFixed(2)}%</span>`; };
+    const timeAgo = (ts) => { if (!ts) return ''; const seconds = Math.floor((Date.now() - ts) / 1000); return seconds < 60 ? `${seconds}s ago` : (seconds < 3600 ? `${Math.floor(seconds/60)}m ago` : `${Math.floor(seconds/3600)}h ago`); };
 
     window.addEventListener('hashchange', handleRoute);
     window.addEventListener('load', handleRoute);
@@ -575,45 +329,67 @@
     
     function handleRoute() {
         const hash = window.location.hash;
-        
-        // Reset Nav & Views
         document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
         document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
-        
-        // Hide Controls by default, show only on Home
         const tableControls = document.getElementById('table-controls');
         const detailControls = document.getElementById('detail-controls');
         tableControls.classList.add('hidden');
         detailControls.classList.add('hidden');
-        
-        // Stop Polling by default
         if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
 
         if (hash === '' || hash === '#') {
-            // HOME / DASHBOARD
             document.getElementById('view-dashboard').classList.add('active');
             document.querySelector('button[onclick="navigateTo(\'\')"]').classList.add('active');
             tableControls.classList.remove('hidden');
             fetchList();
             pollingInterval = setInterval(fetchList, 5000);
-
         } else if (hash === '#about') {
-            // ABOUT
             document.getElementById('view-about').classList.add('active');
             document.querySelector('button[onclick="navigateTo(\'about\')"]').classList.add('active');
-
         } else if (hash === '#update') {
-            // UPDATE
             document.getElementById('view-update').classList.add('active');
             document.querySelector('button[onclick="navigateTo(\'update\')"]').classList.add('active');
-
         } else if (hash.startsWith('#token/')) {
-            // TOKEN DETAIL
-            // No main nav active for detail view
             showDetailView(hash.split('/')[1]);
         }
     }
 
+    // --- Update Form Logic ---
+    async function submitUpdate(e) {
+        e.preventDefault();
+        const mint = document.getElementById('update-mint').value;
+        const twitter = document.getElementById('update-twitter').value;
+        const website = document.getElementById('update-website').value;
+        const telegram = document.getElementById('update-telegram').value;
+        const statusDiv = document.getElementById('update-status');
+
+        statusDiv.innerText = "Submitting...";
+        statusDiv.classList.remove('hidden', 'text-red-500', 'text-green-500');
+        statusDiv.classList.add('text-[#ea580c]');
+
+        try {
+            const res = await fetch(`${API_URL}/api/request-update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mint, twitter, website, telegram })
+            });
+            const data = await res.json();
+            
+            if (data.success) {
+                statusDiv.innerText = "✅ Success! Your update is queued for admin approval.";
+                statusDiv.classList.add('text-green-500');
+                e.target.reset();
+            } else {
+                statusDiv.innerText = `❌ Error: ${data.error}`;
+                statusDiv.classList.add('text-red-500');
+            }
+        } catch (err) {
+            statusDiv.innerText = "❌ Connection Failed";
+            statusDiv.classList.add('text-red-500');
+        }
+    }
+
+    // --- Standard Functions ---
     function toggleStatusModal() {
         const modal = document.getElementById('status-modal');
         isModalOpen = !isModalOpen;
@@ -632,47 +408,62 @@
             barText.innerText = 'ONLINE';
             barText.className = 'text-xs font-bold text-[#ea580c] font-mono';
             barDot.className = 'pulse-dot green';
-            
             modalTitle.innerText = 'SYSTEM ONLINE';
             modalTitle.className = 'text-2xl font-bold text-white mb-2 font-sans tracking-wide';
             modalDesc.innerText = 'Connected to HolDex Data Grid.\nReal-time Solana feed active.';
             modalIcon.className = 'w-20 h-20 bg-[#451a03] text-[#ea580c] rounded-full flex items-center justify-center mx-auto mb-6 border-2 border-[#7c2d12]';
             modalIcon.innerHTML = '<i data-lucide="flame" width="40"></i>';
-            
-            // UPDATE LAST SYNC TIME
             const now = new Date();
             document.getElementById('last-sync-time').innerText = now.toLocaleTimeString([], { hour12: false });
-            
             if (!isConnected) { fetchList(); }
             isConnected = true;
         } else {
             barText.innerText = 'OFFLINE';
             barText.className = 'text-xs font-bold text-[#ef4444] font-mono';
             barDot.className = 'pulse-dot red';
-            
             modalTitle.innerText = 'CONNECTION LOST';
             modalTitle.className = 'text-2xl font-bold text-[#ef4444] mb-2 font-sans tracking-wide';
             modalDesc.innerText = 'Unable to reach backend server.\nRetrying connection automatically...';
             modalIcon.className = 'w-20 h-20 bg-[#451a03] text-[#ef4444] rounded-full flex items-center justify-center mx-auto mb-6 border-2 border-[#ef4444]';
             modalIcon.innerHTML = '<i data-lucide="wifi-off" width="40"></i>';
-            
             isConnected = false;
         }
         lucide.createIcons();
+    }
+
+    function handleManualRefresh() {
+        if (isRefreshing) return;
+        isRefreshing = true;
+        const btn = document.getElementById('manual-refresh');
+        const icon = btn.querySelector('i');
+        fetchList();
+        btn.disabled = true;
+        let cooldown = 10;
+        const originalIconHTML = icon.outerHTML;
+        btn.innerHTML = `<span class="text-xs font-mono font-bold">${cooldown}</span>`;
+        const interval = setInterval(() => {
+            cooldown--;
+            if (cooldown <= 0) {
+                clearInterval(interval);
+                isRefreshing = false;
+                btn.disabled = false;
+                btn.innerHTML = originalIconHTML;
+                lucide.createIcons();
+            } else {
+                btn.innerHTML = `<span class="text-xs font-mono font-bold">${cooldown}</span>`;
+            }
+        }, 1000);
     }
 
     async function fetchList() {
         try {
             document.getElementById('page-display').innerText = `Page ${currentPage}`;
             document.getElementById('btn-prev').disabled = currentPage <= 1;
-
             const endpoint = `${API_URL}/api/tokens?sort=${currentSort}&search=${encodeURIComponent(searchQuery)}&limit=100&page=${currentPage}`;
             const res = await fetch(endpoint);
             if (!res.ok) throw new Error("API Error");
             const data = await res.json();
-            
             updateStatus(true);
-            
             if (data.success) {
                 renderTable(data.tokens);
                 document.getElementById('btn-next').disabled = data.tokens.length < 100;
@@ -683,62 +474,17 @@
         }
     }
 
-    // Manual Refresh with 10s Cooldown
-    function handleManualRefresh() {
-        if (isRefreshing) return;
-        isRefreshing = true;
-
-        const btn = document.getElementById('manual-refresh');
-        const icon = btn.querySelector('i');
-        
-        // 1. Trigger Data Fetch
-        fetchList();
-
-        // 2. Start Visual Cooldown
-        btn.disabled = true;
-        let cooldown = 10;
-        
-        // Store original icon
-        const originalIconHTML = icon.outerHTML;
-        
-        // Update button content loop
-        btn.innerHTML = `<span class="text-xs font-mono font-bold">${cooldown}</span>`;
-        
-        const interval = setInterval(() => {
-            cooldown--;
-            if (cooldown <= 0) {
-                clearInterval(interval);
-                isRefreshing = false;
-                btn.disabled = false;
-                btn.innerHTML = originalIconHTML; // Restore Icon
-                lucide.createIcons();
-            } else {
-                btn.innerHTML = `<span class="text-xs font-mono font-bold">${cooldown}</span>`;
-            }
-        }, 1000);
-    }
-
     function changePage(delta) {
         currentPage += delta;
         if (currentPage < 1) currentPage = 1;
         if (pollingInterval) clearInterval(pollingInterval);
         document.getElementById('table-body').innerHTML = `<tr><td colspan="7" class="text-center py-20 text-orange-700 font-mono animate-pulse">Loading Page ${currentPage}...</td></tr>`;
-        
-        fetchList().then(() => {
-            if (currentPage === 1) {
-                pollingInterval = setInterval(fetchList, 5000);
-            }
-        });
+        fetchList().then(() => { if (currentPage === 1) { pollingInterval = setInterval(fetchList, 5000); } });
     }
 
     function renderTable(tokens) {
         const tbody = document.getElementById('table-body');
-        if (tokens.length === 0) { 
-            tbody.innerHTML = `<tr><td colspan="7" class="text-center py-20 text-[#9a3412] font-mono">
-                ${searchQuery ? `Searching global network for "${searchQuery}"...` : 'No tokens found in database.'}
-            </td></tr>`; 
-            return; 
-        }
+        if (tokens.length === 0) { tbody.innerHTML = `<tr><td colspan="7" class="text-center py-20 text-[#9a3412] font-mono">${searchQuery ? `Searching global network for "${searchQuery}"...` : 'No tokens found in database.'}</td></tr>`; return; }
         tbody.innerHTML = tokens.map(t => `
             <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group">
                 <td>
@@ -765,23 +511,18 @@
 
     async function showDetailView(mint) {
         clearInterval(pollingInterval); pollingInterval = null;
-        
         document.getElementById('view-dashboard').classList.remove('active');
         document.getElementById('view-detail').classList.add('active');
         document.getElementById('detail-controls').classList.remove('hidden');
-
         const loadingDiv = document.getElementById('detail-loading');
         const contentDiv = document.getElementById('detail-content');
-        
         loadingDiv.style.display = 'block';
         contentDiv.style.display = 'none';
-
         try {
             const res = await fetch(`${API_URL}/api/token/${mint}`);
             if(!res.ok) throw new Error("Failed");
             const data = await res.json();
             updateStatus(true);
-            
             if (data.success) {
                 const t = data.token;
                 document.getElementById('detail-ticker').innerText = t.ticker;
@@ -790,35 +531,27 @@
                 document.getElementById('detail-img').src = t.image || 'https://placehold.co/80x80/2a1005/7c2d12?text=?';
                 document.getElementById('link-pump').href = `https://pump.fun/coin/${t.mint}`;
                 document.getElementById('link-solscan').href = `https://solscan.io/token/${t.mint}`;
-                
-                // Safe formatting prevents crashes
                 document.getElementById('stat-price').innerText = formatMoney(t.priceUsd);
                 document.getElementById('stat-mcap').innerText = formatCompact(t.marketCap);
                 document.getElementById('stat-vol').innerText = formatCompact(t.volume24h);
                 document.getElementById('stat-chg1h').innerHTML = formatPct(t.change1h);
                 document.getElementById('stat-chg24h').innerHTML = formatPct(t.change24h);
-                
                 document.getElementById('detail-iframe').src = `https://dexscreener.com/solana/${t.mint}?embed=1&theme=dark&info=0`;
-                
                 loadingDiv.style.display = 'none';
                 contentDiv.style.display = 'block';
             }
         } catch (e) { 
-            console.error(e); 
-            updateStatus(false);
-            loadingDiv.innerText = "Error Loading Token Data";
+            console.error(e); updateStatus(false); loadingDiv.innerText = "Error Loading Token Data";
         }
     }
 
-    // Updated setSort to handle both tabs and headers (if tab btn is null, just sort)
     window.setSort = (sort, btn) => {
         currentSort = sort;
         if(btn) {
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
         }
-        currentPage = 1; // Reset to page 1 on sort change
-        fetchList();
+        currentPage = 1; fetchList();
     };
     window.handleSearch = (e) => { searchQuery = e.target.value; currentPage = 1; clearTimeout(window.searchTimeout); window.searchTimeout = setTimeout(fetchList, 1000); };
     window.copyMint = () => navigator.clipboard.writeText(document.getElementById('detail-mint').innerText);

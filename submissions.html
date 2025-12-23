@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HolDex | Admin Portal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        fire: { bg: '#2a1005', panel: '#451a03', border: '#7c2d12', accent: '#ea580c', text: '#ffedd5', highlight: '#fb923c' },
+                        void: '#0f0502'
+                    },
+                    fontFamily: { mono: ['JetBrains Mono', 'monospace'], sans: ['Comic Neue', 'cursive'] }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background-color: #2a1005; color: #ffedd5; font-family: 'Comic Neue', cursive; min-height: 100vh; font-size: 14px; }
+        .form-input { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; padding: 12px; border-radius: 8px; width: 100%; font-family: 'JetBrains Mono'; outline: none; transition: border-color 0.2s; }
+        .form-input:focus { border-color: #ea580c; }
+        .action-btn { padding: 8px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: all 0.2s; }
+        .btn-green { background: rgba(34, 197, 94, 0.1); border: 1px solid #22c55e; color: #22c55e; }
+        .btn-green:hover { background: #22c55e; color: #000; }
+        .btn-red { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; color: #ef4444; }
+        .btn-red:hover { background: #ef4444; color: #000; }
+    </style>
+</head>
+<body class="p-8">
+
+    <div id="login-screen" class="max-w-md mx-auto mt-20 text-center">
+        <h1 class="text-4xl font-bold text-[#ea580c] mb-8 font-sans">Admin Access</h1>
+        <input type="password" id="admin-pass" class="form-input mb-4" placeholder="Enter Admin Password">
+        <button onclick="login()" class="w-full bg-[#ea580c] text-[#2a1005] font-bold py-3 rounded-lg hover:bg-[#fb923c]">Login</button>
+        <p id="login-error" class="text-red-500 mt-4 hidden">Invalid Password</p>
+    </div>
+
+    <div id="admin-panel" class="max-w-6xl mx-auto hidden">
+        <div class="flex justify-between items-center mb-8 border-b-2 border-[#7c2d12] pb-4">
+            <h1 class="text-3xl font-bold text-white">Pending Updates</h1>
+            <button onclick="logout()" class="text-[#9a3412] hover:text-[#fb923c]">Logout</button>
+        </div>
+
+        <div id="updates-list" class="space-y-4">
+            <!-- Updates injected here -->
+            <div class="text-center py-20 text-[#9a3412]">Loading requests...</div>
+        </div>
+    </div>
+
+<script>
+    const API_URL = 'https://asdev-backend.onrender.com';
+    let adminKey = '';
+
+    function login() {
+        const pass = document.getElementById('admin-pass').value;
+        adminKey = pass;
+        fetchUpdates();
+    }
+
+    async function fetchUpdates() {
+        try {
+            const res = await fetch(`${API_URL}/api/admin/updates`, {
+                headers: { 'x-admin-auth': adminKey }
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                document.getElementById('login-screen').classList.add('hidden');
+                document.getElementById('admin-panel').classList.remove('hidden');
+                renderUpdates(data.updates);
+            } else {
+                document.getElementById('login-error').classList.remove('hidden');
+            }
+        } catch (e) {
+            alert("Connection Failed");
+        }
+    }
+
+    function renderUpdates(updates) {
+        const list = document.getElementById('updates-list');
+        if (updates.length === 0) {
+            list.innerHTML = `<div class="text-center py-20 text-[#9a3412]">No pending updates.</div>`;
+            return;
+        }
+
+        list.innerHTML = updates.map(u => `
+            <div class="bg-[#451a03] border border-[#7c2d12] rounded-xl p-6 flex flex-col md:flex-row gap-6 items-start">
+                <img src="${u.image || 'https://placehold.co/50'}" class="w-16 h-16 rounded-lg bg-black object-cover">
+                <div class="flex-1">
+                    <div class="flex items-center gap-3 mb-2">
+                        <h3 class="text-xl font-bold text-white">${u.ticker || 'Unknown'}</h3>
+                        <span class="text-[#fb923c] font-mono text-xs bg-[#2a1005] px-2 py-1 rounded">${u.mint}</span>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm font-mono text-[#9a3412]">
+                        <div class="flex flex-col">
+                            <span class="text-[10px] uppercase font-bold text-[#7c2d12]">Twitter</span>
+                            <a href="${u.twitter || '#'}" target="_blank" class="${u.twitter ? 'text-[#fb923c] hover:underline' : 'text-[#582206]'} truncate">${u.twitter || 'None'}</a>
+                        </div>
+                        <div class="flex flex-col">
+                            <span class="text-[10px] uppercase font-bold text-[#7c2d12]">Website</span>
+                            <a href="${u.website || '#'}" target="_blank" class="${u.website ? 'text-[#fb923c] hover:underline' : 'text-[#582206]'} truncate">${u.website || 'None'}</a>
+                        </div>
+                        <div class="flex flex-col">
+                            <span class="text-[10px] uppercase font-bold text-[#7c2d12]">Telegram</span>
+                            <a href="${u.telegram || '#'}" target="_blank" class="${u.telegram ? 'text-[#fb923c] hover:underline' : 'text-[#582206]'} truncate">${u.telegram || 'None'}</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex gap-3">
+                    <button onclick="handleAction(${u.id}, 'reject')" class="action-btn btn-red">Reject</button>
+                    <button onclick="handleAction(${u.id}, 'approve')" class="action-btn btn-green">Approve</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async function handleAction(id, action) {
+        if (!confirm(`Are you sure you want to ${action} this request?`)) return;
+        
+        try {
+            const res = await fetch(`${API_URL}/api/admin/${action}-update`, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'x-admin-auth': adminKey 
+                },
+                body: JSON.stringify({ id })
+            });
+            const data = await res.json();
+            if (data.success) {
+                fetchUpdates(); // Refresh list
+            } else {
+                alert("Action failed: " + data.error);
+            }
+        } catch (e) {
+            alert("Network Error");
+        }
+    }
+
+    function logout() {
+        location.reload();
+    }
+</script>
+</body>
+</html>
