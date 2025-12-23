@@ -1,6 +1,6 @@
 /**
- * Token Routes (Search & Save Optimized)
- * Allows users to seed the DB by searching for tokens or CAs.
+ * Token Routes
+ * Updated: 'hasCommunityUpdate' flag logic for verified socials.
  */
 const express = require('express');
 const axios = require('axios');
@@ -49,8 +49,6 @@ function init(deps) {
         const limitVal = Math.min(parseInt(limit) || 100, 100);
         const pageVal = Math.max(parseInt(page) || 1, 1);
         const offsetVal = (pageVal - 1) * limitVal;
-        
-        // Include search in cache key to cache specific search results
         const cacheKey = `api:tokens:${sort}:${limitVal}:${pageVal}:${search.trim() || 'all'}`;
 
         try {
@@ -69,14 +67,11 @@ function init(deps) {
                 let query = `SELECT * FROM tokens`;
                 let params = [];
 
-                // 1. Local DB Search
                 if (search && search.trim().length > 0) {
-                    // Check if it's a CA (exact match)
                     if (isValidPubkey(search.trim())) {
                         query += ` WHERE mint = $1`;
                         params.push(search.trim());
                     } else {
-                        // Fuzzy search
                         query += ` WHERE ticker ILIKE $1 OR name ILIKE $1`;
                         params.push(`%${search.trim()}%`);
                     }
@@ -86,29 +81,21 @@ function init(deps) {
 
                 let rows = params.length > 0 ? await db.all(query, params) : await db.all(query);
 
-                // 2. EXTERNAL SEARCH FALLBACK (Seeding Logic)
-                // If local results are low OR it's a specific CA search that missed, go fetch it.
+                // External Search Fallback
                 const needsExternalFetch = (pageVal === 1 && search && search.trim().length > 2 && (rows.length < 5 || isValidPubkey(search.trim())));
 
                 if (needsExternalFetch) {
                     try {
                         let dexUrl = `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(search)}`;
-                        // If it is a CA, use the specific token endpoint for better accuracy
-                        if (isValidPubkey(search.trim())) {
-                            dexUrl = `https://api.dexscreener.com/latest/dex/tokens/${search.trim()}`;
-                        }
+                        if (isValidPubkey(search.trim())) dexUrl = `https://api.dexscreener.com/latest/dex/tokens/${search.trim()}`;
 
                         const dexRes = await axios.get(dexUrl, { timeout: 4000 });
                         
                         if (dexRes.data && dexRes.data.pairs) {
-                            // Filter for Solana pairs
                             const validPairs = dexRes.data.pairs.filter(p => p.chainId === 'solana');
-                            
-                            // Take top 5 (or 1 if exact CA)
                             const pairsProcess = isValidPubkey(search.trim()) ? validPairs.slice(0, 1) : validPairs.slice(0, 5);
 
                             for (const pair of pairsProcess) {
-                                // If we already found it locally, skip (unless we want to update it?)
                                 if (rows.some(r => r.mint === pair.baseToken.address)) continue;
 
                                 const metadata = {
@@ -126,10 +113,8 @@ function init(deps) {
                                 };
                                 const createdAt = pair.pairCreatedAt || Date.now();
                                 
-                                // SAVE TO DB
                                 await saveTokenData(null, pair.baseToken.address, metadata, createdAt);
                                 
-                                // Add to current response for immediate user feedback
                                 rows.push({
                                     mint: pair.baseToken.address,
                                     userPubkey: null,
@@ -143,14 +128,14 @@ function init(deps) {
                                     change5m: pair.priceChange?.m5 || 0,
                                     change1h: pair.priceChange?.h1 || 0,
                                     change24h: pair.priceChange?.h24 || 0,
-                                    complete: false
+                                    complete: false,
+                                    hasCommunityUpdate: false // New items default to false
                                 });
                             }
                         }
                     } catch (extErr) { console.error("External search failed:", extErr.message); }
                 }
 
-                // Re-sort in memory since we might have appended new items
                 if (pageVal === 1 && rows.length > 0) {
                      if (sort === 'newest' || sort === 'age') rows.sort((a, b) => parseInt(b.timestamp) - parseInt(a.timestamp));
                      else if (sort === 'mcap') rows.sort((a, b) => (b.marketcap || b.marketCap) - (a.marketcap || a.marketCap));
@@ -172,7 +157,9 @@ function init(deps) {
                         timestamp: parseInt(r.timestamp),
                         change5m: r.change5m || 0,
                         change1h: r.change1h || 0,
-                        change24h: r.change24h || 0
+                        change24h: r.change24h || 0,
+                        // RETURN THE FLAG
+                        hasCommunityUpdate: r.hascommunityupdate || r.hasCommunityUpdate || false
                     })),
                     lastUpdate: Date.now()
                 };
@@ -192,7 +179,6 @@ function init(deps) {
                 const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
                 if (!token) return null;
 
-                // FETCH PAIRS FOR TABS (Live fetch to ensure freshness)
                 let pairs = [];
                 try {
                     const dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, { timeout: 3000 });
@@ -222,6 +208,8 @@ function init(deps) {
                         twitter: token.twitter,
                         website: token.website,
                         telegram: token.tweeturl,
+                        // Return the Flag
+                        hasCommunityUpdate: token.hascommunityupdate || false,
                         pairs: pairs 
                     } 
                 };
@@ -231,7 +219,8 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "DB Error" }); }
     });
 
-    // --- ADMIN ENDPOINTS (Unchanged) ---
+    // --- ADMIN ENDPOINTS ---
+
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         try {
             const updates = await db.all(`SELECT u.*, t.name, t.ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`);
@@ -244,11 +233,23 @@ function init(deps) {
         try {
             const update = await db.get('SELECT * FROM token_updates WHERE id = $1', [id]);
             if (!update) return res.status(404).json({ success: false, error: 'Request not found' });
-            const fields = []; const params = []; let idx = 1;
+
+            const fields = [];
+            const params = [];
+            let idx = 1;
+
             if (update.twitter) { fields.push(`twitter = $${idx++}`); params.push(update.twitter); }
             if (update.website) { fields.push(`website = $${idx++}`); params.push(update.website); }
-            if (update.telegram) { fields.push(`tweetUrl = $${idx++}`); params.push(update.telegram); } 
-            if (fields.length > 0) { params.push(update.mint); await db.run(`UPDATE tokens SET ${fields.join(', ')} WHERE mint = $${idx}`, params); }
+            if (update.telegram) { fields.push(`tweetUrl = $${idx++}`); params.push(update.telegram); } // Assuming 'tweetUrl' for TG
+            
+            // SET FLAG TRUE
+            fields.push(`hasCommunityUpdate = $${idx++}`);
+            params.push(true);
+
+            if (fields.length > 0) {
+                params.push(update.mint);
+                await db.run(`UPDATE tokens SET ${fields.join(', ')} WHERE mint = $${idx}`, params);
+            }
             await db.run('DELETE FROM token_updates WHERE id = $1', [id]);
             res.json({ success: true, message: 'Approved' });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
@@ -270,7 +271,10 @@ function init(deps) {
 
     router.post('/admin/update-token', requireAdmin, async (req, res) => {
         const { mint, twitter, website, telegram } = req.body;
-        try { await db.run(`UPDATE tokens SET twitter = $1, website = $2, tweetUrl = $3 WHERE mint = $4`, [twitter, website, telegram, mint]); res.json({ success: true, message: "Token Updated Successfully" });
+        try { 
+            // Manual update also sets flag true
+            await db.run(`UPDATE tokens SET twitter = $1, website = $2, tweetUrl = $3, hasCommunityUpdate = TRUE WHERE mint = $4`, [twitter, website, telegram, mint]); 
+            res.json({ success: true, message: "Token Updated Successfully" });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 

@@ -85,8 +85,6 @@
         .form-label { display: block; color: #9a3412; font-size: 12px; font-weight: bold; margin-bottom: 6px; text-transform: uppercase; }
         .social-btn { display: flex; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 12px; border: 2px solid #7c2d12; background: #451a03; color: #ea580c; transition: all 0.2s; }
         .social-btn:hover { border-color: #ea580c; color: #fff; background: #582206; transform: translateY(-2px); }
-        
-        /* New Pool Tabs */
         .pool-tab { padding: 8px 16px; font-size: 12px; font-weight: bold; color: #9a3412; cursor: pointer; border-bottom: 2px solid transparent; }
         .pool-tab.active { color: #ea580c; border-bottom-color: #ea580c; }
         .pool-tab:hover:not(.active) { color: #fb923c; }
@@ -208,6 +206,7 @@
         </div>
     </div>
 
+    <!-- UPDATE VIEW -->
     <div id="view-update" class="view-section px-4 md:px-0">
         <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 shadow-2xl max-w-2xl mx-auto">
             <div class="text-center mb-8">
@@ -499,6 +498,7 @@
                         <div class="flex flex-col min-w-0">
                             <div class="flex items-center gap-2">
                                 <span class="font-bold text-white text-sm group-hover:text-[#ea580c] transition truncate font-sans tracking-wide">${t.ticker}</span>
+                                ${t.hasCommunityUpdate ? '<span title="Verified Community Update" class="bg-blue-500/20 text-blue-400 border border-blue-500/50 rounded-full p-0.5"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span>' : ''}
                             </div>
                             <span class="text-[10px] text-[#9a3412] truncate max-w-[120px] md:max-w-[200px] font-mono group-hover:text-[#fb923c]">${t.name}</span>
                         </div>
@@ -517,12 +517,9 @@
 
     // --- Switch Pool Tabs ---
     window.switchPool = (pairAddress, dexId) => {
-        // Highlight active tab
         document.querySelectorAll('.pool-tab').forEach(t => t.classList.remove('active'));
         const tab = document.getElementById(`tab-${pairAddress}`);
         if(tab) tab.classList.add('active');
-
-        // Update iframe
         const frame = document.getElementById('detail-iframe');
         frame.src = `https://dexscreener.com/solana/${pairAddress}?embed=1&theme=dark&info=0`;
     };
@@ -552,9 +549,14 @@
                 let linksHtml = '';
                 linksHtml += `<a href="https://pump.fun/coin/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><img src="https://pump.fun/logo.png" width="16" class="rounded-full" onerror="this.style.display='none'"> Pump.fun</a>`;
                 linksHtml += `<a href="https://solscan.io/token/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><i data-lucide="search" width="16"></i> Solscan</a>`;
-                if (t.twitter) linksHtml += `<a href="${t.twitter}" target="_blank" class="social-btn"><i data-lucide="twitter" width="20"></i></a>`;
-                if (t.website) linksHtml += `<a href="${t.website}" target="_blank" class="social-btn"><i data-lucide="globe" width="20"></i></a>`;
-                if (t.telegram) linksHtml += `<a href="${t.telegram}" target="_blank" class="social-btn"><i data-lucide="send" width="20"></i></a>`;
+                
+                // ONLY SHOW SOCIALS IF VERIFIED VIA COMMUNITY UPDATE
+                if (t.hasCommunityUpdate) {
+                    if (t.twitter) linksHtml += `<a href="${t.twitter}" target="_blank" class="social-btn"><i data-lucide="twitter" width="20"></i></a>`;
+                    if (t.website) linksHtml += `<a href="${t.website}" target="_blank" class="social-btn"><i data-lucide="globe" width="20"></i></a>`;
+                    if (t.telegram) linksHtml += `<a href="${t.telegram}" target="_blank" class="social-btn"><i data-lucide="send" width="20"></i></a>`;
+                }
+                
                 actionsDiv.innerHTML = linksHtml;
                 lucide.createIcons();
 
@@ -564,7 +566,6 @@
                 document.getElementById('stat-chg1h').innerHTML = formatPct(t.change1h);
                 document.getElementById('stat-chg24h').innerHTML = formatPct(t.change24h);
 
-                // --- POOL TABS LOGIC ---
                 const tabsContainer = document.getElementById('pool-tabs-container');
                 tabsContainer.innerHTML = '';
                 
@@ -577,10 +578,8 @@
                         tab.onclick = () => switchPool(pair.pairAddress, pair.dexId);
                         tabsContainer.appendChild(tab);
                     });
-                    // Default load first pair
                     document.getElementById('detail-iframe').src = `https://dexscreener.com/solana/${t.pairs[0].pairAddress}?embed=1&theme=dark&info=0`;
                 } else {
-                    // Fallback to mint address if no pairs found (DexScreener usually handles this redirect)
                     document.getElementById('detail-iframe').src = `https://dexscreener.com/solana/${t.mint}?embed=1&theme=dark&info=0`;
                 }
 

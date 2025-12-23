@@ -1,6 +1,6 @@
 /**
  * Database Service (PostgreSQL + Redis Version)
- * Updated: Added 'token_updates' table for the approval queue.
+ * Updated: Added 'hasCommunityUpdate' column to tokens table.
  */
 const { Pool } = require('pg');
 const config = require('../config/env');
@@ -25,26 +25,6 @@ const dbWrapper = {
     async run(text, params = []) {
         const res = await this.query(text, params);
         return { rowCount: res.rowCount };
-    },
-    async transaction(callback) {
-        if (!pool) throw new Error("DB not initialized");
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
-            const trxDb = {
-                query: (t, p) => client.query(t, p),
-                get: async (t, p) => (await client.query(t, p)).rows[0],
-                all: async (t, p) => (await client.query(t, p)).rows,
-                run: async (t, p) => ({ rowCount: (await client.query(t, p)).rowCount })
-            };
-            await callback(trxDb);
-            await client.query('COMMIT');
-        } catch (e) {
-            await client.query('ROLLBACK');
-            throw e;
-        } finally {
-            client.release();
-        }
     }
 };
 
@@ -108,11 +88,16 @@ async function initDB() {
                 change24h DOUBLE PRECISION DEFAULT 0,
                 lastUpdated BIGINT,
                 tweetUrl TEXT,
-                complete BOOLEAN DEFAULT FALSE
+                complete BOOLEAN DEFAULT FALSE,
+                hasCommunityUpdate BOOLEAN DEFAULT FALSE
             );
         `);
+        
+        // Add column if it doesn't exist (Migration logic)
+        try {
+            await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS hasCommunityUpdate BOOLEAN DEFAULT FALSE;`);
+        } catch (e) { /* ignore if exists */ }
 
-        // NEW: Updates Queue Table
         await pool.query(`
             CREATE TABLE IF NOT EXISTS token_updates (
                 id SERIAL PRIMARY KEY,
@@ -125,7 +110,6 @@ async function initDB() {
             );
         `);
 
-        // Indexes
         try {
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_volume ON tokens(volume24h DESC)`);
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_mcap ON tokens(marketCap DESC)`);
@@ -148,6 +132,8 @@ async function saveTokenData(pubkey, mint, metadata, customTimestamp = null) {
     try {
         const ts = customTimestamp || Date.now();
 
+        // Note: We DO NOT update 'hasCommunityUpdate' here.
+        // It stays false unless manually updated via admin flow.
         await pool.query(`
             INSERT INTO tokens (userPubkey, mint, ticker, name, description, twitter, website, metadataUri, image, isMayhemMode, marketCap, timestamp)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -155,8 +141,6 @@ async function saveTokenData(pubkey, mint, metadata, customTimestamp = null) {
                 ticker = EXCLUDED.ticker,
                 name = EXCLUDED.name,
                 description = EXCLUDED.description,
-                twitter = EXCLUDED.twitter,
-                website = EXCLUDED.website,
                 metadataUri = EXCLUDED.metadataUri,
                 image = EXCLUDED.image,
                 marketCap = GREATEST(tokens.marketCap, EXCLUDED.marketCap) 
