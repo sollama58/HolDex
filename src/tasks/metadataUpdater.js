@@ -1,5 +1,6 @@
 /**
- * Metadata Updater Task (Postgres Syntax)
+ * Metadata Updater (Smart Priority Version)
+ * Optimizes API usage by prioritizing active tokens over dead ones.
  */
 const axios = require('axios');
 const config = require('../config/env');
@@ -18,11 +19,35 @@ function chunkArray(array, size) {
 async function updateMetadata(deps) {
     const { db, globalState } = deps;
 
-    // 1. Fetch tokens
-    const tokens = await db.all('SELECT mint FROM tokens');
+    // --- SCALABILITY FIX ---
+    // Instead of selecting ALL tokens, we select:
+    // 1. New launches ( < 24h old)
+    // 2. Active tokens (Volume > 0 in the last check)
+    // 3. High Market Cap tokens (> $5k)
+    // Dead tokens are ignored to prevent the loop from taking hours.
+    
+    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+    const yesterday = Date.now() - ONE_DAY_MS;
+
+    let tokens = [];
+    try {
+        // Postgres syntax
+        tokens = await db.all(`
+            SELECT mint FROM tokens 
+            WHERE timestamp > $1 
+            OR volume24h > 1000 
+            OR marketCap > 5000
+        `, [yesterday]);
+    } catch (e) {
+        logger.error("DB Error fetching update list", { error: e.message });
+        return;
+    }
+
     if (!tokens || tokens.length === 0) return;
 
-    // 2. BATCH FETCH MARKET DATA
+    logger.info(`🔄 Updater: Refreshing ${tokens.length} active tokens...`);
+
+    // DexScreener supports up to 30 mints per call
     const chunks = chunkArray(tokens, 30);
     
     for (const chunk of chunks) {
@@ -35,12 +60,16 @@ async function updateMetadata(deps) {
             );
 
             const pairs = dexRes.data?.pairs || [];
+            
+            // DexScreener returns multiple pairs per token (Raydium, Orca, etc).
+            // We want the most liquid pair for each mint.
             const updates = new Map();
             
             for (const pair of pairs) {
                 const mint = pair.baseToken.address;
                 const existing = updates.get(mint);
                 
+                // If we haven't seen this mint in this batch, OR this pair has higher liquidity
                 if (!existing || (pair.liquidity?.usd > existing.liquidity)) {
                     updates.set(mint, {
                         marketCap: pair.fdv || pair.marketCap || 0,
@@ -55,11 +84,11 @@ async function updateMetadata(deps) {
                 }
             }
 
+            // Execute Updates
             for (const t of chunk) {
                 const data = updates.get(t.mint);
                 
                 if (data) {
-                    // Update - Postgres Syntax ($1, $2...)
                     const updateQuery = `
                         UPDATE tokens SET 
                         volume24h = $1, 
@@ -87,30 +116,20 @@ async function updateMetadata(deps) {
                     if (data.imageUrl) params.push(data.imageUrl); // $9
 
                     await db.run(updateQuery, params);
-                } else {
-                    // Pump.fun Fallback
-                    try {
-                        await delay(300); 
-                        const pumpRes = await axios.get(
-                            `https://frontend-api.pump.fun/coins/${t.mint}`,
-                            { timeout: 3000 }
-                        );
-                        if (pumpRes.data) {
-                            const mcap = pumpRes.data.usd_market_cap || 0;
-                            await db.run(
-                                `UPDATE tokens SET marketCap = $1, lastUpdated = $2 WHERE mint = $3`,
-                                [mcap, Date.now(), t.mint]
-                            );
-                        }
-                    } catch (pumpErr) { /* Silent fail */ }
-                }
+                } 
+                // Note: We removed the "Pump Fallback" here. 
+                // If DexScreener doesn't have it, it likely has no volume, so we skip to save time.
             }
-            await delay(1500);
+            
+            // Rate Limit Protection
+            // 300 requests per minute = 1 request every 200ms.
+            // We are safer at 1 request every 1000ms.
+            await delay(1000);
 
         } catch (e) {
             if (e.response && e.response.status === 429) {
-                logger.warn(`DexScreener Rate Limit (429). Pausing 30 seconds...`);
-                await delay(30000);
+                logger.warn(`DexScreener Rate Limit (429). Pausing...`);
+                await delay(20000);
             } else {
                 logger.warn(`DexScreener Batch Error: ${e.message}`);
             }
@@ -118,13 +137,14 @@ async function updateMetadata(deps) {
     }
 
     globalState.lastBackendUpdate = Date.now();
-    logger.info(`Metadata update complete. Tokens scanned: ${tokens.length}`);
 }
 
 function start(deps) {
+    // Run 5 seconds after start
     setTimeout(() => updateMetadata(deps), 5000);
+    // Then every interval (default 60s)
     setInterval(() => updateMetadata(deps), config.METADATA_UPDATE_INTERVAL);
-    logger.info("Metadata updater started (Postgres + Redis)");
+    logger.info("Metadata updater started (Priority Mode)");
 }
 
 module.exports = { updateMetadata, start };
