@@ -1,52 +1,63 @@
-require('dotenv').config();
+/**
+ * HolDex Backend Entry Point
+ */
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const http = require('http');
 const config = require('./config/env');
-const { initDB, getDB } = require('./services/database');
-const { initRedis } = require('./services/redis');
-const tokenRoutes = require('./routes/tokens');
-const metadataUpdater = require('./tasks/metadataUpdater');
-const holderScanner = require('./tasks/holderScanner');
-const newTokenListener = require('./tasks/newTokenListener');
-const autoSeeder = require('./tasks/autoSeeder'); // <--- IMPORT SEEDER
+const dbService = require('./services/database');
+const redisService = require('./services/redis');
+const logger = require('./services/logger');
 
-const globalState = {
-    asdfTop50Holders: new Set(),
-    userExpectedAirdrops: new Map(),
-    lastBackendUpdate: Date.now()
-};
+// Routes
+const tokenRoutes = require('./routes/tokens');
+const deployRoutes = require('./routes/deploy');
+const solanaRoutes = require('./routes/solana');
+const healthRoutes = require('./routes/health');
+
+// Background Tasks
+const workers = require('./tasks/workers');
 
 async function startServer() {
-    console.log('💎 Starting HolDex Backend...');
-    await initDB();
-    const redis = initRedis();
+    // 1. Initialize Infrastructure
+    await dbService.initDB(); // Connects to Postgres
+    redisService.initRedis(); // Connects to Redis
 
     const app = express();
+    
+    // 2. Middleware
     app.use(helmet());
     app.use(cors({ origin: config.CORS_ORIGINS }));
     app.use(express.json());
 
-    const deps = { db: getDB(), redis, globalState, devKeypair: null };
+    // 3. Dependencies Container
+    const deps = {
+        db: dbService.getDB(), // Wrapper for Postgres
+        globalState: {
+            // In-memory fallback if Redis fails, or for non-critical fast access
+            asdfTop50Holders: new Set(),
+            userExpectedAirdrops: new Map(),
+            lastBackendUpdate: Date.now()
+        },
+        devKeypair: config.PRIVATE_KEY ? require('@solana/web3.js').Keypair.fromSecretKey(new Uint8Array(JSON.parse(config.PRIVATE_KEY))) : null
+    };
 
+    // 4. Register Routes
     app.use('/api', tokenRoutes.init(deps));
-    app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: Date.now() }));
+    app.use('/api/deploy', deployRoutes.init(deps));
+    app.use('/api/solana', solanaRoutes.init(deps));
+    app.use('/health', healthRoutes);
 
-    // --- START BACKGROUND TASKS ---
-    console.log('🚀 Starting Background Tasks...');
-    autoSeeder.start(deps);        // 1. Seed DB with existing tokens > 10k
-    newTokenListener.start(deps);  // 2. Listen for high-value new mints
-    metadataUpdater.start(deps);   // 3. Keep prices fresh
-    holderScanner.start(deps);     // 4. Scan holders for top tokens
+    // 5. Start Background Workers
+    workers.start(deps);
 
-    const server = http.createServer(app);
-    server.listen(config.PORT, () => {
-        console.log(`✅ Server running on port ${config.PORT}`);
+    // 6. Launch
+    app.listen(config.PORT, () => {
+        logger.info(`HolDex Backend running on port ${config.PORT}`);
     });
 }
 
 startServer().catch(err => {
-    console.error('❌ Fatal Server Error:', err);
+    logger.error('Fatal Server Error', err);
     process.exit(1);
 });
