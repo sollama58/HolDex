@@ -1,6 +1,6 @@
 /**
  * Token Routes
- * Updated: Enhanced Search Logic with Auto-Indexing
+ * Updated: Fixed Search Logic (SQLite Comp., Pagination, Pair Address Support)
  */
 const express = require('express');
 const axios = require('axios');
@@ -15,7 +15,7 @@ const router = express.Router();
 
 const solanaConnection = new Connection(config.SOLANA_RPC_URL, 'confirmed');
 
-// Helper to get best pair (Duplicated logic from metadataUpdater to ensure self-contained route safety)
+// Helper to get best pair
 function getBestPairRoute(pairs, mint) {
     if (!pairs || pairs.length === 0) return null;
     const validPairs = pairs.filter(p => (p.liquidity?.usd || 0) > 100);
@@ -147,7 +147,6 @@ function init(deps) {
             const hasData = (twitter && twitter.length > 0) || (website && website.length > 0) || (telegram && telegram.length > 0) || (banner && banner.length > 0) || (safeDesc && safeDesc.length > 0);
             if (!hasData) return res.status(400).json({ success: false, error: "No profile data provided" });
 
-            // PERSISTENCE: This INSERT saves the transaction (signature) and payer immediately
             await db.run(`INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)`, 
                 [mint, twitter, website, telegram, banner, safeDesc, Date.now(), signature, userPublicKey]);
 
@@ -155,7 +154,7 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "Submission failed: " + e.message }); }
     });
 
-    // --- SEARCH / TOKENS LIST (UPDATED SEARCH LOGIC) ---
+    // --- SEARCH / TOKENS LIST (FIXED) ---
     router.get('/tokens', async (req, res) => {
         const { sort = 'newest', limit = 100, page = 1, search = '', filter = '' } = req.query;
         const limitVal = Math.min(parseInt(limit) || 100, 100);
@@ -179,7 +178,6 @@ function init(deps) {
                 }
 
                 let rows = [];
-                let externalTokens = [];
                 const isAddressSearch = isValidPubkey(searchTerm);
 
                 // 1. LOCAL SEARCH
@@ -188,9 +186,9 @@ function init(deps) {
                         // Direct Mint Search
                         rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [searchTerm]);
                     } else {
-                        // Text Search
+                        // Text Search (FIX: Changed ILIKE to LIKE for SQLite compatibility)
                         const searchPattern = `%${searchTerm}%`;
-                        rows = await db.all(`SELECT * FROM tokens WHERE (ticker ILIKE $1 OR name ILIKE $1) ${filter === 'verified' ? 'AND hasCommunityUpdate = TRUE' : ''} ${orderByClause} LIMIT 20`, [searchPattern]);
+                        rows = await db.all(`SELECT * FROM tokens WHERE (ticker LIKE $1 OR name LIKE $1) ${filter === 'verified' ? 'AND hasCommunityUpdate = TRUE' : ''} ${orderByClause} LIMIT 50`, [searchPattern]);
                     }
                 } else {
                     // Default browse view
@@ -203,25 +201,31 @@ function init(deps) {
                 }
 
                 // 2. EXTERNAL SEARCH FALLBACK
-                // We only search externally if:
-                // a) The user is searching (searchTerm exists)
-                // b) We are NOT filtering for locally verified tokens only
-                // c) We have fewer than 5 results OR it's a specific address search that returned nothing
-                
                 const shouldFetchExternal = searchTerm.length > 0 && filter !== 'verified' && (rows.length < 5 || (isAddressSearch && rows.length === 0));
 
                 if (shouldFetchExternal) {
                     try {
-                        let dexUrl = '';
+                        let dexRes = null;
+                        
+                        // FIX: Better handling for Address Search (Mint vs Pair)
                         if (isAddressSearch) {
-                             dexUrl = `https://api.dexscreener.com/latest/dex/tokens/${searchTerm}`;
+                             // Try as Token Mint first
+                             try {
+                                dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${searchTerm}`, { timeout: 3500 });
+                             } catch(e) { /* ignore */ }
+                             
+                             // If no pairs found, try as Pair Address
+                             if (!dexRes || !dexRes.data || !dexRes.data.pairs) {
+                                try {
+                                    dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/pairs/solana/${searchTerm}`, { timeout: 3500 });
+                                } catch(e) { /* ignore */ }
+                             }
                         } else {
-                             dexUrl = `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(searchTerm)}`;
+                             // Text Search
+                             dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(searchTerm)}`, { timeout: 4500 });
                         }
 
-                        const dexRes = await axios.get(dexUrl, { timeout: 4500 });
-                        
-                        if (dexRes.data && dexRes.data.pairs) {
+                        if (dexRes && dexRes.data && dexRes.data.pairs) {
                             // Filter for Solana only
                             const validPairs = dexRes.data.pairs.filter(p => p.chainId === 'solana');
                             
@@ -260,20 +264,17 @@ function init(deps) {
                                 };
                             });
 
-                            // Deduplicate: Don't add if we already have it in 'rows' or 'externalTokens'
-                            // We use a Map to ensure unique mints
+                            // Deduplicate
                             const uniqueMap = new Map();
                             rows.forEach(r => uniqueMap.set(r.mint, r));
                             
                             for (const t of foundTokens) {
                                 if (!uniqueMap.has(t.mint)) {
                                     uniqueMap.set(t.mint, t);
-                                    // FIRE & FORGET: Save to DB for future indexing
                                     saveTokenData(db, t.mint, t, t.timestamp).catch(err => console.error("Search Indexing Error:", err.message));
                                 }
                             }
                             
-                            // Re-convert map to array
                             rows = Array.from(uniqueMap.values());
                         }
                     } catch (extErr) { 
@@ -281,18 +282,26 @@ function init(deps) {
                     }
                 }
 
-                // 3. FINAL SORT & LIMIT
+                // 3. FINAL SORT & PAGINATION (FIXED)
                 if (searchTerm) {
                     if (isAddressSearch) {
-                        // If searching by Address, strict match only
-                         rows = rows.filter(r => r.mint === searchTerm);
+                        // FIX: Removed strict filter that broke Pair Address search.
+                        // We rely on the fact that DexScreener returned relevant results.
+                        // We bubble the exact match to top if it exists.
+                         rows.sort((a, b) => {
+                             if (a.mint === searchTerm) return -1;
+                             if (b.mint === searchTerm) return 1;
+                             return (b.marketCap || 0) - (a.marketCap || 0);
+                         });
                     } else {
-                        // If Text search, sort by liquidity/mcap to bubble up best matches
+                        // Text search sort
                          rows.sort((a, b) => (b.marketCap || 0) - (a.marketCap || 0));
                     }
-                    // Ensure we return exactly what was requested (up to 5 for previews, or list limit)
-                    // If it was a CA search, we likely have 1 result. If text, up to 5 best.
-                    if (rows.length > 5) rows = rows.slice(0, 5); 
+                    
+                    // FIX: Applied proper pagination instead of hard slice(0, 5)
+                    // If no specific page requested, return top results based on limit
+                    const searchOffset = (pageVal - 1) * limitVal;
+                    rows = rows.slice(searchOffset, searchOffset + limitVal);
                 }
 
                 return {
@@ -309,7 +318,7 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, tokens: [], error: e.message }); }
     });
 
-    // --- INDIVIDUAL TOKEN VIEW (FIXED) ---
+    // --- INDIVIDUAL TOKEN VIEW ---
     router.get('/token/:mint', async (req, res) => {
         try {
             const { mint } = req.params;
@@ -318,7 +327,9 @@ function init(deps) {
             const result = await smartCache(cacheKey, 30, async () => {
                 // 1. Get DB Data
                 const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
-                if (!token) return null;
+                
+                // Allow fetching even if not in DB yet (Lazy Load)
+                let tokenData = token || { mint: mint, name: 'Unknown', ticker: 'Unknown' };
                 
                 let pairs = [];
                 let bestPair = null;
@@ -327,7 +338,6 @@ function init(deps) {
                 try {
                     const dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, { timeout: 3000 });
                     if (dexRes.data && dexRes.data.pairs) {
-                        // Sort by liquidity for UI
                         pairs = dexRes.data.pairs.map(p => ({
                             pairAddress: p.pairAddress, dexId: p.dexId, 
                             priceUsd: p.priceUsd, liquidity: p.liquidity?.usd || 0, 
@@ -337,25 +347,27 @@ function init(deps) {
                             baseToken: p.baseToken
                         })).sort((a, b) => (b.liquidity || 0) - (a.liquidity || 0));
 
-                        // Identify the absolute best pair for pricing
                         bestPair = getBestPairRoute(pairs, mint);
+                        
+                        // Update basic info if missing
+                        if (!token && pairs.length > 0) {
+                            tokenData.name = pairs[0].baseToken.name;
+                            tokenData.ticker = pairs[0].baseToken.symbol;
+                            tokenData.image = pairs[0].info?.imageUrl;
+                        }
 
-                        // Trigger DB Update (Side Effect)
                         if (pairs.length > 0) {
                             await syncTokenData(deps, mint, pairs);
                         }
                     }
                 } catch (dexErr) { console.warn("Failed to fetch pairs:", dexErr.message); }
                 
-                // 3. Construct "Live" Response
-                // Use fresh Best Pair data if available, otherwise fallback to DB
-                
-                let liveMcap = token.marketcap || token.marketCap || 0;
-                let livePrice = token.priceusd || token.priceUsd || 0;
-                let liveVol = token.volume24h || 0;
-                let liveChange1h = token.change1h || 0;
-                let liveChange24h = token.change24h || 0;
-                let liveChange5m = token.change5m || 0;
+                let liveMcap = tokenData.marketcap || tokenData.marketCap || 0;
+                let livePrice = tokenData.priceusd || tokenData.priceUsd || 0;
+                let liveVol = tokenData.volume24h || 0;
+                let liveChange1h = tokenData.change1h || 0;
+                let liveChange24h = tokenData.change24h || 0;
+                let liveChange5m = tokenData.change5m || 0;
 
                 if (bestPair) {
                     liveMcap = Number(bestPair.fdv || bestPair.marketCap || 0);
@@ -366,40 +378,28 @@ function init(deps) {
                     liveChange5m = Number(bestPair.priceChange?.m5 || 0);
                 }
 
-                // Handle mixed-case DB columns
-                const hasCommunityUpdate = token.hasCommunityUpdate || token.hascommunityupdate || false;
-                const kScoreVal = token.k_score || 0;
-
-                // REMOVED: Simulation logic.
-                // We now want strict truth. If it is 0, it is 0 (which UI renders as clock).
-                let kScore = kScoreVal;
+                const hasCommunityUpdate = tokenData.hasCommunityUpdate || tokenData.hascommunityupdate || false;
+                const kScoreVal = tokenData.k_score || 0;
 
                 return { 
                     success: true, 
                     token: {
-                        ...token, 
-                        // Explicitly override with "Live" values
+                        ...tokenData, 
                         marketCap: liveMcap, 
                         volume24h: liveVol, 
                         priceUsd: livePrice,
                         change1h: liveChange1h, 
                         change24h: liveChange24h, 
                         change5m: liveChange5m,
-                        
-                        userPubkey: token.userpubkey || token.userPubkey, 
-                        timestamp: parseInt(token.timestamp), 
-                        
-                        // FIX: Ensure these accessors match DB Schema casing OR lowercase fallback
-                        twitter: token.twitter,
-                        website: token.website, 
-                        // MAPPING FIX: Telegram is stored in 'tweetUrl' in the DB
-                        telegram: token.tweetUrl || token.tweeturl || token.telegram, 
-                        banner: token.banner, 
-                        description: token.description,
-                        
-                        // Boolean Fix
+                        userPubkey: tokenData.userpubkey || tokenData.userPubkey, 
+                        timestamp: parseInt(tokenData.timestamp || Date.now()), 
+                        twitter: tokenData.twitter,
+                        website: tokenData.website, 
+                        telegram: tokenData.tweetUrl || tokenData.tweeturl || tokenData.telegram, 
+                        banner: tokenData.banner, 
+                        description: tokenData.description,
                         hasCommunityUpdate: hasCommunityUpdate, 
-                        kScore: kScore, 
+                        kScore: kScoreVal, 
                         pairs: pairs 
                     } 
                 };
@@ -449,30 +449,25 @@ function init(deps) {
     router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => {
         const { mint } = req.body;
         try {
-            // Trigger calculation immediately
             await kScoreUpdater.updateSingleToken(deps, mint);
             res.json({ success: true, message: `K-Score Refresh Complete for ${mint}` });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
-    // UPDATED: Now supports type=history to fetch non-pending
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         try {
             const { type } = req.query;
             let sql = `SELECT u.*, t.name, t.ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`;
-            
             if (type === 'history') {
                 sql += ` WHERE u.status != 'pending' ORDER BY u.submittedAt DESC LIMIT 100`;
             } else {
                 sql += ` WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`;
             }
-            
             const updates = await db.all(sql);
             res.json({ success: true, updates });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
-    // UPDATED: Now updates status to 'approved' instead of deleting
     router.post('/admin/approve-update', requireAdmin, async (req, res) => {
         const { id } = req.body;
         try {
@@ -493,20 +488,15 @@ function init(deps) {
                 await db.run(`UPDATE tokens SET ${fields.join(', ')} WHERE mint = $${idx}`, params); 
             }
             
-            // HISTORY: Mark as approved, do not delete
             await db.run("UPDATE token_updates SET status = 'approved' WHERE id = $1", [id]);
-            
-            // Calculate K-Score IMMEDIATELY
             await kScoreUpdater.updateSingleToken(deps, update.mint);
             
             res.json({ success: true, message: 'Approved & K-Score Calculated' });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
-    // UPDATED: Now updates status to 'rejected' instead of deleting
     router.post('/admin/reject-update', requireAdmin, async (req, res) => {
         try { 
-            // HISTORY: Mark as rejected, do not delete
             await db.run("UPDATE token_updates SET status = 'rejected' WHERE id = $1", [req.body.id]); 
             res.json({ success: true, message: 'Rejected' }); 
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
@@ -526,7 +516,6 @@ function init(deps) {
         if(description) safeDesc = description.substring(0, 250).replace(/<[^>]*>?/gm, '');
         try { 
             await db.run(`UPDATE tokens SET twitter = $1, website = $2, tweetUrl = $3, banner = $4, description = $5, hasCommunityUpdate = TRUE WHERE mint = $6`, [twitter, website, telegram, banner, safeDesc, mint]); 
-            // Trigger calculation immediately
             await kScoreUpdater.updateSingleToken(deps, mint);
             res.json({ success: true, message: "Token Updated & Recalculated" });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
