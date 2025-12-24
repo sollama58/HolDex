@@ -52,7 +52,11 @@ async function calculateTokenScore(mint) {
     // 3. Sort Top 50
     const holders = accounts
         .map(a => {
-            const buf = Buffer.from(a.account.data[0], 'base64');
+            // FIX: Safer data access using optional chaining
+            const rawData = a.account.data?.[0];
+            if (!rawData) return { amount: BigInt(0) };
+
+            const buf = Buffer.from(rawData, 'base64');
             return { amount: readBigUInt64LE(buf) }; 
         })
         .sort((a, b) => (b.amount > a.amount ? 1 : -1))

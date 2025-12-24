@@ -1,6 +1,9 @@
 /**
  * Database Service
- * Updated: Added 'k_score' and 'last_k_calc' columns.
+ * Updated: 
+ * 1. Added 'k_score' and 'last_k_calc' columns.
+ * 2. Fixed 'tweetUrl' (Telegram) data loss in saveTokenData.
+ * 3. Fixed timestamp not updating on conflict in saveTokenData.
  */
 const { Pool } = require('pg');
 const config = require('../config/env');
@@ -114,7 +117,7 @@ async function initDB() {
         `);
 
         try {
-            await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score DESC)`); // Index for K-Score sorting
+            await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score DESC)`); 
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_volume ON tokens(volume24h DESC)`);
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_mcap ON tokens(marketCap DESC)`);
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_time ON tokens(timestamp DESC)`);
@@ -135,22 +138,34 @@ async function saveTokenData(pubkey, mint, metadata, customTimestamp = null) {
     try {
         const ts = customTimestamp || Date.now();
 
+        // FIX: Added 'tweetUrl' handling for Telegram links
+        // FIX: Added 'timestamp = EXCLUDED.timestamp' to update Age if we find a better source
         await pool.query(`
-            INSERT INTO tokens (userPubkey, mint, ticker, name, description, twitter, website, metadataUri, image, isMayhemMode, marketCap, timestamp)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            INSERT INTO tokens (userPubkey, mint, ticker, name, description, twitter, website, metadataUri, image, isMayhemMode, marketCap, timestamp, tweetUrl)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             ON CONFLICT (mint) DO UPDATE SET
                 ticker = EXCLUDED.ticker,
                 name = EXCLUDED.name,
                 description = EXCLUDED.description,
                 metadataUri = EXCLUDED.metadataUri,
                 image = EXCLUDED.image,
+                tweetUrl = EXCLUDED.tweetUrl,
+                timestamp = EXCLUDED.timestamp, 
                 marketCap = GREATEST(tokens.marketCap, EXCLUDED.marketCap) 
         `, [
-            pubkey, mint, metadata.ticker, metadata.name, metadata.description,
-            metadata.twitter, metadata.website, metadata.metadataUri,
-            metadata.image, metadata.isMayhemMode ? true : false,
+            pubkey, 
+            mint, 
+            metadata.ticker, 
+            metadata.name, 
+            metadata.description,
+            metadata.twitter, 
+            metadata.website, 
+            metadata.metadataUri,
+            metadata.image, 
+            metadata.isMayhemMode ? true : false,
             metadata.marketCap || 0, 
-            ts 
+            ts, 
+            metadata.telegram // Maps to tweetUrl
         ]);
     } catch (e) {
         logger.error("Save Token Error", { error: e.message });

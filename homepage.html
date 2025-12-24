@@ -426,7 +426,8 @@
 </div>
 
 <script>
-    const API_URL = 'https://asdev-backend.onrender.com'; 
+    // FIX: Updated API URL to local/production instead of hardcoded dev URL
+    const API_URL = 'http://localhost:3000'; // Change to your actual backend URL
     const FALLBACK_BANNER = "https://images.squarespace-cdn.com/content/690b8c21384b3f1201c2650c/967ea61f-a88a-4497-81c2-5c67d3d06d9e/Gemini_Generated_Image_c82gwyc82gwyc82g.png?content-type=image%2Fpng";
     let currentSort = 'newest';
     let searchQuery = '';
@@ -636,7 +637,12 @@
         tbody.innerHTML = tokens.map(t => `
             <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group">
                 <td><div class="flex items-center gap-3"><img src="${t.image || 'https://placehold.co/40x40/2a1005/7c2d12?text=?'}" class="img-token group-hover:border-[#ea580c] transition" loading="lazy" onerror="this.src='https://placehold.co/40x40/2a1005/7c2d12?text=?'"><div class="flex flex-col min-w-0"><div class="flex items-center gap-2"><span class="font-bold text-white text-sm group-hover:text-[#ea580c] transition truncate font-sans tracking-wide">${t.ticker}</span>${t.hasCommunityUpdate ? '<span title="Verified Community Update" class="verified-badge"><i data-lucide="check" width="12"></i></span>' : ''}</div><span class="text-[10px] text-[#9a3412] truncate max-w-[120px] md:max-w-[200px] font-mono group-hover:text-[#fb923c]">${t.name}</span></div></div></td>
-                <td class="text-right text-[#fb923c] font-mono font-bold">${t.kScore || 0}</td>
+                
+                <!-- FIX: K-Score Logic (Show score only if hasCommunityUpdate, else show Lock) -->
+                <td class="text-right text-[#fb923c] font-mono font-bold">
+                    ${t.hasCommunityUpdate ? (t.kScore || 0) : '<span title="Community Update Required" class="text-gray-500">🔒</span>'}
+                </td>
+                
                 <td class="hidden md:table-cell text-right">${formatPct(t.change5m)}</td>
                 <td class="hidden md:table-cell text-right">${formatPct(t.change1h)}</td>
                 <td class="text-right">${formatPct(t.change24h)}</td>

@@ -70,7 +70,6 @@ async function updateMetadata(deps) {
                         change5m: pair.priceChange?.m5 || 0,
                         change1h: pair.priceChange?.h1 || 0,
                         change24h: pair.priceChange?.h24 || 0,
-                        // Fix Age: Use pairCreatedAt from DexScreener
                         pairCreatedAt: pair.pairCreatedAt 
                     });
                 }
@@ -81,66 +80,40 @@ async function updateMetadata(deps) {
                 const data = updates.get(t.mint);
                 if (!data) return Promise.resolve(); // Skip if no data
 
-                // We update 'timestamp' with 'pairCreatedAt' if available to ensure "Age" is accurate
-                const updateQuery = `
-                    UPDATE tokens SET 
-                    volume24h = $1, 
-                    marketCap = $2, 
-                    priceUsd = $3, 
-                    change5m = $4, 
-                    change1h = $5, 
-                    change24h = $6, 
-                    lastUpdated = $7,
-                    timestamp = COALESCE($10, timestamp)
-                    ${data.imageUrl ? ', image = $9' : ''} 
-                    WHERE mint = $8
-                `;
+                // FIX: Dynamic Query Construction using array push for robustness
+                const setClauses = [];
+                const queryParams = [];
 
-                const params = [
-                    data.volume24h, 
-                    data.marketCap, 
-                    data.priceUsd,
-                    data.change5m,
-                    data.change1h,
-                    data.change24h,
-                    Date.now(),
-                    t.mint
-                ];
+                // Helper to add param
+                const addParam = (val) => {
+                    queryParams.push(val);
+                    return `$${queryParams.length}`;
+                };
 
-                if (data.imageUrl) params.push(data.imageUrl); // $9
-                else params.push(null); // Placeholder if we need to keep index alignment, but here we construct query dynamic-ish.
-                // Wait, simplified:
-                // If data.imageUrl is present, params has 9 items. $10 is the timestamp.
-                // If NOT present, params has 8 items. timestamp is $9.
-                // Let's rewrite the query construction to be safer.
-                
-                // RE-WRITING QUERY CONSTRUCTION FOR SAFETY
-                let queryParts = [
-                    "volume24h = $1", "marketCap = $2", "priceUsd = $3", 
-                    "change5m = $4", "change1h = $5", "change24h = $6", 
-                    "lastUpdated = $7"
-                ];
-                let queryParams = [
-                    data.volume24h, data.marketCap, data.priceUsd, 
-                    data.change5m, data.change1h, data.change24h, Date.now()
-                ];
-                let paramIdx = 8;
+                setClauses.push(`volume24h = ${addParam(data.volume24h)}`);
+                setClauses.push(`marketCap = ${addParam(data.marketCap)}`);
+                setClauses.push(`priceUsd = ${addParam(data.priceUsd)}`);
+                setClauses.push(`change5m = ${addParam(data.change5m)}`);
+                setClauses.push(`change1h = ${addParam(data.change1h)}`);
+                setClauses.push(`change24h = ${addParam(data.change24h)}`);
+                setClauses.push(`lastUpdated = ${addParam(Date.now())}`);
 
+                // Conditional updates
                 if (data.imageUrl) {
-                    queryParts.push(`image = $${paramIdx++}`);
-                    queryParams.push(data.imageUrl);
+                    setClauses.push(`image = ${addParam(data.imageUrl)}`);
                 }
-
+                
                 if (data.pairCreatedAt) {
-                    queryParts.push(`timestamp = $${paramIdx++}`);
-                    queryParams.push(data.pairCreatedAt);
+                    // Update timestamp (Age) if we have data from DexScreener
+                    setClauses.push(`timestamp = ${addParam(data.pairCreatedAt)}`);
                 }
 
-                queryParams.push(t.mint); // The WHERE clause param
+                // WHERE clause
+                const whereClause = `WHERE mint = ${addParam(t.mint)}`;
+                
+                const fullQuery = `UPDATE tokens SET ${setClauses.join(', ')} ${whereClause}`;
 
-                const safeQuery = `UPDATE tokens SET ${queryParts.join(', ')} WHERE mint = $${paramIdx}`;
-
-                return db.run(safeQuery, queryParams);
+                return db.run(fullQuery, queryParams);
             });
 
             await Promise.all(updatePromises);
@@ -163,7 +136,7 @@ async function updateMetadata(deps) {
 function start(deps) {
     setTimeout(() => updateMetadata(deps), 5000);
     setInterval(() => updateMetadata(deps), config.METADATA_UPDATE_INTERVAL);
-    logger.info("Metadata updater started (Age Fix Mode)");
+    logger.info("Metadata updater started (Dynamic Query Mode)");
 }
 
 module.exports = { updateMetadata, start };
