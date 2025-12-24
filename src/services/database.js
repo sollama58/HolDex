@@ -10,32 +10,32 @@ async function initDB() {
     if (dbInstance) return dbInstance;
 
     // --- PERSISTENCE CONFIGURATION ---
-    // 1. Docker/Render often use specific paths for persistent disks.
-    // 2. We default to a 'data' folder in the project root.
-    // 3. __dirname is 'src/services', so '../../data' puts it in 'project/data'.
+    // Critical: Ensure we use the absolute path matching the Docker Volume if available.
+    // Dockerfile VOLUME is ["/usr/src/app/data"]
     
-    // Explicit check for Render's persistent disk path if configured, else local.
-    const projectRoot = path.resolve(__dirname, '../../');
-    let dbPath = process.env.DB_PATH;
+    let dbPath;
     
-    if (!dbPath) {
-        // If no env var, use project/data/database.sqlite
+    // 1. Check for Environment Variable Override
+    if (process.env.DB_PATH) {
+        dbPath = process.env.DB_PATH;
+    } 
+    // 2. Check for Standard Docker/Render Mount Path
+    else if (fs.existsSync('/usr/src/app/data')) {
+        console.log("📂 Detected Docker Volume at /usr/src/app/data");
+        dbPath = '/usr/src/app/data/database.sqlite';
+    }
+    // 3. Fallback to Local Relative Path (Dev Mode)
+    else {
+        const projectRoot = path.resolve(__dirname, '../../');
         const dataDir = path.join(projectRoot, 'data');
         if (!fs.existsSync(dataDir)) {
-            console.log(`📂 Creating persistent data directory: ${dataDir}`);
+            console.log(`📂 Creating local data directory: ${dataDir}`);
             fs.mkdirSync(dataDir, { recursive: true });
         }
         dbPath = path.join(dataDir, 'database.sqlite');
-    } else {
-        // If env var provided, ensure its directory exists too
-        const dbDir = path.dirname(dbPath);
-        if (!fs.existsSync(dbDir)) {
-            console.log(`📂 Creating configured DB directory: ${dbDir}`);
-            fs.mkdirSync(dbDir, { recursive: true });
-        }
     }
     
-    console.log(`🔌 Database Path Resolved: ${dbPath}`);
+    console.log(`🔌 Database Full Path: ${dbPath}`);
 
     try {
         dbInstance = await open({
@@ -130,8 +130,6 @@ async function initDB() {
         
     } catch (err) {
         console.error("❌ Fatal Database Initialization Error:", err);
-        // Do NOT throw here if we want the server to try and limp along or restart cleanly, 
-        // but typically a DB fail is fatal.
         throw err;
     }
 

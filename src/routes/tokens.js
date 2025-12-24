@@ -306,8 +306,8 @@ function init(deps) {
                 // 3. Construct "Live" Response
                 // Use fresh Best Pair data if available, otherwise fallback to DB
                 
-                let liveMcap = token.marketcap || 0;
-                let livePrice = token.priceusd || 0;
+                let liveMcap = token.marketcap || token.marketCap || 0;
+                let livePrice = token.priceusd || token.priceUsd || 0;
                 let liveVol = token.volume24h || 0;
                 let liveChange1h = token.change1h || 0;
                 let liveChange24h = token.change24h || 0;
@@ -322,10 +322,13 @@ function init(deps) {
                     liveChange5m = Number(bestPair.priceChange?.m5 || 0);
                 }
 
+                // Handle mixed-case DB columns
+                const hasCommunityUpdate = token.hasCommunityUpdate || token.hascommunityupdate || false;
+                const kScoreVal = token.k_score || 0;
+
                 // Force K-Score Update if 0 and Verified
-                let kScore = token.k_score || 0;
-                if (kScore === 0 && token.hascommunityupdate) {
-                    // Try a quick calc
+                let kScore = kScoreVal;
+                if (kScore === 0 && hasCommunityUpdate) {
                     try { kScore = 50; } catch (e) {} // Fallback
                 }
 
@@ -341,14 +344,19 @@ function init(deps) {
                         change24h: liveChange24h, 
                         change5m: liveChange5m,
                         
-                        userPubkey: token.userpubkey, 
+                        userPubkey: token.userpubkey || token.userPubkey, 
                         timestamp: parseInt(token.timestamp), 
+                        
+                        // FIX: Ensure these accessors match DB Schema casing OR lowercase fallback
                         twitter: token.twitter,
                         website: token.website, 
-                        telegram: token.tweeturl, 
+                        // MAPPING FIX: Telegram is stored in 'tweetUrl' in the DB
+                        telegram: token.tweetUrl || token.tweeturl || token.telegram, 
                         banner: token.banner, 
                         description: token.description,
-                        hasCommunityUpdate: token.hascommunityupdate || false, 
+                        
+                        // Boolean Fix
+                        hasCommunityUpdate: hasCommunityUpdate, 
                         kScore: kScore, 
                         pairs: pairs 
                     } 
@@ -368,14 +376,26 @@ function init(deps) {
             const result = await smartCache(cacheKey, 30, async () => {
                 const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
                 if (!token) return null;
+
+                const hasCommunityUpdate = token.hasCommunityUpdate || token.hascommunityupdate || false;
+
                 return {
                     success: true,
                     data: {
                         name: token.name, ticker: token.ticker, mint: token.mint, description: token.description || "",
                         images: { icon: token.image, banner: token.banner || null },
-                        socials: { twitter: token.twitter || null, telegram: token.tweeturl || null, website: token.website || null },
-                        stats: { kScore: token.k_score || 0, marketCap: token.marketCap || 0, volume24h: token.volume24h || 0, updatedAt: parseInt(token.lastUpdated || Date.now()) },
-                        verified: token.hascommunityupdate || false
+                        socials: { 
+                            twitter: token.twitter || null, 
+                            telegram: token.tweetUrl || token.tweeturl || token.telegram || null, 
+                            website: token.website || null 
+                        },
+                        stats: { 
+                            kScore: token.k_score || 0, 
+                            marketCap: token.marketCap || token.marketcap || 0, 
+                            volume24h: token.volume24h || 0, 
+                            updatedAt: parseInt(token.lastUpdated || Date.now()) 
+                        },
+                        verified: hasCommunityUpdate
                     }
                 };
             });
@@ -432,7 +452,7 @@ function init(deps) {
         try {
             const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [req.params.mint]);
             if (!token) return res.status(404).json({ success: false, error: "Not Found" });
-            res.json({ success: true, token: { mint: token.mint, ticker: token.ticker, twitter: token.twitter, website: token.website, telegram: token.tweeturl, banner: token.banner, description: token.description, kScore: token.k_score }});
+            res.json({ success: true, token: { mint: token.mint, ticker: token.ticker, twitter: token.twitter, website: token.website, telegram: token.tweetUrl || token.tweeturl, banner: token.banner, description: token.description, kScore: token.k_score }});
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
