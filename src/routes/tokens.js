@@ -1,6 +1,6 @@
 /**
  * Token Routes
- * Updated: Payment Verification, Balance Proxy, Description Handling
+ * Updated: Payment Verification with Retry Logic, Balance Proxy, Description Handling
  */
 const express = require('express');
 const axios = require('axios');
@@ -28,6 +28,9 @@ const requireAdmin = (req, res, next) => {
     next();
 };
 
+// Helper for delays
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 function init(deps) {
     const { db } = deps;
 
@@ -39,10 +42,28 @@ function init(deps) {
         const existing = await db.get('SELECT id FROM token_updates WHERE signature = $1', [signature]);
         if (existing) throw new Error("Transaction signature already used");
 
-        // 2. Fetch Transaction from Chain
-        const tx = await solanaConnection.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 });
+        // 2. Fetch Transaction from Chain (With Retry Logic)
+        let tx = null;
+        let attempts = 0;
+        const maxRetries = 5; // Retry up to 5 times (approx 10-15 seconds total)
+
+        while (attempts < maxRetries) {
+            try {
+                tx = await solanaConnection.getParsedTransaction(signature, { 
+                    commitment: 'confirmed',
+                    maxSupportedTransactionVersion: 0 
+                });
+                
+                if (tx) break; // Found it!
+            } catch (err) {
+                console.log(`Attempt ${attempts + 1} failed to fetch tx: ${err.message}`);
+            }
+            
+            attempts++;
+            if (attempts < maxRetries) await sleep(2500); // Wait 2.5s between retries
+        }
         
-        if (!tx) throw new Error("Transaction not found. Please wait 10s and try again.");
+        if (!tx) throw new Error("Transaction propagation timed out. Please try submitting again in 30 seconds.");
         if (tx.meta.err) throw new Error("Transaction failed on-chain.");
 
         // 3. Verify Signer
@@ -57,7 +78,8 @@ function init(deps) {
         const postSol = tx.meta.postBalances[treasuryIndex];
         const solReceived = (postSol - preSol) / 1e9; // Lamports -> SOL
 
-        if (solReceived < config.FEE_SOL * 0.99) {
+        // Allow tiny margin for rent exemption changes or float math
+        if (solReceived < config.FEE_SOL * 0.95) {
             throw new Error(`Insufficient SOL fee. Received: ${solReceived.toFixed(4)}, Required: ${config.FEE_SOL}`);
         }
 
@@ -69,7 +91,7 @@ function init(deps) {
         const postAmt = treasuryTokenPost ? (treasuryTokenPost.uiTokenAmount.uiAmount || 0) : 0;
         const tokensReceived = postAmt - preAmt;
 
-        if (tokensReceived < config.FEE_TOKEN_AMOUNT * 0.99) {
+        if (tokensReceived < config.FEE_TOKEN_AMOUNT * 0.95) {
             throw new Error(`Insufficient Token fee. Received: ${tokensReceived.toFixed(2)}, Required: ${config.FEE_TOKEN_AMOUNT}`);
         }
 
