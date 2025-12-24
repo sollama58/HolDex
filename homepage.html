@@ -9,28 +9,40 @@
     <!-- 1. CRITICAL POLYFILLS (STRICT ORDER)       -->
     <!-- ========================================== -->
     
-    <!-- Load Buffer Library synchronously -->
+    <!-- 1. Load Buffer from a reliable CDN (Browserify Bundle) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/buffer/6.0.3/buffer.min.js"></script>
-    
-    <!-- Immediately assign global polyfills before anything else -->
-    <script>
-        // 1. Polyfill Global
-        window.global = window;
-        
-        // 2. Polyfill Process
-        window.process = { 
-            env: { NODE_ENV: 'production' }, 
-            version: '',
-            nextTick: function(callback) { setTimeout(callback, 0); }
-        };
 
-        // 3. Polyfill Buffer (Explicit Assignment)
-        if (window.buffer && window.buffer.Buffer) {
-            window.Buffer = window.buffer.Buffer;
-            console.log("✅ Polyfills Loaded: Buffer is ready");
-        } else {
-            console.error("❌ CRITICAL: Buffer library failed to load");
+    <!-- 2. Execute Polyfills Immediately -->
+    <script>
+        // Polyfill Global Object (Node.js style)
+        if (typeof window !== 'undefined') {
+            window.global = window;
         }
+
+        // Polyfill Buffer (Defensive Assignment)
+        if (typeof window.Buffer === 'undefined') {
+            if (window.buffer && window.buffer.Buffer) {
+                // Scenario 1: cdnjs export (buffer module containing Buffer class)
+                window.Buffer = window.buffer.Buffer;
+            } else if (window.buffer) {
+                // Scenario 2: Direct export
+                window.Buffer = window.buffer;
+            } else {
+                console.error("❌ CRITICAL: Buffer polyfill failed to load.");
+            }
+        }
+
+        // Polyfill Process (Required by Web3.js)
+        if (typeof window.process === 'undefined') {
+            window.process = { 
+                env: { NODE_ENV: 'production' }, 
+                version: '', 
+                browser: true,
+                nextTick: function(callback) { setTimeout(callback, 0); }
+            };
+        }
+        
+        console.log("✅ Polyfills Active: Buffer =", !!window.Buffer, "| Process =", !!window.process);
     </script>
 
     <!-- ========================================== -->
