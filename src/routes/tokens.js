@@ -1,7 +1,6 @@
 /**
  * Token Routes
- * Updated: Payment Verification with Retry Logic, Balance Proxy, Description Handling
- * Updated: Auto-refresh metadata on single token view
+ * Integrates payment verification, admin tools, and the shared metadata updater.
  */
 const express = require('express');
 const axios = require('axios');
@@ -48,7 +47,7 @@ function init(deps) {
         // 2. Fetch Transaction from Chain (With Retry Logic)
         let tx = null;
         let attempts = 0;
-        const maxRetries = 5; // Retry up to 5 times (approx 10-15 seconds total)
+        const maxRetries = 5;
 
         while (attempts < maxRetries) {
             try {
@@ -57,13 +56,13 @@ function init(deps) {
                     maxSupportedTransactionVersion: 0 
                 });
                 
-                if (tx) break; // Found it!
+                if (tx) break;
             } catch (err) {
                 console.log(`Attempt ${attempts + 1} failed to fetch tx: ${err.message}`);
             }
             
             attempts++;
-            if (attempts < maxRetries) await sleep(2500); // Wait 2.5s between retries
+            if (attempts < maxRetries) await sleep(2500);
         }
         
         if (!tx) throw new Error("Transaction propagation timed out. Please try submitting again in 30 seconds.");
@@ -73,7 +72,7 @@ function init(deps) {
         const signer = tx.transaction.message.accountKeys.find(k => k.signer);
         if (!signer || signer.pubkey.toBase58() !== payerPubkey) throw new Error("Signer public key mismatch.");
 
-        // 4. Verify SOL Transfer to Treasury
+        // 4. Verify SOL Transfer
         const treasuryIndex = tx.transaction.message.accountKeys.findIndex(k => k.pubkey.toBase58() === config.TREASURY_WALLET);
         if (treasuryIndex === -1) throw new Error("Treasury wallet not found in transaction.");
 
@@ -81,12 +80,11 @@ function init(deps) {
         const postSol = tx.meta.postBalances[treasuryIndex];
         const solReceived = (postSol - preSol) / 1e9; // Lamports -> SOL
 
-        // Allow tiny margin for rent exemption changes or float math
         if (solReceived < config.FEE_SOL * 0.95) {
             throw new Error(`Insufficient SOL fee. Received: ${solReceived.toFixed(4)}, Required: ${config.FEE_SOL}`);
         }
 
-        // 5. Verify Token Transfer ($ASDFASDFA) to Treasury
+        // 5. Verify Token Transfer
         const treasuryTokenPre = tx.meta.preTokenBalances.find(b => b.owner === config.TREASURY_WALLET && b.mint === config.FEE_TOKEN_MINT);
         const treasuryTokenPost = tx.meta.postTokenBalances.find(b => b.owner === config.TREASURY_WALLET && b.mint === config.FEE_TOKEN_MINT);
 
@@ -101,16 +99,14 @@ function init(deps) {
         return true;
     }
 
-    // --- NEW: BACKEND PROXY FOR BALANCES ---
+    // --- PROXY ENDPOINTS ---
     router.get('/proxy/balance/:wallet', async (req, res) => {
         try {
             const { wallet } = req.params;
             const tokenMint = req.query.tokenMint || config.FEE_TOKEN_MINT;
-
             if (!isValidPubkey(wallet)) return res.status(400).json({ success: false, error: "Invalid wallet" });
 
             const pubKey = new PublicKey(wallet);
-            
             const [solBalance, tokenAccounts] = await Promise.all([
                 solanaConnection.getBalance(pubKey),
                 solanaConnection.getParsedTokenAccountsByOwner(pubKey, { mint: new PublicKey(tokenMint) })
@@ -128,18 +124,11 @@ function init(deps) {
         }
     });
 
-    // --- PUBLIC ENDPOINTS ---
-
     router.get('/config/fees', (req, res) => {
-        res.json({
-            success: true,
-            solFee: config.FEE_SOL,
-            tokenFee: config.FEE_TOKEN_AMOUNT,
-            tokenMint: config.FEE_TOKEN_MINT,
-            treasury: config.TREASURY_WALLET
-        });
+        res.json({ success: true, solFee: config.FEE_SOL, tokenFee: config.FEE_TOKEN_AMOUNT, tokenMint: config.FEE_TOKEN_MINT, treasury: config.TREASURY_WALLET });
     });
     
+    // --- UPDATE REQUEST ---
     router.post('/request-update', async (req, res) => {
         try {
             const { mint, twitter, website, telegram, banner, description, signature, userPublicKey } = req.body;
@@ -147,34 +136,22 @@ function init(deps) {
             if (!mint || mint.length < 30) return res.status(400).json({ success: false, error: "Invalid Mint" });
             if (!signature || !userPublicKey) return res.status(400).json({ success: false, error: "Payment signature and wallet required" });
 
-            // Sanitize Description
             let safeDesc = null;
-            if (description) {
-                safeDesc = description.substring(0, 250).replace(/<[^>]*>?/gm, ''); // Strip HTML
-            }
+            if (description) safeDesc = description.substring(0, 250).replace(/<[^>]*>?/gm, '');
 
-            try {
-                await verifyPayment(signature, userPublicKey);
-            } catch (payErr) {
-                console.warn(`Payment Verification Failed for ${mint}:`, payErr.message);
-                return res.status(402).json({ success: false, error: payErr.message });
-            }
+            try { await verifyPayment(signature, userPublicKey); } catch (payErr) { return res.status(402).json({ success: false, error: payErr.message }); }
 
             const hasData = (twitter && twitter.length > 0) || (website && website.length > 0) || (telegram && telegram.length > 0) || (banner && banner.length > 0) || (safeDesc && safeDesc.length > 0);
             if (!hasData) return res.status(400).json({ success: false, error: "No profile data provided" });
 
-            await db.run(`
-                INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer) 
-                VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
-            `, [mint, twitter, website, telegram, banner, safeDesc, Date.now(), signature, userPublicKey]);
+            await db.run(`INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)`, 
+                [mint, twitter, website, telegram, banner, safeDesc, Date.now(), signature, userPublicKey]);
 
             res.json({ success: true, message: "Update queued successfully. Payment verified." });
-        } catch (e) { 
-            console.error(e);
-            res.status(500).json({ success: false, error: "Submission failed: " + e.message }); 
-        }
+        } catch (e) { res.status(500).json({ success: false, error: "Submission failed: " + e.message }); }
     });
 
+    // --- PUBLIC READS ---
     router.get('/tokens', async (req, res) => {
         const { sort = 'newest', limit = 100, page = 1, search = '', filter = '' } = req.query;
         const limitVal = Math.min(parseInt(limit) || 100, 100);
@@ -216,6 +193,7 @@ function init(deps) {
 
                 let rows = params.length > 0 ? await db.all(query, params) : await db.all(query);
 
+                // External Search fallback
                 const needsExternalFetch = (filter !== 'verified' && pageVal === 1 && search && search.trim().length > 2 && (rows.length < 5 || isValidPubkey(search.trim())));
                 if (needsExternalFetch) {
                     try {
@@ -284,12 +262,8 @@ function init(deps) {
                         })).sort((a, b) => b.liquidity - a.liquidity);
 
                         // --- AUTO-UPDATE LOGIC ---
-                        // Since we just fetched fresh data, update the database for this specific token
-                        // This ensures the view is always eventually consistent with the latest fetch
+                        // Trigger immediate background update for this token
                         if (pairs.length > 0) {
-                            // Fire and forget (don't await) to not slow down read significantly, 
-                            // or await if we want strict consistency.
-                            // Given smartCache is wrapping this, awaiting is safer.
                             await syncTokenData(deps, mint, pairs);
                         }
                     }
@@ -311,24 +285,16 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "DB Error" }); }
     });
 
-    // --- ADMIN ENDPOINTS (Require Password) ---
+    // --- ADMIN ENDPOINTS ---
     
     router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => {
-        const { mint } = req.body;
-        try {
-            const score = await calculateTokenScore(mint);
-            res.json({ success: true, message: `K-Score Updated: ${score}` });
-        } catch (e) {
-            res.status(500).json({ success: false, error: e.message });
-        }
+        try { res.json({ success: true, message: `K-Score Updated: ${await calculateTokenScore(req.body.mint)}` }); } 
+        catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.get('/admin/updates', requireAdmin, async (req, res) => {
-        try {
-            // Include description in the select
-            const updates = await db.all(`SELECT u.*, t.name, t.ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`);
-            res.json({ success: true, updates });
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+        try { res.json({ success: true, updates: await db.all(`SELECT u.*, t.name, t.ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`) }); } 
+        catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.post('/admin/approve-update', requireAdmin, async (req, res) => {
@@ -338,74 +304,43 @@ function init(deps) {
             if (!update) return res.status(404).json({ success: false, error: 'Request not found' });
             
             const fields = []; const params = []; let idx = 1;
-            
             if (update.twitter) { fields.push(`twitter = $${idx++}`); params.push(update.twitter); }
             if (update.website) { fields.push(`website = $${idx++}`); params.push(update.website); }
             if (update.telegram) { fields.push(`tweetUrl = $${idx++}`); params.push(update.telegram); } 
             if (update.banner) { fields.push(`banner = $${idx++}`); params.push(update.banner); }
             if (update.description) { fields.push(`description = $${idx++}`); params.push(update.description); }
-            
             fields.push(`hasCommunityUpdate = $${idx++}`); params.push(true);
             
-            if (fields.length > 0) { 
-                params.push(update.mint); 
-                await db.run(`UPDATE tokens SET ${fields.join(', ')} WHERE mint = $${idx}`, params); 
-            }
-            
+            if (fields.length > 0) { params.push(update.mint); await db.run(`UPDATE tokens SET ${fields.join(', ')} WHERE mint = $${idx}`, params); }
             await db.run('DELETE FROM token_updates WHERE id = $1', [id]);
             res.json({ success: true, message: 'Approved' });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.post('/admin/reject-update', requireAdmin, async (req, res) => {
-        const { id } = req.body;
-        try { await db.run('DELETE FROM token_updates WHERE id = $1', [id]); res.json({ success: true, message: 'Rejected' });
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+        try { await db.run('DELETE FROM token_updates WHERE id = $1', [req.body.id]); res.json({ success: true, message: 'Rejected' }); } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.get('/admin/token/:mint', requireAdmin, async (req, res) => {
         try {
             const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [req.params.mint]);
             if (!token) return res.status(404).json({ success: false, error: "Not Found" });
-            res.json({ success: true, token: { 
-                mint: token.mint, 
-                ticker: token.ticker, 
-                twitter: token.twitter, 
-                website: token.website, 
-                telegram: token.tweeturl, 
-                banner: token.banner, 
-                description: token.description, // Return desc
-                kScore: token.k_score 
-            }});
+            res.json({ success: true, token: { mint: token.mint, ticker: token.ticker, twitter: token.twitter, website: token.website, telegram: token.tweeturl, banner: token.banner, description: token.description, kScore: token.k_score }});
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.post('/admin/update-token', requireAdmin, async (req, res) => {
         const { mint, twitter, website, telegram, banner, description } = req.body;
-        
         let safeDesc = null;
         if(description) safeDesc = description.substring(0, 250).replace(/<[^>]*>?/gm, '');
-
         try { 
-            await db.run(`
-                UPDATE tokens SET 
-                    twitter = $1, 
-                    website = $2, 
-                    tweetUrl = $3, 
-                    banner = $4, 
-                    description = $5,
-                    hasCommunityUpdate = TRUE 
-                WHERE mint = $6`, 
-                [twitter, website, telegram, banner, safeDesc, mint]
-            ); 
+            await db.run(`UPDATE tokens SET twitter = $1, website = $2, tweetUrl = $3, banner = $4, description = $5, hasCommunityUpdate = TRUE WHERE mint = $6`, [twitter, website, telegram, banner, safeDesc, mint]); 
             res.json({ success: true, message: "Token Updated Successfully" });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.post('/admin/delete-token', requireAdmin, async (req, res) => {
-        const { mint } = req.body;
-        try { await db.run('DELETE FROM tokens WHERE mint = $1', [mint]); res.json({ success: true, message: "Token Deleted Successfully" });
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+        try { await db.run('DELETE FROM tokens WHERE mint = $1', [req.body.mint]); res.json({ success: true, message: "Token Deleted Successfully" }); } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     return router;

@@ -1,12 +1,7 @@
 /**
- * Metadata Updater (Smart Priority Version)
- * Optimizes API usage by prioritizing active tokens over dead ones.
- * Updates: Prices, Volume, Market Cap, AND Creation Timestamp (Age).
- * * UPDATES:
- * - Added robust Retry Logic for API calls (fixes data gaps on 429 errors).
- * - Improved logging for better visibility.
- * - Added safety checks for database values.
- * - Refactored logic to allow single-token updates from API.
+ * Metadata Updater (Global Version)
+ * Runs on ALL tokens in the database to ensure nothing is missed.
+ * Updates: Prices, Volume, Market Cap, Change, and Timestamp.
  */
 const axios = require('axios');
 const config = require('../config/env');
@@ -27,7 +22,6 @@ function getBestPair(pairs, mint) {
     if (!pairs || pairs.length === 0) return null;
 
     // 1. Sort all pairs by liquidity first (descending)
-    // This ensures that if we select a specific DEX, we get the best pool on that DEX.
     const sortedPairs = [...pairs].sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
 
     // 2. Identify specific pools
@@ -35,20 +29,16 @@ function getBestPair(pairs, mint) {
     const raydiumPair = sortedPairs.find(p => p.dexId === 'raydium');
 
     // --- RULE 1: BONK Token Exception ---
-    // If Mint is BONK, always use Raydium
     if (mint === 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263' && raydiumPair) {
         return raydiumPair;
     }
 
     // --- RULE 2: PumpFun Tokens ---
-    // "For PumpFun tokens, always consider the PumpSwap pool."
-    // If a PumpSwap pool exists, we prioritize it regardless of liquidity size compared to others.
     if (pumpPair) {
         return pumpPair;
     }
 
     // --- RULE 3: Default / Other Tokens ---
-    // "For other tokens, consider the largest liquidity pool."
     return sortedPairs[0];
 }
 
@@ -63,7 +53,7 @@ async function fetchWithRetry(url, retries = 3) {
 
             if (isRateLimit) {
                 logger.warn(`⚠️ DexScreener Rate Limit (429). Retrying in 5s... (Attempt ${i + 1}/${retries})`);
-                await delay(5000 * (i + 1)); // Exponential backoff-ish
+                await delay(5000 * (i + 1));
             } else if (e.code === 'ECONNABORTED') {
                 logger.warn(`⚠️ DexScreener Timeout. Retrying... (Attempt ${i + 1}/${retries})`);
                 await delay(2000);
@@ -78,12 +68,10 @@ async function fetchWithRetry(url, retries = 3) {
 }
 
 /**
- * Core logic to update a token in DB based on DexScreener pairs data.
- * Can be used by the batch updater OR the single token view.
+ * Shared logic to update a single token's data in the DB
  */
 async function syncTokenData(deps, mint, pairs) {
     const { db } = deps;
-    
     if (!pairs || pairs.length === 0) return;
 
     // A. Calculate Aggregate Volume (Sum of ALL pools)
@@ -91,7 +79,6 @@ async function syncTokenData(deps, mint, pairs) {
 
     // B. Select "Best Pair" for Price & Changes
     const bestPair = getBestPair(pairs, mint);
-    
     if (!bestPair) return;
 
     // Prepare Data
@@ -108,17 +95,17 @@ async function syncTokenData(deps, mint, pairs) {
     const queryParams = [];
     const addParam = (val) => { queryParams.push(val); return `$${queryParams.length}`; };
 
-    setClauses.push(`volume24h = ${addParam(totalVolume)}`); // Using Aggregate
-    setClauses.push(`marketCap = ${addParam(marketCap)}`);    // Using Best Pair
-    setClauses.push(`priceUsd = ${addParam(priceUsd)}`);      // Using Best Pair
-    setClauses.push(`change5m = ${addParam(change5m)}`);      // Using Best Pair
-    setClauses.push(`change1h = ${addParam(change1h)}`);      // Using Best Pair
-    setClauses.push(`change24h = ${addParam(change24h)}`);    // Using Best Pair
+    setClauses.push(`volume24h = ${addParam(totalVolume)}`);
+    setClauses.push(`marketCap = ${addParam(marketCap)}`);
+    setClauses.push(`priceUsd = ${addParam(priceUsd)}`);
+    setClauses.push(`change5m = ${addParam(change5m)}`);
+    setClauses.push(`change1h = ${addParam(change1h)}`);
+    setClauses.push(`change24h = ${addParam(change24h)}`);
     setClauses.push(`lastUpdated = ${addParam(Date.now())}`);
 
     if (imageUrl) setClauses.push(`image = ${addParam(imageUrl)}`);
     
-    // Only update timestamp if it looks valid and isn't wildly in the future
+    // Only update timestamp if it looks valid
     if (pairCreatedAt && pairCreatedAt < Date.now() + 86400000) {
         setClauses.push(`timestamp = ${addParam(pairCreatedAt)}`);
     }
@@ -131,39 +118,30 @@ async function syncTokenData(deps, mint, pairs) {
 
 async function updateMetadata(deps) {
     const { db, globalState } = deps;
-    logger.info("⏱️ Metadata Updater: Starting cycle...");
-
-    // 1. Select candidates (New or Active or High Cap)
-    const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-    const yesterday = Date.now() - ONE_DAY_MS;
-
+    
+    // 1. Select ALL tokens (Removed all filters)
     let tokens = [];
     try {
-        tokens = await db.all(`
-            SELECT mint FROM tokens 
-            WHERE timestamp > $1 
-            OR volume24h > 1000 
-            OR marketCap > 5000
-        `, [yesterday]);
+        tokens = await db.all(`SELECT mint FROM tokens`);
     } catch (e) {
-        logger.error("❌ DB Error fetching update list", { error: e.message });
+        logger.error("❌ DB Error fetching token list", { error: e.message });
         return;
     }
 
     if (!tokens || tokens.length === 0) {
-        logger.info("ℹ️ Metadata Updater: No active tokens found matching criteria (Age < 24h OR Vol > 1k OR MC > 5k).");
+        logger.info("ℹ️ Metadata Updater: No tokens in database to update.");
         return;
     }
 
-    logger.info(`🔄 Metadata Updater: Refreshing ${tokens.length} active tokens...`);
+    logger.info(`🔄 Metadata Updater: Starting update for ALL ${tokens.length} tokens...`);
 
-    const chunks = chunkArray(tokens, 30);
-    
+    const chunks = chunkArray(tokens, 30); // 30 is safe for DexScreener
+    let processed = 0;
+
     for (const chunk of chunks) {
         const mints = chunk.map(t => t.mint).join(',');
         
         try {
-            // Using the new Retry Logic here
             const dexRes = await fetchWithRetry(`https://api.dexscreener.com/latest/dex/tokens/${mints}`);
             const pairsData = dexRes.data?.pairs || [];
             
@@ -183,7 +161,8 @@ async function updateMetadata(deps) {
 
             await Promise.all(updatePromises);
             
-            // Respect Rate Limits
+            processed += chunk.length;
+            // Respect Rate Limits (approx 50-60 requests per minute)
             await delay(1100);
 
         } catch (e) {
@@ -192,7 +171,7 @@ async function updateMetadata(deps) {
     }
 
     globalState.lastBackendUpdate = Date.now();
-    logger.info("✅ Metadata Updater: Cycle complete.");
+    logger.info(`✅ Metadata Updater: Completed. Updated ${processed}/${tokens.length} tokens.`);
 }
 
 function start(deps) {
@@ -200,7 +179,7 @@ function start(deps) {
     setTimeout(() => updateMetadata(deps), 5000);
     // Then run on interval
     setInterval(() => updateMetadata(deps), config.METADATA_UPDATE_INTERVAL);
-    logger.info(`🚀 Metadata updater started (Interval: ${config.METADATA_UPDATE_INTERVAL / 60000}m)`);
+    logger.info(`🚀 Metadata Updater started on ALL tokens (Interval: ${config.METADATA_UPDATE_INTERVAL / 60000}m)`);
 }
 
 module.exports = { updateMetadata, start, syncTokenData };
