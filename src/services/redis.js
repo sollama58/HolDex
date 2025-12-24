@@ -1,57 +1,44 @@
-/**
- * Redis Service
- * Uses 'ioredis' for robust connection handling and features.
- */
 const Redis = require('ioredis');
 const config = require('../config/env');
-const logger = require('./logger');
 
-let redisClient = null;
+let client = null;
 
-function initRedis() {
-    if (redisClient) return redisClient;
+async function initRedis() {
+    if (client) return client;
 
+    // Use REDIS_URL from env (Docker service name 'redis' resolves to IP automatically)
+    // Fallback to localhost for local development
+    const redisUrl = config.REDIS_URL || 'redis://localhost:6379';
+    
+    console.log(`🔌 Connecting to Redis at ${redisUrl}...`);
+    
     try {
-        // Support for REDIS_URL string (e.g. from Render/Heroku)
-        if (config.REDIS_URL) {
-            redisClient = new Redis(config.REDIS_URL, {
-                maxRetriesPerRequest: 3,
-                retryStrategy: (times) => {
-                    const delay = Math.min(times * 50, 2000);
-                    return delay;
-                }
-            });
-        } else {
-            // Fallback for local dev if no URL provided
-            redisClient = new Redis({
-                host: 'localhost',
-                port: 6379
-            });
-        }
-
-        redisClient.on('connect', () => {
-            logger.info('✅ Redis Connected');
+        client = new Redis(redisUrl, {
+            maxRetriesPerRequest: 3,
+            retryStrategy(times) {
+                const delay = Math.min(times * 50, 2000);
+                return delay;
+            }
         });
 
-        redisClient.on('error', (err) => {
-            logger.error('❌ Redis Error:', err);
+        client.on('connect', () => console.log('✅ Redis Connected'));
+        client.on('error', (err) => {
+            // Suppress connection refused logs in dev if redis isn't running
+            if (err.code === 'ECONNREFUSED') {
+                console.warn('⚠️ Redis Connection Refused (Is Redis running?)');
+            } else {
+                console.warn('⚠️ Redis Error:', err.message);
+            }
         });
-
-        return redisClient;
     } catch (e) {
-        logger.error('Failed to initialize Redis:', e);
-        return null;
+        console.error("Failed to initialize Redis client", e);
     }
+
+    return client;
 }
 
-function getRedis() {
-    if (!redisClient) {
-        return initRedis();
-    }
-    return redisClient;
+function getClient() {
+    return client;
 }
 
-module.exports = {
-    initRedis,
-    getRedis
-};
+module.exports = { initRedis, getClient };

@@ -2,7 +2,9 @@ const sqlite3 = require('sqlite3').verbose();
 const { open } = require('sqlite');
 const path = require('path');
 const config = require('../config/env');
-const redisClient = require('./redis').getClient();
+
+// FIXED: Removed the top-level require causing the crash.
+// const redisClient = require('./redis').getClient(); 
 
 let dbInstance = null;
 
@@ -81,7 +83,9 @@ async function initDB() {
 
 // ... existing wrapper functions for caching ...
 async function smartCache(key, durationSeconds, fetchFunction) {
-    const redis = require('./redis').getClient();
+    // Dynamic require to prevent loading order issues
+    const { getClient } = require('./redis'); 
+    const redis = getClient();
     
     // Safety check for Redis connection
     if (redis && redis.status === 'ready') {
