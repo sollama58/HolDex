@@ -1148,9 +1148,17 @@
             const mcap = Number(t.marketCap || t.marketcap || 0);
             const vol = Number(t.volume24h || t.volume24h || 0);
             
-            const kScoreDisplay = isVerified 
-                ? `${score}${score > 50 ? ' 💎' : ''}` 
-                : '<span title="Community Update Required" class="text-gray-500">🔒</span>';
+            // LOGIC FIX: Show Clock if Verified but Score is 0
+            let kScoreDisplay;
+            if (isVerified) {
+                if (score > 0) {
+                     kScoreDisplay = `${score}${score > 50 ? ' 💎' : ''}`;
+                } else {
+                     kScoreDisplay = `<span title="Calculating Score..." class="animate-pulse">🕒</span>`;
+                }
+            } else {
+                 kScoreDisplay = '<span title="Community Update Required" class="text-gray-500">🔒</span>';
+            }
 
             return `
             <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group">
@@ -1265,13 +1273,22 @@
                 
                 const kEl = document.getElementById('stat-kscore');
                 if(kEl) {
-                    if (isVerified && score > 0) {
-                        kEl.innerText = score;
-                        kEl.classList.remove('text-gray-500'); kEl.classList.add('text-[#fb923c]');
-                        kEl.title = "Conviction Score";
+                    // LOGIC FIX: Show Clock if Verified but Score is 0
+                    if (isVerified) {
+                        if (score > 0) {
+                            kEl.innerText = score;
+                            kEl.classList.remove('text-gray-500'); kEl.classList.add('text-[#fb923c]');
+                            kEl.title = "Conviction Score";
+                        } else {
+                            // Pending State
+                            kEl.innerText = '🕒';
+                            kEl.classList.remove('text-gray-500', 'text-[#fb923c]'); kEl.classList.add('text-[#fb923c]', 'animate-pulse');
+                            kEl.title = "Calculating Score...";
+                        }
                     } else {
+                        // Unverified State
                         kEl.innerText = '🔒';
-                        kEl.classList.remove('text-[#fb923c]'); kEl.classList.add('text-gray-500'); 
+                        kEl.classList.remove('text-[#fb923c]', 'animate-pulse'); kEl.classList.add('text-gray-500'); 
                         kEl.title = "Requires Community Update";
                     }
                 }

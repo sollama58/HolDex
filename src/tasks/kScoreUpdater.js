@@ -27,7 +27,7 @@ async function computeScoreInternal(mint, dbData = null) {
     try {
         // 1. Verification / Community Update (Max 50 pts)
         // If we have DB data, check verification status
-        if (dbData && dbData.hasCommunityUpdate) {
+        if (dbData && (dbData.hasCommunityUpdate || dbData.hascommunityupdate)) {
             score += 50;
         } else {
             // If no DB data passed, we assume base score or 0
@@ -38,8 +38,9 @@ async function computeScoreInternal(mint, dbData = null) {
 
         // 2. Volume (Max 20 pts)
         if (dbData) {
-            if (dbData.volume24h > 100000) score += 20;
-            else if (dbData.volume24h > 10000) score += 10;
+            const vol = dbData.volume24h || 0;
+            if (vol > 100000) score += 20;
+            else if (vol > 10000) score += 10;
         }
 
         // 3. Holder Analysis (RPC) - Max 20 pts
@@ -55,13 +56,42 @@ async function computeScoreInternal(mint, dbData = null) {
         }
 
         // 4. Age/Market Cap Boost (Max 10 pts)
-        if (dbData && dbData.marketCap > 100000) score += 10;
+        if (dbData) {
+             const mcap = dbData.marketCap || dbData.marketcap || 0;
+             if (mcap > 100000) score += 10;
+        }
 
         return Math.min(score, 100);
         
     } catch (e) {
         console.error(`Score Calc Error ${mint}:`, e.message);
         return 10; // Default low score on error
+    }
+}
+
+/**
+ * Updates a single token's score immediately in the DB.
+ * Used by Admin Approval route.
+ */
+async function updateSingleToken(deps, mint) {
+    const { db } = deps;
+    try {
+        const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+        if (!token) return;
+
+        logger.info(`⚡ Immediate K-Score Calc triggered for ${token.ticker}`);
+        const score = await computeScoreInternal(mint, token);
+
+        await db.run(`
+            UPDATE tokens 
+            SET k_score = $1, last_k_calc = $2 
+            WHERE mint = $3
+        `, [score, Date.now(), mint]);
+        
+        return score;
+    } catch (e) {
+        logger.error(`Failed single update for ${mint}:`, e);
+        return 0;
     }
 }
 
@@ -119,10 +149,8 @@ function start(deps) {
 
 module.exports = { 
     start, 
+    updateSingleToken, // Exported for Routes
     calculateTokenScore: async (mint) => {
-        // Calls the real logic now instead of returning 50
-        // Note: This won't have the 'dbData' (volume/verification) unless we fetch it here,
-        // but it will at least perform the RPC holder check.
         return await computeScoreInternal(mint, null);
     }
 };

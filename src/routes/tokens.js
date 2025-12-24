@@ -8,10 +8,7 @@ const { Connection, PublicKey } = require('@solana/web3.js');
 const { isValidPubkey } = require('../utils/solana');
 const { smartCache, saveTokenData } = require('../services/database');
 const config = require('../config/env');
-const { calculateTokenScore } = require('../tasks/kScoreUpdater'); 
-// Import getBestPair helper to ensure consistent logic
-// We need to export it from metadataUpdater.js or redefine it here. 
-// Redefining simpler version for safety to avoid circular deps if structure is messy.
+const kScoreUpdater = require('../tasks/kScoreUpdater'); 
 const { syncTokenData } = require('../tasks/metadataUpdater'); 
 
 const router = express.Router();
@@ -326,11 +323,9 @@ function init(deps) {
                 const hasCommunityUpdate = token.hasCommunityUpdate || token.hascommunityupdate || false;
                 const kScoreVal = token.k_score || 0;
 
-                // Force K-Score Update if 0 and Verified
+                // REMOVED: Simulation logic.
+                // We now want strict truth. If it is 0, it is 0 (which UI renders as clock).
                 let kScore = kScoreVal;
-                if (kScore === 0 && hasCommunityUpdate) {
-                    try { kScore = 50; } catch (e) {} // Fallback
-                }
 
                 return { 
                     success: true, 
@@ -407,8 +402,9 @@ function init(deps) {
     router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => {
         const { mint } = req.body;
         try {
-            await db.run(`UPDATE tokens SET last_k_calc = 0 WHERE mint = $1`, [mint]); 
-            res.json({ success: true, message: `K-Score Refresh Queued for ${mint}` });
+            // Trigger calculation immediately
+            await kScoreUpdater.updateSingleToken(deps, mint);
+            res.json({ success: true, message: `K-Score Refresh Complete for ${mint}` });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
@@ -438,9 +434,13 @@ function init(deps) {
                 params.push(update.mint); 
                 await db.run(`UPDATE tokens SET ${fields.join(', ')} WHERE mint = $${idx}`, params); 
             }
+            
             await db.run('DELETE FROM token_updates WHERE id = $1', [id]);
-            await db.run(`UPDATE tokens SET last_k_calc = 0 WHERE mint = $1`, [update.mint]);
-            res.json({ success: true, message: 'Approved & K-Score Queued' });
+            
+            // --- NEW: Calculate K-Score IMMEDIATELY ---
+            await kScoreUpdater.updateSingleToken(deps, update.mint);
+            
+            res.json({ success: true, message: 'Approved & K-Score Calculated' });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
@@ -462,8 +462,9 @@ function init(deps) {
         if(description) safeDesc = description.substring(0, 250).replace(/<[^>]*>?/gm, '');
         try { 
             await db.run(`UPDATE tokens SET twitter = $1, website = $2, tweetUrl = $3, banner = $4, description = $5, hasCommunityUpdate = TRUE WHERE mint = $6`, [twitter, website, telegram, banner, safeDesc, mint]); 
-            await db.run(`UPDATE tokens SET last_k_calc = 0 WHERE mint = $1`, [mint]);
-            res.json({ success: true, message: "Token Updated Successfully" });
+            // Trigger calculation immediately
+            await kScoreUpdater.updateSingleToken(deps, mint);
+            res.json({ success: true, message: "Token Updated & Recalculated" });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
