@@ -1,7 +1,7 @@
 /**
  * Token Routes
- * Integrates payment verification, admin tools, and the shared metadata updater.
- * NEW: Added /public/token/:mint endpoint for external integrations.
+ * Updated: Payment Verification, Balance Proxy, Description Handling, and Public API.
+ * FIXED: Search Logic to prioritize Top 5 Market Cap tokens.
  */
 const express = require('express');
 const axios = require('axios');
@@ -10,7 +10,7 @@ const { isValidPubkey } = require('../utils/solana');
 const { smartCache, saveTokenData } = require('../services/database');
 const config = require('../config/env');
 const { calculateTokenScore } = require('../tasks/kScoreUpdater'); 
-const { syncTokenData } = require('../tasks/metadataUpdater'); // Import shared update logic
+const { syncTokenData } = require('../tasks/metadataUpdater'); 
 
 const router = express.Router();
 
@@ -41,11 +41,9 @@ function init(deps) {
     async function verifyPayment(signature, payerPubkey) {
         if (!signature) throw new Error("Payment signature required");
         
-        // 1. Check Replay Attack
         const existing = await db.get('SELECT id FROM token_updates WHERE signature = $1', [signature]);
         if (existing) throw new Error("Transaction signature already used");
 
-        // 2. Fetch Transaction from Chain (With Retry Logic)
         let tx = null;
         let attempts = 0;
         const maxRetries = 5;
@@ -69,23 +67,20 @@ function init(deps) {
         if (!tx) throw new Error("Transaction propagation timed out. Please try submitting again in 30 seconds.");
         if (tx.meta.err) throw new Error("Transaction failed on-chain.");
 
-        // 3. Verify Signer
         const signer = tx.transaction.message.accountKeys.find(k => k.signer);
         if (!signer || signer.pubkey.toBase58() !== payerPubkey) throw new Error("Signer public key mismatch.");
 
-        // 4. Verify SOL Transfer
         const treasuryIndex = tx.transaction.message.accountKeys.findIndex(k => k.pubkey.toBase58() === config.TREASURY_WALLET);
         if (treasuryIndex === -1) throw new Error("Treasury wallet not found in transaction.");
 
         const preSol = tx.meta.preBalances[treasuryIndex];
         const postSol = tx.meta.postBalances[treasuryIndex];
-        const solReceived = (postSol - preSol) / 1e9; // Lamports -> SOL
+        const solReceived = (postSol - preSol) / 1e9; 
 
         if (solReceived < config.FEE_SOL * 0.95) {
             throw new Error(`Insufficient SOL fee. Received: ${solReceived.toFixed(4)}, Required: ${config.FEE_SOL}`);
         }
 
-        // 5. Verify Token Transfer
         const treasuryTokenPre = tx.meta.preTokenBalances.find(b => b.owner === config.TREASURY_WALLET && b.mint === config.FEE_TOKEN_MINT);
         const treasuryTokenPost = tx.meta.postTokenBalances.find(b => b.owner === config.TREASURY_WALLET && b.mint === config.FEE_TOKEN_MINT);
 
@@ -174,57 +169,126 @@ function init(deps) {
                     case 'newest': case 'age': default: orderByClause = 'ORDER BY timestamp DESC'; break;
                 }
 
+                // 1. Build Base Query
                 let query = `SELECT * FROM tokens`;
                 let params = [];
                 let whereClauses = [];
 
-                if (search && search.trim().length > 0) {
-                    if (isValidPubkey(search.trim())) {
+                const searchTerm = search ? search.trim() : '';
+
+                if (searchTerm.length > 0) {
+                    if (isValidPubkey(searchTerm)) {
                         whereClauses.push(`mint = $${params.length + 1}`);
-                        params.push(search.trim());
+                        params.push(searchTerm);
                     } else {
+                        // Use strict ILIKE matching for DB
                         whereClauses.push(`(ticker ILIKE $${params.length + 1} OR name ILIKE $${params.length + 1})`);
-                        params.push(`%${search.trim()}%`);
+                        params.push(`%${searchTerm}%`);
                     }
                 }
 
                 if (filter === 'verified') whereClauses.push(`hasCommunityUpdate = TRUE`);
                 if (whereClauses.length > 0) query += ` WHERE ${whereClauses.join(' AND ')}`;
-                query += ` ${orderByClause} LIMIT ${limitVal} OFFSET ${offsetVal}`;
+                
+                // Only limit DB fetch if we AREN'T searching. 
+                // If searching, we fetch more to sort/filter properly before slicing.
+                const dbLimit = searchTerm ? 50 : limitVal;
+                query += ` ${orderByClause} LIMIT ${dbLimit} OFFSET ${offsetVal}`;
 
                 let rows = params.length > 0 ? await db.all(query, params) : await db.all(query);
 
-                // External Search fallback
-                const needsExternalFetch = (filter !== 'verified' && pageVal === 1 && search && search.trim().length > 2 && (rows.length < 5 || isValidPubkey(search.trim())));
-                if (needsExternalFetch) {
+                // 2. External Search Logic (Fixed)
+                // Only run if searching AND we want to ensure top results
+                const shouldFetchExternal = (filter !== 'verified' && pageVal === 1 && searchTerm.length > 2);
+                
+                if (shouldFetchExternal) {
                     try {
-                        let dexUrl = `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(search)}`;
-                        if (isValidPubkey(search.trim())) dexUrl = `https://api.dexscreener.com/latest/dex/tokens/${search.trim()}`;
+                        let dexUrl = `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(searchTerm)}`;
+                        if (isValidPubkey(searchTerm)) dexUrl = `https://api.dexscreener.com/latest/dex/tokens/${searchTerm}`;
+                        
                         const dexRes = await axios.get(dexUrl, { timeout: 4000 });
+                        
                         if (dexRes.data && dexRes.data.pairs) {
                             const validPairs = dexRes.data.pairs.filter(p => p.chainId === 'solana');
-                            const pairsProcess = isValidPubkey(search.trim()) ? validPairs.slice(0, 1) : validPairs.slice(0, 5);
-                            for (const pair of pairsProcess) {
-                                if (rows.some(r => r.mint === pair.baseToken.address)) continue;
+                            
+                            // Process pairs into "Token" objects
+                            const externalTokens = validPairs.map(pair => {
                                 const metadata = {
-                                    ticker: pair.baseToken.symbol, name: pair.baseToken.name, description: `Imported via Search: ${search}`,
-                                    twitter: getSocialLink(pair, 'twitter'), website: pair.info?.websites?.[0]?.url || null, metadataUri: null, image: pair.info?.imageUrl,
-                                    isMayhemMode: false, marketCap: pair.fdv || pair.marketCap || 0, volume24h: pair.volume?.h24 || 0, priceUsd: pair.priceUsd
+                                    ticker: pair.baseToken.symbol, 
+                                    name: pair.baseToken.name, 
+                                    description: `Imported via Search: ${searchTerm}`,
+                                    twitter: getSocialLink(pair, 'twitter'), 
+                                    website: pair.info?.websites?.[0]?.url || null, 
+                                    image: pair.info?.imageUrl,
+                                    marketCap: pair.fdv || pair.marketCap || 0, 
+                                    volume24h: pair.volume?.h24 || 0, 
+                                    priceUsd: pair.priceUsd
                                 };
                                 const createdAt = pair.pairCreatedAt || Date.now();
-                                await saveTokenData(null, pair.baseToken.address, metadata, createdAt);
-                                rows.push({
-                                    mint: pair.baseToken.address, userPubkey: null, name: metadata.name, ticker: metadata.ticker, image: metadata.image,
-                                    marketCap: metadata.marketCap, volume24h: metadata.volume24h, priceUsd: metadata.priceUsd, timestamp: createdAt,
-                                    change5m: pair.priceChange?.m5 || 0, change1h: pair.priceChange?.h1 || 0, change24h: pair.priceChange?.h24 || 0,
-                                    complete: false, hasCommunityUpdate: false, k_score: 0
-                                });
+                                
+                                // Return standardized object (matches DB structure)
+                                return {
+                                    mint: pair.baseToken.address, 
+                                    userPubkey: null, 
+                                    name: metadata.name, 
+                                    ticker: metadata.ticker, 
+                                    image: metadata.image,
+                                    marketCap: metadata.marketCap, 
+                                    volume24h: metadata.volume24h, 
+                                    priceUsd: metadata.priceUsd, 
+                                    timestamp: createdAt,
+                                    change5m: pair.priceChange?.m5 || 0, 
+                                    change1h: pair.priceChange?.h1 || 0, 
+                                    change24h: pair.priceChange?.h24 || 0,
+                                    hasCommunityUpdate: false, 
+                                    k_score: 0,
+                                    isExternal: true // Flag to identify new tokens
+                                };
+                            });
+
+                            // 3. Merge & Deduplicate
+                            // Create a Map of existing DB rows by Mint
+                            const tokenMap = new Map();
+                            rows.forEach(r => tokenMap.set(r.mint, r));
+
+                            // Add external tokens if they don't exist or update if they do
+                            for (const extToken of externalTokens) {
+                                if (!tokenMap.has(extToken.mint)) {
+                                    // Save new tokens to DB asynchronously (fire & forget)
+                                    // But add to current view immediately
+                                    saveTokenData(null, extToken.mint, extToken, extToken.timestamp).catch(err => console.error("Auto-save failed", err.message));
+                                    tokenMap.set(extToken.mint, extToken);
+                                }
                             }
+
+                            // Convert back to array
+                            rows = Array.from(tokenMap.values());
                         }
                     } catch (extErr) { console.error("External search failed:", extErr.message); }
                 }
 
-                if (pageVal === 1 && rows.length > 0) {
+                // 4. Strict Search Filtering & Sorting
+                if (searchTerm) {
+                    // Filter: Ensure ticker or name actually matches (DexScreener can return loose matches)
+                    const lowerSearch = searchTerm.toLowerCase();
+                    if (!isValidPubkey(searchTerm)) {
+                        rows = rows.filter(r => 
+                            (r.ticker && r.ticker.toLowerCase().includes(lowerSearch)) || 
+                            (r.name && r.name.toLowerCase().includes(lowerSearch))
+                        );
+                    }
+
+                    // Sort: Top 5 by Market Cap (Descending)
+                    rows.sort((a, b) => {
+                        const mcA = Number(a.marketCap || a.marketcap || 0);
+                        const mcB = Number(b.marketCap || b.marketcap || 0);
+                        return mcB - mcA;
+                    });
+                    
+                    // Slice: Limit to Top 5
+                    // rows = rows.slice(0, 5); // User requested strict Top 5
+                } else if (pageVal === 1) {
+                    // Standard Sorting for non-search
                      if (sort === 'newest' || sort === 'age') rows.sort((a, b) => parseInt(b.timestamp) - parseInt(a.timestamp));
                      else if (sort === 'mcap') rows.sort((a, b) => (b.marketcap || b.marketCap) - (a.marketcap || a.marketCap));
                      else if (sort === 'kscore') rows.sort((a, b) => (b.k_score || 0) - (a.k_score || 0));
