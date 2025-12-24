@@ -1,13 +1,13 @@
 /**
  * Token Routes
- * Updated: Admin K-Score Refresh Endpoint
+ * Updated: Payment Verification for Updates
  */
 const express = require('express');
 const axios = require('axios');
+const { Connection, PublicKey } = require('@solana/web3.js');
 const { isValidPubkey } = require('../utils/solana');
 const { smartCache, saveTokenData } = require('../services/database');
 const config = require('../config/env');
-// Import the new calculator function
 const { calculateTokenScore } = require('../tasks/kScoreUpdater'); 
 const router = express.Router();
 
@@ -28,18 +28,98 @@ const requireAdmin = (req, res, next) => {
 function init(deps) {
     const { db } = deps;
 
+    // --- PAYMENT VERIFICATION LOGIC ---
+    async function verifyPayment(signature, payerPubkey) {
+        if (!signature) throw new Error("Payment signature required");
+        
+        // 1. Check Replay Attack
+        const existing = await db.get('SELECT id FROM token_updates WHERE signature = $1', [signature]);
+        if (existing) throw new Error("Transaction signature already used");
+
+        // 2. Fetch Transaction from Chain
+        const connection = new Connection(config.SOLANA_RPC_URL, 'confirmed');
+        const tx = await connection.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 });
+        
+        if (!tx) throw new Error("Transaction not found. Please wait 10s and try again.");
+        if (tx.meta.err) throw new Error("Transaction failed on-chain.");
+
+        // 3. Verify Signer
+        const signer = tx.transaction.message.accountKeys.find(k => k.signer);
+        if (!signer || signer.pubkey.toBase58() !== payerPubkey) throw new Error("Signer public key mismatch.");
+
+        // 4. Verify SOL Transfer to Treasury
+        const treasuryIndex = tx.transaction.message.accountKeys.findIndex(k => k.pubkey.toBase58() === config.TREASURY_WALLET);
+        if (treasuryIndex === -1) throw new Error("Treasury wallet not found in transaction.");
+
+        const preSol = tx.meta.preBalances[treasuryIndex];
+        const postSol = tx.meta.postBalances[treasuryIndex];
+        const solReceived = (postSol - preSol) / 1e9; // Lamports -> SOL
+
+        // Allow tiny margin for error if needed, but strict is better
+        if (solReceived < config.FEE_SOL * 0.99) {
+            throw new Error(`Insufficient SOL fee. Received: ${solReceived.toFixed(4)}, Required: ${config.FEE_SOL}`);
+        }
+
+        // 5. Verify Token Transfer ($ASDFASDFA) to Treasury
+        // We look at Token Balance changes for the Treasury Wallet and specific Mint
+        const treasuryTokenPre = tx.meta.preTokenBalances.find(b => b.owner === config.TREASURY_WALLET && b.mint === config.FEE_TOKEN_MINT);
+        const treasuryTokenPost = tx.meta.postTokenBalances.find(b => b.owner === config.TREASURY_WALLET && b.mint === config.FEE_TOKEN_MINT);
+
+        // UI Amount is the human readable float (e.g. 5000.00)
+        const preAmt = treasuryTokenPre ? (treasuryTokenPre.uiTokenAmount.uiAmount || 0) : 0;
+        const postAmt = treasuryTokenPost ? (treasuryTokenPost.uiTokenAmount.uiAmount || 0) : 0;
+        const tokensReceived = postAmt - preAmt;
+
+        if (tokensReceived < config.FEE_TOKEN_AMOUNT * 0.99) {
+            throw new Error(`Insufficient Token fee. Received: ${tokensReceived.toFixed(2)}, Required: ${config.FEE_TOKEN_AMOUNT}`);
+        }
+
+        return true;
+    }
+
     // --- PUBLIC ENDPOINTS ---
-    // (Existing endpoints omitted for brevity, they remain unchanged)
+
+    // PUBLIC: Get Config (for frontend to know fees)
+    router.get('/config/fees', (req, res) => {
+        res.json({
+            success: true,
+            solFee: config.FEE_SOL,
+            tokenFee: config.FEE_TOKEN_AMOUNT,
+            tokenMint: config.FEE_TOKEN_MINT,
+            treasury: config.TREASURY_WALLET
+        });
+    });
     
+    // UPDATED: Request Update with Payment
     router.post('/request-update', async (req, res) => {
         try {
-            const { mint, twitter, website, telegram, banner } = req.body;
+            const { mint, twitter, website, telegram, banner, signature, userPublicKey } = req.body;
+            
             if (!mint || mint.length < 30) return res.status(400).json({ success: false, error: "Invalid Mint" });
+            if (!signature || !userPublicKey) return res.status(400).json({ success: false, error: "Payment signature and wallet required" });
+
+            // Verify Payment
+            try {
+                await verifyPayment(signature, userPublicKey);
+            } catch (payErr) {
+                console.warn(`Payment Verification Failed for ${mint}:`, payErr.message);
+                return res.status(402).json({ success: false, error: payErr.message });
+            }
+
             const hasData = (twitter && twitter.length > 0) || (website && website.length > 0) || (telegram && telegram.length > 0) || (banner && banner.length > 0);
-            if (!hasData) return res.status(400).json({ success: false, error: "No data provided" });
-            await db.run(`INSERT INTO token_updates (mint, twitter, website, telegram, banner, submittedAt, status) VALUES ($1, $2, $3, $4, $5, $6, 'pending')`, [mint, twitter, website, telegram, banner, Date.now()]);
-            res.json({ success: true, message: "Update queued" });
-        } catch (e) { res.status(500).json({ success: false, error: "Submission failed" }); }
+            if (!hasData) return res.status(400).json({ success: false, error: "No profile data provided" });
+
+            // Insert Record with Payment Info
+            await db.run(`
+                INSERT INTO token_updates (mint, twitter, website, telegram, banner, submittedAt, status, signature, payer) 
+                VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
+            `, [mint, twitter, website, telegram, banner, Date.now(), signature, userPublicKey]);
+
+            res.json({ success: true, message: "Update queued successfully. Payment verified." });
+        } catch (e) { 
+            console.error(e);
+            res.status(500).json({ success: false, error: "Submission failed: " + e.message }); 
+        }
     });
 
     router.get('/tokens', async (req, res) => {
@@ -165,9 +245,8 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "DB Error" }); }
     });
 
-    // --- ADMIN ENDPOINTS ---
+    // --- ADMIN ENDPOINTS (Require Password) ---
     
-    // NEW: Force Refresh K-Score
     router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => {
         const { mint } = req.body;
         try {
@@ -180,6 +259,7 @@ function init(deps) {
 
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         try {
+            // Updated to fetch payment info too (optional)
             const updates = await db.all(`SELECT u.*, t.name, t.ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`);
             res.json({ success: true, updates });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }

@@ -4,6 +4,7 @@
  * 1. Added 'k_score' and 'last_k_calc' columns.
  * 2. Fixed 'tweetUrl' (Telegram) data loss in saveTokenData.
  * 3. Fixed timestamp not updating on conflict in saveTokenData.
+ * 4. Updated 'token_updates' to store payment signature and payer.
  */
 const { Pool } = require('pg');
 const config = require('../config/env');
@@ -99,10 +100,10 @@ async function initDB() {
             );
         `);
         
-        // Migration: Add columns if missing
         try { await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS k_score DOUBLE PRECISION DEFAULT 0;`); } catch (e) {}
         try { await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS last_k_calc BIGINT DEFAULT 0;`); } catch (e) {}
 
+        // Token Updates Queue (Modified for Payment)
         await pool.query(`
             CREATE TABLE IF NOT EXISTS token_updates (
                 id SERIAL PRIMARY KEY,
@@ -112,9 +113,15 @@ async function initDB() {
                 telegram TEXT,
                 banner TEXT,
                 submittedAt BIGINT,
-                status TEXT DEFAULT 'pending' 
+                status TEXT DEFAULT 'pending',
+                signature TEXT UNIQUE, 
+                payer TEXT 
             );
         `);
+
+        // Migration for existing tables in case they exist without new columns
+        try { await pool.query(`ALTER TABLE token_updates ADD COLUMN IF NOT EXISTS signature TEXT UNIQUE;`); } catch (e) {}
+        try { await pool.query(`ALTER TABLE token_updates ADD COLUMN IF NOT EXISTS payer TEXT;`); } catch (e) {}
 
         try {
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score DESC)`); 
@@ -138,8 +145,6 @@ async function saveTokenData(pubkey, mint, metadata, customTimestamp = null) {
     try {
         const ts = customTimestamp || Date.now();
 
-        // FIX: Added 'tweetUrl' handling for Telegram links
-        // FIX: Added 'timestamp = EXCLUDED.timestamp' to update Age if we find a better source
         await pool.query(`
             INSERT INTO tokens (userPubkey, mint, ticker, name, description, twitter, website, metadataUri, image, isMayhemMode, marketCap, timestamp, tweetUrl)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
@@ -165,7 +170,7 @@ async function saveTokenData(pubkey, mint, metadata, customTimestamp = null) {
             metadata.isMayhemMode ? true : false,
             metadata.marketCap || 0, 
             ts, 
-            metadata.telegram // Maps to tweetUrl
+            metadata.telegram 
         ]);
     } catch (e) {
         logger.error("Save Token Error", { error: e.message });
