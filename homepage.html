@@ -5,12 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HolDex | The Terminal Fire Explorer</title>
     
-    <!-- 1. BUFFER POLYFILL (CRITICAL: Must be first) -->
+    <!-- 1. ESSENTIAL POLYFILLS (MUST BE FIRST) -->
+    <!-- Buffer Polyfill -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/buffer/6.0.3/buffer.min.js"></script>
     <script>
-        // Expose Buffer globally for Solana libraries
-        if (typeof window !== 'undefined' && typeof window.Buffer === 'undefined') {
-            window.Buffer = window.buffer.Buffer;
+        // CRITICAL: Manually assign Buffer and global vars for Solana libs
+        window.global = window;
+        window.process = { env: { NODE_ENV: 'production' } };
+        
+        if (typeof window.Buffer === 'undefined') {
+            if (window.buffer && window.buffer.Buffer) {
+                window.Buffer = window.buffer.Buffer;
+                console.log("✅ Buffer polyfill injected");
+            } else {
+                console.error("❌ Buffer polyfill failed to load");
+            }
         }
     </script>
 
