@@ -9,58 +9,69 @@
     <!-- 1. CRITICAL POLYFILLS (STRICT ORDER)       -->
     <!-- ========================================== -->
     
-    <!-- 1. Load Buffer from a reliable CDN (Browserify Bundle) -->
+    <!-- 1. Load Buffer from a reliable CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/buffer/6.0.3/buffer.min.js"></script>
 
     <!-- 2. Execute Polyfills Immediately -->
     <script>
-        // Polyfill Global Object (Node.js style) - Essential for Web3.js
-        window.global = window;
-
-        // Polyfill Buffer (Aggressive Assignment)
-        // Checks multiple export locations from the CDN
-        if (typeof window.Buffer === 'undefined') {
-            if (window.buffer && window.buffer.Buffer) {
-                window.Buffer = window.buffer.Buffer;
-            } else if (window.buffer) {
-                window.Buffer = window.buffer;
-            } else {
-                console.error("❌ CRITICAL: Buffer polyfill failed to load.");
+        (function() {
+            // Polyfill Global Object
+            if (typeof global === 'undefined') {
+                window.global = window;
             }
-        }
-        
-        // Ensure global.Buffer is also set (some libs check global.Buffer instead of window.Buffer)
-        if (window.global && !window.global.Buffer) {
-            window.global.Buffer = window.Buffer;
-        }
+            if (typeof globalThis === 'undefined') {
+                window.globalThis = window;
+            }
 
-        // Polyfill Process (Required by Web3.js env checks)
-        if (typeof window.process === 'undefined') {
-            window.process = { 
-                env: { NODE_ENV: 'production' }, 
-                version: '', 
-                browser: true,
-                nextTick: function(callback) { setTimeout(callback, 0); }
-            };
-        }
-        
-        console.log("✅ Polyfills Active: Buffer =", !!window.Buffer, "| Process =", !!window.process);
+            // Polyfill Buffer (Aggressive Search)
+            function initBuffer() {
+                if (typeof window.Buffer === 'undefined') {
+                    if (window.buffer && window.buffer.Buffer) {
+                        window.Buffer = window.buffer.Buffer;
+                    } else if (window.buffer && typeof window.buffer.from === 'function') {
+                        window.Buffer = window.buffer;
+                    }
+                }
+                
+                // Sync global and window
+                if (window.Buffer) {
+                    window.global.Buffer = window.Buffer;
+                    window.globalThis.Buffer = window.Buffer;
+                    console.log("✅ Buffer polyfilled successfully.");
+                } else {
+                    console.warn("⚠️ Buffer not found in window.buffer yet.");
+                }
+            }
+
+            // Initialize immediately
+            initBuffer();
+            
+            // Retry on load just in case CDN was slow
+            window.addEventListener('load', initBuffer);
+
+            // Polyfill Process
+            if (typeof window.process === 'undefined') {
+                window.process = { 
+                    env: { NODE_ENV: 'production' }, 
+                    version: 'v16.0.0', 
+                    browser: true,
+                    nextTick: function(callback) { setTimeout(callback, 0); }
+                };
+                window.global.process = window.process;
+            }
+        })();
     </script>
 
     <!-- ========================================== -->
     <!-- 2. SOLANA LIBRARIES                        -->
     <!-- ========================================== -->
     <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
-    <!-- SPL Token library removed - Using manual instruction construction -->
-
+    
     <!-- ========================================== -->
     <!-- 3. STYLES & UI LIBS                        -->
     <!-- ========================================== -->
-    <!-- Tailwind -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     
     <script>
@@ -77,7 +88,7 @@
         }
     </script>
     <style>
-        body { background-color: #2a1005; color: #ffedd5; font-family: 'Comic Neue', cursive; min-height: 100vh; font-size: 14px; overflow-x: hidden; padding-bottom: 50px; }
+        body { background-color: #2a1005; color: #ffedd5; font-family: 'Comic Neue', cursive; min-height: 100vh; font-size: 14px; overflow-x: hidden; padding-bottom: 60px; }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: #2a1005; }
         ::-webkit-scrollbar-thumb { background: #7c2d12; border-radius: 4px; border: 1px solid #451a03; }
@@ -121,7 +132,8 @@
         .stat-value { font-size: 18px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
         .modal-overlay { position: fixed; inset: 0; background: rgba(15, 5, 2, 0.95); backdrop-filter: blur(5px); z-index: 100; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
         .modal-overlay.open { opacity: 1; pointer-events: auto; }
-        .status-bar { position: fixed; bottom: 0; left: 0; width: 100%; background: #451a03; border-top: 2px solid #ea580c; padding: 0 24px; height: 50px; display: flex; justify-content: space-between; align-items: center; z-index: 50; transition: background 0.2s; box-shadow: 0 -5px 20px rgba(234, 88, 12, 0.2); }
+        .status-bar { position: fixed; bottom: 0; left: 0; width: 100%; background: #451a03; border-top: 2px solid #ea580c; padding: 0 16px; height: 50px; display: flex; justify-content: space-between; align-items: center; z-index: 50; transition: background 0.2s; box-shadow: 0 -5px 20px rgba(234, 88, 12, 0.2); }
+        .status-bar:hover { background: #582206; }
         .pulse-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 8px; border: 1px solid rgba(255,255,255,0.2); }
         .pulse-dot.green { background: #22c55e; box-shadow: 0 0 12px #22c55e; animation: pulseGlow 2s infinite; }
         .pulse-dot.red { background: #ef4444; box-shadow: 0 0 12px #ef4444; }
@@ -159,8 +171,7 @@
         .wallet-btn:hover { border-color: #ea580c; background: #451a03; transform: translateX(5px); }
         .wallet-icon { width: 32px; height: 32px; border-radius: 8px; }
         
-        /* New Status Bar specific styles */
-        .status-bar-btn { padding: 6px 12px; border-radius: 6px; border: 1px solid #7c2d12; background: #2a1005; color: #9a3412; font-size: 11px; font-weight: bold; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px; }
+        .status-bar-btn { padding: 6px 12px; border-radius: 6px; border: 1px solid #7c2d12; background: #2a1005; color: #9a3412; font-size: 11px; font-weight: bold; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
         .status-bar-btn:hover { border-color: #ea580c; color: #fb923c; background: #451a03; }
         .status-bar-btn.connected { border-color: #22c55e; color: #22c55e; background: rgba(34, 197, 94, 0.1); }
     </style>
@@ -285,6 +296,7 @@
                         <h2 class="text-2xl font-bold text-white mb-1 font-sans">Update Token</h2>
                         <p class="text-[#9a3412] text-xs">Connect wallet to pay fees & submit updates.</p>
                     </div>
+                    <!-- Button here is optional as we have the global one, but kept for context -->
                     <button onclick="openWalletModal()" class="connect-btn">
                         <i data-lucide="wallet" width="18"></i> <span>Connect Wallet</span>
                     </button>
@@ -465,23 +477,23 @@
 
 <div class="status-bar">
     <div class="flex items-center gap-3" onclick="toggleStatusModal()">
-        <span class="text-[#9a3412] text-xs font-bold tracking-wider uppercase">System Status</span>
-        <div class="h-4 w-[2px] bg-[#7c2d12]"></div>
+        <span class="text-[#9a3412] text-xs font-bold tracking-wider uppercase hidden md:inline">System Status</span>
+        <div class="h-4 w-[2px] bg-[#7c2d12] hidden md:block"></div>
         <div class="flex items-center gap-2">
             <span id="bar-text" class="text-xs font-bold text-[#ea580c] font-mono">ONLINE</span>
             <span id="bar-dot" class="pulse-dot green"></span>
         </div>
-        <div class="h-4 w-[2px] bg-[#7c2d12] ml-2"></div>
-        <div class="flex items-center gap-2 ml-1">
-            <span class="text-[#9a3412] text-xs font-bold uppercase">Last Sync:</span>
+        <div class="h-4 w-[2px] bg-[#7c2d12] ml-2 hidden sm:block"></div>
+        <div class="flex items-center gap-2 ml-1 hidden sm:flex">
+            <span class="text-[#9a3412] text-xs font-bold uppercase">Sync:</span>
             <span id="last-sync-time" class="text-xs font-mono text-[#fb923c]">--:--:--</span>
         </div>
     </div>
     
-    <!-- New Wallet Status in Bottom Bar -->
+    <!-- New Wallet Status in Bottom Bar (Visible Everywhere) -->
     <div class="flex items-center gap-3">
         <button id="statusbar-wallet-btn" onclick="openWalletModal()" class="status-bar-btn">
-            <i data-lucide="wallet" width="14"></i> <span>Connect Wallet</span>
+            <i data-lucide="wallet" width="14"></i> <span class="hidden sm:inline">Connect Wallet</span><span class="sm:hidden">Wallet</span>
         </button>
         <div class="text-[#fb923c] hover:text-white transition transform hover:scale-110 cursor-pointer" onclick="toggleStatusModal()">
             <i data-lucide="activity" width="20"></i>
@@ -563,7 +575,8 @@
     // Wallet & Fee State
     let walletAddress = null;
     let walletProvider = null; // 'phantom' or 'solflare'
-    let feeConfig = { solFee: 0, tokenFee: 0, tokenMint: '', treasury: '' };
+    // Default config in case fetch fails
+    let feeConfig = { solFee: 0.1, tokenFee: 1000, tokenMint: '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump', treasury: 'H8sMJqC9X8rJ8W1a6VjFq7X5gZ5fX9x8x8x8x8x8x8' };
 
     // Initialize
     window.onload = async () => {
@@ -583,7 +596,12 @@
                 document.getElementById('fee-sol').innerText = `${data.solFee} SOL`;
                 document.getElementById('fee-token').innerText = `${data.tokenFee.toLocaleString()} TOKENS`;
             }
-        } catch (e) { console.error("Fee fetch failed", e); }
+        } catch (e) { 
+            console.error("Fee fetch failed", e);
+            // Default UI update if fetch fails
+            document.getElementById('fee-sol').innerText = `${feeConfig.solFee} SOL`;
+            document.getElementById('fee-token').innerText = `${feeConfig.tokenFee.toLocaleString()} TOKENS`;
+        }
     }
 
     // --- Wallet Logic ---
@@ -660,7 +678,7 @@
             submitBtn.disabled = true;
             
             // Status Bar
-            statusBtn.innerHTML = `<i data-lucide="wallet" width="14"></i> <span>Connect Wallet</span>`;
+            statusBtn.innerHTML = `<i data-lucide="wallet" width="14"></i> <span class="hidden sm:inline">Connect Wallet</span><span class="sm:hidden">Wallet</span>`;
             statusBtn.classList.remove('connected');
         }
         lucide.createIcons();
@@ -711,6 +729,14 @@
             statusDiv.innerText = "❌ Error: Banner URL must end in .jpg, .png, .gif, or .webp";
             statusDiv.classList.remove('hidden', 'text-green-500'); statusDiv.classList.add('text-red-500'); return;
         }
+        
+        // --- RUNTIME BUFFER CHECK ---
+        // Ensure Buffer is present right before transaction construction
+        if (typeof window.Buffer === 'undefined' && window.buffer) {
+             console.log("Re-patching Buffer before TX...");
+             if(window.buffer.Buffer) window.Buffer = window.buffer.Buffer;
+             else window.Buffer = window.buffer;
+        }
 
         statusDiv.innerText = "Processing Payment...";
         statusDiv.classList.remove('hidden', 'text-red-500', 'text-green-500'); statusDiv.classList.add('text-[#ea580c]');
@@ -720,6 +746,10 @@
             const connection = new solanaWeb3.Connection("https://rpc.ankr.com/solana", "confirmed");
             const TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
             const SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID = new solanaWeb3.PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
+
+            // Ensure valid keys
+            if (!feeConfig.treasury || feeConfig.treasury.length < 32) throw new Error("Invalid Treasury Address");
+            if (!feeConfig.tokenMint || feeConfig.tokenMint.length < 32) throw new Error("Invalid Token Mint Config");
 
             const fromPubkey = new solanaWeb3.PublicKey(walletAddress);
             const toPubkey = new solanaWeb3.PublicKey(feeConfig.treasury);
