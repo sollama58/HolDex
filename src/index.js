@@ -3,50 +3,51 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const http = require('http');
+const rateLimit = require('express-rate-limit');
 const config = require('./config/env');
 const { initDB, getDB } = require('./services/database');
 const { initRedis } = require('./services/redis');
 const tokenRoutes = require('./routes/tokens');
-const metadataUpdater = require('./tasks/metadataUpdater');
-const newTokenListener = require('./tasks/newTokenListener');
-const kScoreUpdater = require('./tasks/kScoreUpdater'); // NEW IMPORT
+const { calculateTokenScore } = require('./tasks/kScoreUpdater'); // Keep for on-demand admin endpoint
 
 const globalState = {
-    asdfTop50Holders: new Set(),
-    userExpectedAirdrops: new Map(),
     lastBackendUpdate: Date.now()
 };
 
+// Rate Limiter: 200 requests per 15 minutes per IP
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, 
+    max: 200, 
+    standardHeaders: true, 
+    legacyHeaders: false,
+    message: { success: false, error: "Too many requests, please try again later." }
+});
+
 async function startServer() {
-    console.log('💎 Starting HolDex Backend...');
+    console.log('💎 Starting HolDex API Server...');
     await initDB();
     const redis = initRedis();
 
     const app = express();
+    
+    // Security & Middleware
     app.use(helmet());
     app.use(cors({ origin: config.CORS_ORIGINS }));
-    app.use(express.json());
+    app.use(express.json({ limit: '10kb' })); 
+    app.use(limiter); 
 
     const deps = { db: getDB(), redis, globalState, devKeypair: null };
 
     app.use('/api', tokenRoutes.init(deps));
-    app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: Date.now() }));
+    
+    app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: Date.now(), uptime: process.uptime(), role: 'API' }));
 
-    // --- START BACKGROUND TASKS ---
-    console.log('🚀 Starting Background Tasks...');
-    
-    // 1. Listen for new/migrated tokens via DexScreener (The main feed)
-    newTokenListener.start(deps);  
-    
-    // 2. Keep prices/volume fresh for existing tokens
-    metadataUpdater.start(deps);   
-    
-    // 3. Update K-Scores every 6 hours
-    kScoreUpdater.start(deps);
+    // NOTE: Background tasks are now run by 'src/worker.js' to decouple load.
+    // The API server only handles HTTP requests.
 
     const server = http.createServer(app);
     server.listen(config.PORT, () => {
-        console.log(`✅ Server running on port ${config.PORT}`);
+        console.log(`✅ API Server running on port ${config.PORT}`);
     });
 }
 

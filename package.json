@@ -1,34 +1,28 @@
 {
-  "name": "asdev-launcher-backend",
-  "version": "1.1.0",
-  "description": "Solana Token Launcher Backend",
+  "name": "holdex-backend",
+  "version": "2.1.0",
+  "description": "Solana Token Explorer Backend",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "worker": "node src/worker.js",
+    "dev": "concurrently \"nodemon src/index.js\" \"nodemon src/worker.js\""
   },
-  "keywords": [
-    "solana",
-    "pumpfun",
-    "token",
-    "launcher"
-  ],
-  "author": "ASDev",
-  "license": "ISC",
   "dependencies": {
-    "@solana/web3.js": "^1.91.0",
-    "axios": "^1.6.8",
+    "@solana/web3.js": "^1.87.6",
+    "axios": "^1.6.2",
     "bs58": "^5.0.0",
+    "concurrently": "^8.2.2",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
     "helmet": "^7.1.0",
-    "ioredis": "^5.4.1",
-    "pg": "^8.11.5",
-    "tweetnacl": "^1.0.3"
+    "pg": "^8.11.3",
+    "redis": "^4.6.10",
+    "winston": "^3.11.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0"
+    "nodemon": "^3.0.2"
   }
 }
