@@ -1,6 +1,6 @@
 /**
  * Token Routes
- * Updated: Robust Persistence for History and Transactions
+ * Updated: Enhanced Search Logic with Auto-Indexing
  */
 const express = require('express');
 const axios = require('axios');
@@ -155,13 +155,14 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "Submission failed: " + e.message }); }
     });
 
-    // --- SEARCH / TOKENS LIST ---
+    // --- SEARCH / TOKENS LIST (UPDATED SEARCH LOGIC) ---
     router.get('/tokens', async (req, res) => {
         const { sort = 'newest', limit = 100, page = 1, search = '', filter = '' } = req.query;
         const limitVal = Math.min(parseInt(limit) || 100, 100);
         const pageVal = Math.max(parseInt(page) || 1, 1);
         const offsetVal = (pageVal - 1) * limitVal;
-        const cacheKey = `api:tokens:${sort}:${limitVal}:${pageVal}:${search.trim() || 'all'}:${filter}`;
+        const searchTerm = search ? search.trim() : '';
+        const cacheKey = `api:tokens:${sort}:${limitVal}:${pageVal}:${searchTerm || 'all'}:${filter}`;
 
         try {
             const result = await smartCache(cacheKey, 5, async () => {
@@ -177,76 +178,121 @@ function init(deps) {
                     case 'newest': case 'age': default: orderByClause = 'ORDER BY timestamp DESC'; break;
                 }
 
-                let query = `SELECT * FROM tokens`;
-                let params = [];
-                let whereClauses = [];
-                const searchTerm = search ? search.trim() : '';
+                let rows = [];
+                let externalTokens = [];
+                const isAddressSearch = isValidPubkey(searchTerm);
 
+                // 1. LOCAL SEARCH
                 if (searchTerm.length > 0) {
-                    if (isValidPubkey(searchTerm)) {
-                        whereClauses.push(`mint = $${params.length + 1}`);
-                        params.push(searchTerm);
+                    if (isAddressSearch) {
+                        // Direct Mint Search
+                        rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [searchTerm]);
                     } else {
-                        whereClauses.push(`(ticker ILIKE $${params.length + 1} OR name ILIKE $${params.length + 1})`);
-                        params.push(`%${searchTerm}%`);
+                        // Text Search
+                        const searchPattern = `%${searchTerm}%`;
+                        rows = await db.all(`SELECT * FROM tokens WHERE (ticker ILIKE $1 OR name ILIKE $1) ${filter === 'verified' ? 'AND hasCommunityUpdate = TRUE' : ''} ${orderByClause} LIMIT 20`, [searchPattern]);
                     }
+                } else {
+                    // Default browse view
+                    let query = `SELECT * FROM tokens`;
+                    let where = [];
+                    if (filter === 'verified') where.push(`hasCommunityUpdate = TRUE`);
+                    if (where.length > 0) query += ` WHERE ${where.join(' AND ')}`;
+                    query += ` ${orderByClause} LIMIT ${limitVal} OFFSET ${offsetVal}`;
+                    rows = await db.all(query);
                 }
 
-                if (filter === 'verified') whereClauses.push(`hasCommunityUpdate = TRUE`);
-                if (whereClauses.length > 0) query += ` WHERE ${whereClauses.join(' AND ')}`;
+                // 2. EXTERNAL SEARCH FALLBACK
+                // We only search externally if:
+                // a) The user is searching (searchTerm exists)
+                // b) We are NOT filtering for locally verified tokens only
+                // c) We have fewer than 5 results OR it's a specific address search that returned nothing
                 
-                const dbLimit = searchTerm ? 20 : limitVal;
-                query += ` ${orderByClause} LIMIT ${dbLimit} OFFSET ${offsetVal}`;
+                const shouldFetchExternal = searchTerm.length > 0 && filter !== 'verified' && (rows.length < 5 || (isAddressSearch && rows.length === 0));
 
-                let rows = params.length > 0 ? await db.all(query, params) : await db.all(query);
-
-                const shouldFetchExternal = (searchTerm.length > 2 && filter !== 'verified');
-                
                 if (shouldFetchExternal) {
-                    if (rows.length < 5) {
-                        try {
-                            let dexUrl = `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(searchTerm)}`;
-                            if (isValidPubkey(searchTerm)) dexUrl = `https://api.dexscreener.com/latest/dex/tokens/${searchTerm}`;
+                    try {
+                        let dexUrl = '';
+                        if (isAddressSearch) {
+                             dexUrl = `https://api.dexscreener.com/latest/dex/tokens/${searchTerm}`;
+                        } else {
+                             dexUrl = `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(searchTerm)}`;
+                        }
+
+                        const dexRes = await axios.get(dexUrl, { timeout: 4500 });
+                        
+                        if (dexRes.data && dexRes.data.pairs) {
+                            // Filter for Solana only
+                            const validPairs = dexRes.data.pairs.filter(p => p.chainId === 'solana');
                             
-                            const dexRes = await axios.get(dexUrl, { timeout: 4000 });
+                            // Map to our Token Schema
+                            const foundTokens = validPairs.map(pair => {
+                                // Create robust metadata object
+                                const metadata = {
+                                    ticker: pair.baseToken.symbol, 
+                                    name: pair.baseToken.name, 
+                                    description: `Imported via Search: ${searchTerm}`,
+                                    twitter: getSocialLink(pair, 'twitter'), 
+                                    website: pair.info?.websites?.[0]?.url || null, 
+                                    image: pair.info?.imageUrl,
+                                    marketCap: Number(pair.fdv || pair.marketCap || 0), 
+                                    volume24h: Number(pair.volume?.h24 || 0), 
+                                    priceUsd: Number(pair.priceUsd || 0)
+                                };
+                                const createdAt = pair.pairCreatedAt || Date.now();
+                                
+                                return {
+                                    mint: pair.baseToken.address, 
+                                    userPubkey: null, 
+                                    name: metadata.name, 
+                                    ticker: metadata.ticker, 
+                                    image: metadata.image,
+                                    marketCap: metadata.marketCap, 
+                                    volume24h: metadata.volume24h, 
+                                    priceUsd: metadata.priceUsd, 
+                                    timestamp: createdAt,
+                                    change5m: pair.priceChange?.m5 || 0, 
+                                    change1h: pair.priceChange?.h1 || 0, 
+                                    change24h: pair.priceChange?.h24 || 0,
+                                    hasCommunityUpdate: false, 
+                                    k_score: 0, 
+                                    isExternal: true 
+                                };
+                            });
+
+                            // Deduplicate: Don't add if we already have it in 'rows' or 'externalTokens'
+                            // We use a Map to ensure unique mints
+                            const uniqueMap = new Map();
+                            rows.forEach(r => uniqueMap.set(r.mint, r));
                             
-                            if (dexRes.data && dexRes.data.pairs) {
-                                const validPairs = dexRes.data.pairs.filter(p => p.chainId === 'solana');
-                                const externalTokens = validPairs.map(pair => {
-                                    const metadata = {
-                                        ticker: pair.baseToken.symbol, name: pair.baseToken.name, description: `Imported via Search: ${searchTerm}`,
-                                        twitter: getSocialLink(pair, 'twitter'), website: pair.info?.websites?.[0]?.url || null, image: pair.info?.imageUrl,
-                                        marketCap: Number(pair.fdv || pair.marketCap || 0), volume24h: Number(pair.volume?.h24 || 0), priceUsd: Number(pair.priceUsd || 0)
-                                    };
-                                    const createdAt = pair.pairCreatedAt || Date.now();
-                                    return {
-                                        mint: pair.baseToken.address, userPubkey: null, name: metadata.name, ticker: metadata.ticker, image: metadata.image,
-                                        marketCap: metadata.marketCap, volume24h: metadata.volume24h, priceUsd: metadata.priceUsd, timestamp: createdAt,
-                                        change5m: pair.priceChange?.m5 || 0, change1h: pair.priceChange?.h1 || 0, change24h: pair.priceChange?.h24 || 0,
-                                        hasCommunityUpdate: false, k_score: 0, isExternal: true 
-                                    };
-                                });
-                                const tokenMap = new Map();
-                                rows.forEach(r => tokenMap.set(r.mint, r));
-                                for (const extToken of externalTokens) {
-                                    if (!tokenMap.has(extToken.mint)) {
-                                        tokenMap.set(extToken.mint, extToken);
-                                        saveTokenData(db, extToken.mint, extToken, extToken.timestamp).catch(err => console.error("Search Indexing Error:", err.message));
-                                    }
+                            for (const t of foundTokens) {
+                                if (!uniqueMap.has(t.mint)) {
+                                    uniqueMap.set(t.mint, t);
+                                    // FIRE & FORGET: Save to DB for future indexing
+                                    saveTokenData(db, t.mint, t, t.timestamp).catch(err => console.error("Search Indexing Error:", err.message));
                                 }
-                                rows = Array.from(tokenMap.values());
                             }
-                        } catch (extErr) { console.error("External search failed:", extErr.message); }
+                            
+                            // Re-convert map to array
+                            rows = Array.from(uniqueMap.values());
+                        }
+                    } catch (extErr) { 
+                        console.error("External search failed:", extErr.message); 
                     }
                 }
 
+                // 3. FINAL SORT & LIMIT
                 if (searchTerm) {
-                    const lowerSearch = searchTerm.toLowerCase();
-                    if (!isValidPubkey(searchTerm)) {
-                        rows = rows.filter(r => (r.ticker && r.ticker.toLowerCase().includes(lowerSearch)) || (r.name && r.name.toLowerCase().includes(lowerSearch)));
+                    if (isAddressSearch) {
+                        // If searching by Address, strict match only
+                         rows = rows.filter(r => r.mint === searchTerm);
+                    } else {
+                        // If Text search, sort by liquidity/mcap to bubble up best matches
+                         rows.sort((a, b) => (b.marketCap || 0) - (a.marketCap || 0));
                     }
-                    rows.sort((a, b) => (b.marketCap || 0) - (a.marketCap || 0));
-                    rows = rows.slice(0, 5);
+                    // Ensure we return exactly what was requested (up to 5 for previews, or list limit)
+                    // If it was a CA search, we likely have 1 result. If text, up to 5 best.
+                    if (rows.length > 5) rows = rows.slice(0, 5); 
                 }
 
                 return {
