@@ -6,36 +6,35 @@
     <title>HolDex | The Terminal Fire Explorer</title>
     
     <!-- ========================================== -->
-    <!-- 1. CRITICAL INFRASTRUCTURE (STRICT ORDER)  -->
+    <!-- 1. CRITICAL POLYFILLS (STRICT ORDER)       -->
     <!-- ========================================== -->
     
-    <!-- A. Polyfill Global Scope first -->
+    <!-- Load Buffer Library synchronously -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/buffer/6.0.3/buffer.min.js"></script>
+    
+    <!-- Immediately assign global polyfills before anything else -->
     <script>
+        // 1. Polyfill Global
         window.global = window;
+        
+        // 2. Polyfill Process
         window.process = { 
             env: { NODE_ENV: 'production' }, 
             version: '',
             nextTick: function(callback) { setTimeout(callback, 0); }
         };
-    </script>
 
-    <!-- B. Load Buffer Library Synchronously -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/buffer/6.0.3/buffer.min.js"></script>
-
-    <!-- C. Force Bind Buffer to Global Scope -->
-    <script>
-        if (typeof window.buffer !== 'undefined' && typeof window.buffer.Buffer !== 'undefined') {
+        // 3. Polyfill Buffer (Explicit Assignment)
+        if (window.buffer && window.buffer.Buffer) {
             window.Buffer = window.buffer.Buffer;
-            window.global.Buffer = window.buffer.Buffer; // Extra safety for some internal checks
-            console.log("✅ Buffer Polyfill: Active and Bound.");
+            console.log("✅ Polyfills Loaded: Buffer is ready");
         } else {
-            console.error("❌ CRITICAL: Buffer library failed to load.");
-            alert("Critical Error: Core libraries failed to load. Please refresh the page.");
+            console.error("❌ CRITICAL: Buffer library failed to load");
         }
     </script>
 
     <!-- ========================================== -->
-    <!-- 2. SOLANA LIBRARIES (DEPEND ON BUFFER)     -->
+    <!-- 2. SOLANA LIBRARIES (LOAD AFTER POLYFILLS) -->
     <!-- ========================================== -->
     <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
     <script src="https://unpkg.com/@solana/spl-token@0.4.6/lib/index.iife.min.js"></script>
@@ -43,8 +42,11 @@
     <!-- ========================================== -->
     <!-- 3. STYLES & UI LIBS                        -->
     <!-- ========================================== -->
+    <!-- Tailwind -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     
     <script>
@@ -462,7 +464,7 @@
     </div>
 </div>
 
-<!-- STATUS MODAL -->
+<!-- STATUS MODAL (Unchanged content, just placeholder for structure) -->
 <div id="status-modal" class="modal-overlay" onclick="toggleStatusModal()">
     <div class="bg-[#2a1005] border-4 border-[#ea580c] p-8 rounded-2xl max-w-sm w-full text-center shadow-[0_0_50px_rgba(234,88,12,0.5)] relative" onclick="event.stopPropagation()">
         <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleStatusModal()"><i data-lucide="x" width="24"></i></button>
