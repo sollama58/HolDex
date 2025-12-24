@@ -17,6 +17,36 @@ function chunkArray(array, size) {
     return result;
 }
 
+// Helper to determine the best pair based on user rules
+function getBestPair(pairs, mint) {
+    if (!pairs || pairs.length === 0) return null;
+
+    // 1. Sort all pairs by liquidity first (descending)
+    // This ensures that if we select a specific DEX, we get the best pool on that DEX.
+    const sortedPairs = [...pairs].sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
+
+    // 2. Identify specific pools
+    const pumpPair = sortedPairs.find(p => p.dexId === 'pump');
+    const raydiumPair = sortedPairs.find(p => p.dexId === 'raydium');
+
+    // --- RULE 1: BONK Token Exception ---
+    // If Mint is BONK, always use Raydium
+    if (mint === 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263' && raydiumPair) {
+        return raydiumPair;
+    }
+
+    // --- RULE 2: PumpFun Tokens ---
+    // "For PumpFun tokens, always consider the PumpSwap pool."
+    // If a PumpSwap pool exists, we prioritize it regardless of liquidity size compared to others.
+    if (pumpPair) {
+        return pumpPair;
+    }
+
+    // --- RULE 3: Default / Other Tokens ---
+    // "For other tokens, consider the largest liquidity pool."
+    return sortedPairs[0];
+}
+
 async function updateMetadata(deps) {
     const { db, globalState } = deps;
 
@@ -52,92 +82,62 @@ async function updateMetadata(deps) {
                 { timeout: 8000 }
             );
 
-            const pairs = dexRes.data?.pairs || [];
-            const updates = new Map();
+            const pairsData = dexRes.data?.pairs || [];
             
-            for (const pair of pairs) {
+            // Group pairs by Mint ID
+            const pairsByMint = {};
+            for (const pair of pairsData) {
                 const mint = pair.baseToken.address;
-                const existing = updates.get(mint);
-                
-                // Safe values (default to 0 to prevent comparison errors)
-                const pairLiq = pair.liquidity?.usd || 0;
-                const pairVol = pair.volume?.h24 || 0;
-                
-                if (!existing) {
-                    updates.set(mint, {
-                        marketCap: pair.fdv || pair.marketCap || 0,
-                        volume24h: pairVol, // Start with this pair's volume
-                        priceUsd: pair.priceUsd || 0,
-                        liquidity: pairLiq,
-                        imageUrl: pair.info?.imageUrl,
-                        change5m: pair.priceChange?.m5 || 0,
-                        change1h: pair.priceChange?.h1 || 0,
-                        change24h: pair.priceChange?.h24 || 0,
-                        pairCreatedAt: pair.pairCreatedAt 
-                    });
-                } else {
-                    // 1. Aggregate Volume (Sum volume from all pools)
-                    existing.volume24h += pairVol;
-
-                    // 2. Select Largest Liquidity Pool for Price/Stats
-                    // We check strictly if this pair is bigger than the stored one
-                    if (pairLiq > existing.liquidity) {
-                        existing.liquidity = pairLiq;
-                        existing.marketCap = pair.fdv || pair.marketCap || 0;
-                        existing.priceUsd = pair.priceUsd || 0;
-                        existing.imageUrl = pair.info?.imageUrl || existing.imageUrl;
-                        existing.change5m = pair.priceChange?.m5 || 0;
-                        existing.change1h = pair.priceChange?.h1 || 0;
-                        existing.change24h = pair.priceChange?.h24 || 0;
-                        existing.pairCreatedAt = pair.pairCreatedAt;
-                        // Note: We do NOT overwrite volume24h here, we aggregated it above.
-                    }
-                }
+                if (!pairsByMint[mint]) pairsByMint[mint] = [];
+                pairsByMint[mint].push(pair);
             }
 
-            // OPTIMIZATION: Execute updates in parallel for this chunk
+            // Process each token in the chunk
             const updatePromises = chunk.map(t => {
-                const data = updates.get(t.mint);
-                if (!data) return Promise.resolve(); // Skip if no data
+                const pairs = pairsByMint[t.mint] || [];
+                
+                if (pairs.length === 0) return Promise.resolve(); // No data found
 
-                // FIX: Dynamic Query Construction using array push for robustness
+                // A. Calculate Aggregate Volume (Sum of ALL pools)
+                const totalVolume = pairs.reduce((sum, p) => sum + (p.volume?.h24 || 0), 0);
+
+                // B. Select "Best Pair" for Price & Changes
+                const bestPair = getBestPair(pairs, t.mint);
+                
+                if (!bestPair) return Promise.resolve();
+
+                // Prepare Data
+                const marketCap = bestPair.fdv || bestPair.marketCap || 0;
+                const priceUsd = bestPair.priceUsd || 0;
+                const change5m = bestPair.priceChange?.m5 || 0;
+                const change1h = bestPair.priceChange?.h1 || 0;
+                const change24h = bestPair.priceChange?.h24 || 0;
+                const pairCreatedAt = bestPair.pairCreatedAt;
+                const imageUrl = bestPair.info?.imageUrl;
+
+                // C. Construct Query
                 const setClauses = [];
                 const queryParams = [];
+                const addParam = (val) => { queryParams.push(val); return `$${queryParams.length}`; };
 
-                // Helper to add param
-                const addParam = (val) => {
-                    queryParams.push(val);
-                    return `$${queryParams.length}`;
-                };
-
-                setClauses.push(`volume24h = ${addParam(data.volume24h)}`);
-                setClauses.push(`marketCap = ${addParam(data.marketCap)}`);
-                setClauses.push(`priceUsd = ${addParam(data.priceUsd)}`);
-                setClauses.push(`change5m = ${addParam(data.change5m)}`);
-                setClauses.push(`change1h = ${addParam(data.change1h)}`);
-                setClauses.push(`change24h = ${addParam(data.change24h)}`);
+                setClauses.push(`volume24h = ${addParam(totalVolume)}`); // Using Aggregate
+                setClauses.push(`marketCap = ${addParam(marketCap)}`);    // Using Best Pair
+                setClauses.push(`priceUsd = ${addParam(priceUsd)}`);      // Using Best Pair
+                setClauses.push(`change5m = ${addParam(change5m)}`);      // Using Best Pair
+                setClauses.push(`change1h = ${addParam(change1h)}`);      // Using Best Pair
+                setClauses.push(`change24h = ${addParam(change24h)}`);    // Using Best Pair
                 setClauses.push(`lastUpdated = ${addParam(Date.now())}`);
 
-                // Conditional updates
-                if (data.imageUrl) {
-                    setClauses.push(`image = ${addParam(data.imageUrl)}`);
-                }
-                
-                if (data.pairCreatedAt) {
-                    // Update timestamp (Age) if we have data from DexScreener
-                    setClauses.push(`timestamp = ${addParam(data.pairCreatedAt)}`);
-                }
+                if (imageUrl) setClauses.push(`image = ${addParam(imageUrl)}`);
+                if (pairCreatedAt) setClauses.push(`timestamp = ${addParam(pairCreatedAt)}`);
 
-                // WHERE clause
                 const whereClause = `WHERE mint = ${addParam(t.mint)}`;
-                
                 const fullQuery = `UPDATE tokens SET ${setClauses.join(', ')} ${whereClause}`;
 
                 return db.run(fullQuery, queryParams);
             });
 
             await Promise.all(updatePromises);
-            
             await delay(1100);
 
         } catch (e) {
@@ -156,7 +156,7 @@ async function updateMetadata(deps) {
 function start(deps) {
     setTimeout(() => updateMetadata(deps), 5000);
     setInterval(() => updateMetadata(deps), config.METADATA_UPDATE_INTERVAL);
-    logger.info("Metadata updater started (Global Volume + Best Pool Mode)");
+    logger.info("Metadata updater started (Prioritized Mode: Bonk > Pump > Liq)");
 }
 
 module.exports = { updateMetadata, start };
