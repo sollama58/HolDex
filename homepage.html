@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HolDex | The Terminal Fire Explorer</title>
-    <!-- Styles & Scripts maintained from previous version -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -22,7 +21,6 @@
         }
     </script>
     <style>
-        /* All existing styles maintained */
         body { background-color: #2a1005; color: #ffedd5; font-family: 'Comic Neue', cursive; min-height: 100vh; font-size: 14px; overflow-x: hidden; padding-bottom: 50px; }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: #2a1005; }
@@ -47,6 +45,8 @@
         .nav-btn { background: transparent; color: #9a3412; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 800; transition: all 0.2s; border: 2px solid transparent; }
         .nav-btn:hover { color: #fb923c; }
         .nav-btn.active { background: #451a03; color: #ea580c; border-color: #7c2d12; box-shadow: 0 4px 0 #2a1005; }
+        .filter-toggle { background: #451a03; border: 2px solid #7c2d12; color: #9a3412; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; transition: all 0.2s; display: flex; align-items: center; gap: 6px; }
+        .filter-toggle.active { border-color: #22c55e; color: #4ade80; background: rgba(34, 197, 94, 0.1); }
         .refresh-btn { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; transition: all 0.2s; position: relative; }
         .refresh-btn:hover:not(:disabled) { border-color: #ea580c; color: #fff; background: #582206; }
         .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; border-color: #451a03; color: #7c2d12; }
@@ -89,21 +89,17 @@
         .pool-tab:hover:not(.active) { color: #fb923c; }
         .verified-badge { display: inline-flex; align-items: center; justify-content: center; background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #22c55e; border-radius: 50%; width: 20px; height: 20px; margin-left: 6px; box-shadow: 0 0 10px rgba(34, 197, 94, 0.3); }
         .verified-badge i { width: 12px; height: 12px; }
-        .filter-toggle { background: #451a03; border: 2px solid #7c2d12; color: #9a3412; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; transition: all 0.2s; display: flex; align-items: center; gap: 6px; }
-        .filter-toggle.active { border-color: #22c55e; color: #4ade80; background: rgba(34, 197, 94, 0.1); }
         .info-btn { color: #9a3412; cursor: pointer; transition: color 0.2s; }
         .info-btn:hover { color: #fb923c; }
         .info-box { background: #451a03; border: 1px solid #7c2d12; border-radius: 8px; padding: 16px; margin-bottom: 16px; color: #ffedd5; font-size: 13px; line-height: 1.5; }
         .info-box a { color: #fb923c; text-decoration: underline; }
         .preview-content { max-height: 80vh; overflow-y: auto; padding: 20px; }
-        
         .feature-box { background: #451a03; border: 2px solid #7c2d12; border-radius: 16px; padding: 24px; transition: transform 0.2s; }
         .feature-box:hover { border-color: #ea580c; transform: translateY(-4px); }
     </style>
 </head>
 <body>
 
-<!-- Nav same as before -->
 <nav class="sticky top-0 z-40">
     <div class="max-w-[1800px] mx-auto px-4 md:px-6 py-4 flex flex-col md:flex-row md:justify-between md:items-center gap-4">
         <div class="flex items-center justify-between w-full md:w-auto">
@@ -145,7 +141,7 @@
 
 <main class="max-w-[1800px] mx-auto px-0 md:px-6 py-4 md:py-8">
     
-    <!-- DASHBOARD -->
+    <!-- DASHBOARD VIEW -->
     <div id="view-dashboard" class="view-section active">
         <div class="bg-[#2a1005] border-y md:border-2 border-[#7c2d12] md:rounded-2xl overflow-hidden shadow-2xl flex flex-col">
             <div class="table-scroll-container overflow-x-auto">
@@ -185,7 +181,7 @@
         </div>
     </div>
 
-    <!-- DETAILED ABOUT VIEW -->
+    <!-- ABOUT VIEW -->
     <div id="view-about" class="view-section px-4 md:px-0">
         <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 md:p-12 shadow-2xl max-w-5xl mx-auto">
             <div class="flex items-center gap-6 mb-10 border-b-2 border-[#7c2d12] pb-8">
@@ -209,7 +205,7 @@
                             <i data-lucide="zap" class="text-[#fb923c]" width="24"></i>
                             <h3 class="font-bold text-white text-xl">Real-Time Indexing</h3>
                         </div>
-                        <p class="text-sm text-[#9a3412] font-mono">Our decoupled worker architecture ingests new token mints and migrations instantly via direct RPC streams and DexScreener websockets.</p>
+                        <p class="text-sm text-[#9a3412] font-mono">Our ingestion engine connects directly to high-performance Solana RPC nodes, indexing new token mints and liquidity pools milliseconds after they launch.</p>
                     </div>
                     
                     <div class="feature-box">
@@ -218,7 +214,7 @@
                             <h3 class="font-bold text-white text-xl">K-Score™ Analysis</h3>
                         </div>
                         <p class="text-sm text-[#9a3412] font-mono">
-                            Our proprietary algorithm analyzes the Top 50 holders using the <strong>Helius DAS API</strong>. 
+                            Our proprietary "Conviction Score" algorithm analyzes the Top 50 holders using the <strong>Helius DAS API</strong>. 
                             It calculates a "Conviction Score" (1-99) based on holder retention, wallet distribution, and volume velocity.
                         </p>
                     </div>
@@ -258,14 +254,14 @@
         </div>
     </div>
 
-    <!-- UPDATE VIEW & DETAIL VIEW (Same as before) -->
+    <!-- UPDATE VIEW -->
     <div id="view-update" class="view-section px-4 md:px-0">
-        <!-- Update form logic preserved -->
         <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 shadow-2xl max-w-2xl mx-auto">
             <div class="text-center mb-8">
                 <h2 class="text-3xl font-bold text-white mb-2 font-sans">Update Token Info</h2>
                 <p class="text-[#9a3412]">Enter a Mint Address to auto-add it to our database, then customize your page.</p>
             </div>
+            
             <form onsubmit="submitUpdate(event)">
                 <label class="form-label">Token Mint Address</label>
                 <div class="relative">
@@ -279,12 +275,16 @@
                         <div class="text-xs text-[#9a3412] font-mono" id="update-token-ticker">TICKER</div>
                     </div>
                 </div>
+                
                 <label class="form-label">X (Twitter) Link</label>
                 <input type="url" id="update-twitter" class="form-input" placeholder="https://x.com/...">
+                
                 <label class="form-label">Website Link</label>
                 <input type="url" id="update-website" class="form-input" placeholder="https://...">
+                
                 <label class="form-label">Telegram Link</label>
                 <input type="url" id="update-telegram" class="form-input" placeholder="https://t.me/...">
+                
                 <div class="flex justify-between items-center mb-1 mt-4">
                     <label class="form-label mb-0">Banner Image URL</label>
                     <button type="button" class="info-btn flex items-center gap-1 text-xs" onclick="toggleInfoModal()">
@@ -292,6 +292,7 @@
                     </button>
                 </div>
                 <input type="url" id="update-banner" class="form-input" placeholder="https://i.imgur.com/...">
+                
                 <div class="flex gap-4 mt-6">
                     <button type="button" onclick="openPreview()" class="action-btn flex-1 flex items-center justify-center gap-2 bg-[#451a03] text-[#fb923c] border-[#ea580c] hover:bg-[#582206]">
                         <i data-lucide="eye" width="16"></i> Preview
@@ -305,11 +306,12 @@
         </div>
     </div>
 
+    <!-- DETAIL VIEW -->
     <div id="view-detail" class="view-section px-4 md:px-0">
-        <!-- Detail view logic preserved -->
         <div id="detail-loading" class="text-center py-20 text-[#ea580c] font-mono animate-pulse hidden">Fetching Chain Data...</div>
         <div id="detail-content">
             <div id="detail-banner-container" class="hidden mb-6"></div>
+
             <div class="flex flex-col md:flex-row gap-6 mb-8 items-start">
                 <div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl">
                     <img id="detail-img" src="" class="w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black shadow-lg">
@@ -329,9 +331,10 @@
             </div>
             
             <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4 mb-6">
+                <!-- K-SCORE CARD (Strict Logic) -->
                 <div class="stat-card border-[#ea580c] relative overflow-hidden">
                     <span class="stat-label text-[#ea580c]">K-Score</span>
-                    <span id="stat-kscore" class="stat-value text-[#fb923c] text-2xl font-bold font-mono">-</span>
+                    <span id="stat-kscore" class="stat-value text-[#fb923c] text-2xl font-bold font-mono">🔒</span>
                 </div>
                 <div class="stat-card"><span class="stat-label">Price</span><span id="stat-price" class="stat-value text-[#ffedd5]">-</span></div>
                 <div class="stat-card"><span class="stat-label">MCap</span><span id="stat-mcap" class="stat-value text-[#ea580c]">-</span></div>
@@ -345,9 +348,6 @@
     </div>
 </main>
 
-<!-- Modals & Script Preserved -->
-<!-- ... Same modals (Status, Info, Preview) ... -->
-<!-- ... Same Script ... -->
 <div class="status-bar" onclick="toggleStatusModal()">
     <div class="flex items-center gap-3">
         <span class="text-[#9a3412] text-xs font-bold tracking-wider uppercase">System Status</span>
@@ -367,6 +367,7 @@
     </div>
 </div>
 
+<!-- STATUS MODAL -->
 <div id="status-modal" class="modal-overlay" onclick="toggleStatusModal()">
     <div class="bg-[#2a1005] border-4 border-[#ea580c] p-8 rounded-2xl max-w-sm w-full text-center shadow-[0_0_50px_rgba(234,88,12,0.5)] relative" onclick="event.stopPropagation()">
         <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleStatusModal()"><i data-lucide="x" width="24"></i></button>
@@ -388,6 +389,7 @@
     </div>
 </div>
 
+<!-- INFO MODAL -->
 <div id="info-modal" class="modal-overlay">
     <div class="bg-[#2a1005] border-2 border-[#ea580c] p-8 rounded-2xl max-w-md w-full shadow-2xl relative" onclick="event.stopPropagation()">
         <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleInfoModal()"><i data-lucide="x" width="24"></i></button>
@@ -407,6 +409,7 @@
     </div>
 </div>
 
+<!-- PREVIEW MODAL -->
 <div id="preview-modal" class="modal-overlay" style="align-items: flex-start; padding-top: 50px;">
     <div class="bg-[#2a1005] border-2 border-[#ea580c] w-full max-w-5xl rounded-2xl shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh]">
         <div class="p-4 border-b border-[#7c2d12] flex justify-between items-center bg-[#451a03]">
@@ -602,12 +605,22 @@
         try {
             document.getElementById('page-display').innerText = `Page ${currentPage}`;
             document.getElementById('btn-prev').disabled = currentPage <= 1;
+            
             let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&search=${encodeURIComponent(searchQuery)}&limit=100&page=${currentPage}`;
             if (isVerifiedFilter) endpoint += '&filter=verified';
-            const res = await fetch(endpoint); if (!res.ok) throw new Error("API Error"); const data = await res.json();
+
+            const res = await fetch(endpoint);
+            if (!res.ok) throw new Error("API Error");
+            const data = await res.json();
             updateStatus(true);
-            if (data.success) { renderTable(data.tokens); document.getElementById('btn-next').disabled = data.tokens.length < 100; }
-        } catch (e) { console.error("API Connection Failed", e); updateStatus(false); }
+            if (data.success) {
+                renderTable(data.tokens);
+                document.getElementById('btn-next').disabled = data.tokens.length < 100;
+            }
+        } catch (e) {
+            console.error("API Connection Failed", e);
+            updateStatus(false);
+        }
     }
 
     function changePage(delta) {
@@ -652,7 +665,9 @@
         loadingDiv.style.display = 'block'; contentDiv.style.display = 'none'; bannerContainer.classList.add('hidden'); bannerContainer.innerHTML = '';
 
         try {
-            const res = await fetch(`${API_URL}/api/token/${mint}`); if(!res.ok) throw new Error("Failed"); const data = await res.json();
+            const res = await fetch(`${API_URL}/api/token/${mint}`);
+            if(!res.ok) throw new Error("Failed");
+            const data = await res.json();
             updateStatus(true);
             if (data.success) {
                 const t = data.token;
@@ -660,32 +675,43 @@
                 document.getElementById('detail-name').innerText = t.name;
                 document.getElementById('detail-mint').innerText = t.mint;
                 document.getElementById('detail-img').src = t.image || 'https://placehold.co/80x80/2a1005/7c2d12?text=?';
+                
+                // RENDER BANNER WITH FALLBACK
                 if (t.banner) {
                     bannerContainer.innerHTML = `<div class="w-full h-48 md:h-64 rounded-xl border-2 border-[#7c2d12] shadow-lg relative overflow-hidden bg-black"><img src="${t.banner}" class="w-full h-full object-cover object-center" onerror="this.src='${FALLBACK_BANNER}'"><div class="absolute inset-0 bg-gradient-to-t from-[#2a1005] to-transparent opacity-80 pointer-events-none"></div></div>`;
                     bannerContainer.classList.remove('hidden');
                 }
+
                 const actionsDiv = document.getElementById('detail-actions'); let linksHtml = '';
                 linksHtml += `<a href="https://pump.fun/coin/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><img src="https://pump.fun/logo.png" width="16" class="rounded-full" onerror="this.style.display='none'"> Pump.fun</a>`;
                 linksHtml += `<a href="https://solscan.io/token/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><i data-lucide="search" width="16"></i> Solscan</a>`;
+                
                 if (t.hasCommunityUpdate) {
                     if (t.twitter) linksHtml += `<a href="${t.twitter}" target="_blank" class="social-btn"><i data-lucide="twitter" width="20"></i></a>`;
                     if (t.website) linksHtml += `<a href="${t.website}" target="_blank" class="social-btn"><i data-lucide="globe" width="20"></i></a>`;
                     if (t.telegram) linksHtml += `<a href="${t.telegram}" target="_blank" class="social-btn"><i data-lucide="send" width="20"></i></a>`;
                 }
                 actionsDiv.innerHTML = linksHtml; lucide.createIcons();
+
                 document.getElementById('stat-price').innerText = formatMoney(t.priceUsd);
                 document.getElementById('stat-mcap').innerText = formatCompact(t.marketCap);
                 document.getElementById('stat-vol').innerText = formatCompact(t.volume24h);
                 document.getElementById('stat-chg1h').innerHTML = formatPct(t.change1h);
                 document.getElementById('stat-chg24h').innerHTML = formatPct(t.change24h);
                 
+                // K-SCORE LOGIC: Show Lock if no update or no score
                 const kEl = document.getElementById('stat-kscore');
-                if (t.kScore && t.kScore > 0) {
+                const hasScore = t.kScore && t.kScore > 0;
+                const isVerified = t.hasCommunityUpdate;
+
+                if (isVerified && hasScore) {
                     kEl.innerText = t.kScore;
                     kEl.classList.remove('text-gray-500'); kEl.classList.add('text-[#fb923c]');
+                    kEl.title = "Conviction Score";
                 } else {
                     kEl.innerText = '🔒';
-                    kEl.classList.remove('text-[#fb923c]'); kEl.classList.add('text-gray-500'); kEl.title = "Score calculating...";
+                    kEl.classList.remove('text-[#fb923c]'); kEl.classList.add('text-gray-500'); 
+                    kEl.title = "Requires Community Update";
                 }
 
                 const tabsContainer = document.getElementById('pool-tabs-container'); tabsContainer.innerHTML = '';
