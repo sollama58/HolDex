@@ -10,12 +10,16 @@ services:
       - PORT=3000
       - REDIS_URL=redis://redis:6379
       - METADATA_UPDATE_INTERVAL=300000
-      - ADMIN_PASSWORD=admin123 
+      - ADMIN_PASSWORD=admin123
+      # --- NEW: Pass Fee Variables to Container ---
+      # This allows the app to see the values set in your .env file or Render Dashboard
+      - FEE_SOL=${FEE_SOL}
+      - FEE_TOKEN_AMOUNT=${FEE_TOKEN_AMOUNT}
+      - TREASURY_WALLET=${TREASURY_WALLET}
     depends_on:
       - redis
     volumes:
-      # FIX: Map the local ./data folder to the container's /usr/src/app/data folder
-      # This matches the path defined in src/services/database.js
+      # Map the local ./data folder to the container's /usr/src/app/data folder
       - ./data:/usr/src/app/data
     restart: always
 
@@ -26,7 +30,6 @@ services:
       - "6379:6379"
     restart: always
     volumes:
-       # Optional: Persist Redis data as well
        - redis_data:/data
 
 volumes:

@@ -19,6 +19,6 @@ module.exports = {
     FEE_SOL: parseFloat(process.env.FEE_SOL) || 0.1, 
     // Fee in Tokens (e.g., 5000 tokens)
     FEE_TOKEN_AMOUNT: parseFloat(process.env.FEE_TOKEN_AMOUNT) || 5000,
-    // The Token Mint ($ASDFASDFA)
-    FEE_TOKEN_MINT: '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump' 
+    // The Token Mint ($ASDFASDFA) - NOW DYNAMIC
+    FEE_TOKEN_MINT: process.env.FEE_TOKEN_MINT || '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump' 
 };
