@@ -2,6 +2,10 @@
  * Metadata Updater (Smart Priority Version)
  * Optimizes API usage by prioritizing active tokens over dead ones.
  * Updates: Prices, Volume, Market Cap, AND Creation Timestamp (Age).
+ * * UPDATES:
+ * - Added robust Retry Logic for API calls (fixes data gaps on 429 errors).
+ * - Improved logging for better visibility.
+ * - Added safety checks for database values.
  */
 const axios = require('axios');
 const config = require('../config/env');
@@ -47,6 +51,31 @@ function getBestPair(pairs, mint) {
     return sortedPairs[0];
 }
 
+// Robust Fetch with Retry
+async function fetchWithRetry(url, retries = 3) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await axios.get(url, { timeout: 10000 });
+        } catch (e) {
+            const isRateLimit = e.response && e.response.status === 429;
+            const isLastAttempt = i === retries - 1;
+
+            if (isRateLimit) {
+                logger.warn(`⚠️ DexScreener Rate Limit (429). Retrying in 5s... (Attempt ${i + 1}/${retries})`);
+                await delay(5000 * (i + 1)); // Exponential backoff-ish
+            } else if (e.code === 'ECONNABORTED') {
+                logger.warn(`⚠️ DexScreener Timeout. Retrying... (Attempt ${i + 1}/${retries})`);
+                await delay(2000);
+            } else {
+                if (isLastAttempt) throw e;
+                await delay(1000);
+            }
+            
+            if (isLastAttempt) throw e;
+        }
+    }
+}
+
 async function updateMetadata(deps) {
     const { db, globalState } = deps;
 
@@ -63,11 +92,15 @@ async function updateMetadata(deps) {
             OR marketCap > 5000
         `, [yesterday]);
     } catch (e) {
-        logger.error("DB Error fetching update list", { error: e.message });
+        logger.error("❌ DB Error fetching update list", { error: e.message });
         return;
     }
 
-    if (!tokens || tokens.length === 0) return;
+    if (!tokens || tokens.length === 0) {
+        // Optional: Log if empty just to know the task ran
+        // logger.debug("Updater: No active tokens to update.");
+        return;
+    }
 
     logger.info(`🔄 Updater: Refreshing ${tokens.length} active tokens...`);
 
@@ -77,10 +110,8 @@ async function updateMetadata(deps) {
         const mints = chunk.map(t => t.mint).join(',');
         
         try {
-            const dexRes = await axios.get(
-                `https://api.dexscreener.com/latest/dex/tokens/${mints}`,
-                { timeout: 8000 }
-            );
+            // Using the new Retry Logic here
+            const dexRes = await fetchWithRetry(`https://api.dexscreener.com/latest/dex/tokens/${mints}`);
 
             const pairsData = dexRes.data?.pairs || [];
             
@@ -99,7 +130,7 @@ async function updateMetadata(deps) {
                 if (pairs.length === 0) return Promise.resolve(); // No data found
 
                 // A. Calculate Aggregate Volume (Sum of ALL pools)
-                const totalVolume = pairs.reduce((sum, p) => sum + (p.volume?.h24 || 0), 0);
+                const totalVolume = pairs.reduce((sum, p) => sum + (Number(p.volume?.h24) || 0), 0);
 
                 // B. Select "Best Pair" for Price & Changes
                 const bestPair = getBestPair(pairs, t.mint);
@@ -107,11 +138,11 @@ async function updateMetadata(deps) {
                 if (!bestPair) return Promise.resolve();
 
                 // Prepare Data
-                const marketCap = bestPair.fdv || bestPair.marketCap || 0;
-                const priceUsd = bestPair.priceUsd || 0;
-                const change5m = bestPair.priceChange?.m5 || 0;
-                const change1h = bestPair.priceChange?.h1 || 0;
-                const change24h = bestPair.priceChange?.h24 || 0;
+                const marketCap = Number(bestPair.fdv || bestPair.marketCap || 0);
+                const priceUsd = Number(bestPair.priceUsd || 0);
+                const change5m = Number(bestPair.priceChange?.m5 || 0);
+                const change1h = Number(bestPair.priceChange?.h1 || 0);
+                const change24h = Number(bestPair.priceChange?.h24 || 0);
                 const pairCreatedAt = bestPair.pairCreatedAt;
                 const imageUrl = bestPair.info?.imageUrl;
 
@@ -129,7 +160,11 @@ async function updateMetadata(deps) {
                 setClauses.push(`lastUpdated = ${addParam(Date.now())}`);
 
                 if (imageUrl) setClauses.push(`image = ${addParam(imageUrl)}`);
-                if (pairCreatedAt) setClauses.push(`timestamp = ${addParam(pairCreatedAt)}`);
+                
+                // Only update timestamp if it looks valid and isn't wildly in the future
+                if (pairCreatedAt && pairCreatedAt < Date.now() + 86400000) {
+                    setClauses.push(`timestamp = ${addParam(pairCreatedAt)}`);
+                }
 
                 const whereClause = `WHERE mint = ${addParam(t.mint)}`;
                 const fullQuery = `UPDATE tokens SET ${setClauses.join(', ')} ${whereClause}`;
@@ -138,25 +173,28 @@ async function updateMetadata(deps) {
             });
 
             await Promise.all(updatePromises);
+            
+            // Log progress occasionally
+            // logger.info(`Updated batch of ${chunk.length} tokens`);
+            
+            // Respect Rate Limits
             await delay(1100);
 
         } catch (e) {
-            if (e.response && e.response.status === 429) {
-                logger.warn(`DexScreener Rate Limit (429). Pausing...`);
-                await delay(20000);
-            } else {
-                logger.warn(`DexScreener Batch Error: ${e.message}`);
-            }
+            logger.error(`❌ DexScreener Batch Failed (Skipping ${chunk.length} tokens): ${e.message}`);
         }
     }
 
     globalState.lastBackendUpdate = Date.now();
+    logger.info("✅ Updater: Cycle complete.");
 }
 
 function start(deps) {
+    // Run immediately after 5s
     setTimeout(() => updateMetadata(deps), 5000);
+    // Then run on interval
     setInterval(() => updateMetadata(deps), config.METADATA_UPDATE_INTERVAL);
-    logger.info("Metadata updater started (Prioritized Mode: Bonk > Pump > Liq)");
+    logger.info("🚀 Metadata updater started (Prioritized Mode: Bonk > Pump > Liq)");
 }
 
 module.exports = { updateMetadata, start };
