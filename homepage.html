@@ -5,36 +5,49 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HolDex | The Terminal Fire Explorer</title>
     
-    <!-- 1. CRITICAL POLYFILLS (Must load before Solana libs) -->
-    <script>
-        window.global = window;
-        window.process = { env: { NODE_ENV: 'production' }, version: '' };
-    </script>
+    <!-- ========================================== -->
+    <!-- 1. CRITICAL POLYFILLS (STRICT ORDER)       -->
+    <!-- ========================================== -->
+    
+    <!-- Load Buffer Library synchronously -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/buffer/6.0.3/buffer.min.js"></script>
+    
+    <!-- Immediately assign global polyfills before anything else -->
     <script>
-        // Ensure Buffer is globally available
-        if (typeof window.Buffer === 'undefined') {
-            if (window.buffer && window.buffer.Buffer) {
-                window.Buffer = window.buffer.Buffer;
-            } else {
-                console.warn("Buffer loaded asynchronously - waiting for load");
-                window.addEventListener('load', () => {
-                    if (window.buffer && window.buffer.Buffer) window.Buffer = window.buffer.Buffer;
-                });
-            }
+        // 1. Polyfill Global
+        window.global = window;
+        
+        // 2. Polyfill Process
+        window.process = { 
+            env: { NODE_ENV: 'production' }, 
+            version: '',
+            nextTick: function(callback) { setTimeout(callback, 0); }
+        };
+
+        // 3. Polyfill Buffer (Explicit Assignment)
+        if (window.buffer && window.buffer.Buffer) {
+            window.Buffer = window.buffer.Buffer;
+            console.log("✅ Polyfills Loaded: Buffer is ready");
+        } else {
+            console.error("❌ CRITICAL: Buffer library failed to load");
         }
     </script>
 
+    <!-- ========================================== -->
+    <!-- 2. SOLANA LIBRARIES (LOAD AFTER POLYFILLS) -->
+    <!-- ========================================== -->
+    <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
+    <script src="https://unpkg.com/@solana/spl-token@0.4.6/lib/index.iife.min.js"></script>
+
+    <!-- ========================================== -->
+    <!-- 3. STYLES & UI LIBS                        -->
+    <!-- ========================================== -->
     <!-- Tailwind -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-    
-    <!-- Solana Web3 & SPL Token -->
-    <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
-    <script src="https://unpkg.com/@solana/spl-token@0.4.6/lib/index.iife.min.js"></script>
     
     <script>
         tailwind.config = {
