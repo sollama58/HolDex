@@ -51,6 +51,9 @@ async function initDB() {
             timestamp INTEGER,
             lastUpdated INTEGER,
             
+            -- Added missing column for K-Score tracking
+            last_k_calc INTEGER DEFAULT 0,
+            
             userPubkey TEXT,
             hasCommunityUpdate BOOLEAN DEFAULT 0,
             k_score INTEGER DEFAULT 0
@@ -77,6 +80,21 @@ async function initDB() {
         CREATE INDEX IF NOT EXISTS idx_tokens_timestamp ON tokens(timestamp);
         CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score);
     `);
+
+    // --- AUTO MIGRATION ---
+    // Check if last_k_calc exists (for existing databases)
+    try {
+        const columns = await dbInstance.all("PRAGMA table_info(tokens)");
+        const hasLastKCalc = columns.some(c => c.name === 'last_k_calc');
+        
+        if (!hasLastKCalc) {
+            console.log("⚠️ Migrating DB: Adding missing column 'last_k_calc'...");
+            await dbInstance.exec("ALTER TABLE tokens ADD COLUMN last_k_calc INTEGER DEFAULT 0");
+            console.log("✅ Migration Successful");
+        }
+    } catch (e) {
+        console.error("Migration Error:", e.message);
+    }
 
     return dbInstance;
 }
