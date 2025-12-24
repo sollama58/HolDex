@@ -22,10 +22,8 @@
         // Polyfill Buffer (Defensive Assignment)
         if (typeof window.Buffer === 'undefined') {
             if (window.buffer && window.buffer.Buffer) {
-                // Scenario 1: cdnjs export (buffer module containing Buffer class)
                 window.Buffer = window.buffer.Buffer;
             } else if (window.buffer) {
-                // Scenario 2: Direct export
                 window.Buffer = window.buffer;
             } else {
                 console.error("❌ CRITICAL: Buffer polyfill failed to load.");
@@ -46,10 +44,10 @@
     </script>
 
     <!-- ========================================== -->
-    <!-- 2. SOLANA LIBRARIES (LOAD AFTER POLYFILLS) -->
+    <!-- 2. SOLANA LIBRARIES                        -->
     <!-- ========================================== -->
     <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
-    <script src="https://unpkg.com/@solana/spl-token@0.4.6/lib/index.iife.min.js"></script>
+    <!-- SPL Token library removed to prevent Buffer conflicts - Logic reimplemented manually below -->
 
     <!-- ========================================== -->
     <!-- 3. STYLES & UI LIBS                        -->
@@ -664,7 +662,7 @@
         }
     }
 
-    // Submit with Transaction
+    // Submit with Transaction (MANUAL INSTRUCTION CONSTRUCTION - NO SPL LIB)
     async function submitUpdate(e) {
         e.preventDefault();
         
@@ -687,11 +685,27 @@
         statusDiv.classList.remove('hidden', 'text-red-500', 'text-green-500'); statusDiv.classList.add('text-[#ea580c]');
 
         try {
-            // 1. Construct Transaction using Ankr (Better public RPC)
+            // 1. Setup Constants & Connection
             const connection = new solanaWeb3.Connection("https://rpc.ankr.com/solana", "confirmed");
+            const TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+            const SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID = new solanaWeb3.PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
+
             const fromPubkey = new solanaWeb3.PublicKey(walletAddress);
             const toPubkey = new solanaWeb3.PublicKey(feeConfig.treasury);
             const tokenMintPubkey = new solanaWeb3.PublicKey(feeConfig.tokenMint);
+
+            // 2. Derive ATA Addresses Manually (Avoiding spl-token lib)
+            // Function to find address without Buffer dependence
+            const findATA = async (owner, mint) => {
+                const [address] = await solanaWeb3.PublicKey.findProgramAddress(
+                    [owner.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mint.toBytes()],
+                    SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID
+                );
+                return address;
+            };
+
+            const fromTokenAccount = await findATA(fromPubkey, tokenMintPubkey);
+            const toTokenAccount = await findATA(toPubkey, tokenMintPubkey);
 
             const transaction = new solanaWeb3.Transaction();
 
@@ -704,24 +718,31 @@
                 })
             );
 
-            // B. Token Transfer Instruction
-            const fromTokenAccount = await splToken.getAssociatedTokenAddress(tokenMintPubkey, fromPubkey);
-            const toTokenAccount = await splToken.getAssociatedTokenAddress(tokenMintPubkey, toPubkey);
-            
-            // Assume 6 decimals
+            // B. Token Transfer Instruction (Manual Construction)
+            // Layout: Instruction (1 byte) + Amount (8 bytes u64 le)
             const decimals = 6; 
             const amountRaw = BigInt(Math.floor(feeConfig.tokenFee * Math.pow(10, decimals)));
+            
+            // Construct Data Buffer using Uint8Array (No Buffer needed)
+            const data = new Uint8Array(9);
+            data[0] = 3; // Instruction Index 3 = Transfer
+            // Write 64-bit Little Endian Integer
+            const bigIntAmount = BigInt(amountRaw);
+            for (let i = 0; i < 8; i++) {
+                data[i + 1] = Number((bigIntAmount >> (BigInt(8) * BigInt(i))) & BigInt(0xff));
+            }
 
-            transaction.add(
-                splToken.createTransferInstruction(
-                    fromTokenAccount,
-                    toTokenAccount,
-                    fromPubkey,
-                    amountRaw,
-                    [],
-                    splToken.TOKEN_PROGRAM_ID
-                )
-            );
+            const instruction = new solanaWeb3.TransactionInstruction({
+                keys: [
+                    { pubkey: fromTokenAccount, isSigner: false, isWritable: true },
+                    { pubkey: toTokenAccount, isSigner: false, isWritable: true },
+                    { pubkey: fromPubkey, isSigner: true, isWritable: false } // Owner
+                ],
+                programId: TOKEN_PROGRAM_ID,
+                data: data
+            });
+
+            transaction.add(instruction);
 
             transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
             transaction.feePayer = fromPubkey;
@@ -742,14 +763,14 @@
                 body: JSON.stringify(payload)
             });
 
-            const data = await res.json();
+            const dataRes = await res.json();
             
-            if (data.success) {
+            if (dataRes.success) {
                 statusDiv.innerText = "✅ Success! Update queued.";
                 statusDiv.classList.remove('text-[#ea580c]'); statusDiv.classList.add('text-green-500');
                 e.target.reset();
             } else {
-                statusDiv.innerText = `❌ Verification Failed: ${data.error}`;
+                statusDiv.innerText = `❌ Verification Failed: ${dataRes.error}`;
                 statusDiv.classList.remove('text-[#ea580c]'); statusDiv.classList.add('text-red-500');
             }
 
