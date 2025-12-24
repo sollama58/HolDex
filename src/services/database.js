@@ -1,58 +1,69 @@
-const sqlite3 = require('sqlite3').verbose();
-const { open } = require('sqlite');
-const path = require('path');
-const fs = require('fs');
+const { Pool } = require('pg');
 const config = require('../config/env');
 
-let dbInstance = null;
+let pool = null;
+let dbWrapper = null;
 
 async function initDB() {
-    if (dbInstance) return dbInstance;
+    if (dbWrapper) return dbWrapper;
 
-    // --- PERSISTENCE CONFIGURATION ---
-    // Critical: Ensure we use the absolute path matching the Docker Volume if available.
-    // Dockerfile VOLUME is ["/usr/src/app/data"]
+    // 1. Initialize PostgreSQL Connection Pool
+    console.log(`🔌 Connecting to PostgreSQL Database...`);
     
-    let dbPath;
-    
-    // 1. Check for Environment Variable Override
-    if (process.env.DB_PATH) {
-        dbPath = process.env.DB_PATH;
-    } 
-    // 2. Check for Standard Docker/Render Mount Path
-    else if (fs.existsSync('/usr/src/app/data')) {
-        console.log("📂 Detected Docker Volume at /usr/src/app/data");
-        dbPath = '/usr/src/app/data/database.sqlite';
-    }
-    // 3. Fallback to Local Relative Path (Dev Mode)
-    else {
-        const projectRoot = path.resolve(__dirname, '../../');
-        const dataDir = path.join(projectRoot, 'data');
-        if (!fs.existsSync(dataDir)) {
-            console.log(`📂 Creating local data directory: ${dataDir}`);
-            fs.mkdirSync(dataDir, { recursive: true });
-        }
-        dbPath = path.join(dataDir, 'database.sqlite');
-    }
-    
-    console.log(`🔌 Database Full Path: ${dbPath}`);
-
     try {
-        dbInstance = await open({
-            filename: dbPath,
-            driver: sqlite3.Database
+        pool = new Pool({
+            connectionString: config.DATABASE_URL,
+            ssl: { rejectUnauthorized: false }, // Required for hosted databases (Render/Neon)
+            max: 20, // Connection pool size
+            idleTimeoutMillis: 30000,
+            connectionTimeoutMillis: 5000,
         });
 
-        console.log("💾 SQLite Database Connected Successfully");
+        // Test the connection
+        const client = await pool.connect();
+        console.log("💾 PostgreSQL Connected Successfully");
+        client.release();
+    } catch (err) {
+        console.error("❌ Fatal Database Connection Error:", err.message);
+        throw err; // Retry or crash
+    }
 
-        // --- CONCURRENCY ---
-        await dbInstance.exec('PRAGMA journal_mode = WAL;');
-        await dbInstance.exec('PRAGMA synchronous = NORMAL;');
-        await dbInstance.exec('PRAGMA foreign_keys = ON;');
+    // 2. Create Compatibility Wrapper
+    // This allows us to keep using db.get, db.all, db.run syntax across the app
+    dbWrapper = {
+        pool,
+        // Fetch single row
+        get: async (text, params) => {
+            const res = await pool.query(text, params);
+            return res.rows[0];
+        },
+        // Fetch all rows
+        all: async (text, params) => {
+            const res = await pool.query(text, params);
+            return res.rows;
+        },
+        // Execute command (INSERT, UPDATE, DELETE)
+        run: async (text, params) => {
+            const res = await pool.query(text, params);
+            return { rowCount: res.rowCount }; 
+        },
+        // Execute raw script
+        exec: async (text) => {
+            return await pool.query(text);
+        }
+    };
 
-        // --- SCHEMA DEFINITION (Idempotent) ---
-        
-        await dbInstance.exec(`
+    // 3. Initialize Schema & Migrations
+    await initSchema(dbWrapper);
+
+    return dbWrapper;
+}
+
+async function initSchema(db) {
+    try {
+        // --- TOKENS TABLE ---
+        // Converted types: REAL -> DOUBLE PRECISION, INTEGER -> BIGINT
+        await db.exec(`
             CREATE TABLE IF NOT EXISTS tokens (
                 mint TEXT PRIMARY KEY,
                 name TEXT,
@@ -65,34 +76,36 @@ async function initDB() {
                 tweetUrl TEXT,
                 telegram TEXT,
                 
-                marketCap REAL DEFAULT 0,
-                volume24h REAL DEFAULT 0,
-                priceUsd REAL DEFAULT 0,
+                marketCap DOUBLE PRECISION DEFAULT 0,
+                volume24h DOUBLE PRECISION DEFAULT 0,
+                priceUsd DOUBLE PRECISION DEFAULT 0,
                 
-                change5m REAL DEFAULT 0,
-                change1h REAL DEFAULT 0,
-                change24h REAL DEFAULT 0,
+                change5m DOUBLE PRECISION DEFAULT 0,
+                change1h DOUBLE PRECISION DEFAULT 0,
+                change24h DOUBLE PRECISION DEFAULT 0,
                 
-                timestamp INTEGER,
-                lastUpdated INTEGER,
-                last_k_calc INTEGER DEFAULT 0,
+                timestamp BIGINT,
+                lastUpdated BIGINT,
+                last_k_calc BIGINT DEFAULT 0,
                 
                 userPubkey TEXT,
-                hasCommunityUpdate BOOLEAN DEFAULT 0,
+                hasCommunityUpdate BOOLEAN DEFAULT FALSE,
                 k_score INTEGER DEFAULT 0
             );
         `);
 
-        await dbInstance.exec(`
+        // --- UPDATES TABLE ---
+        // Converted: AUTOINCREMENT -> SERIAL
+        await db.exec(`
             CREATE TABLE IF NOT EXISTS token_updates (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 mint TEXT,
                 twitter TEXT,
                 website TEXT,
                 telegram TEXT,
                 banner TEXT,
                 description TEXT,
-                submittedAt INTEGER,
+                submittedAt BIGINT,
                 status TEXT,
                 signature TEXT,
                 payer TEXT
@@ -100,57 +113,43 @@ async function initDB() {
         `);
 
         // --- INDEXES ---
-        await dbInstance.exec(`
-            CREATE INDEX IF NOT EXISTS idx_tokens_ticker ON tokens(ticker);
-            CREATE INDEX IF NOT EXISTS idx_tokens_name ON tokens(name);
-            CREATE INDEX IF NOT EXISTS idx_tokens_timestamp ON tokens(timestamp);
-            CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score);
-            CREATE INDEX IF NOT EXISTS idx_tokens_mcap ON tokens(marketCap); 
-        `);
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_ticker ON tokens(ticker);`);
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_name ON tokens(name);`);
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_timestamp ON tokens(timestamp);`);
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score);`);
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_mcap ON tokens(marketCap);`);
 
-        // --- AUTO-MIGRATION (Column Repair - Tokens) ---
-        const columns = await dbInstance.all("PRAGMA table_info(tokens)");
-        const columnNames = columns.map(c => c.name);
+        // --- AUTO-MIGRATION (Column Repair) ---
+        // PostgreSQL specific: Check information_schema
+        const res = await db.all(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'tokens';
+        `);
+        const existingCols = res.map(r => r.column_name);
 
         const requiredColumns = [
-            'last_k_calc', 'k_score', 'hasCommunityUpdate', 'marketCap', 'banner', 'description'
+            { name: 'last_k_calc', type: 'BIGINT DEFAULT 0' },
+            { name: 'k_score', type: 'INTEGER DEFAULT 0' },
+            { name: 'hascommunityupdate', type: 'BOOLEAN DEFAULT FALSE' }, // Postgres stores lowercase
+            { name: 'banner', type: 'TEXT' },
+            { name: 'description', type: 'TEXT' }
         ];
 
         for (const col of requiredColumns) {
-            if (!columnNames.includes(col)) {
-                console.log(`⚠️ Auto-Migrating: Adding missing column '${col}' to tokens...`);
-                let type = 'INTEGER DEFAULT 0';
-                if (col === 'hasCommunityUpdate') type = 'BOOLEAN DEFAULT 0';
-                if (col === 'marketCap') type = 'REAL DEFAULT 0';
-                if (col === 'banner' || col === 'description') type = 'TEXT';
-                
-                await dbInstance.exec(`ALTER TABLE tokens ADD COLUMN ${col} ${type}`);
-            }
-        }
-
-        // --- AUTO-MIGRATION (Column Repair - Token Updates) ---
-        // Critical for persistence of history across app versions
-        const updateCols = await dbInstance.all("PRAGMA table_info(token_updates)");
-        const updateColNames = updateCols.map(c => c.name);
-        
-        const requiredUpdateCols = ['signature', 'payer', 'status', 'description', 'banner', 'website', 'twitter', 'telegram'];
-
-        for (const col of requiredUpdateCols) {
-            if (!updateColNames.includes(col)) {
-                console.log(`⚠️ Auto-Migrating: Adding missing column '${col}' to token_updates...`);
-                await dbInstance.exec(`ALTER TABLE token_updates ADD COLUMN ${col} TEXT`);
+            // Check lowercase because Postgres returns lowercase column names
+            if (!existingCols.includes(col.name.toLowerCase())) {
+                console.log(`⚠️ Auto-Migrating: Adding missing column '${col.name}' to tokens...`);
+                await db.exec(`ALTER TABLE tokens ADD COLUMN ${col.name} ${col.type}`);
             }
         }
         
     } catch (err) {
-        console.error("❌ Fatal Database Initialization Error:", err);
-        throw err;
+        console.error("❌ Database Schema Init Error:", err);
     }
-
-    return dbInstance;
 }
 
-// ... Caching Wrapper ...
+// Caching wrapper (Unchanged)
 async function smartCache(key, durationSeconds, fetchFunction) {
     let redis = null;
     try {
@@ -178,11 +177,12 @@ async function smartCache(key, durationSeconds, fetchFunction) {
     return data;
 }
 
+// Save Token wrapper
 async function saveTokenData(db, mint, metadata, timestamp = Date.now()) {
-    const d = db || dbInstance;
-    if (!d) { console.error("DB not initialized in saveTokenData"); return; }
-    
+    const d = db || dbWrapper;
+    if (!d) return;
     try {
+        // Postgres ON CONFLICT syntax is standard
         await d.run(`
             INSERT INTO tokens (
                 mint, name, ticker, image, 

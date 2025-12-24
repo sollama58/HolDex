@@ -1,29 +1,44 @@
 version: '3.8'
 
 services:
-  # The Backend Application Service
+  # 1. THE API SERVICE
+  # Handles HTTP requests from users. Scalable (can add more replicas).
   api:
     build: .
+    command: npm start
     ports:
       - "3000:3000"
     environment:
       - PORT=3000
       - REDIS_URL=redis://redis:6379
       - METADATA_UPDATE_INTERVAL=300000
-      - ADMIN_PASSWORD=admin123
-      # --- NEW: Pass Fee Variables to Container ---
-      # This allows the app to see the values set in your .env file or Render Dashboard
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
       - FEE_SOL=${FEE_SOL}
       - FEE_TOKEN_AMOUNT=${FEE_TOKEN_AMOUNT}
       - TREASURY_WALLET=${TREASURY_WALLET}
     depends_on:
       - redis
     volumes:
-      # Map the local ./data folder to the container's /usr/src/app/data folder
       - ./data:/usr/src/app/data
     restart: always
 
-  # Redis Service for Caching
+  # 2. THE WORKER SERVICE
+  # Handles background tasks (Price updates, Listener, K-Score).
+  # Decoupled from API to prevent blocking user requests.
+  worker:
+    build: .
+    command: node src/worker.js
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - METADATA_UPDATE_INTERVAL=300000
+      - HELIUS_API_KEY=${HELIUS_API_KEY}
+    depends_on:
+      - redis
+    volumes:
+      - ./data:/usr/src/app/data
+    restart: always
+
+  # 3. CACHE SERVICE
   redis:
     image: "redis:alpine"
     ports:
