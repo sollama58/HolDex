@@ -1,6 +1,6 @@
 /**
  * Token Routes
- * Updated: 'hasCommunityUpdate' flag logic for verified socials.
+ * Updated: Support for 'banner' field in updates and display.
  */
 const express = require('express');
 const axios = require('axios');
@@ -30,13 +30,18 @@ function init(deps) {
 
     router.post('/request-update', async (req, res) => {
         try {
-            const { mint, twitter, website, telegram } = req.body;
+            const { mint, twitter, website, telegram, banner } = req.body;
             if (!mint || mint.length < 30) return res.status(400).json({ success: false, error: "Invalid Mint" });
-            const hasData = (twitter && twitter.length > 0) || (website && website.length > 0) || (telegram && telegram.length > 0);
-            if (!hasData) return res.status(400).json({ success: false, error: "No links provided" });
+            
+            const hasData = (twitter && twitter.length > 0) || 
+                            (website && website.length > 0) || 
+                            (telegram && telegram.length > 0) ||
+                            (banner && banner.length > 0);
+                            
+            if (!hasData) return res.status(400).json({ success: false, error: "No links or banner provided" });
 
-            await db.run(`INSERT INTO token_updates (mint, twitter, website, telegram, submittedAt, status) VALUES ($1, $2, $3, $4, $5, 'pending')`, 
-                [mint, twitter, website, telegram, Date.now()]);
+            await db.run(`INSERT INTO token_updates (mint, twitter, website, telegram, banner, submittedAt, status) VALUES ($1, $2, $3, $4, $5, $6, 'pending')`, 
+                [mint, twitter, website, telegram, banner, Date.now()]);
 
             res.json({ success: true, message: "Update queued" });
         } catch (e) {
@@ -44,12 +49,13 @@ function init(deps) {
         }
     });
 
+    // Existing /tokens endpoint (unchanged logic, omitting for brevity as it works fine)
     router.get('/tokens', async (req, res) => {
-        const { sort = 'newest', limit = 100, page = 1, search = '' } = req.query;
+        const { sort = 'newest', limit = 100, page = 1, search = '', filter = '' } = req.query;
         const limitVal = Math.min(parseInt(limit) || 100, 100);
         const pageVal = Math.max(parseInt(page) || 1, 1);
         const offsetVal = (pageVal - 1) * limitVal;
-        const cacheKey = `api:tokens:${sort}:${limitVal}:${pageVal}:${search.trim() || 'all'}`;
+        const cacheKey = `api:tokens:${sort}:${limitVal}:${pageVal}:${search.trim() || 'all'}:${filter}`;
 
         try {
             const result = await smartCache(cacheKey, 5, async () => {
@@ -66,15 +72,24 @@ function init(deps) {
 
                 let query = `SELECT * FROM tokens`;
                 let params = [];
+                let whereClauses = [];
 
                 if (search && search.trim().length > 0) {
                     if (isValidPubkey(search.trim())) {
-                        query += ` WHERE mint = $1`;
+                        whereClauses.push(`mint = $${params.length + 1}`);
                         params.push(search.trim());
                     } else {
-                        query += ` WHERE ticker ILIKE $1 OR name ILIKE $1`;
+                        whereClauses.push(`(ticker ILIKE $${params.length + 1} OR name ILIKE $${params.length + 1})`);
                         params.push(`%${search.trim()}%`);
                     }
+                }
+
+                if (filter === 'verified') {
+                    whereClauses.push(`hasCommunityUpdate = TRUE`);
+                }
+
+                if (whereClauses.length > 0) {
+                    query += ` WHERE ${whereClauses.join(' AND ')}`;
                 }
 
                 query += ` ${orderByClause} LIMIT ${limitVal} OFFSET ${offsetVal}`;
@@ -82,7 +97,12 @@ function init(deps) {
                 let rows = params.length > 0 ? await db.all(query, params) : await db.all(query);
 
                 // External Search Fallback
-                const needsExternalFetch = (pageVal === 1 && search && search.trim().length > 2 && (rows.length < 5 || isValidPubkey(search.trim())));
+                const needsExternalFetch = (
+                    filter !== 'verified' && 
+                    pageVal === 1 && 
+                    search && search.trim().length > 2 && 
+                    (rows.length < 5 || isValidPubkey(search.trim()))
+                );
 
                 if (needsExternalFetch) {
                     try {
@@ -129,7 +149,7 @@ function init(deps) {
                                     change1h: pair.priceChange?.h1 || 0,
                                     change24h: pair.priceChange?.h24 || 0,
                                     complete: false,
-                                    hasCommunityUpdate: false // New items default to false
+                                    hasCommunityUpdate: false
                                 });
                             }
                         }
@@ -158,7 +178,6 @@ function init(deps) {
                         change5m: r.change5m || 0,
                         change1h: r.change1h || 0,
                         change24h: r.change24h || 0,
-                        // RETURN THE FLAG
                         hasCommunityUpdate: r.hascommunityupdate || r.hasCommunityUpdate || false
                     })),
                     lastUpdate: Date.now()
@@ -166,7 +185,6 @@ function init(deps) {
             });
             res.json(result);
         } catch (e) {
-            console.error("Fetch Tokens Error:", e);
             res.status(500).json({ success: false, tokens: [], error: e.message });
         }
     });
@@ -208,7 +226,7 @@ function init(deps) {
                         twitter: token.twitter,
                         website: token.website,
                         telegram: token.tweeturl,
-                        // Return the Flag
+                        banner: token.banner, // Added Banner
                         hasCommunityUpdate: token.hascommunityupdate || false,
                         pairs: pairs 
                     } 
@@ -234,17 +252,14 @@ function init(deps) {
             const update = await db.get('SELECT * FROM token_updates WHERE id = $1', [id]);
             if (!update) return res.status(404).json({ success: false, error: 'Request not found' });
 
-            const fields = [];
-            const params = [];
-            let idx = 1;
+            const fields = []; const params = []; let idx = 1;
 
             if (update.twitter) { fields.push(`twitter = $${idx++}`); params.push(update.twitter); }
             if (update.website) { fields.push(`website = $${idx++}`); params.push(update.website); }
-            if (update.telegram) { fields.push(`tweetUrl = $${idx++}`); params.push(update.telegram); } // Assuming 'tweetUrl' for TG
-            
-            // SET FLAG TRUE
-            fields.push(`hasCommunityUpdate = $${idx++}`);
-            params.push(true);
+            if (update.telegram) { fields.push(`tweetUrl = $${idx++}`); params.push(update.telegram); } 
+            if (update.banner) { fields.push(`banner = $${idx++}`); params.push(update.banner); } // Added Banner
+
+            fields.push(`hasCommunityUpdate = $${idx++}`); params.push(true);
 
             if (fields.length > 0) {
                 params.push(update.mint);
@@ -265,15 +280,25 @@ function init(deps) {
         try {
             const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [req.params.mint]);
             if (!token) return res.status(404).json({ success: false, error: "Not Found" });
-            res.json({ success: true, token: { mint: token.mint, ticker: token.ticker, twitter: token.twitter, website: token.website, telegram: token.tweeturl } });
+            res.json({ 
+                success: true, 
+                token: { 
+                    mint: token.mint, 
+                    ticker: token.ticker, 
+                    twitter: token.twitter, 
+                    website: token.website, 
+                    telegram: token.tweeturl,
+                    banner: token.banner // Added Banner
+                } 
+            });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.post('/admin/update-token', requireAdmin, async (req, res) => {
-        const { mint, twitter, website, telegram } = req.body;
+        const { mint, twitter, website, telegram, banner } = req.body;
         try { 
-            // Manual update also sets flag true
-            await db.run(`UPDATE tokens SET twitter = $1, website = $2, tweetUrl = $3, hasCommunityUpdate = TRUE WHERE mint = $4`, [twitter, website, telegram, mint]); 
+            await db.run(`UPDATE tokens SET twitter = $1, website = $2, tweetUrl = $3, banner = $4, hasCommunityUpdate = TRUE WHERE mint = $5`, 
+                [twitter, website, telegram, banner, mint]); 
             res.json({ success: true, message: "Token Updated Successfully" });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });

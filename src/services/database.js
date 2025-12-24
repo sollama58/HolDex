@@ -1,6 +1,6 @@
 /**
  * Database Service (PostgreSQL + Redis Version)
- * Updated: Added 'hasCommunityUpdate' column to tokens table.
+ * Updated: Added 'banner' column to tokens and token_updates.
  */
 const { Pool } = require('pg');
 const config = require('../config/env');
@@ -76,6 +76,7 @@ async function initDB() {
                 website TEXT,
                 metadataUri TEXT,
                 image TEXT,
+                banner TEXT,
                 isMayhemMode BOOLEAN DEFAULT FALSE,
                 signature TEXT,
                 timestamp BIGINT,
@@ -93,11 +94,11 @@ async function initDB() {
             );
         `);
         
-        // Add column if it doesn't exist (Migration logic)
-        try {
-            await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS hasCommunityUpdate BOOLEAN DEFAULT FALSE;`);
-        } catch (e) { /* ignore if exists */ }
+        // Migration: Add columns if missing
+        try { await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS hasCommunityUpdate BOOLEAN DEFAULT FALSE;`); } catch (e) {}
+        try { await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS banner TEXT;`); } catch (e) {}
 
+        // Updates Queue Table
         await pool.query(`
             CREATE TABLE IF NOT EXISTS token_updates (
                 id SERIAL PRIMARY KEY,
@@ -105,10 +106,13 @@ async function initDB() {
                 twitter TEXT,
                 website TEXT,
                 telegram TEXT,
+                banner TEXT,
                 submittedAt BIGINT,
                 status TEXT DEFAULT 'pending' 
             );
         `);
+        
+        try { await pool.query(`ALTER TABLE token_updates ADD COLUMN IF NOT EXISTS banner TEXT;`); } catch (e) {}
 
         try {
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_volume ON tokens(volume24h DESC)`);
@@ -132,8 +136,6 @@ async function saveTokenData(pubkey, mint, metadata, customTimestamp = null) {
     try {
         const ts = customTimestamp || Date.now();
 
-        // Note: We DO NOT update 'hasCommunityUpdate' here.
-        // It stays false unless manually updated via admin flow.
         await pool.query(`
             INSERT INTO tokens (userPubkey, mint, ticker, name, description, twitter, website, metadataUri, image, isMayhemMode, marketCap, timestamp)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)

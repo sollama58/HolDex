@@ -45,7 +45,8 @@
         .nav-btn { background: transparent; color: #9a3412; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 800; transition: all 0.2s; border: 2px solid transparent; }
         .nav-btn:hover { color: #fb923c; }
         .nav-btn.active { background: #451a03; color: #ea580c; border-color: #7c2d12; box-shadow: 0 4px 0 #2a1005; }
-        
+        .filter-toggle { background: #451a03; border: 2px solid #7c2d12; color: #9a3412; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; transition: all 0.2s; display: flex; align-items: center; gap: 6px; }
+        .filter-toggle.active { border-color: #22c55e; color: #4ade80; background: rgba(34, 197, 94, 0.1); }
         .refresh-btn { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; transition: all 0.2s; position: relative; }
         .refresh-btn:hover:not(:disabled) { border-color: #ea580c; color: #fff; background: #582206; }
         .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; border-color: #451a03; color: #7c2d12; }
@@ -86,6 +87,14 @@
         .pool-tab { padding: 8px 16px; font-size: 12px; font-weight: bold; color: #9a3412; cursor: pointer; border-bottom: 2px solid transparent; }
         .pool-tab.active { color: #ea580c; border-bottom-color: #ea580c; }
         .pool-tab:hover:not(.active) { color: #fb923c; }
+        .verified-badge { display: inline-flex; align-items: center; justify-content: center; background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #22c55e; border-radius: 50%; width: 20px; height: 20px; margin-left: 6px; box-shadow: 0 0 10px rgba(34, 197, 94, 0.3); }
+        .verified-badge i { width: 12px; height: 12px; }
+        
+        /* New Info Modal styles */
+        .info-btn { color: #9a3412; cursor: pointer; transition: color 0.2s; }
+        .info-btn:hover { color: #fb923c; }
+        .info-box { background: #451a03; border: 1px solid #7c2d12; border-radius: 8px; padding: 16px; margin-bottom: 16px; color: #ffedd5; font-size: 13px; line-height: 1.5; }
+        .info-box a { color: #fb923c; text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -110,10 +119,11 @@
         </div>
         
         <div id="table-controls" class="flex items-center gap-3 w-full md:w-auto transition-opacity duration-300">
-            <!-- REMOVED FRESH MINTS BUTTON -->
-            
+            <button id="filter-verified" onclick="toggleVerifiedFilter()" class="filter-toggle" title="Show only Verified Community Updates">
+                <i data-lucide="shield-check" width="16"></i> Verified Only
+            </button>
+
             <div class="relative w-full md:w-auto">
-                <!-- REMOVED MAGNIFYING GLASS ICON -->
                 <input type="text" id="search" placeholder="Search..." class="search-box" onkeyup="handleSearch(event)">
             </div>
 
@@ -223,6 +233,14 @@
                 <label class="form-label">Telegram Link</label>
                 <input type="url" id="update-telegram" class="form-input" placeholder="https://t.me/...">
                 
+                <div class="flex justify-between items-center mb-1 mt-4">
+                    <label class="form-label mb-0">Banner Image URL</label>
+                    <button type="button" class="info-btn flex items-center gap-1 text-xs" onclick="toggleInfoModal()">
+                        <i data-lucide="info" width="14"></i> How to upload?
+                    </button>
+                </div>
+                <input type="url" id="update-banner" class="form-input" placeholder="https://postimg.cc/...">
+                
                 <button type="submit" class="action-btn w-full mt-4 flex items-center justify-center gap-2">
                     Submit Update <i data-lucide="send" width="16"></i>
                 </button>
@@ -234,6 +252,9 @@
     <div id="view-detail" class="view-section px-4 md:px-0">
         <div id="detail-loading" class="text-center py-20 text-[#ea580c] font-mono animate-pulse hidden">Fetching Chain Data...</div>
         <div id="detail-content">
+            <!-- Banner Hero Section (injected if exists) -->
+            <div id="detail-banner-container" class="hidden mb-6"></div>
+
             <div class="flex flex-col md:flex-row gap-6 mb-8 items-start">
                 <div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl">
                     <img id="detail-img" src="" class="w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black shadow-lg">
@@ -262,7 +283,6 @@
                 <div class="stat-card"><span class="stat-label">24H Trend</span><span id="stat-chg24h" class="stat-value">-</span></div>
             </div>
 
-            <!-- Pool Tabs Container -->
             <div id="pool-tabs-container" class="flex gap-4 border-b border-[#7c2d12] mb-4 overflow-x-auto"></div>
 
             <div class="chart-container"><iframe id="detail-iframe" src="about:blank"></iframe></div>
@@ -310,6 +330,25 @@
     </div>
 </div>
 
+<!-- INFO MODAL FOR UPLOAD INSTRUCTIONS -->
+<div id="info-modal" class="modal-overlay">
+    <div class="bg-[#2a1005] border-2 border-[#ea580c] p-8 rounded-2xl max-w-md w-full shadow-2xl relative" onclick="event.stopPropagation()">
+        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleInfoModal()"><i data-lucide="x" width="24"></i></button>
+        <h3 class="text-xl font-bold text-white mb-4 font-sans">How to Upload a Banner?</h3>
+        
+        <div class="info-box">
+            <p class="mb-2">We do not store large image files directly. Please use a free cloud host:</p>
+            <ol class="list-decimal pl-5 space-y-2 text-[#9a3412]">
+                <li>Go to <a href="https://postimages.org/" target="_blank">PostImages.org</a></li>
+                <li>Upload your banner image (Recommended size: 1200x300px)</li>
+                <li>Copy the <strong>"Direct Link"</strong> (it must end in .jpg or .png)</li>
+                <li>Paste that link into the field below</li>
+            </ol>
+        </div>
+        <button onclick="toggleInfoModal()" class="w-full bg-[#451a03] border border-[#7c2d12] text-[#fb923c] py-2 rounded-lg hover:bg-[#582206] font-bold">Got it</button>
+    </div>
+</div>
+
 <script>
     const API_URL = 'https://asdev-backend.onrender.com'; 
     let currentSort = 'newest';
@@ -317,8 +356,10 @@
     let pollingInterval;
     let isConnected = true;
     let isModalOpen = false;
+    let isInfoModalOpen = false;
     let currentPage = 1;
     let isRefreshing = false;
+    let isVerifiedFilter = false;
 
     const formatMoney = (val) => { if (val === undefined || val === null) return "$0.00"; return val < 0.01 ? '$' + val.toExponential(2) : '$' + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }); };
     const formatCompact = (val) => { if (val === undefined || val === null) return "$0"; return '$' + new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val); };
@@ -357,12 +398,19 @@
         }
     }
 
+    function toggleInfoModal() {
+        const modal = document.getElementById('info-modal');
+        isInfoModalOpen = !isInfoModalOpen;
+        if (isInfoModalOpen) modal.classList.add('open'); else modal.classList.remove('open');
+    }
+
     async function submitUpdate(e) {
         e.preventDefault();
         const mint = document.getElementById('update-mint').value;
         const twitter = document.getElementById('update-twitter').value;
         const website = document.getElementById('update-website').value;
         const telegram = document.getElementById('update-telegram').value;
+        const banner = document.getElementById('update-banner').value;
         const statusDiv = document.getElementById('update-status');
 
         statusDiv.innerText = "Submitting...";
@@ -373,10 +421,9 @@
             const res = await fetch(`${API_URL}/api/request-update`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mint, twitter, website, telegram })
+                body: JSON.stringify({ mint, twitter, website, telegram, banner })
             });
             const data = await res.json();
-            
             if (data.success) {
                 statusDiv.innerText = "✅ Success! Your update is queued for admin approval.";
                 statusDiv.classList.add('text-green-500');
@@ -456,11 +503,23 @@
         }, 1000);
     }
 
+    function toggleVerifiedFilter() {
+        isVerifiedFilter = !isVerifiedFilter;
+        const btn = document.getElementById('filter-verified');
+        if (isVerifiedFilter) btn.classList.add('active');
+        else btn.classList.remove('active');
+        currentPage = 1;
+        fetchList();
+    }
+
     async function fetchList() {
         try {
             document.getElementById('page-display').innerText = `Page ${currentPage}`;
             document.getElementById('btn-prev').disabled = currentPage <= 1;
-            const endpoint = `${API_URL}/api/tokens?sort=${currentSort}&search=${encodeURIComponent(searchQuery)}&limit=100&page=${currentPage}`;
+            
+            let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&search=${encodeURIComponent(searchQuery)}&limit=100&page=${currentPage}`;
+            if (isVerifiedFilter) endpoint += '&filter=verified';
+
             const res = await fetch(endpoint);
             if (!res.ok) throw new Error("API Error");
             const data = await res.json();
@@ -494,7 +553,7 @@
                         <div class="flex flex-col min-w-0">
                             <div class="flex items-center gap-2">
                                 <span class="font-bold text-white text-sm group-hover:text-[#ea580c] transition truncate font-sans tracking-wide">${t.ticker}</span>
-                                ${t.hasCommunityUpdate ? '<span title="Verified Community Update" class="bg-blue-500/20 text-blue-400 border border-blue-500/50 rounded-full p-0.5"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span>' : ''}
+                                ${t.hasCommunityUpdate ? '<span title="Verified Community Update" class="verified-badge"><i data-lucide="check" width="12"></i></span>' : ''}
                             </div>
                             <span class="text-[10px] text-[#9a3412] truncate max-w-[120px] md:max-w-[200px] font-mono group-hover:text-[#fb923c]">${t.name}</span>
                         </div>
@@ -511,7 +570,6 @@
         lucide.createIcons();
     }
 
-    // --- Switch Pool Tabs ---
     window.switchPool = (pairAddress, dexId) => {
         document.querySelectorAll('.pool-tab').forEach(t => t.classList.remove('active'));
         const tab = document.getElementById(`tab-${pairAddress}`);
@@ -527,8 +585,13 @@
         document.getElementById('detail-controls').classList.remove('hidden');
         const loadingDiv = document.getElementById('detail-loading');
         const contentDiv = document.getElementById('detail-content');
+        const bannerContainer = document.getElementById('detail-banner-container');
+        
         loadingDiv.style.display = 'block';
         contentDiv.style.display = 'none';
+        bannerContainer.classList.add('hidden');
+        bannerContainer.innerHTML = '';
+
         try {
             const res = await fetch(`${API_URL}/api/token/${mint}`);
             if(!res.ok) throw new Error("Failed");
@@ -541,12 +604,22 @@
                 document.getElementById('detail-mint').innerText = t.mint;
                 document.getElementById('detail-img').src = t.image || 'https://placehold.co/80x80/2a1005/7c2d12?text=?';
                 
+                // RENDER BANNER IF EXISTS
+                if (t.banner) {
+                    bannerContainer.innerHTML = `
+                        <div class="w-full h-48 md:h-64 rounded-xl bg-cover bg-center border-2 border-[#7c2d12] shadow-lg relative overflow-hidden" 
+                             style="background-image: url('${t.banner}')">
+                             <div class="absolute inset-0 bg-gradient-to-t from-[#2a1005] to-transparent opacity-80"></div>
+                        </div>
+                    `;
+                    bannerContainer.classList.remove('hidden');
+                }
+
                 const actionsDiv = document.getElementById('detail-actions');
                 let linksHtml = '';
                 linksHtml += `<a href="https://pump.fun/coin/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><img src="https://pump.fun/logo.png" width="16" class="rounded-full" onerror="this.style.display='none'"> Pump.fun</a>`;
                 linksHtml += `<a href="https://solscan.io/token/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><i data-lucide="search" width="16"></i> Solscan</a>`;
                 
-                // ONLY SHOW SOCIALS IF VERIFIED VIA COMMUNITY UPDATE
                 if (t.hasCommunityUpdate) {
                     if (t.twitter) linksHtml += `<a href="${t.twitter}" target="_blank" class="social-btn"><i data-lucide="twitter" width="20"></i></a>`;
                     if (t.website) linksHtml += `<a href="${t.website}" target="_blank" class="social-btn"><i data-lucide="globe" width="20"></i></a>`;
@@ -587,10 +660,11 @@
         }
     }
 
-    // REMOVED 'filter-btn' logic since button is gone
     window.setSort = (sort, btn) => {
         currentSort = sort;
-        // No buttons to toggle anymore for Fresh Mints
+        if(btn) {
+            // No filter btn logic needed
+        }
         currentPage = 1; fetchList();
     };
     window.handleSearch = (e) => { searchQuery = e.target.value; currentPage = 1; clearTimeout(window.searchTimeout); window.searchTimeout = setTimeout(fetchList, 1000); };

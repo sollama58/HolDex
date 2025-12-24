@@ -51,20 +51,17 @@
             <button onclick="logout()" class="text-[#9a3412] hover:text-[#fb923c]">Logout</button>
         </div>
 
-        <!-- TABS -->
         <div class="flex gap-4 mb-8">
             <div id="tab-pending" class="nav-tab active" onclick="switchTab('pending')">Pending Updates</div>
             <div id="tab-manage" class="nav-tab" onclick="switchTab('manage')">Manage Token</div>
         </div>
 
-        <!-- PENDING UPDATES VIEW -->
         <div id="view-pending" class="space-y-4">
             <div id="updates-list">
                 <div class="text-center py-20 text-[#9a3412]">Loading requests...</div>
             </div>
         </div>
 
-        <!-- MANAGE TOKEN VIEW -->
         <div id="view-manage" class="hidden">
             <div class="bg-[#451a03] border border-[#7c2d12] rounded-xl p-8 max-w-2xl mx-auto">
                 <h3 class="text-xl font-bold text-white mb-6">Edit or Delete Token</h3>
@@ -91,6 +88,10 @@
                         <label class="text-xs text-[#9a3412] uppercase font-bold">Telegram</label>
                         <input type="text" id="edit-telegram" class="form-input">
                     </div>
+                    <div>
+                        <label class="text-xs text-[#9a3412] uppercase font-bold">Banner URL</label>
+                        <input type="text" id="edit-banner" class="form-input">
+                    </div>
 
                     <div class="flex justify-between pt-4 border-t border-[#7c2d12] mt-6">
                         <button onclick="deleteToken()" class="action-btn btn-red">Delete Token</button>
@@ -109,7 +110,7 @@
     function login() {
         const pass = document.getElementById('admin-pass').value;
         adminKey = pass;
-        fetchUpdates(); // Try fetching to validate key
+        fetchUpdates(); 
     }
 
     function switchTab(tab) {
@@ -160,7 +161,7 @@
                         <h3 class="text-xl font-bold text-white">${u.ticker || 'Unknown'}</h3>
                         <span class="text-[#fb923c] font-mono text-xs bg-[#2a1005] px-2 py-1 rounded">${u.mint}</span>
                     </div>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm font-mono text-[#9a3412]">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm font-mono text-[#9a3412]">
                         <div class="flex flex-col">
                             <span class="text-[10px] uppercase font-bold text-[#7c2d12]">Twitter</span>
                             <a href="${u.twitter || '#'}" target="_blank" class="${u.twitter ? 'text-[#fb923c] hover:underline' : 'text-[#582206]'} truncate">${u.twitter || 'None'}</a>
@@ -173,7 +174,12 @@
                             <span class="text-[10px] uppercase font-bold text-[#7c2d12]">Telegram</span>
                             <a href="${u.telegram || '#'}" target="_blank" class="${u.telegram ? 'text-[#fb923c] hover:underline' : 'text-[#582206]'} truncate">${u.telegram || 'None'}</a>
                         </div>
+                        <div class="flex flex-col">
+                            <span class="text-[10px] uppercase font-bold text-[#7c2d12]">Banner</span>
+                            ${u.banner ? `<a href="${u.banner}" target="_blank" class="text-[#fb923c] hover:underline truncate">View Banner</a>` : '<span class="text-[#582206]">None</span>'}
+                        </div>
                     </div>
+                    ${u.banner ? `<img src="${u.banner}" class="mt-4 w-full h-24 object-cover rounded border border-[#7c2d12] opacity-70">` : ''}
                 </div>
                 <div class="flex gap-3">
                     <button onclick="handleAction(${u.id}, 'reject')" class="action-btn btn-red">Reject</button>
@@ -197,7 +203,6 @@
         } catch (e) { alert("Network Error"); }
     }
 
-    // --- MANAGE TOKEN LOGIC ---
     async function loadToken() {
         const mint = document.getElementById('manage-mint').value;
         const msg = document.getElementById('manage-msg');
@@ -215,6 +220,7 @@
                 document.getElementById('edit-twitter').value = data.token.twitter || '';
                 document.getElementById('edit-website').value = data.token.website || '';
                 document.getElementById('edit-telegram').value = data.token.telegram || '';
+                document.getElementById('edit-banner').value = data.token.banner || '';
             } else {
                 alert("Token not found");
                 document.getElementById('manage-form').classList.add('hidden');
@@ -227,12 +233,13 @@
         const twitter = document.getElementById('edit-twitter').value;
         const website = document.getElementById('edit-website').value;
         const telegram = document.getElementById('edit-telegram').value;
+        const banner = document.getElementById('edit-banner').value;
         
         try {
             const res = await fetch(`${API_URL}/api/admin/update-token`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-admin-auth': adminKey },
-                body: JSON.stringify({ mint, twitter, website, telegram })
+                body: JSON.stringify({ mint, twitter, website, telegram, banner })
             });
             const data = await res.json();
             if(data.success) alert("Token Updated!");
@@ -243,7 +250,6 @@
     async function deleteToken() {
         if(!confirm("DANGER: This will permanently delete the token from the database. This cannot be undone. Proceed?")) return;
         const mint = document.getElementById('manage-mint').value;
-        
         try {
             const res = await fetch(`${API_URL}/api/admin/delete-token`, {
                 method: 'POST',
