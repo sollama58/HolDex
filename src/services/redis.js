@@ -1,46 +1,55 @@
 /**
  * Redis Service
- * Handles caching and temporary state storage
+ * Uses 'ioredis' for robust connection handling and features.
  */
 const Redis = require('ioredis');
 const config = require('../config/env');
 const logger = require('./logger');
 
-let redis = null;
+let redisClient = null;
 
 function initRedis() {
-    if (!config.REDIS_URL) {
-        logger.warn('REDIS_URL not set. Caching will be disabled (or fallback to memory).');
-        return null;
-    }
+    if (redisClient) return redisClient;
 
     try {
-        redis = new Redis(config.REDIS_URL, {
-            maxRetriesPerRequest: 3,
-            retryStrategy(times) {
-                const delay = Math.min(times * 50, 2000);
-                return delay;
-            }
+        // Support for REDIS_URL string (e.g. from Render/Heroku)
+        if (config.REDIS_URL) {
+            redisClient = new Redis(config.REDIS_URL, {
+                maxRetriesPerRequest: 3,
+                retryStrategy: (times) => {
+                    const delay = Math.min(times * 50, 2000);
+                    return delay;
+                }
+            });
+        } else {
+            // Fallback for local dev if no URL provided
+            redisClient = new Redis({
+                host: 'localhost',
+                port: 6379
+            });
+        }
+
+        redisClient.on('connect', () => {
+            logger.info('✅ Redis Connected');
         });
 
-        redis.on('connect', () => logger.info('Connected to Redis'));
-        redis.on('error', (err) => logger.error('Redis Error', { error: err.message }));
+        redisClient.on('error', (err) => {
+            logger.error('❌ Redis Error:', err);
+        });
 
-        return redis;
+        return redisClient;
     } catch (e) {
-        logger.error('Failed to initialize Redis', { error: e.message });
+        logger.error('Failed to initialize Redis:', e);
         return null;
     }
 }
 
-// Get the singleton instance
-const getRedis = () => {
-    if (!redis) {
-        // Try to init if not already done
+function getRedis() {
+    if (!redisClient) {
         return initRedis();
     }
-    return redis;
-};
+    return redisClient;
+}
 
 module.exports = {
     initRedis,
