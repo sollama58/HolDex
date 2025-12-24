@@ -28,16 +28,6 @@ function getBestPair(pairs, mint) {
     const pumpPair = sortedPairs.find(p => p.dexId === 'pump');
     const raydiumPair = sortedPairs.find(p => p.dexId === 'raydium');
 
-    // --- RULE 1: BONK Token Exception ---
-    if (mint === 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263' && raydiumPair) {
-        return raydiumPair;
-    }
-
-    // --- RULE 2: PumpFun Tokens ---
-    if (pumpPair) {
-        return pumpPair;
-    }
-
     // --- RULE 3: Default / Other Tokens ---
     return sortedPairs[0];
 }
