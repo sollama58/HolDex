@@ -982,10 +982,24 @@
     }
 
     // --- Helper Functions (Search, Formatting, Routing) ---
-    const formatMoney = (val) => { if (val === undefined || val === null) return "$0.00"; return val < 0.01 ? '$' + val.toExponential(2) : '$' + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }); };
-    const formatCompact = (val) => { if (val === undefined || val === null) return "$0"; return '$' + new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val); };
-    const formatPct = (val) => { if (val === undefined || val === null || val === 0) return `<span class="text-[#9a3412]">-</span>`; const cls = val > 0 ? 'pill-green' : (val < 0 ? 'pill-red' : 'text-[#9a3412]'); return `<span class="pill ${cls}">${val > 0 ? '+' : ''}${val.toFixed(2)}%</span>`; };
-    const timeAgo = (ts) => { if (!ts) return ''; const seconds = Math.floor((Date.now() - ts) / 1000); return seconds < 60 ? `${seconds}s ago` : (seconds < 3600 ? `${Math.floor(seconds/60)}m ago` : `${Math.floor(seconds/3600)}h ago`); };
+    const formatMoney = (val) => { 
+        if (val === undefined || val === null || isNaN(val)) return "$0.00"; 
+        return val < 0.01 ? '$' + val.toExponential(2) : '$' + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }); 
+    };
+    const formatCompact = (val) => { 
+        if (val === undefined || val === null || isNaN(val)) return "$0"; 
+        return '$' + new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val); 
+    };
+    const formatPct = (val) => { 
+        if (val === undefined || val === null || isNaN(val) || val === 0) return `<span class="text-[#9a3412]">-</span>`; 
+        const cls = val > 0 ? 'pill-green' : (val < 0 ? 'pill-red' : 'text-[#9a3412]'); 
+        return `<span class="pill ${cls}">${val > 0 ? '+' : ''}${val.toFixed(2)}%</span>`; 
+    };
+    const timeAgo = (ts) => { 
+        if (!ts) return ''; 
+        const seconds = Math.floor((Date.now() - ts) / 1000); 
+        return seconds < 60 ? `${seconds}s ago` : (seconds < 3600 ? `${Math.floor(seconds/60)}m ago` : `${Math.floor(seconds/3600)}h ago`); 
+    };
 
     function navigateTo(path) { window.location.hash = path; }
     
@@ -1120,7 +1134,7 @@
         // Apply Client-Side Filter for Zero Volume
         let displayTokens = tokens;
         if (isZeroVolHidden) {
-            displayTokens = tokens.filter(t => t.volume24h > 0);
+            displayTokens = tokens.filter(t => (t.volume24h || t.volume24h || 0) > 0);
         }
 
         if (displayTokens.length === 0) { 
@@ -1128,18 +1142,19 @@
         }
 
         tbody.innerHTML = displayTokens.map(t => {
-            const kScoreDisplay = t.hasCommunityUpdate 
-                ? `${t.kScore || 0}${t.kScore > 50 ? ' 💎' : ''}` 
+            // Robust check for properties (camelCase vs snake_case)
+            const score = t.kScore || t.k_score || 0;
+            const isVerified = t.hasCommunityUpdate || t.hascommunityupdate;
+            const mcap = Number(t.marketCap || t.marketcap || 0);
+            const vol = Number(t.volume24h || t.volume24h || 0);
+            
+            const kScoreDisplay = isVerified 
+                ? `${score}${score > 50 ? ' 💎' : ''}` 
                 : '<span title="Community Update Required" class="text-gray-500">🔒</span>';
-
-            // Robust checks for both camelCase and lowercase property names from DB
-            const mcap = t.marketCap || t.marketcap || 0;
-            const vol = t.volume24h || t.volume24h || 0;
-            const price = t.priceUsd || t.priceusd || 0;
 
             return `
             <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group">
-                <td><div class="flex items-center gap-3"><img src="${t.image || 'https://placehold.co/40x40/2a1005/7c2d12?text=?'}" class="img-token group-hover:border-[#ea580c] transition" loading="lazy" onerror="this.src='https://placehold.co/40x40/2a1005/7c2d12?text=?'"><div class="flex flex-col min-w-0"><div class="flex items-center gap-2"><span class="font-bold text-white text-sm group-hover:text-[#ea580c] transition truncate font-sans tracking-wide">${t.ticker}</span>${t.hasCommunityUpdate ? '<span title="Verified Community Update" class="verified-badge"><i data-lucide="check" width="12"></i></span>' : ''}</div><span class="text-[10px] text-[#9a3412] truncate max-w-[120px] md:max-w-[200px] font-mono group-hover:text-[#fb923c]">${t.name}</span></div></div></td>
+                <td><div class="flex items-center gap-3"><img src="${t.image || 'https://placehold.co/40x40/2a1005/7c2d12?text=?'}" class="img-token group-hover:border-[#ea580c] transition" loading="lazy" onerror="this.src='https://placehold.co/40x40/2a1005/7c2d12?text=?'"><div class="flex flex-col min-w-0"><div class="flex items-center gap-2"><span class="font-bold text-white text-sm group-hover:text-[#ea580c] transition truncate font-sans tracking-wide">${t.ticker}</span>${isVerified ? '<span title="Verified Community Update" class="verified-badge"><i data-lucide="check" width="12"></i></span>' : ''}</div><span class="text-[10px] text-[#9a3412] truncate max-w-[120px] md:max-w-[200px] font-mono group-hover:text-[#fb923c]">${t.name}</span></div></div></td>
                 <td class="text-right text-[#fb923c] font-mono font-bold">${kScoreDisplay}</td>
                 <td class="hidden md:table-cell text-right">${formatPct(t.change5m)}</td>
                 <td class="hidden md:table-cell text-right">${formatPct(t.change1h)}</td>
@@ -1197,9 +1212,12 @@
                 if(mintEl) mintEl.innerText = t.mint;
                 if(img) img.src = t.image || 'https://placehold.co/80x80/2a1005/7c2d12?text=?';
                 
+                // Verified Status Check
+                const isVerified = t.hasCommunityUpdate || t.hascommunityupdate;
+
                 // Show Description if available AND Verified
-                if (t.description && descEl && t.hasCommunityUpdate) {
-                    descEl.innerHTML = sanitizeInput(t.description); // Safe injection
+                if (t.description && descEl && isVerified) {
+                    descEl.innerHTML = sanitizeInput(t.description); 
                     descEl.classList.remove('hidden');
                 } else if (descEl) {
                     descEl.classList.add('hidden');
@@ -1221,7 +1239,7 @@
                     // 2. Solscan Link
                     linksHtml += `<a href="https://solscan.io/token/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><i data-lucide="search" width="16"></i> Solscan</a>`;
                     
-                    if (t.hasCommunityUpdate) {
+                    if (isVerified) {
                         // Badge
                         linksHtml += `<div class="flex items-center px-4 py-2 bg-green-900/30 border border-green-500 text-green-500 rounded-xl font-bold uppercase text-xs tracking-wider h-14"><i data-lucide="shield-check" width="18" class="mr-2"></i> VERIFIED UPDATE</div>`;
 
@@ -1233,10 +1251,11 @@
                     actionsDiv.innerHTML = linksHtml; lucide.createIcons();
                 }
 
-                // Stats - Robust Data Handling
-                const mcap = t.marketCap || t.marketcap || 0;
-                const price = t.priceUsd || t.priceusd || 0;
-                const vol = t.volume24h || t.volume24h || 0;
+                // Stats - Robust Data Handling (CamelCase vs SnakeCase)
+                const mcap = Number(t.marketCap || t.marketcap || 0);
+                const price = Number(t.priceUsd || t.priceusd || 0);
+                const vol = Number(t.volume24h || t.volume24h || 0);
+                const score = t.kScore || t.k_score || 0;
 
                 const sPrice = document.getElementById('stat-price'); if(sPrice) sPrice.innerText = formatMoney(price);
                 const sMcap = document.getElementById('stat-mcap'); if(sMcap) sMcap.innerText = formatCompact(mcap);
@@ -1246,11 +1265,8 @@
                 
                 const kEl = document.getElementById('stat-kscore');
                 if(kEl) {
-                    const hasScore = t.kScore && t.kScore > 0;
-                    const isVerified = t.hasCommunityUpdate;
-
-                    if (isVerified && hasScore) {
-                        kEl.innerText = t.kScore;
+                    if (isVerified && score > 0) {
+                        kEl.innerText = score;
                         kEl.classList.remove('text-gray-500'); kEl.classList.add('text-[#fb923c]');
                         kEl.title = "Conviction Score";
                     } else {

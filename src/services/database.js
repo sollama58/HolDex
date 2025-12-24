@@ -9,28 +9,33 @@ let dbInstance = null;
 async function initDB() {
     if (dbInstance) return dbInstance;
 
-    // --- PERSISTENCE FIX ---
-    // 1. Prefer explicit DB_PATH from environment (Render/Docker)
-    // 2. Fallback to 'data/database.sqlite' in project root
-    // 3. Ensure the directory exists before opening
+    // --- PERSISTENCE CONFIGURATION ---
+    // 1. Docker/Render often use specific paths for persistent disks.
+    // 2. We default to a 'data' folder in the project root.
+    // 3. __dirname is 'src/services', so '../../data' puts it in 'project/data'.
     
+    // Explicit check for Render's persistent disk path if configured, else local.
+    const projectRoot = path.resolve(__dirname, '../../');
     let dbPath = process.env.DB_PATH;
     
     if (!dbPath) {
-        // Default to a 'data' folder in the project root to keep it organized
-        // __dirname is src/services, so up 2 levels is root
-        dbPath = path.resolve(__dirname, '../../data/database.sqlite');
+        // If no env var, use project/data/database.sqlite
+        const dataDir = path.join(projectRoot, 'data');
+        if (!fs.existsSync(dataDir)) {
+            console.log(`📂 Creating persistent data directory: ${dataDir}`);
+            fs.mkdirSync(dataDir, { recursive: true });
+        }
+        dbPath = path.join(dataDir, 'database.sqlite');
+    } else {
+        // If env var provided, ensure its directory exists too
+        const dbDir = path.dirname(dbPath);
+        if (!fs.existsSync(dbDir)) {
+            console.log(`📂 Creating configured DB directory: ${dbDir}`);
+            fs.mkdirSync(dbDir, { recursive: true });
+        }
     }
-
-    const dbDir = path.dirname(dbPath);
     
-    console.log(`🔌 Database Path Configured: ${dbPath}`);
-
-    // Create directory if it doesn't exist (Critical for Docker volumes)
-    if (!fs.existsSync(dbDir)) {
-        console.log(`📂 Creating database directory: ${dbDir}`);
-        fs.mkdirSync(dbDir, { recursive: true });
-    }
+    console.log(`🔌 Database Path Resolved: ${dbPath}`);
 
     try {
         dbInstance = await open({
@@ -40,14 +45,13 @@ async function initDB() {
 
         console.log("💾 SQLite Database Connected Successfully");
 
-        // --- CONCURRENCY & SAFETY ---
+        // --- CONCURRENCY ---
         await dbInstance.exec('PRAGMA journal_mode = WAL;');
         await dbInstance.exec('PRAGMA synchronous = NORMAL;');
-        await dbInstance.exec('PRAGMA foreign_keys = ON;'); // Enforce integrity
+        await dbInstance.exec('PRAGMA foreign_keys = ON;');
 
-        // --- SCHEMA DEFINITION ---
+        // --- SCHEMA DEFINITION (Idempotent) ---
         
-        // 1. Tokens Table
         await dbInstance.exec(`
             CREATE TABLE IF NOT EXISTS tokens (
                 mint TEXT PRIMARY KEY,
@@ -79,7 +83,6 @@ async function initDB() {
             );
         `);
 
-        // 2. Token Updates Table
         await dbInstance.exec(`
             CREATE TABLE IF NOT EXISTS token_updates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,7 +108,7 @@ async function initDB() {
             CREATE INDEX IF NOT EXISTS idx_tokens_mcap ON tokens(marketCap); 
         `);
 
-        // --- AUTO-MIGRATION ---
+        // --- AUTO-MIGRATION (Column Repair) ---
         const columns = await dbInstance.all("PRAGMA table_info(tokens)");
         const columnNames = columns.map(c => c.name);
 
@@ -127,13 +130,15 @@ async function initDB() {
         
     } catch (err) {
         console.error("❌ Fatal Database Initialization Error:", err);
+        // Do NOT throw here if we want the server to try and limp along or restart cleanly, 
+        // but typically a DB fail is fatal.
         throw err;
     }
 
     return dbInstance;
 }
 
-// ... Caching Wrapper (Unchanged) ...
+// ... Caching Wrapper ...
 async function smartCache(key, durationSeconds, fetchFunction) {
     let redis = null;
     try {
