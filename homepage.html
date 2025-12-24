@@ -14,12 +14,11 @@
 
     <!-- 2. Execute Polyfills Immediately -->
     <script>
-        // Polyfill Global Object (Node.js style)
-        if (typeof window !== 'undefined') {
-            window.global = window;
-        }
+        // Polyfill Global Object (Node.js style) - Essential for Web3.js
+        window.global = window;
 
-        // Polyfill Buffer (Defensive Assignment)
+        // Polyfill Buffer (Aggressive Assignment)
+        // Checks multiple export locations from the CDN
         if (typeof window.Buffer === 'undefined') {
             if (window.buffer && window.buffer.Buffer) {
                 window.Buffer = window.buffer.Buffer;
@@ -29,8 +28,13 @@
                 console.error("❌ CRITICAL: Buffer polyfill failed to load.");
             }
         }
+        
+        // Ensure global.Buffer is also set (some libs check global.Buffer instead of window.Buffer)
+        if (window.global && !window.global.Buffer) {
+            window.global.Buffer = window.Buffer;
+        }
 
-        // Polyfill Process (Required by Web3.js)
+        // Polyfill Process (Required by Web3.js env checks)
         if (typeof window.process === 'undefined') {
             window.process = { 
                 env: { NODE_ENV: 'production' }, 
@@ -47,7 +51,7 @@
     <!-- 2. SOLANA LIBRARIES                        -->
     <!-- ========================================== -->
     <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
-    <!-- SPL Token library removed to prevent Buffer conflicts - Logic reimplemented manually below -->
+    <!-- SPL Token library removed - Using manual instruction construction -->
 
     <!-- ========================================== -->
     <!-- 3. STYLES & UI LIBS                        -->
@@ -117,8 +121,7 @@
         .stat-value { font-size: 18px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
         .modal-overlay { position: fixed; inset: 0; background: rgba(15, 5, 2, 0.95); backdrop-filter: blur(5px); z-index: 100; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
         .modal-overlay.open { opacity: 1; pointer-events: auto; }
-        .status-bar { position: fixed; bottom: 0; left: 0; width: 100%; background: #451a03; border-top: 2px solid #ea580c; padding: 10px 24px; display: flex; justify-content: space-between; align-items: center; z-index: 50; cursor: pointer; transition: background 0.2s; box-shadow: 0 -5px 20px rgba(234, 88, 12, 0.2); }
-        .status-bar:hover { background: #582206; }
+        .status-bar { position: fixed; bottom: 0; left: 0; width: 100%; background: #451a03; border-top: 2px solid #ea580c; padding: 0 24px; height: 50px; display: flex; justify-content: space-between; align-items: center; z-index: 50; transition: background 0.2s; box-shadow: 0 -5px 20px rgba(234, 88, 12, 0.2); }
         .pulse-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 8px; border: 1px solid rgba(255,255,255,0.2); }
         .pulse-dot.green { background: #22c55e; box-shadow: 0 0 12px #22c55e; animation: pulseGlow 2s infinite; }
         .pulse-dot.red { background: #ef4444; box-shadow: 0 0 12px #ef4444; }
@@ -155,6 +158,11 @@
         .wallet-btn { background: #2a1005; border: 2px solid #7c2d12; padding: 16px; border-radius: 12px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.2s; color: #ffedd5; font-weight: bold; }
         .wallet-btn:hover { border-color: #ea580c; background: #451a03; transform: translateX(5px); }
         .wallet-icon { width: 32px; height: 32px; border-radius: 8px; }
+        
+        /* New Status Bar specific styles */
+        .status-bar-btn { padding: 6px 12px; border-radius: 6px; border: 1px solid #7c2d12; background: #2a1005; color: #9a3412; font-size: 11px; font-weight: bold; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px; }
+        .status-bar-btn:hover { border-color: #ea580c; color: #fb923c; background: #451a03; }
+        .status-bar-btn.connected { border-color: #22c55e; color: #22c55e; background: rgba(34, 197, 94, 0.1); }
     </style>
 </head>
 <body>
@@ -455,8 +463,8 @@
     </div>
 </div>
 
-<div class="status-bar" onclick="toggleStatusModal()">
-    <div class="flex items-center gap-3">
+<div class="status-bar">
+    <div class="flex items-center gap-3" onclick="toggleStatusModal()">
         <span class="text-[#9a3412] text-xs font-bold tracking-wider uppercase">System Status</span>
         <div class="h-4 w-[2px] bg-[#7c2d12]"></div>
         <div class="flex items-center gap-2">
@@ -469,8 +477,15 @@
             <span id="last-sync-time" class="text-xs font-mono text-[#fb923c]">--:--:--</span>
         </div>
     </div>
-    <div class="text-[#fb923c] hover:text-white transition transform hover:scale-110">
-        <i data-lucide="activity" width="20"></i>
+    
+    <!-- New Wallet Status in Bottom Bar -->
+    <div class="flex items-center gap-3">
+        <button id="statusbar-wallet-btn" onclick="openWalletModal()" class="status-bar-btn">
+            <i data-lucide="wallet" width="14"></i> <span>Connect Wallet</span>
+        </button>
+        <div class="text-[#fb923c] hover:text-white transition transform hover:scale-110 cursor-pointer" onclick="toggleStatusModal()">
+            <i data-lucide="activity" width="20"></i>
+        </div>
     </div>
 </div>
 
@@ -554,8 +569,7 @@
     window.onload = async () => {
         handleRoute();
         await fetchFees();
-        // Check if previously connected (simple persistence)
-        // In a real app we'd check window.solana.isConnected or use localstorage
+        // Removed auto-connect logic as requested
     };
     window.addEventListener('hashchange', handleRoute);
 
@@ -619,20 +633,37 @@
     }
 
     function updateWalletUI(connected) {
+        // Update Page Elements
         const discDiv = document.getElementById('wallet-disconnected');
         const connDiv = document.getElementById('wallet-connected');
         const submitBtn = document.getElementById('submit-btn');
+        
+        // Status Bar Elements
+        const statusBtn = document.getElementById('statusbar-wallet-btn');
 
         if (connected) {
+            const shortAddr = walletAddress.slice(0,4) + '...' + walletAddress.slice(-4);
+            
+            // Update Page
             discDiv.classList.add('hidden');
             connDiv.classList.remove('hidden');
-            document.getElementById('display-address').innerText = walletAddress.slice(0,4) + '...' + walletAddress.slice(-4);
+            document.getElementById('display-address').innerText = shortAddr;
             submitBtn.disabled = false;
+            
+            // Status Bar
+            statusBtn.innerHTML = `<i data-lucide="wallet" width="14"></i> <span>${shortAddr}</span>`;
+            statusBtn.classList.add('connected');
         } else {
+            // Update Page
             discDiv.classList.remove('hidden');
             connDiv.classList.add('hidden');
             submitBtn.disabled = true;
+            
+            // Status Bar
+            statusBtn.innerHTML = `<i data-lucide="wallet" width="14"></i> <span>Connect Wallet</span>`;
+            statusBtn.classList.remove('connected');
         }
+        lucide.createIcons();
     }
 
     // UPDATED: Use Backend Proxy for Balances to avoid CORS/403
@@ -695,7 +726,6 @@
             const tokenMintPubkey = new solanaWeb3.PublicKey(feeConfig.tokenMint);
 
             // 2. Derive ATA Addresses Manually (Avoiding spl-token lib)
-            // Function to find address without Buffer dependence
             const findATA = async (owner, mint) => {
                 const [address] = await solanaWeb3.PublicKey.findProgramAddress(
                     [owner.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mint.toBytes()],
