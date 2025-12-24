@@ -8,17 +8,15 @@ services:
       - "3000:3000"
     environment:
       - PORT=3000
-      # Connects to the 'redis' service defined below
       - REDIS_URL=redis://redis:6379
-      # 5 Minutes in milliseconds
       - METADATA_UPDATE_INTERVAL=300000
-      # Ensure this matches the password in your src/config/env.js
       - ADMIN_PASSWORD=admin123 
     depends_on:
       - redis
     volumes:
-      # Persist SQLite database file outside the container so data isn't lost on restart
-      - ./database.sqlite:/usr/src/app/database.sqlite
+      # FIX: Map the local ./data folder to the container's /usr/src/app/data folder
+      # This matches the path defined in src/services/database.js
+      - ./data:/usr/src/app/data
     restart: always
 
   # Redis Service for Caching
@@ -27,7 +25,9 @@ services:
     ports:
       - "6379:6379"
     restart: always
+    volumes:
+       # Optional: Persist Redis data as well
+       - redis_data:/data
 
-# Define volumes if needed (sqlite file is mapped directly above)
 volumes:
-  sqlite_data:
+  redis_data:
