@@ -12,13 +12,17 @@ const newTokenListener = require('./tasks/newTokenListener');
 
 const app = express();
 
+// --- PROXY CONFIGURATION (FIX) ---
+// Required because we are behind a Load Balancer (Render/Docker/Nginx).
+// Without this, the Rate Limiter thinks all traffic comes from one IP (the balancer) and blocks everyone.
+app.set('trust proxy', 1);
+
 // --- SECURITY & MIDDLEWARE ---
 app.use(helmet());
 app.use(cors({ origin: config.CORS_ORIGINS }));
 app.use(express.json());
 
 // --- RATE LIMITING (Phase 1 Stabilizer) ---
-// This ensures your server doesn't crash from spam bots
 
 // 1. Global Limiter: Basic protection (500 requests per 15 mins per IP)
 const globalLimiter = rateLimit({
