@@ -14,7 +14,6 @@ const app = express();
 
 // --- PROXY CONFIGURATION (FIX) ---
 // Required because we are behind a Load Balancer (Render/Docker/Nginx).
-// Without this, the Rate Limiter thinks all traffic comes from one IP (the balancer) and blocks everyone.
 app.set('trust proxy', 1);
 
 // --- SECURITY & MIDDLEWARE ---
@@ -22,22 +21,22 @@ app.use(helmet());
 app.use(cors({ origin: config.CORS_ORIGINS }));
 app.use(express.json());
 
-// --- RATE LIMITING (Phase 1 Stabilizer) ---
+// --- RATE LIMITING (RELAXED) ---
 
-// 1. Global Limiter: Basic protection (500 requests per 15 mins per IP)
+// 1. Global Limiter: 2000 requests per 15 mins per IP (Approx ~2 req/sec sustained)
 const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, 
-    max: 500, 
+    max: 2000, 
     standardHeaders: true,
     legacyHeaders: false,
     message: { success: false, error: "Too many requests, please try again later." }
 });
 app.use(globalLimiter);
 
-// 2. Strict Limiter: For Search & Updates (30 requests per 1 min)
+// 2. Strict Limiter: For Search & Updates (120 requests per 1 min = 2 req/sec bursts)
 const strictLimiter = rateLimit({
     windowMs: 1 * 60 * 1000, 
-    max: 30, 
+    max: 120, 
     message: { success: false, error: "Rate limit exceeded. Please slow down." }
 });
 
@@ -68,7 +67,7 @@ async function startServer() {
         // 4. Start Listener
         app.listen(config.PORT, () => {
             console.log(`🔥 HolDex Backend v2.3 running on port ${config.PORT}`);
-            console.log(`🛡️ Rate Limiting Active`);
+            console.log(`🛡️ Rate Limiting Active (Relaxed Mode)`);
         });
     } catch (err) {
         console.error("Fatal Server Startup Error:", err);
