@@ -1132,6 +1132,11 @@
                 ? `${t.kScore || 0}${t.kScore > 50 ? ' 💎' : ''}` 
                 : '<span title="Community Update Required" class="text-gray-500">🔒</span>';
 
+            // Robust checks for both camelCase and lowercase property names from DB
+            const mcap = t.marketCap || t.marketcap || 0;
+            const vol = t.volume24h || t.volume24h || 0;
+            const price = t.priceUsd || t.priceusd || 0;
+
             return `
             <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group">
                 <td><div class="flex items-center gap-3"><img src="${t.image || 'https://placehold.co/40x40/2a1005/7c2d12?text=?'}" class="img-token group-hover:border-[#ea580c] transition" loading="lazy" onerror="this.src='https://placehold.co/40x40/2a1005/7c2d12?text=?'"><div class="flex flex-col min-w-0"><div class="flex items-center gap-2"><span class="font-bold text-white text-sm group-hover:text-[#ea580c] transition truncate font-sans tracking-wide">${t.ticker}</span>${t.hasCommunityUpdate ? '<span title="Verified Community Update" class="verified-badge"><i data-lucide="check" width="12"></i></span>' : ''}</div><span class="text-[10px] text-[#9a3412] truncate max-w-[120px] md:max-w-[200px] font-mono group-hover:text-[#fb923c]">${t.name}</span></div></div></td>
@@ -1139,8 +1144,8 @@
                 <td class="hidden md:table-cell text-right">${formatPct(t.change5m)}</td>
                 <td class="hidden md:table-cell text-right">${formatPct(t.change1h)}</td>
                 <td class="text-right">${formatPct(t.change24h)}</td>
-                <td class="text-right font-mono text-[#fb923c] font-bold">${formatCompact(t.marketCap)}</td>
-                <td class="text-right font-mono text-[#22c55e]">${formatCompact(t.volume24h)}</td>
+                <td class="text-right font-mono text-[#fb923c] font-bold">${formatCompact(mcap)}</td>
+                <td class="text-right font-mono text-[#22c55e]">${formatCompact(vol)}</td>
                 <td class="hidden md:table-cell text-right text-xs text-[#9a3412] font-mono">${timeAgo(t.timestamp)}</td>
             </tr>
         `}).join('');
@@ -1228,10 +1233,14 @@
                     actionsDiv.innerHTML = linksHtml; lucide.createIcons();
                 }
 
-                // Stats
-                const sPrice = document.getElementById('stat-price'); if(sPrice) sPrice.innerText = formatMoney(t.priceUsd);
-                const sMcap = document.getElementById('stat-mcap'); if(sMcap) sMcap.innerText = formatCompact(t.marketCap);
-                const sVol = document.getElementById('stat-vol'); if(sVol) sVol.innerText = formatCompact(t.volume24h);
+                // Stats - Robust Data Handling
+                const mcap = t.marketCap || t.marketcap || 0;
+                const price = t.priceUsd || t.priceusd || 0;
+                const vol = t.volume24h || t.volume24h || 0;
+
+                const sPrice = document.getElementById('stat-price'); if(sPrice) sPrice.innerText = formatMoney(price);
+                const sMcap = document.getElementById('stat-mcap'); if(sMcap) sMcap.innerText = formatCompact(mcap);
+                const sVol = document.getElementById('stat-vol'); if(sVol) sVol.innerText = formatCompact(vol);
                 const s1h = document.getElementById('stat-chg1h'); if(s1h) s1h.innerHTML = formatPct(t.change1h);
                 const s24h = document.getElementById('stat-chg24h'); if(s24h) s24h.innerHTML = formatPct(t.change24h);
                 

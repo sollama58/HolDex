@@ -1,6 +1,6 @@
 /**
  * Token Routes
- * Updated: Search Logic Fixed (Index new tokens + Top 5 Guarantee)
+ * Updated: K-Score auto-calculation on update, payment verification robust.
  */
 const express = require('express');
 const axios = require('axios');
@@ -13,6 +13,7 @@ const { syncTokenData } = require('../tasks/metadataUpdater');
 
 const router = express.Router();
 
+// Initialize backend connection
 const solanaConnection = new Connection(config.SOLANA_RPC_URL, 'confirmed');
 
 function getSocialLink(pair, type) {
@@ -29,6 +30,7 @@ const requireAdmin = (req, res, next) => {
     next();
 };
 
+// Helper for delays
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 function init(deps) {
@@ -67,9 +69,6 @@ function init(deps) {
         if (tx.meta.err) throw new Error("Transaction failed on-chain.");
 
         // 3. Verify Signer
-        const signer = tx.transaction.message.accountKeys.find(k => k.signer);
-        // Note: Some wallets might not be the first signer if using a proxy, but usually payer is signer[0]
-        // We strictly check if the claimed public key signed the tx
         const isSigner = tx.transaction.message.accountKeys.some(k => k.pubkey.toBase58() === payerPubkey && k.signer);
         
         if (!isSigner) throw new Error("Signer public key mismatch or signature missing.");
@@ -326,7 +325,6 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, tokens: [], error: e.message }); }
     });
 
-    // ... (rest of endpoints: token/:mint, admin, etc. remain unchanged)
     router.get('/token/:mint', async (req, res) => {
         try {
             const { mint } = req.params;
@@ -363,72 +361,37 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "DB Error" }); }
     });
 
-    // ... Public API & Admin endpoints ... (kept consistent with previous file)
-    
-    // Public API
     router.get('/public/token/:mint', async (req, res) => {
         try {
             const { mint } = req.params;
-            
-            // Re-use smartCache to protect DB
             const cacheKey = `api:public:${mint}`;
             const result = await smartCache(cacheKey, 30, async () => {
                 const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
                 if (!token) return null;
-
                 return {
                     success: true,
                     data: {
-                        name: token.name,
-                        ticker: token.ticker,
-                        mint: token.mint,
-                        description: token.description || "",
-                        images: {
-                            icon: token.image,
-                            banner: token.banner || null
-                        },
-                        socials: {
-                            twitter: token.twitter || null,
-                            telegram: token.tweeturl || null, // Mapped from tweetUrl column
-                            website: token.website || null
-                        },
-                        stats: {
-                            kScore: token.k_score || 0,
-                            marketCap: token.marketCap || 0,
-                            volume24h: token.volume24h || 0,
-                            updatedAt: parseInt(token.lastUpdated || Date.now())
-                        },
+                        name: token.name, ticker: token.ticker, mint: token.mint, description: token.description || "",
+                        images: { icon: token.image, banner: token.banner || null },
+                        socials: { twitter: token.twitter || null, telegram: token.tweeturl || null, website: token.website || null },
+                        stats: { kScore: token.k_score || 0, marketCap: token.marketCap || 0, volume24h: token.volume24h || 0, updatedAt: parseInt(token.lastUpdated || Date.now()) },
                         verified: token.hascommunityupdate || false
                     }
                 };
             });
-
             if (!result) return res.status(404).json({ success: false, error: "Token not found" });
             res.json(result);
-
-        } catch (e) {
-            console.error("Public API Error:", e);
-            res.status(500).json({ success: false, error: "Internal Server Error" });
-        }
+        } catch (e) { console.error("Public API Error:", e); res.status(500).json({ success: false, error: "Internal Server Error" }); }
     });
 
-    // Admin endpoints (placeholders for brevity, implementation is standard)
     router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => {
-        const { mint } = req.body;
-        try {
-            const score = await calculateTokenScore(mint);
-            res.json({ success: true, message: `K-Score Updated: ${score}` });
-        } catch (e) {
-            res.status(500).json({ success: false, error: e.message });
-        }
+        try { res.json({ success: true, message: `K-Score Updated: ${await calculateTokenScore(req.body.mint)}` }); } 
+        catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.get('/admin/updates', requireAdmin, async (req, res) => {
-        try {
-            // Include description in the select
-            const updates = await db.all(`SELECT u.*, t.name, t.ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`);
-            res.json({ success: true, updates });
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+        try { res.json({ success: true, updates: await db.all(`SELECT u.*, t.name, t.ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`) }); } 
+        catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.post('/admin/approve-update', requireAdmin, async (req, res) => {
@@ -453,14 +416,21 @@ function init(deps) {
             }
             
             await db.run('DELETE FROM token_updates WHERE id = $1', [id]);
-            res.json({ success: true, message: 'Approved' });
+            
+            // --- NEW: Calculate K-Score immediately ---
+            try {
+                await calculateTokenScore(update.mint);
+                console.log(`K-Score auto-updated for ${update.mint} after approval.`);
+            } catch (err) {
+                console.warn(`Failed to auto-update K-Score for ${update.mint}:`, err.message);
+            }
+
+            res.json({ success: true, message: 'Approved & K-Score Updated' });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.post('/admin/reject-update', requireAdmin, async (req, res) => {
-        const { id } = req.body;
-        try { await db.run('DELETE FROM token_updates WHERE id = $1', [id]); res.json({ success: true, message: 'Rejected' });
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+        try { await db.run('DELETE FROM token_updates WHERE id = $1', [req.body.id]); res.json({ success: true, message: 'Rejected' }); } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.get('/admin/token/:mint', requireAdmin, async (req, res) => {
@@ -474,7 +444,7 @@ function init(deps) {
                 website: token.website, 
                 telegram: token.tweeturl, 
                 banner: token.banner, 
-                description: token.description, // Return desc
+                description: token.description, 
                 kScore: token.k_score 
             }});
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
@@ -482,30 +452,25 @@ function init(deps) {
 
     router.post('/admin/update-token', requireAdmin, async (req, res) => {
         const { mint, twitter, website, telegram, banner, description } = req.body;
-        
         let safeDesc = null;
         if(description) safeDesc = description.substring(0, 250).replace(/<[^>]*>?/gm, '');
-
         try { 
-            await db.run(`
-                UPDATE tokens SET 
-                    twitter = $1, 
-                    website = $2, 
-                    tweetUrl = $3, 
-                    banner = $4, 
-                    description = $5,
-                    hasCommunityUpdate = TRUE 
-                WHERE mint = $6`, 
-                [twitter, website, telegram, banner, safeDesc, mint]
-            ); 
+            await db.run(`UPDATE tokens SET twitter = $1, website = $2, tweetUrl = $3, banner = $4, description = $5, hasCommunityUpdate = TRUE WHERE mint = $6`, [twitter, website, telegram, banner, safeDesc, mint]); 
+            
+            // --- NEW: Calculate K-Score immediately ---
+            try {
+                await calculateTokenScore(mint);
+                console.log(`K-Score auto-updated for ${mint} after manual update.`);
+            } catch (err) {
+                console.warn(`Failed to auto-update K-Score for ${mint}:`, err.message);
+            }
+
             res.json({ success: true, message: "Token Updated Successfully" });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.post('/admin/delete-token', requireAdmin, async (req, res) => {
-        const { mint } = req.body;
-        try { await db.run('DELETE FROM tokens WHERE mint = $1', [mint]); res.json({ success: true, message: "Token Deleted Successfully" });
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+        try { await db.run('DELETE FROM tokens WHERE mint = $1', [req.body.mint]); res.json({ success: true, message: "Token Deleted Successfully" }); } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     return router;
