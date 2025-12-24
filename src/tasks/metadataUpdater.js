@@ -2,6 +2,7 @@
  * Metadata Updater (Stabilized Version)
  * Implements Pagination & Locking to handle high concurrency.
  * UPDATED: Strict logic to pull price/mcap from Largest Liquidity Pool.
+ * UPDATED: Reduced Batch Size to prevent 400 Errors from DexScreener.
  */
 const axios = require('axios');
 const config = require('../config/env');
@@ -18,6 +19,9 @@ async function fetchWithRetry(url, retries = 3) {
         try {
             return await axios.get(url, { timeout: 10000 });
         } catch (e) {
+            // If 400, do not retry, it's a bad request (too many mints or invalid format)
+            if (e.response && e.response.status === 400) throw e;
+            
             if (i === retries - 1) throw e;
             await delay(1000 * (i + 1));
         }
@@ -44,13 +48,6 @@ function getBestPair(pairs, mint) {
     if (mint === 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263' && raydiumPair) {
         return raydiumPair;
     }
-
-    // --- RULE 2: PumpFun Handling ---
-    // Previously we prioritized Pump.fun. Now we only prioritize it if it actually has
-    // the highest liquidity (which `sortedPairs[0]` handles automatically).
-    // However, if the user explicitly wants Pump data for Pump tokens even if Raydium is bigger
-    // (unlikely for "Market Cap" accuracy), we can add logic.
-    // Current Decision: TRUST LIQUIDITY. The market decides the price.
     
     return sortedPairs[0];
 }
@@ -111,7 +108,10 @@ async function updateMetadata(deps) {
     isRunning = true;
 
     const { db, globalState } = deps;
-    const BATCH_SIZE = 50; 
+    
+    // FIX: Reduced from 50 to 30. DexScreener API limits the /tokens/ endpoint to 30 addresses.
+    const BATCH_SIZE = 30; 
+    
     let offset = 0;
     let hasMore = true;
     let totalProcessed = 0;
@@ -147,7 +147,10 @@ async function updateMetadata(deps) {
                 await Promise.all(updatePromises);
 
             } catch (e) {
-                logger.error(`❌ Batch Error (Offset ${offset}): ${e.message}`);
+                logger.error(`❌ Batch Error (Offset ${offset}): ${e.message}`, {
+                    status: e.response?.status,
+                    data: e.response?.data
+                });
             }
 
             totalProcessed += tokens.length;
