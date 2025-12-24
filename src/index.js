@@ -8,13 +8,8 @@ const { initDB, getDB } = require('./services/database');
 const { initRedis } = require('./services/redis');
 const tokenRoutes = require('./routes/tokens');
 const metadataUpdater = require('./tasks/metadataUpdater');
-// REMOVED: holderScanner
 const newTokenListener = require('./tasks/newTokenListener');
-// REMOVED: autoSeeder (Deprecated due to 530 Cloudflare blocks) - Wait, we re-added it with DexScreener logic?
-// The user asked to "remove the auto-adding of pre-bonded tokens" but later asked for "auto synch is not working... change how we populate... track newly Migrated tokens".
-// The latest instruction for autoSeeder was to remove it. 
-// "Removal of AutoSeeder: ... we will disable/remove it." 
-// So I will ensure it is removed here.
+const kScoreUpdater = require('./tasks/kScoreUpdater'); // NEW IMPORT
 
 const globalState = {
     asdfTop50Holders: new Set(),
@@ -46,8 +41,8 @@ async function startServer() {
     // 2. Keep prices/volume fresh for existing tokens
     metadataUpdater.start(deps);   
     
-    // 3. REMOVED: holderScanner.start(deps);  <-- This was the error cause
-    // 4. REMOVED: autoSeeder.start(deps);     <-- This was removed per plan
+    // 3. Update K-Scores every 6 hours
+    kScoreUpdater.start(deps);
 
     const server = http.createServer(app);
     server.listen(config.PORT, () => {

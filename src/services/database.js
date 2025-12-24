@@ -1,6 +1,6 @@
 /**
- * Database Service (PostgreSQL + Redis Version)
- * Updated: Added 'banner' column to tokens and token_updates.
+ * Database Service
+ * Updated: Added 'k_score' and 'last_k_calc' columns.
  */
 const { Pool } = require('pg');
 const config = require('../config/env');
@@ -90,15 +90,16 @@ async function initDB() {
                 lastUpdated BIGINT,
                 tweetUrl TEXT,
                 complete BOOLEAN DEFAULT FALSE,
-                hasCommunityUpdate BOOLEAN DEFAULT FALSE
+                hasCommunityUpdate BOOLEAN DEFAULT FALSE,
+                k_score DOUBLE PRECISION DEFAULT 0,
+                last_k_calc BIGINT DEFAULT 0
             );
         `);
         
         // Migration: Add columns if missing
-        try { await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS hasCommunityUpdate BOOLEAN DEFAULT FALSE;`); } catch (e) {}
-        try { await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS banner TEXT;`); } catch (e) {}
+        try { await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS k_score DOUBLE PRECISION DEFAULT 0;`); } catch (e) {}
+        try { await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS last_k_calc BIGINT DEFAULT 0;`); } catch (e) {}
 
-        // Updates Queue Table
         await pool.query(`
             CREATE TABLE IF NOT EXISTS token_updates (
                 id SERIAL PRIMARY KEY,
@@ -111,14 +112,12 @@ async function initDB() {
                 status TEXT DEFAULT 'pending' 
             );
         `);
-        
-        try { await pool.query(`ALTER TABLE token_updates ADD COLUMN IF NOT EXISTS banner TEXT;`); } catch (e) {}
 
         try {
+            await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score DESC)`); // Index for K-Score sorting
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_volume ON tokens(volume24h DESC)`);
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_mcap ON tokens(marketCap DESC)`);
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_time ON tokens(timestamp DESC)`);
-            await pool.query(`CREATE INDEX IF NOT EXISTS idx_updates_status ON token_updates(status)`);
         } catch (idxErr) {
             logger.warn('Index creation notice:', idxErr.message);
         }

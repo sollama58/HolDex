@@ -1,6 +1,6 @@
 /**
  * Token Routes
- * Updated: Support for 'banner' field in updates and display.
+ * Updated: K-Score Sort enabled.
  */
 const express = require('express');
 const axios = require('axios');
@@ -38,7 +38,7 @@ function init(deps) {
                             (telegram && telegram.length > 0) ||
                             (banner && banner.length > 0);
                             
-            if (!hasData) return res.status(400).json({ success: false, error: "No links or banner provided" });
+            if (!hasData) return res.status(400).json({ success: false, error: "No data provided" });
 
             await db.run(`INSERT INTO token_updates (mint, twitter, website, telegram, banner, submittedAt, status) VALUES ($1, $2, $3, $4, $5, $6, 'pending')`, 
                 [mint, twitter, website, telegram, banner, Date.now()]);
@@ -49,7 +49,6 @@ function init(deps) {
         }
     });
 
-    // Existing /tokens endpoint (unchanged logic, omitting for brevity as it works fine)
     router.get('/tokens', async (req, res) => {
         const { sort = 'newest', limit = 100, page = 1, search = '', filter = '' } = req.query;
         const limitVal = Math.min(parseInt(limit) || 100, 100);
@@ -61,6 +60,7 @@ function init(deps) {
             const result = await smartCache(cacheKey, 5, async () => {
                 let orderByClause = 'ORDER BY timestamp DESC'; 
                 switch (sort) {
+                    case 'kscore': orderByClause = 'ORDER BY k_score DESC'; break;
                     case 'mcap': orderByClause = 'ORDER BY marketCap DESC'; break;
                     case 'volume': orderByClause = 'ORDER BY volume24h DESC'; break;
                     case 'gainers': case '24h': orderByClause = 'ORDER BY change24h DESC'; break;
@@ -84,25 +84,16 @@ function init(deps) {
                     }
                 }
 
-                if (filter === 'verified') {
-                    whereClauses.push(`hasCommunityUpdate = TRUE`);
-                }
+                if (filter === 'verified') whereClauses.push(`hasCommunityUpdate = TRUE`);
 
-                if (whereClauses.length > 0) {
-                    query += ` WHERE ${whereClauses.join(' AND ')}`;
-                }
+                if (whereClauses.length > 0) query += ` WHERE ${whereClauses.join(' AND ')}`;
 
                 query += ` ${orderByClause} LIMIT ${limitVal} OFFSET ${offsetVal}`;
 
                 let rows = params.length > 0 ? await db.all(query, params) : await db.all(query);
 
-                // External Search Fallback
-                const needsExternalFetch = (
-                    filter !== 'verified' && 
-                    pageVal === 1 && 
-                    search && search.trim().length > 2 && 
-                    (rows.length < 5 || isValidPubkey(search.trim()))
-                );
+                // External Search
+                const needsExternalFetch = (filter !== 'verified' && pageVal === 1 && search && search.trim().length > 2 && (rows.length < 5 || isValidPubkey(search.trim())));
 
                 if (needsExternalFetch) {
                     try {
@@ -132,7 +123,6 @@ function init(deps) {
                                     priceUsd: pair.priceUsd
                                 };
                                 const createdAt = pair.pairCreatedAt || Date.now();
-                                
                                 await saveTokenData(null, pair.baseToken.address, metadata, createdAt);
                                 
                                 rows.push({
@@ -149,7 +139,8 @@ function init(deps) {
                                     change1h: pair.priceChange?.h1 || 0,
                                     change24h: pair.priceChange?.h24 || 0,
                                     complete: false,
-                                    hasCommunityUpdate: false
+                                    hasCommunityUpdate: false,
+                                    k_score: 0 
                                 });
                             }
                         }
@@ -159,6 +150,7 @@ function init(deps) {
                 if (pageVal === 1 && rows.length > 0) {
                      if (sort === 'newest' || sort === 'age') rows.sort((a, b) => parseInt(b.timestamp) - parseInt(a.timestamp));
                      else if (sort === 'mcap') rows.sort((a, b) => (b.marketcap || b.marketCap) - (a.marketcap || a.marketCap));
+                     else if (sort === 'kscore') rows.sort((a, b) => (b.k_score || 0) - (a.k_score || 0));
                 }
 
                 return {
@@ -178,7 +170,8 @@ function init(deps) {
                         change5m: r.change5m || 0,
                         change1h: r.change1h || 0,
                         change24h: r.change24h || 0,
-                        hasCommunityUpdate: r.hascommunityupdate || r.hasCommunityUpdate || false
+                        hasCommunityUpdate: r.hascommunityupdate || r.hasCommunityUpdate || false,
+                        kScore: r.k_score || 0
                     })),
                     lastUpdate: Date.now()
                 };
@@ -226,8 +219,9 @@ function init(deps) {
                         twitter: token.twitter,
                         website: token.website,
                         telegram: token.tweeturl,
-                        banner: token.banner, // Added Banner
+                        banner: token.banner,
                         hasCommunityUpdate: token.hascommunityupdate || false,
+                        kScore: token.k_score || 0, 
                         pairs: pairs 
                     } 
                 };
@@ -237,8 +231,7 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "DB Error" }); }
     });
 
-    // --- ADMIN ENDPOINTS ---
-
+    // Admin endpoints (Unchanged - omitting for brevity)
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         try {
             const updates = await db.all(`SELECT u.*, t.name, t.ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`);
@@ -251,20 +244,13 @@ function init(deps) {
         try {
             const update = await db.get('SELECT * FROM token_updates WHERE id = $1', [id]);
             if (!update) return res.status(404).json({ success: false, error: 'Request not found' });
-
             const fields = []; const params = []; let idx = 1;
-
             if (update.twitter) { fields.push(`twitter = $${idx++}`); params.push(update.twitter); }
             if (update.website) { fields.push(`website = $${idx++}`); params.push(update.website); }
             if (update.telegram) { fields.push(`tweetUrl = $${idx++}`); params.push(update.telegram); } 
-            if (update.banner) { fields.push(`banner = $${idx++}`); params.push(update.banner); } // Added Banner
-
+            if (update.banner) { fields.push(`banner = $${idx++}`); params.push(update.banner); }
             fields.push(`hasCommunityUpdate = $${idx++}`); params.push(true);
-
-            if (fields.length > 0) {
-                params.push(update.mint);
-                await db.run(`UPDATE tokens SET ${fields.join(', ')} WHERE mint = $${idx}`, params);
-            }
+            if (fields.length > 0) { params.push(update.mint); await db.run(`UPDATE tokens SET ${fields.join(', ')} WHERE mint = $${idx}`, params); }
             await db.run('DELETE FROM token_updates WHERE id = $1', [id]);
             res.json({ success: true, message: 'Approved' });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
@@ -280,26 +266,13 @@ function init(deps) {
         try {
             const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [req.params.mint]);
             if (!token) return res.status(404).json({ success: false, error: "Not Found" });
-            res.json({ 
-                success: true, 
-                token: { 
-                    mint: token.mint, 
-                    ticker: token.ticker, 
-                    twitter: token.twitter, 
-                    website: token.website, 
-                    telegram: token.tweeturl,
-                    banner: token.banner // Added Banner
-                } 
-            });
+            res.json({ success: true, token: { mint: token.mint, ticker: token.ticker, twitter: token.twitter, website: token.website, telegram: token.tweeturl, banner: token.banner } });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.post('/admin/update-token', requireAdmin, async (req, res) => {
         const { mint, twitter, website, telegram, banner } = req.body;
-        try { 
-            await db.run(`UPDATE tokens SET twitter = $1, website = $2, tweetUrl = $3, banner = $4, hasCommunityUpdate = TRUE WHERE mint = $5`, 
-                [twitter, website, telegram, banner, mint]); 
-            res.json({ success: true, message: "Token Updated Successfully" });
+        try { await db.run(`UPDATE tokens SET twitter = $1, website = $2, tweetUrl = $3, banner = $4, hasCommunityUpdate = TRUE WHERE mint = $5`, [twitter, website, telegram, banner, mint]); res.json({ success: true, message: "Token Updated Successfully" });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
