@@ -8,13 +8,20 @@
     <!-- ========================================== -->
     <!-- 1. ESSENTIAL LIBRARIES                     -->
     <!-- ========================================== -->
+    
+    <!-- 1. Buffer (Browser Compatible) -->
     <script src="https://bundle.run/buffer@6.0.3"></script>
     <script>
+        // Expose Buffer globally for any legacy dependency
         if (typeof window.buffer !== 'undefined') {
             window.Buffer = window.buffer.Buffer;
         }
     </script>
+
+    <!-- 2. Solana Web3.js -->
     <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
+
+    <!-- 3. Styling & Icons -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -53,39 +60,72 @@
         .pill-red { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
         .search-box { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; padding: 10px 16px; border-radius: 8px; outline: none; width: 100%; font-family: 'JetBrains Mono'; transition: border-color 0.2s; }
         .search-box:focus { border-color: #ea580c; }
+        .search-box::placeholder { color: #9a3412; }
         .nav-btn { background: transparent; color: #9a3412; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 800; transition: all 0.2s; border: 2px solid transparent; }
+        .nav-btn:hover { color: #fb923c; }
         .nav-btn.active { background: #451a03; color: #ea580c; border-color: #7c2d12; box-shadow: 0 4px 0 #2a1005; }
         .filter-toggle { background: #451a03; border: 2px solid #7c2d12; color: #9a3412; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; transition: all 0.2s; display: flex; align-items: center; gap: 6px; }
         .filter-toggle.active { border-color: #22c55e; color: #4ade80; background: rgba(34, 197, 94, 0.1); }
-        .refresh-btn { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; transition: all 0.2s; }
-        .refresh-btn:hover { border-color: #ea580c; color: #fff; background: #582206; }
-        .page-btn { background: #2a1005; border: 2px solid #7c2d12; color: #fb923c; padding: 8px 16px; border-radius: 8px; font-weight: bold; font-family: 'JetBrains Mono', monospace; cursor: pointer; }
-        .page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .refresh-btn { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; transition: all 0.2s; position: relative; }
+        .refresh-btn:hover:not(:disabled) { border-color: #ea580c; color: #fff; background: #582206; }
+        .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; border-color: #451a03; color: #7c2d12; }
+        .refresh-btn:disabled i { animation: spin 1s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .page-btn { background: #2a1005; border: 2px solid #7c2d12; color: #fb923c; padding: 8px 16px; border-radius: 8px; font-weight: bold; font-family: 'JetBrains Mono', monospace; transition: all 0.2s; cursor: pointer; }
+        .page-btn:hover:not(:disabled) { border-color: #ea580c; color: #fff; background: #451a03; }
+        .page-btn:disabled { opacity: 0.5; cursor: not-allowed; border-color: #451a03; color: #7c2d12; }
         .view-section { display: none; }
         .view-section.active { display: block; animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         .chart-container { width: 100%; height: 500px; background: #1a0a05; border-radius: 16px; overflow: hidden; border: 2px solid #7c2d12; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .chart-container iframe { width: 100%; height: 100%; border: 0; }
         .stat-card { background: rgba(69, 26, 3, 0.8); border: 2px solid #7c2d12; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 4px; box-shadow: 4px 4px 0 rgba(0,0,0,0.2); }
         .stat-label { font-size: 11px; color: #fb923c; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
-        .stat-value { font-size: 18px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; }
+        .stat-value { font-size: 18px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
         .modal-overlay { position: fixed; inset: 0; background: rgba(15, 5, 2, 0.95); backdrop-filter: blur(5px); z-index: 100; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
         .modal-overlay.open { opacity: 1; pointer-events: auto; }
-        .status-bar { position: fixed; bottom: 0; left: 0; width: 100%; background: #451a03; border-top: 2px solid #ea580c; padding: 0 24px; height: 50px; display: flex; justify-content: space-between; align-items: center; z-index: 50; box-shadow: 0 -5px 20px rgba(234, 88, 12, 0.2); }
-        .action-btn { background: #451a03; border: 2px solid #ea580c; color: #fb923c; padding: 12px 20px; border-radius: 12px; font-weight: 700; text-transform: uppercase; font-size: 13px; transition: all 0.2s; box-shadow: 4px 4px 0 #7c2d12; cursor: pointer; }
-        .action-btn:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 #7c2d12; background: #582206; color: #fff; }
-        .form-input { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; padding: 12px; border-radius: 8px; width: 100%; font-family: 'JetBrains Mono'; margin-bottom: 16px; outline: none; transition: border-color 0.2s; }
-        .form-label { display: block; color: #9a3412; font-size: 12px; font-weight: bold; margin-bottom: 6px; text-transform: uppercase; }
-        .status-bar-btn { padding: 6px 12px; border-radius: 6px; border: 1px solid #7c2d12; background: #2a1005; color: #9a3412; font-size: 11px; font-weight: bold; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-        .status-bar-btn.connected { border-color: #22c55e; color: #22c55e; background: rgba(34, 197, 94, 0.1); }
+        .status-bar { position: fixed; bottom: 0; left: 0; width: 100%; background: #451a03; border-top: 2px solid #ea580c; padding: 0 16px; height: 50px; display: flex; justify-content: space-between; align-items: center; z-index: 50; transition: background 0.2s; box-shadow: 0 -5px 20px rgba(234, 88, 12, 0.2); }
+        .status-bar:hover { background: #582206; }
         .pulse-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 8px; border: 1px solid rgba(255,255,255,0.2); }
         .pulse-dot.green { background: #22c55e; box-shadow: 0 0 12px #22c55e; animation: pulseGlow 2s infinite; }
+        .pulse-dot.red { background: #ef4444; box-shadow: 0 0 12px #ef4444; }
         @keyframes pulseGlow { 0% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); } 70% { opacity: 1; box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); } 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); } }
-        .tx-link { color: #3b82f6; text-decoration: underline; font-family: 'JetBrains Mono'; font-size: 11px; display: block; margin-top: 8px; }
-        .verified-badge { display: inline-flex; align-items: center; justify-content: center; background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #22c55e; border-radius: 50%; width: 20px; height: 20px; margin-left: 6px; box-shadow: 0 0 10px rgba(34, 197, 94, 0.3); }
-        .pool-tab { padding: 8px 16px; font-size: 12px; font-weight: bold; color: #9a3412; cursor: pointer; border-bottom: 2px solid transparent; }
-        .pool-tab.active { color: #ea580c; border-bottom-color: #ea580c; }
+        .action-btn { background: #451a03; border: 2px solid #ea580c; color: #fb923c; padding: 12px 20px; border-radius: 12px; font-weight: 700; text-transform: uppercase; font-size: 13px; transition: all 0.2s; box-shadow: 4px 4px 0 #7c2d12; }
+        .action-btn:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 #7c2d12; background: #582206; color: #fff; }
+        .action-btn:active { transform: translate(2px, 2px); box-shadow: 0 0 0; }
+        .back-btn { background: #2a1005; border: 2px solid #7c2d12; color: #9a3412; padding: 10px 16px; border-radius: 8px; font-weight: 700; transition: all 0.2s; }
+        .back-btn:hover { border-color: #ea580c; color: #ea580c; }
+        .sort-header { position: relative; }
+        .sort-header:active { transform: translateY(1px); }
+        .table-scroll-container { max-height: 70vh; overflow-y: auto; border-radius: 0 0 16px 16px; }
+        .form-input { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; padding: 12px; border-radius: 8px; width: 100%; font-family: 'JetBrains Mono'; margin-bottom: 16px; outline: none; transition: border-color 0.2s; }
+        .form-input:focus { border-color: #ea580c; }
+        .form-label { display: block; color: #9a3412; font-size: 12px; font-weight: bold; margin-bottom: 6px; text-transform: uppercase; }
         .social-btn { display: flex; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 12px; border: 2px solid #7c2d12; background: #451a03; color: #ea580c; transition: all 0.2s; }
         .social-btn:hover { border-color: #ea580c; color: #fff; background: #582206; transform: translateY(-2px); }
+        .pool-tab { padding: 8px 16px; font-size: 12px; font-weight: bold; color: #9a3412; cursor: pointer; border-bottom: 2px solid transparent; }
+        .pool-tab.active { color: #ea580c; border-bottom-color: #ea580c; }
+        .pool-tab:hover:not(.active) { color: #fb923c; }
+        .verified-badge { display: inline-flex; align-items: center; justify-content: center; background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #22c55e; border-radius: 50%; width: 20px; height: 20px; margin-left: 6px; box-shadow: 0 0 10px rgba(34, 197, 94, 0.3); }
+        .verified-badge i { width: 12px; height: 12px; }
+        .info-btn { color: #9a3412; cursor: pointer; transition: color 0.2s; }
+        .info-btn:hover { color: #fb923c; }
+        .info-box { background: #451a03; border: 1px solid #7c2d12; border-radius: 8px; padding: 16px; margin-bottom: 16px; color: #ffedd5; font-size: 13px; line-height: 1.5; }
+        .info-box a { color: #fb923c; text-decoration: underline; }
+        .preview-content { max-height: 80vh; overflow-y: auto; padding: 20px; }
+        .feature-box { background: #451a03; border: 2px solid #7c2d12; border-radius: 16px; padding: 24px; transition: transform 0.2s; }
+        .feature-box:hover { border-color: #ea580c; transform: translateY(-4px); }
+        .connect-btn { background: #581c87; border: 2px solid #a855f7; color: white; padding: 8px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 8px; }
+        .connect-btn:hover { background: #6b21a8; box-shadow: 0 0 15px rgba(168, 85, 247, 0.4); }
+        .fee-card { background: rgba(0,0,0,0.3); border: 1px dashed #7c2d12; padding: 12px; border-radius: 8px; margin-bottom: 16px; text-align: center; }
+        
+        .wallet-btn { background: #2a1005; border: 2px solid #7c2d12; padding: 16px; border-radius: 12px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.2s; color: #ffedd5; font-weight: bold; }
+        .wallet-btn:hover { border-color: #ea580c; background: #451a03; transform: translateX(5px); }
+        .wallet-icon { width: 32px; height: 32px; border-radius: 8px; }
+        
+        .status-bar-btn { padding: 6px 12px; border-radius: 6px; border: 1px solid #7c2d12; background: #2a1005; color: #9a3412; font-size: 11px; font-weight: bold; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+        .status-bar-btn:hover { border-color: #ea580c; color: #fb923c; background: #451a03; }
+        .status-bar-btn.connected { border-color: #22c55e; color: #22c55e; background: rgba(34, 197, 94, 0.1); }
     </style>
 </head>
 <body>
@@ -97,435 +137,1010 @@
                 <div class="w-12 h-12 rounded-xl flex items-center justify-center bg-[#451a03] text-orange-500 border-2 border-[#7c2d12] shadow-lg group-hover:border-orange-500 transition">
                     <i data-lucide="flame" width="24"></i>
                 </div>
-                <h1 class="text-3xl brand-text tracking-tight font-sans">HolDex</h1>
+                <div>
+                    <h1 class="text-3xl brand-text tracking-tight font-sans">HolDex</h1>
+                </div>
             </div>
         </div>
+
         <div class="flex items-center bg-[#451a03]/50 p-1 rounded-lg border border-[#7c2d12]/50">
             <button class="nav-btn active" onclick="navigateTo('')">Home</button>
             <button class="nav-btn" onclick="navigateTo('about')">About</button>
             <button class="nav-btn" onclick="navigateTo('update')">Update</button>
         </div>
-        <div id="table-controls" class="flex items-center gap-3 w-full md:w-auto">
+        
+        <div id="table-controls" class="flex items-center gap-3 w-full md:w-auto transition-opacity duration-300">
             <button id="filter-verified" onclick="toggleVerifiedFilter()" class="filter-toggle" title="Show only Verified Community Updates">
                 <i data-lucide="shield-check" width="16"></i> Verified Only
             </button>
+
             <div class="relative w-full md:w-auto">
                 <input type="text" id="search" placeholder="Search..." class="search-box" onkeyup="handleSearch(event)">
             </div>
-            <button onclick="handleManualRefresh()" class="refresh-btn"><i data-lucide="refresh-cw" width="18"></i></button>
+
+            <button id="manual-refresh" onclick="handleManualRefresh()" class="refresh-btn" title="Refresh Data">
+                <i data-lucide="refresh-cw" width="18"></i>
+            </button>
         </div>
+
         <div id="detail-controls" class="hidden w-full md:w-auto">
-            <button onclick="navigateTo('')" class="back-btn flex items-center gap-2 px-6 py-2 border-2 border-[#7c2d12] rounded-xl"><i data-lucide="arrow-left" width="16"></i> Back</button>
+            <button onclick="navigateTo('')" class="back-btn flex items-center justify-center gap-2 w-full md:w-auto"><i data-lucide="arrow-left" width="16"></i> Back</button>
         </div>
     </div>
 </nav>
 
-<main class="max-w-[1800px] mx-auto px-4 md:px-6 py-4 md:py-8">
+<main class="max-w-[1800px] mx-auto px-0 md:px-6 py-4 md:py-8">
     
     <!-- DASHBOARD VIEW -->
     <div id="view-dashboard" class="view-section active">
-        <div class="bg-[#2a1005] border-2 border-[#7c2d12] md:rounded-2xl overflow-hidden shadow-2xl flex flex-col">
-            <div class="overflow-x-auto">
+        <div class="bg-[#2a1005] border-y md:border-2 border-[#7c2d12] md:rounded-2xl overflow-hidden shadow-2xl flex flex-col">
+            <div class="table-scroll-container overflow-x-auto">
                 <table class="holdex-table">
                     <thead>
                         <tr>
-                            <th width="40%" onclick="setSort('newest')">Asset <i data-lucide="arrow-down-up" width="10" class="inline"></i></th>
-                            <th onclick="setSort('kscore')">K-Score</th>
-                            <th onclick="setSort('mcap')">Mkt Cap</th>
-                            <th onclick="setSort('volume')">Vol (24h)</th>
-                            <th onclick="setSort('24h')">24h Change</th>
+                            <th width="40%" class="sort-header" onclick="setSort('newest')">Asset <i data-lucide="arrow-down-up" width="10" class="inline opacity-50 ml-1"></i></th>
+                            <th class="sort-header text-[#ea580c] border-b-[#ea580c] border-b-2" onclick="setSort('kscore')">K-Score</th>
+                            <th class="hidden md:table-cell sort-header" onclick="setSort('5m')">5m</th>
+                            <th class="hidden md:table-cell sort-header" onclick="setSort('1h')">1h</th>
+                            <th class="sort-header" onclick="setSort('24h')">24h</th>
+                            <th class="sort-header" onclick="setSort('mcap')">Mkt Cap</th>
+                            <th class="sort-header" onclick="setSort('volume')">Vol (24h)</th> 
+                            <th class="hidden md:table-cell sort-header" onclick="setSort('age')">Age</th>
                         </tr>
                     </thead>
                     <tbody id="table-body">
-                        <tr><td colspan="5" class="text-center py-20 text-[#ea580c] animate-pulse">Scanning the Solana Grid...</td></tr>
+                        <tr><td colspan="8" class="text-center py-20 text-orange-700 font-mono animate-pulse">Scanning Solana Mempool...</td></tr>
                     </tbody>
                 </table>
             </div>
+            
             <div class="bg-[#451a03] p-4 border-t-2 border-[#7c2d12] flex justify-between items-center">
-                <div id="page-info" class="text-xs text-[#9a3412] font-mono font-bold uppercase">Page 1</div>
-                <div class="flex gap-4">
-                    <button id="btn-prev" onclick="changePage(-1)" class="page-btn" disabled>Previous</button>
-                    <button id="btn-next" onclick="changePage(1)" class="page-btn">Next</button>
+                <div class="text-xs text-[#9a3412] font-mono font-bold uppercase tracking-wider hidden md:block">
+                    Showing 100 results per page
+                </div>
+                <div class="flex items-center gap-4 mx-auto md:mx-0">
+                    <button id="btn-prev" onclick="changePage(-1)" class="page-btn flex items-center gap-2" disabled>
+                        <i data-lucide="chevron-left" width="16"></i> Previous
+                    </button>
+                    <span id="page-display" class="text-[#fb923c] font-mono font-bold text-lg">Page 1</span>
+                    <button id="btn-next" onclick="changePage(1)" class="page-btn flex items-center gap-2">
+                        Next <i data-lucide="chevron-right" width="16"></i>
+                    </button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- UPDATE VIEW -->
-    <div id="view-update" class="view-section px-4">
-        <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 shadow-2xl max-w-2xl mx-auto">
-            <h2 class="text-2xl font-bold mb-6 flex items-center gap-3"><i data-lucide="edit-3" class="text-[#ea580c]"></i> Update Token</h2>
-            
-            <form onsubmit="submitUpdate(event)" class="space-y-4">
-                <div>
-                    <label class="form-label">Token Mint Address</label>
-                    <input type="text" id="update-mint" class="form-input" placeholder="Enter Solana Mint Address..." required onblur="fetchTokenForUpdate(this.value)">
+    <!-- ABOUT VIEW -->
+    <div id="view-about" class="view-section px-4 md:px-0">
+        <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 md:p-12 shadow-2xl max-w-5xl mx-auto">
+            <div class="flex items-center gap-6 mb-10 border-b-2 border-[#7c2d12] pb-8">
+                <div class="w-20 h-20 rounded-2xl flex items-center justify-center bg-[#451a03] text-orange-500 border-2 border-[#7c2d12] shadow-lg">
+                    <i data-lucide="flame" width="40"></i>
                 </div>
+                <div>
+                    <h2 class="text-5xl font-bold text-white tracking-tight font-sans">About HolDex</h2>
+                    <p class="text-[#ea580c] font-mono text-lg mt-1">The Terminal Fire Explorer</p>
+                </div>
+            </div>
+             <div class="bg-[#451a03] p-6 rounded-xl border border-[#7c2d12] flex flex-col md:flex-row justify-between items-center gap-4">
+                <div>
+                    <h4 class="font-bold text-white mb-1">Status</h4>
+                    <p class="text-sm text-[#22c55e]">● Systems Operational</p>
+                </div>
+                <div class="text-right">
+                    <h4 class="font-bold text-white mb-1">Version</h4>
+                    <p class="text-sm text-[#ea580c] font-mono">v2.3.0 "PayGate"</p>
+                </div>
+            </div>
+        </div>
+    </div>
 
-                <div id="token-preview-info" class="hidden p-4 bg-[#451a03] border border-[#7c2d12] rounded-lg flex items-center gap-4 mb-4">
-                    <img id="update-token-img" class="w-12 h-12 rounded bg-black">
+    <!-- UPDATE VIEW (Enhanced with Payment & Wallet Modal) -->
+    <div id="view-update" class="view-section px-4 md:px-0">
+        <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 shadow-2xl max-w-2xl mx-auto">
+            
+            <!-- WALLET DASHBOARD -->
+            <div class="bg-[#451a03] border-2 border-[#ea580c] rounded-xl p-4 mb-8">
+                <!-- Disconnected State -->
+                <div id="wallet-disconnected" class="flex justify-between items-center">
                     <div>
-                        <div class="font-bold" id="update-token-name"></div>
-                        <div class="text-xs text-[#9a3412] font-mono" id="update-token-ticker"></div>
+                        <h2 class="text-2xl font-bold text-white mb-1 font-sans">Update Token</h2>
+                        <p class="text-[#9a3412] text-xs">Connect wallet to pay fees & submit updates.</p>
                     </div>
                 </div>
 
+                <!-- Connected State -->
+                <div id="wallet-connected" class="hidden">
+                    <div class="flex justify-between items-start border-b border-[#7c2d12] pb-3 mb-3">
+                        <div>
+                            <div class="text-[#9a3412] text-[10px] font-bold uppercase tracking-wider">Connected Wallet</div>
+                            <div class="font-mono text-[#fb923c] font-bold text-lg flex items-center gap-2">
+                                <span id="display-address">...</span>
+                                <i data-lucide="check-circle" width="16" class="text-green-500"></i>
+                            </div>
+                        </div>
+                        <button onclick="disconnectWallet()" class="text-[#9a3412] hover:text-red-500 text-xs font-bold flex items-center gap-1 transition">
+                            <i data-lucide="log-out" width="14"></i> Disconnect
+                        </button>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="bg-[#2a1005] rounded-lg p-3 border border-[#7c2d12]">
+                            <div class="text-[#9a3412] text-[10px] font-bold uppercase">SOL Balance</div>
+                            <div class="font-mono text-white text-xl" id="balance-sol">0.00</div>
+                        </div>
+                        <div class="bg-[#2a1005] rounded-lg p-3 border border-[#7c2d12]">
+                            <div class="text-[#9a3412] text-[10px] font-bold uppercase">$ASDFASDFA Balance</div>
+                            <div class="font-mono text-[#a855f7] text-xl" id="balance-token">0.00</div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3 text-right">
+                         <button onclick="refreshBalances()" class="text-[#ea580c] hover:text-white text-xs font-bold flex items-center justify-end gap-1 w-full">
+                            <i id="refresh-icon" data-lucide="refresh-cw" width="12"></i> Refresh Balances
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Fee Display -->
+            <div class="fee-card" id="fee-panel">
+                <div class="text-[#9a3412] font-bold text-xs uppercase tracking-wider mb-2">Required Fees</div>
+                <div class="flex justify-center gap-6 items-center">
+                    <div class="flex flex-col">
+                        <span class="text-xl font-mono text-[#fb923c]" id="fee-sol">-- SOL</span>
+                        <span class="text-[10px] text-[#9a3412]">Protocol Fee</span>
+                    </div>
+                    <div class="text-[#7c2d12]">+</div>
+                    <div class="flex flex-col">
+                        <span class="text-xl font-mono text-[#a855f7]" id="fee-token">-- TOKENS</span>
+                        <span class="text-[10px] text-[#9a3412]">$ASDFASDFA</span>
+                    </div>
+                </div>
+            </div>
+            
+            <form onsubmit="submitUpdate(event)">
+                <label class="form-label">Token Mint Address</label>
+                <div class="relative">
+                    <input type="text" id="update-mint" class="form-input" placeholder="Enter Solana Mint Address..." required onblur="fetchTokenForUpdate(this.value)">
+                    <div id="mint-check-spinner" class="absolute right-3 top-3 hidden"><i data-lucide="loader-2" class="animate-spin text-[#ea580c]" width="18"></i></div>
+                </div>
+                
+                <div id="token-preview-info" class="mb-6 p-4 bg-[#451a03] border border-[#7c2d12] rounded-lg hidden flex items-center gap-4">
+                    <img id="update-token-img" src="" class="w-12 h-12 rounded-md object-cover bg-black">
+                    <div>
+                        <div class="font-bold text-white" id="update-token-name">Token Name</div>
+                        <div class="text-xs text-[#9a3412] font-mono" id="update-token-ticker">TICKER</div>
+                    </div>
+                </div>
+                
                 <div class="grid grid-cols-2 gap-4">
-                    <input type="url" id="update-twitter" class="form-input" placeholder="Twitter URL">
-                    <input type="url" id="update-telegram" class="form-input" placeholder="Telegram URL">
+                    <div>
+                        <label class="form-label">X (Twitter)</label>
+                        <input type="url" id="update-twitter" class="form-input" placeholder="https://x.com/...">
+                    </div>
+                    <div>
+                         <label class="form-label">Telegram</label>
+                        <input type="url" id="update-telegram" class="form-input" placeholder="https://t.me/...">
+                    </div>
                 </div>
-                <input type="url" id="update-website" class="form-input" placeholder="Website URL">
-
-                <div>
-                    <label class="form-label">Project Description (Max 250 characters)</label>
-                    <textarea id="update-description" class="form-input h-28 resize-none" maxlength="250" placeholder="Brief project overview..."></textarea>
-                    <div class="text-right text-[10px] text-[#9a3412] font-bold mt-[-10px] mb-4"><span id="char-count">0</span>/250</div>
+                
+                <label class="form-label">Website</label>
+                <input type="url" id="update-website" class="form-input" placeholder="https://...">
+                
+                <!-- NEW DESCRIPTION FIELD -->
+                <div class="mt-2">
+                    <label class="form-label">Description (Max 250 chars)</label>
+                    <textarea id="update-description" class="form-input h-24 resize-none" maxlength="250" placeholder="Briefly describe your token project..."></textarea>
+                    <div class="text-right text-[10px] text-[#9a3412] font-mono font-bold"><span id="char-count">0</span>/250</div>
                 </div>
-
-                <input type="url" id="update-banner" class="form-input" placeholder="Banner Image URL (Imgur recommended)">
-
-                <button type="submit" id="submit-btn" class="action-btn w-full flex items-center justify-center gap-2" disabled>
-                    <i data-lucide="wallet" width="18"></i> Pay Fee & Submit Update
-                </button>
+                
+                <div class="flex justify-between items-center mb-1 mt-2">
+                    <label class="form-label mb-0">Banner Image URL</label>
+                    <button type="button" class="info-btn flex items-center gap-1 text-xs" onclick="toggleInfoModal()">
+                        <i data-lucide="info" width="14"></i> How to upload?
+                    </button>
+                </div>
+                <input type="url" id="update-banner" class="form-input" placeholder="https://i.imgur.com/...">
+                
+                <div class="flex gap-4 mt-6">
+                    <button type="button" onclick="openPreview()" class="action-btn flex-1 flex items-center justify-center gap-2 bg-[#451a03] text-[#fb923c] border-[#ea580c] hover:bg-[#582206]">
+                        <i data-lucide="eye" width="16"></i> Preview
+                    </button>
+                    <button type="submit" id="submit-btn" class="action-btn flex-1 flex items-center justify-center gap-2 bg-[#2a1005] border-[#22c55e] text-[#22c55e] hover:bg-green-900/20 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                        <i data-lucide="wallet" width="16"></i> Pay & Submit
+                    </button>
+                </div>
             </form>
-            <div id="update-status" class="mt-6 p-4 rounded-lg bg-[#451a03] border border-[#7c2d12] text-center hidden"></div>
+            <div id="update-status" class="mt-4 text-center text-sm font-mono hidden"></div>
         </div>
     </div>
 
     <!-- DETAIL VIEW -->
-    <div id="view-detail" class="view-section px-4">
-        <div id="detail-loading" class="text-center py-20 text-[#ea580c] animate-pulse">Indexing Project Data...</div>
-        <div id="detail-content" class="hidden">
-            <div id="detail-banner-container" class="mb-8"></div>
-            
-            <div class="flex flex-col md:flex-row gap-8 items-start mb-8">
-                <div class="bg-[#451a03] p-6 rounded-2xl border-2 border-[#7c2d12] shadow-xl flex items-center gap-6 w-full md:w-auto">
-                    <img id="detail-img" class="w-24 h-24 rounded-xl object-cover border-2 border-[#ea580c]">
-                    <div>
-                        <div class="flex items-center gap-3">
-                            <h2 id="detail-ticker" class="text-4xl font-bold font-mono"></h2>
-                            <span id="detail-verified" class="verified-badge hidden"><i data-lucide="check" width="12"></i></span>
-                        </div>
-                        <p id="detail-name" class="text-[#fb923c] text-lg"></p>
-                        <div id="detail-mint" class="text-[10px] text-[#9a3412] mt-1 font-mono break-all cursor-pointer hover:text-white" onclick="navigator.clipboard.writeText(this.innerText)"></div>
-                    </div>
-                </div>
-                <div class="flex-1">
-                    <div id="detail-desc-box" class="hidden bg-[#451a03]/40 border border-[#7c2d12] p-6 rounded-xl">
-                        <h4 class="text-xs font-bold text-[#9a3412] uppercase tracking-widest mb-3">Project Vision</h4>
-                        <p id="detail-desc-text" class="text-[#ffedd5] leading-relaxed text-sm"></p>
-                    </div>
-                </div>
-                <div id="detail-actions" class="flex gap-3"></div>
-            </div>
+    <div id="view-detail" class="view-section px-4 md:px-0">
+        <div id="detail-loading" class="text-center py-20 text-[#ea580c] font-mono animate-pulse hidden">Fetching Chain Data...</div>
+        <div id="detail-content">
+            <div id="detail-banner-container" class="hidden mb-6"></div>
 
-            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-8">
-                <div class="stat-card border-[#ea580c]"><span class="stat-label text-[#ea580c]">K-Score</span><span id="stat-kscore" class="stat-value">-</span></div>
-                <div class="stat-card"><span class="stat-label">Market Cap</span><span id="stat-mcap" class="stat-value">-</span></div>
-                <div class="stat-card"><span class="stat-label">Volume (24h)</span><span id="stat-vol" class="stat-value">-</span></div>
-                <div class="stat-card"><span class="stat-label">1h Change</span><span id="stat-1h" class="stat-value">-</span></div>
-                <div class="stat-card"><span class="stat-label">24h Change</span><span id="stat-24h" class="stat-value">-</span></div>
+            <div class="flex flex-col md:flex-row gap-6 mb-8 items-start">
+                <div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl">
+                    <img id="detail-img" src="" class="w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black shadow-lg">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mb-1">
+                            <h2 id="detail-ticker" class="text-3xl md:text-4xl font-bold text-white tracking-tight truncate font-mono"></h2>
+                            <span id="detail-name" class="text-[#fb923c] text-xs md:text-sm bg-[#2a1005] px-3 py-1 rounded-lg border border-[#7c2d12] truncate"></span>
+                        </div>
+                        <div class="flex items-center gap-2 cursor-pointer group" onclick="copyMint()">
+                            <span id="detail-mint" class="text-xs text-[#9a3412] font-mono group-hover:text-[#ea580c] transition truncate max-w-[200px] md:max-w-none"></span>
+                            <i data-lucide="copy" width="12" class="text-[#9a3412] group-hover:text-[#ea580c] flex-shrink-0"></i>
+                        </div>
+                        <!-- Description Injection Point -->
+                        <div id="detail-desc" class="mt-3 text-sm text-[#ffedd5] font-sans leading-relaxed opacity-90 hidden"></div>
+                    </div>
+                </div>
+                <div class="flex-1"></div>
+                <div class="flex flex-wrap gap-3 w-full md:w-auto" id="detail-actions"></div>
             </div>
             
-            <div id="pool-tabs" class="flex gap-4 border-b border-[#7c2d12] mb-4 overflow-x-auto"></div>
-            <div class="chart-container"><iframe id="detail-iframe" class="w-full h-full border-0 bg-black"></iframe></div>
+            <div class="grid grid-cols-2 lg:grid-cols-6 gap-3 md:gap-4 mb-6">
+                <!-- K-SCORE CARD (Strict Logic) -->
+                <div class="stat-card border-[#ea580c] relative overflow-hidden">
+                    <span class="stat-label text-[#ea580c]">K-Score</span>
+                    <span id="stat-kscore" class="stat-value text-[#fb923c] text-2xl font-bold font-mono">🔒</span>
+                </div>
+                <div class="stat-card"><span class="stat-label">Price</span><span id="stat-price" class="stat-value text-[#ffedd5]">-</span></div>
+                <div class="stat-card"><span class="stat-label">MCap</span><span id="stat-mcap" class="stat-value text-[#ea580c]">-</span></div>
+                <div class="stat-card col-span-2 md:col-span-1"><span class="stat-label">Alpha</span><span id="stat-vol" class="stat-value text-[#22c55e]">-</span></div>
+                <div class="stat-card"><span class="stat-label">1H</span><span id="stat-chg1h" class="stat-value">-</span></div>
+                <div class="stat-card"><span class="stat-label">24H</span><span id="stat-chg24h" class="stat-value">-</span></div>
+            </div>
+            
+            <div id="pool-tabs-container" class="flex gap-4 border-b border-[#7c2d12] mb-4 overflow-x-auto"></div>
+            <div class="chart-container"><iframe id="detail-iframe" src="about:blank"></iframe></div>
         </div>
     </div>
 </main>
 
-<div class="status-bar">
-    <div class="flex items-center gap-3">
-        <span class="text-xs font-bold text-[#ea580c] font-mono">LIVE FEED ACTIVE</span>
-        <span class="pulse-dot green"></span>
+<!-- WALLET SELECTION MODAL -->
+<div id="wallet-modal" class="modal-overlay">
+    <div class="bg-[#2a1005] border-2 border-[#ea580c] p-6 rounded-2xl max-w-sm w-full shadow-2xl relative" onclick="event.stopPropagation()">
+        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="closeWalletModal()"><i data-lucide="x" width="24"></i></button>
+        <h3 class="text-xl font-bold text-white mb-6 font-sans text-center">Connect Wallet</h3>
+        
+        <div class="space-y-3">
+            <div onclick="connectProvider('phantom')" class="wallet-btn group">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded bg-[#581c87] flex items-center justify-center">
+                        <i data-lucide="ghost" width="20" class="text-white"></i>
+                    </div>
+                    <span>Phantom</span>
+                </div>
+                <div class="text-[#22c55e] text-xs font-mono opacity-0 group-hover:opacity-100 transition">Detected</div>
+            </div>
+
+            <div onclick="connectProvider('solflare')" class="wallet-btn group">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded bg-[#ea580c] flex items-center justify-center">
+                        <i data-lucide="flame" width="20" class="text-white"></i>
+                    </div>
+                    <span>Solflare</span>
+                </div>
+                <div class="text-[#22c55e] text-xs font-mono opacity-0 group-hover:opacity-100 transition">Detected</div>
+            </div>
+        </div>
     </div>
-    <button id="statusbar-wallet-btn" onclick="openWalletModal()" class="status-bar-btn">
-        <i data-lucide="wallet" width="14"></i> <span>Connect Wallet</span>
-    </button>
 </div>
 
-<!-- WALLET MODAL -->
-<div id="wallet-modal" class="modal-overlay">
-    <div class="bg-[#2a1005] border-2 border-[#ea580c] p-8 rounded-2xl max-w-sm w-full relative">
-        <button onclick="closeWalletModal()" class="absolute top-4 right-4 text-[#9a3412]"><i data-lucide="x"></i></button>
-        <h3 class="text-xl font-bold mb-6 text-center">Establish Connection</h3>
-        <div class="space-y-3">
-            <button onclick="connectProvider('phantom')" class="w-full p-4 border-2 border-[#7c2d12] rounded-xl flex justify-between items-center hover:border-[#ea580c]"><span>Phantom</span><i data-lucide="ghost"></i></button>
-            <button onclick="connectProvider('solflare')" class="w-full p-4 border-2 border-[#7c2d12] rounded-xl flex justify-between items-center hover:border-[#ea580c]"><span>Solflare</span><i data-lucide="flame"></i></button>
+<div class="status-bar">
+    <div class="flex items-center gap-3" onclick="toggleStatusModal()">
+        <span class="text-[#9a3412] text-xs font-bold tracking-wider uppercase hidden md:inline">System Status</span>
+        <div class="h-4 w-[2px] bg-[#7c2d12] hidden md:block"></div>
+        <div class="flex items-center gap-2">
+            <span id="bar-text" class="text-xs font-bold text-[#ea580c] font-mono">ONLINE</span>
+            <span id="bar-dot" class="pulse-dot green"></span>
+        </div>
+        <div class="h-4 w-[2px] bg-[#7c2d12] ml-2 hidden sm:block"></div>
+        <div class="flex items-center gap-2 ml-1 hidden sm:flex">
+            <span class="text-[#9a3412] text-xs font-bold uppercase">Sync:</span>
+            <span id="last-sync-time" class="text-xs font-mono text-[#fb923c]">--:--:--</span>
+        </div>
+    </div>
+    
+    <!-- New Wallet Status in Bottom Bar (Visible Everywhere) -->
+    <div class="flex items-center gap-3">
+        <button id="statusbar-wallet-btn" onclick="openWalletModal()" class="status-bar-btn">
+            <i data-lucide="wallet" width="14"></i> <span class="hidden sm:inline">Connect Wallet</span><span class="sm:hidden">Wallet</span>
+        </button>
+        <div class="text-[#fb923c] hover:text-white transition transform hover:scale-110 cursor-pointer" onclick="toggleStatusModal()">
+            <i data-lucide="activity" width="20"></i>
+        </div>
+    </div>
+</div>
+
+<!-- STATUS MODAL -->
+<div id="status-modal" class="modal-overlay" onclick="toggleStatusModal()">
+    <div class="bg-[#2a1005] border-4 border-[#ea580c] p-8 rounded-2xl max-w-sm w-full text-center shadow-[0_0_50px_rgba(234,88,12,0.5)] relative" onclick="event.stopPropagation()">
+        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleStatusModal()"><i data-lucide="x" width="24"></i></button>
+        <div id="modal-icon-container" class="w-20 h-20 bg-[#451a03] text-[#ea580c] rounded-full flex items-center justify-center mx-auto mb-6 border-2 border-[#7c2d12]">
+            <i data-lucide="flame" width="40"></i>
+        </div>
+        <h3 id="modal-title" class="text-2xl font-bold text-white mb-2 font-sans tracking-wide">SYSTEM ONLINE</h3>
+        <p id="modal-desc" class="text-[#fb923c] mb-8 text-sm font-mono">Connected to HolDex Data Grid.<br>Real-time Solana feed active.</p>
+        <div class="bg-[#451a03] rounded-lg p-4 text-left border border-[#7c2d12]">
+            <div class="flex justify-between items-center mb-2">
+                <span class="text-xs text-[#9a3412] uppercase font-bold">Latency</span>
+                <span class="text-xs font-mono text-[#22c55e] font-bold">~45ms</span>
+            </div>
+            <div class="flex justify-between items-center">
+                <span class="text-xs text-[#9a3412] uppercase font-bold">Backend</span>
+                <span class="text-xs font-mono text-[#ea580c] font-bold">Render (US-East)</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- INFO MODAL -->
+<div id="info-modal" class="modal-overlay">
+    <div class="bg-[#2a1005] border-2 border-[#ea580c] p-8 rounded-2xl max-w-md w-full shadow-2xl relative" onclick="event.stopPropagation()">
+        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleInfoModal()"><i data-lucide="x" width="24"></i></button>
+        <h3 class="text-xl font-bold text-white mb-4 font-sans">How to Upload a Banner?</h3>
+        <div class="info-box">
+            <p class="mb-2">We do not store large image files directly. Please use Imgur:</p>
+            <ol class="list-decimal pl-5 space-y-2 text-[#9a3412]">
+                <li>Go to <a href="https://imgur.com/" target="_blank">Imgur.com</a> and upload your image.</li>
+                <li>Wait for upload to complete.</li>
+                <li><strong>Right-click</strong> the image and select <strong>"Copy Image Address"</strong> (or "Copy Image Link").</li>
+                <li>Ensure the link ends with <strong>.jpg, .png, or .gif</strong>.</li>
+                <li>Paste that link into the field below.</li>
+                <li>Recommended size: <strong>1500x500px</strong>.</li>
+            </ol>
+        </div>
+        <button onclick="toggleInfoModal()" class="w-full bg-[#451a03] border border-[#7c2d12] text-[#fb923c] py-2 rounded-lg hover:bg-[#582206] font-bold">Got it</button>
+    </div>
+</div>
+
+<!-- PREVIEW MODAL -->
+<div id="preview-modal" class="modal-overlay" style="align-items: flex-start; padding-top: 50px;">
+    <div class="bg-[#2a1005] border-2 border-[#ea580c] w-full max-w-5xl rounded-2xl shadow-2xl relative overflow-hidden flex flex-col max-h-[90vh]">
+        <div class="p-4 border-b border-[#7c2d12] flex justify-between items-center bg-[#451a03]">
+            <h3 class="text-lg font-bold text-white">Live Preview</h3>
+            <button onclick="closePreview()" class="text-[#9a3412] hover:text-white"><i data-lucide="x" width="24"></i></button>
+        </div>
+        <div class="preview-content bg-[#0f0502] p-4 overflow-y-auto">
+            <div id="preview-container"></div>
+        </div>
+        <div class="p-4 bg-[#451a03] border-t border-[#7c2d12] text-center">
+            <button onclick="closePreview()" class="action-btn bg-[#2a1005] border-[#ea580c]">Close Preview</button>
         </div>
     </div>
 </div>
 
 <script>
-    // --- Configuration ---
+    // --- Constants ---
     const API_URL = 'https://asdev-backend.onrender.com';
-    const HELIUS_API_KEY = "9cf39f1e-049f-49c7-8884-781b37344379"; 
-    const RPC_ENDPOINTS = HELIUS_API_KEY ? [`https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`] : ["https://api.mainnet-beta.solana.com", "https://rpc.ankr.com/solana"];
-    const FALLBACK_BANNER = "https://images.squarespace-cdn.com/content/690b8c21384b3f1201c2650c/967ea61f-a88a-4497-81c2-5c67d3d06d9e/Gemini_Generated_Image_c82gwyc82gwyc82g.png";
+    const FALLBACK_BANNER = "https://images.squarespace-cdn.com/content/690b8c21384b3f1201c2650c/967ea61f-a88a-4497-81c2-5c67d3d06d9e/Gemini_Generated_Image_c82gwyc82gwyc82g.png?content-type=image%2Fpng";
+    const TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+    const ASSOCIATED_TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
+
+    // !!! IMPORTANT: INSERT YOUR HELIUS KEY BELOW IF YOU HAVE ONE !!!
+    const HELIUS_API_KEY = "9cf39f1e-049f-49c7-8884-781b37344379"; // e.g. "your-uuid-here"
+
+    // Robust list of public RPCs to rotate through
+    // We dynamically add Helius to the TOP of the list if a key is provided
+    let RPC_ENDPOINTS = [
+        "https://api.mainnet-beta.solana.com", 
+        "https://solana-api.projectserum.com", 
+        "https://rpc.ankr.com/solana"
+    ];
+    
+    if (HELIUS_API_KEY && HELIUS_API_KEY.length > 5) {
+        RPC_ENDPOINTS.unshift(`https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`);
+        console.log("Helius RPC enabled");
+    }
 
     // --- State ---
-    let walletAddress = null;
-    let walletProvider = null;
     let currentSort = 'newest';
     let searchQuery = '';
-    let isVerifiedFilter = false;
+    let pollingInterval;
+    let isConnected = true;
+    let isInfoModalOpen = false;
+    let isWalletModalOpen = false;
     let currentPage = 1;
-    let feeConfig = { solFee: 0.1, tokenFee: 1000, treasury: '', tokenMint: '' };
+    let isVerifiedFilter = false;
     let currentUpdateTokenData = null;
+    let walletAddress = null;
+    let walletProvider = null; 
+    let feeConfig = { solFee: 0.1, tokenFee: 1000, tokenMint: '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump', treasury: 'H8sMJqC9X8rJ8W1a6VjFq7X5gZ5fX9x8x8x8x8x8x8' };
 
     // --- Init ---
-    window.onload = () => {
+    window.onload = async () => {
         handleRoute();
-        fetchFees();
+        await fetchFees();
+        
+        // Character counter listener
         const descInput = document.getElementById('update-description');
-        if(descInput) {
-            descInput.addEventListener('input', e => {
-                document.getElementById('char-count').innerText = e.target.value.length;
+        const charCount = document.getElementById('char-count');
+        if(descInput && charCount) {
+            descInput.addEventListener('input', () => {
+                charCount.innerText = descInput.value.length;
             });
         }
     };
     window.addEventListener('hashchange', handleRoute);
 
+    // --- API Calls ---
     async function fetchFees() {
         try {
             const res = await fetch(`${API_URL}/api/config/fees`);
             const data = await res.json();
-            if(data.success) feeConfig = data;
-        } catch(e) {}
+            if (data.success) {
+                feeConfig = data;
+                // Safely update DOM
+                const solEl = document.getElementById('fee-sol');
+                const tokEl = document.getElementById('fee-token');
+                if (solEl) solEl.innerText = `${data.solFee} SOL`;
+                if (tokEl) tokEl.innerText = `${data.tokenFee.toLocaleString()} TOKENS`;
+            }
+        } catch (e) { console.error("Fee fetch failed", e); }
     }
 
-    // --- Navigation ---
-    function navigateTo(h) { window.location.hash = h; }
-    function handleRoute() {
-        const h = window.location.hash;
-        document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
-        document.getElementById('table-controls').classList.add('hidden');
-        document.getElementById('detail-controls').classList.add('hidden');
+    // --- Helper: Input Sanitization ---
+    function sanitizeInput(str) {
+        if(!str) return '';
+        const div = document.createElement('div');
+        div.innerText = str;
+        return div.innerHTML; // Returns escaped HTML (safe to display)
+    }
 
-        if (!h || h === '#') {
-            document.getElementById('view-dashboard').classList.add('active');
-            document.getElementById('table-controls').classList.remove('hidden');
-            fetchList();
-        } else if (h === '#update') {
-            document.getElementById('view-update').classList.add('active');
-        } else if (h.startsWith('#token/')) {
-            document.getElementById('view-detail').classList.add('active');
-            document.getElementById('detail-controls').classList.remove('hidden');
-            showDetail(h.split('/')[1]);
+    // --- Wallet Logic (Rewritten) ---
+    function openWalletModal() {
+        const modal = document.getElementById('wallet-modal');
+        if (modal) modal.classList.add('open');
+        isWalletModalOpen = true;
+    }
+
+    function closeWalletModal() {
+        const modal = document.getElementById('wallet-modal');
+        if (modal) modal.classList.remove('open');
+        isWalletModalOpen = false;
+    }
+
+    async function connectProvider(providerName) {
+        let provider = null;
+        if (providerName === 'phantom' && window.solana && window.solana.isPhantom) {
+            provider = window.solana;
+        } else if (providerName === 'solflare' && window.solflare) {
+            provider = window.solflare;
         }
-    }
 
-    // --- Wallet ---
-    function openWalletModal() { document.getElementById('wallet-modal').classList.add('open'); }
-    function closeWalletModal() { document.getElementById('wallet-modal').classList.remove('open'); }
+        if (!provider) {
+            alert(`${providerName} not found. Please install the extension.`);
+            return;
+        }
 
-    async function connectProvider(p) {
-        const provider = p === 'phantom' ? window.solana : window.solflare;
-        if (!provider) return alert("Wallet not found");
         try {
+            // Connect
             const resp = await provider.connect();
             walletAddress = resp.publicKey.toString();
             walletProvider = provider;
+            
             closeWalletModal();
             updateWalletUI(true);
-        } catch (e) {}
-    }
-
-    function updateWalletUI(connected) {
-        const barBtn = document.getElementById('statusbar-wallet-btn');
-        const submitBtn = document.getElementById('submit-btn');
-        if (connected) {
-            barBtn.innerHTML = `<span>${walletAddress.slice(0,4)}...${walletAddress.slice(-4)}</span>`;
-            barBtn.classList.add('connected');
-            if(submitBtn) submitBtn.disabled = false;
+            refreshBalances();
+        } catch (err) {
+            console.error("Connection Failed:", err);
+            alert("Connection denied or failed.");
         }
     }
 
-    // --- Dashboard ---
+    function disconnectWallet() {
+        if (walletProvider && walletProvider.disconnect) {
+            walletProvider.disconnect();
+        }
+        walletAddress = null;
+        walletProvider = null;
+        updateWalletUI(false);
+    }
+
+    function updateWalletUI(connected) {
+        const discDiv = document.getElementById('wallet-disconnected');
+        const connDiv = document.getElementById('wallet-connected');
+        const submitBtn = document.getElementById('submit-btn');
+        const statusBtn = document.getElementById('statusbar-wallet-btn');
+        const displayAddr = document.getElementById('display-address');
+
+        if (connected) {
+            const shortAddr = walletAddress.slice(0,4) + '...' + walletAddress.slice(-4);
+            
+            // Update UI elements if they exist
+            if (discDiv) discDiv.classList.add('hidden');
+            if (connDiv) connDiv.classList.remove('hidden');
+            if (displayAddr) displayAddr.innerText = shortAddr;
+            if (submitBtn) submitBtn.disabled = false;
+            
+            if (statusBtn) {
+                statusBtn.innerHTML = `<i data-lucide="wallet" width="14"></i> <span>${shortAddr}</span>`;
+                statusBtn.classList.add('connected');
+            }
+        } else {
+            if (discDiv) discDiv.classList.remove('hidden');
+            if (connDiv) connDiv.classList.add('hidden');
+            if (submitBtn) submitBtn.disabled = true;
+            
+            if (statusBtn) {
+                statusBtn.innerHTML = `<i data-lucide="wallet" width="14"></i> <span class="hidden sm:inline">Connect Wallet</span><span class="sm:hidden">Wallet</span>`;
+                statusBtn.classList.remove('connected');
+            }
+        }
+        lucide.createIcons();
+    }
+
+    async function refreshBalances() {
+        if (!walletAddress) return;
+        const icon = document.getElementById('refresh-icon');
+        if (icon) icon.classList.add('animate-spin');
+
+        try {
+            const tokenMint = feeConfig.tokenMint || '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump';
+            const res = await fetch(`${API_URL}/api/proxy/balance/${walletAddress}?tokenMint=${tokenMint}`);
+            const data = await res.json();
+
+            const solEl = document.getElementById('balance-sol');
+            const tokEl = document.getElementById('balance-token');
+
+            if (data.success) {
+                if(solEl) solEl.innerText = (data.sol || 0).toFixed(4);
+                if(tokEl) tokEl.innerText = (data.tokens || 0).toLocaleString();
+            } else {
+                if(solEl) solEl.innerText = "Err";
+                if(tokEl) tokEl.innerText = "Err";
+            }
+        } catch (e) {
+            console.error("Balance Refresh Failed", e);
+        } finally {
+            if (icon) setTimeout(() => icon.classList.remove('animate-spin'), 500);
+        }
+    }
+
+    // --- Transaction Logic (Pure Web3.js - No Buffer dependency) ---
+    async function submitUpdate(e) {
+        e.preventDefault();
+        
+        if (!walletAddress || !walletProvider) { alert("Please connect wallet first"); return; }
+        
+        const statusDiv = document.getElementById('update-status');
+        const mint = document.getElementById('update-mint').value;
+        const twitter = document.getElementById('update-twitter').value;
+        const website = document.getElementById('update-website').value;
+        const telegram = document.getElementById('update-telegram').value;
+        const banner = document.getElementById('update-banner').value;
+        const descInput = document.getElementById('update-description');
+        
+        // Capture and Sanitize Description
+        const description = descInput ? sanitizeInput(descInput.value.substring(0, 250)) : '';
+
+        // Validation
+        if (banner && !banner.match(/\.(jpeg|jpg|gif|png|webp)$/i)) {
+            statusDiv.innerText = "❌ Error: Banner URL must end in .jpg, .png, .gif, or .webp";
+            statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500";
+            return;
+        }
+
+        statusDiv.innerText = "Initializing Transaction...";
+        statusDiv.className = "mt-4 text-center text-sm font-mono text-[#ea580c]";
+        statusDiv.classList.remove('hidden');
+
+        try {
+            // --- RPC ROTATION LOGIC ---
+            let connection;
+            let blockhash;
+            let rpcError;
+
+            // Try Helius first (if configured), then others
+            for (const endpoint of RPC_ENDPOINTS) {
+                try {
+                    const host = new URL(endpoint).hostname;
+                    statusDiv.innerText = `Connecting to ${host}...`;
+                    const conn = new solanaWeb3.Connection(endpoint, "confirmed");
+                    const latest = await conn.getLatestBlockhash();
+                    connection = conn;
+                    blockhash = latest.blockhash;
+                    break; // Success!
+                } catch (err) {
+                    console.warn(`RPC ${endpoint} failed:`, err);
+                    rpcError = err;
+                }
+            }
+
+            if (!connection || !blockhash) {
+                throw new Error(`All RPC endpoints failed. Please try again later. (Last error: ${rpcError?.message})`);
+            }
+            
+            // Public Keys
+            const fromPubkey = new solanaWeb3.PublicKey(walletAddress);
+            const toPubkey = new solanaWeb3.PublicKey(feeConfig.treasury);
+            const tokenMintPubkey = new solanaWeb3.PublicKey(feeConfig.tokenMint);
+
+            // Find ATAs (Associated Token Accounts)
+            const getATA = async (owner, mint) => {
+                const [addr] = await solanaWeb3.PublicKey.findProgramAddress(
+                    [owner.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mint.toBytes()],
+                    ASSOCIATED_TOKEN_PROGRAM_ID
+                );
+                return addr;
+            };
+
+            const fromTokenAccount = await getATA(fromPubkey, tokenMintPubkey);
+            const toTokenAccount = await getATA(toPubkey, tokenMintPubkey);
+
+            statusDiv.innerText = "Building Transaction...";
+            const transaction = new solanaWeb3.Transaction();
+
+            // 1. SOL Transfer
+            transaction.add(
+                solanaWeb3.SystemProgram.transfer({
+                    fromPubkey: fromPubkey,
+                    toPubkey: toPubkey,
+                    lamports: Math.round(feeConfig.solFee * solanaWeb3.LAMPORTS_PER_SOL)
+                })
+            );
+
+            // 2. Token Transfer (Manual Instruction Data)
+            const decimals = 6;
+            const rawAmount = BigInt(Math.floor(feeConfig.tokenFee * Math.pow(10, decimals)));
+            
+            // Build buffer manually
+            const dataLayout = new Uint8Array(9);
+            dataLayout[0] = 3; // Transfer instruction
+            
+            // Write 64-bit integer
+            let remaining = rawAmount;
+            for (let i = 0; i < 8; i++) {
+                dataLayout[i + 1] = Number(remaining & 0xFFn);
+                remaining >>= 8n;
+            }
+
+            const transferIx = new solanaWeb3.TransactionInstruction({
+                keys: [
+                    { pubkey: fromTokenAccount, isSigner: false, isWritable: true },
+                    { pubkey: toTokenAccount, isSigner: false, isWritable: true },
+                    { pubkey: fromPubkey, isSigner: true, isWritable: false } // Owner
+                ],
+                programId: TOKEN_PROGRAM_ID,
+                data: dataLayout
+            });
+            
+            transaction.add(transferIx);
+
+            // Sign & Send
+            transaction.recentBlockhash = blockhash;
+            transaction.feePayer = fromPubkey;
+
+            statusDiv.innerText = "Please Sign in Wallet...";
+            const { signature } = await walletProvider.signAndSendTransaction(transaction);
+            
+            statusDiv.innerText = "Verifying Payment...";
+
+            // 3. Backend Verification
+            const payload = {
+                mint, twitter, website, telegram, banner, description, // Included Description
+                signature: signature,
+                userPublicKey: walletAddress
+            };
+
+            const res = await fetch(`${API_URL}/api/request-update`, {
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const dataRes = await res.json();
+            
+            if (dataRes.success) {
+                statusDiv.innerText = "✅ Success! Update queued.";
+                statusDiv.className = "mt-4 text-center text-sm font-mono text-green-500";
+                e.target.reset();
+                document.getElementById('char-count').innerText = "0";
+            } else {
+                statusDiv.innerText = `❌ Verification Failed: ${dataRes.error}`;
+                statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500";
+            }
+
+        } catch (err) {
+            console.error(err);
+            statusDiv.innerText = `❌ Error: ${err.message}`;
+            statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500";
+        }
+    }
+
+    // --- Helper Functions (Search, Formatting, Routing) ---
+    // (Kept standard logic but guarded against null elements)
+    const formatMoney = (val) => { if (val === undefined || val === null) return "$0.00"; return val < 0.01 ? '$' + val.toExponential(2) : '$' + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }); };
+    const formatCompact = (val) => { if (val === undefined || val === null) return "$0"; return '$' + new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val); };
+    const formatPct = (val) => { if (val === undefined || val === null || val === 0) return `<span class="text-[#9a3412]">-</span>`; const cls = val > 0 ? 'pill-green' : (val < 0 ? 'pill-red' : 'text-[#9a3412]'); return `<span class="pill ${cls}">${val > 0 ? '+' : ''}${val.toFixed(2)}%</span>`; };
+    const timeAgo = (ts) => { if (!ts) return ''; const seconds = Math.floor((Date.now() - ts) / 1000); return seconds < 60 ? `${seconds}s ago` : (seconds < 3600 ? `${Math.floor(seconds/60)}m ago` : `${Math.floor(seconds/3600)}h ago`); };
+
+    function navigateTo(path) { window.location.hash = path; }
+    
+    function handleRoute() {
+        const hash = window.location.hash;
+        document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+        const tableControls = document.getElementById('table-controls');
+        const detailControls = document.getElementById('detail-controls');
+        
+        if (tableControls) tableControls.classList.add('hidden');
+        if (detailControls) detailControls.classList.add('hidden');
+        
+        if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
+
+        if (hash === '' || hash === '#') {
+            const el = document.getElementById('view-dashboard');
+            const btn = document.querySelector('button[onclick="navigateTo(\'\')"]');
+            if(el) el.classList.add('active');
+            if(btn) btn.classList.add('active');
+            if(tableControls) tableControls.classList.remove('hidden');
+            fetchList();
+            pollingInterval = setInterval(fetchList, 5000);
+        } else if (hash === '#about') {
+            const el = document.getElementById('view-about');
+            const btn = document.querySelector('button[onclick="navigateTo(\'about\')"]');
+            if(el) el.classList.add('active');
+            if(btn) btn.classList.add('active');
+        } else if (hash === '#update') {
+            const el = document.getElementById('view-update');
+            const btn = document.querySelector('button[onclick="navigateTo(\'update\')"]');
+            if(el) el.classList.add('active');
+            if(btn) btn.classList.add('active');
+            // Refresh wallet UI in case we connected on another tab
+            updateWalletUI(walletAddress !== null);
+        } else if (hash.startsWith('#token/')) {
+            showDetailView(hash.split('/')[1]);
+        }
+    }
+
+    // --- Token Preview Logic ---
+    async function fetchTokenForUpdate(mint) {
+        if (!mint || mint.length < 30) return;
+        const spinner = document.getElementById('mint-check-spinner');
+        const infoBox = document.getElementById('token-preview-info');
+        if(spinner) spinner.classList.remove('hidden'); 
+        if(infoBox) infoBox.classList.add('hidden');
+        try {
+            const res = await fetch(`${API_URL}/api/tokens?search=${mint}&limit=1`);
+            const data = await res.json();
+            if (data.success && data.tokens.length > 0) {
+                const token = data.tokens[0];
+                if (token.mint === mint) {
+                    currentUpdateTokenData = token;
+                    const img = document.getElementById('update-token-img');
+                    const name = document.getElementById('update-token-name');
+                    const tick = document.getElementById('update-token-ticker');
+                    
+                    if(img) img.src = token.image || 'https://placehold.co/50';
+                    if(name) name.innerText = token.name;
+                    if(tick) tick.innerText = token.ticker;
+                    if(infoBox) infoBox.classList.remove('hidden');
+                }
+            }
+        } catch (e) { console.error("Fetch failed", e); } finally { if(spinner) spinner.classList.add('hidden'); }
+    }
+
+    function openPreview() {
+        if (!currentUpdateTokenData) { alert("Please enter a valid Mint Address first."); return; }
+        const banner = document.getElementById('update-banner').value;
+        const twitter = document.getElementById('update-twitter').value;
+        const website = document.getElementById('update-website').value;
+        const telegram = document.getElementById('update-telegram').value;
+        const t = { ...currentUpdateTokenData, banner, twitter, website, telegram, hasCommunityUpdate: true };
+        const container = document.getElementById('preview-container');
+        
+        let html = '';
+        if (t.banner) {
+            html += `<div class="w-full h-48 md:h-64 rounded-xl border-2 border-[#7c2d12] shadow-lg relative overflow-hidden bg-black mb-6"><img src="${t.banner}" class="w-full h-full object-cover object-center" onerror="this.src='${FALLBACK_BANNER}'"><div class="absolute inset-0 bg-gradient-to-t from-[#2a1005] to-transparent opacity-80 pointer-events-none"></div></div>`;
+        }
+        let linksHtml = '';
+        if (t.twitter) linksHtml += `<a href="#" class="social-btn"><i data-lucide="twitter" width="20"></i></a>`;
+        if (t.website) linksHtml += `<a href="#" class="social-btn"><i data-lucide="globe" width="20"></i></a>`;
+        if (t.telegram) linksHtml += `<a href="#" class="social-btn"><i data-lucide="send" width="20"></i></a>`;
+
+        html += `<div class="flex flex-col md:flex-row gap-6 mb-8 items-start"><div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl"><img src="${t.image}" class="w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black"><div class="flex-1 min-w-0"><div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mb-1"><h2 class="text-3xl font-bold text-white tracking-tight font-mono">${t.ticker}</h2><span class="text-[#fb923c] text-sm bg-[#2a1005] px-3 py-1 rounded-lg border border-[#7c2d12]">${t.name}</span></div><div class="text-xs text-[#9a3412] font-mono">${t.mint}</div></div></div><div class="flex-1"></div><div class="flex flex-wrap gap-3">${linksHtml}</div></div><div class="text-center text-[#9a3412] font-mono text-xs mt-10">-- End of Preview --</div>`;
+        if(container) container.innerHTML = html;
+        lucide.createIcons();
+        const modal = document.getElementById('preview-modal');
+        if(modal) modal.classList.add('open');
+    }
+
+    function closePreview() { const modal = document.getElementById('preview-modal'); if(modal) modal.classList.remove('open'); }
+    function toggleInfoModal() { const modal = document.getElementById('info-modal'); isInfoModalOpen = !isInfoModalOpen; if (isInfoModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
+    function toggleVerifiedFilter() { isVerifiedFilter = !isVerifiedFilter; const btn = document.getElementById('filter-verified'); if(btn) { if (isVerifiedFilter) btn.classList.add('active'); else btn.classList.remove('active'); } currentPage = 1; fetchList(); }
+    
     async function fetchList() {
         try {
-            const url = `${API_URL}/api/tokens?sort=${currentSort}&search=${encodeURIComponent(searchQuery)}&page=${currentPage}${isVerifiedFilter ? '&filter=verified' : ''}`;
-            const res = await fetch(url);
+            const pDisplay = document.getElementById('page-display');
+            const prev = document.getElementById('btn-prev');
+            const next = document.getElementById('btn-next');
+            if(pDisplay) pDisplay.innerText = `Page ${currentPage}`;
+            if(prev) prev.disabled = currentPage <= 1;
+            
+            let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&search=${encodeURIComponent(searchQuery)}&limit=100&page=${currentPage}`;
+            if (isVerifiedFilter) endpoint += '&filter=verified';
+            const res = await fetch(endpoint);
             const data = await res.json();
-            if(data.success) renderTable(data.tokens);
-            document.getElementById('page-info').innerText = `Page ${currentPage}`;
-            document.getElementById('btn-prev').disabled = currentPage <= 1;
-        } catch(e) {}
+            if (data.success) {
+                renderTable(data.tokens);
+                if(next) next.disabled = data.tokens.length < 100;
+            }
+        } catch (e) { console.error("API Connection Failed", e); }
+    }
+
+    function changePage(delta) {
+        currentPage += delta; if (currentPage < 1) currentPage = 1;
+        if (pollingInterval) clearInterval(pollingInterval);
+        const tbody = document.getElementById('table-body');
+        if(tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-orange-700 font-mono animate-pulse">Loading Page ${currentPage}...</td></tr>`;
+        fetchList().then(() => { if (currentPage === 1) { pollingInterval = setInterval(fetchList, 5000); } });
     }
 
     function renderTable(tokens) {
         const tbody = document.getElementById('table-body');
-        if(!tokens.length) { tbody.innerHTML = `<tr><td colspan="5" class="text-center py-20 text-[#9a3412]">No results found.</td></tr>`; return; }
-        
+        if(!tbody) return;
+        if (tokens.length === 0) { tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-[#9a3412] font-mono">${searchQuery ? `Searching global network for "${searchQuery}"...` : 'No tokens found in database.'}</td></tr>`; return; }
         tbody.innerHTML = tokens.map(t => `
-            <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer hover:bg-white/5">
-                <td class="p-4 flex items-center gap-3">
-                    <img src="${t.image}" class="img-token" onerror="this.src='https://placehold.co/40'">
-                    <div>
-                        <div class="font-bold flex items-center gap-2">${t.ticker}${t.hasCommunityUpdate ? '<i data-lucide="check-circle" class="w-3 h-3 text-green-500"></i>' : ''}</div>
-                        <div class="text-[10px] text-[#9a3412] font-mono">${t.name}</div>
-                    </div>
-                </td>
-                <td class="text-right font-mono font-bold text-[#fb923c]">${t.hasCommunityUpdate ? (t.kScore || 0) : '🔒'}</td>
-                <td class="text-right font-mono">$${(t.marketCap || 0).toLocaleString()}</td>
-                <td class="text-right font-mono">$${(t.volume24h || 0).toLocaleString()}</td>
-                <td class="text-right font-mono ${t.change24h > 0 ? 'text-green-500' : 'text-red-500'}">${t.change24h?.toFixed(2)}%</td>
+            <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group">
+                <td><div class="flex items-center gap-3"><img src="${t.image || 'https://placehold.co/40x40/2a1005/7c2d12?text=?'}" class="img-token group-hover:border-[#ea580c] transition" loading="lazy" onerror="this.src='https://placehold.co/40x40/2a1005/7c2d12?text=?'"><div class="flex flex-col min-w-0"><div class="flex items-center gap-2"><span class="font-bold text-white text-sm group-hover:text-[#ea580c] transition truncate font-sans tracking-wide">${t.ticker}</span>${t.hasCommunityUpdate ? '<span title="Verified Community Update" class="verified-badge"><i data-lucide="check" width="12"></i></span>' : ''}</div><span class="text-[10px] text-[#9a3412] truncate max-w-[120px] md:max-w-[200px] font-mono group-hover:text-[#fb923c]">${t.name}</span></div></div></td>
+                <td class="text-right text-[#fb923c] font-mono font-bold">${t.hasCommunityUpdate ? (t.kScore || 0) : '<span title="Community Update Required" class="text-gray-500">🔒</span>'}</td>
+                <td class="hidden md:table-cell text-right">${formatPct(t.change5m)}</td>
+                <td class="hidden md:table-cell text-right">${formatPct(t.change1h)}</td>
+                <td class="text-right">${formatPct(t.change24h)}</td>
+                <td class="text-right font-mono text-[#fb923c] font-bold">${formatCompact(t.marketCap)}</td>
+                <td class="text-right font-mono text-[#22c55e]">${formatCompact(t.volume24h)}</td>
+                <td class="hidden md:table-cell text-right text-xs text-[#9a3412] font-mono">${timeAgo(t.timestamp)}</td>
             </tr>
         `).join('');
         lucide.createIcons();
     }
 
-    window.setSort = (s) => { currentSort = s; currentPage = 1; fetchList(); };
-    window.handleSearch = (e) => { searchQuery = e.target.value; currentPage = 1; clearTimeout(window.searchT); window.searchT = setTimeout(fetchList, 800); };
-    window.toggleVerifiedFilter = () => { isVerifiedFilter = !isVerifiedFilter; document.getElementById('filter-verified').classList.toggle('active'); currentPage = 1; fetchList(); };
-    window.changePage = (d) => { currentPage += d; fetchList(); };
-    window.handleManualRefresh = () => fetchList();
+    window.switchPool = (pairAddress, dexId) => {
+        document.querySelectorAll('.pool-tab').forEach(t => t.classList.remove('active')); const tab = document.getElementById(`tab-${pairAddress}`); if(tab) tab.classList.add('active');
+        const frame = document.getElementById('detail-iframe'); if(frame) frame.src = `https://dexscreener.com/solana/${pairAddress}?embed=1&theme=dark&info=0`;
+    };
 
-    // --- Detail ---
-    async function showDetail(mint) {
-        const loading = document.getElementById('detail-loading');
-        const content = document.getElementById('detail-content');
-        loading.classList.remove('hidden'); content.classList.add('hidden');
+    async function showDetailView(mint) {
+        clearInterval(pollingInterval); pollingInterval = null;
+        
+        // Hide others, Show detail
+        const db = document.getElementById('view-dashboard');
+        const dt = document.getElementById('view-detail');
+        const ab = document.getElementById('view-about');
+        const up = document.getElementById('view-update');
+        const dc = document.getElementById('detail-controls');
+        
+        if(db) db.classList.remove('active');
+        if(ab) ab.classList.remove('active');
+        if(up) up.classList.remove('active');
+        if(dt) dt.classList.add('active');
+        if(dc) dc.classList.remove('hidden');
+
+        const loadingDiv = document.getElementById('detail-loading');
+        const contentDiv = document.getElementById('detail-content');
+        const bannerContainer = document.getElementById('detail-banner-container');
+        
+        if(loadingDiv) loadingDiv.style.display = 'block'; 
+        if(contentDiv) contentDiv.style.display = 'none'; 
+        if(bannerContainer) { bannerContainer.classList.add('hidden'); bannerContainer.innerHTML = ''; }
 
         try {
             const res = await fetch(`${API_URL}/api/token/${mint}`);
             const data = await res.json();
-            if(data.success) {
+            if (data.success) {
                 const t = data.token;
-                document.getElementById('detail-ticker').innerText = t.ticker;
-                document.getElementById('detail-name').innerText = t.name;
-                document.getElementById('detail-mint').innerText = t.mint;
-                document.getElementById('detail-img').src = t.image;
+                const ticker = document.getElementById('detail-ticker');
+                const name = document.getElementById('detail-name');
+                const mintEl = document.getElementById('detail-mint');
+                const img = document.getElementById('detail-img');
+                const descEl = document.getElementById('detail-desc');
                 
-                const verified = document.getElementById('detail-verified');
-                if(t.hasCommunityUpdate) verified.classList.remove('hidden'); else verified.classList.add('hidden');
+                if(ticker) ticker.innerText = t.ticker;
+                if(name) name.innerText = t.name;
+                if(mintEl) mintEl.innerText = t.mint;
+                if(img) img.src = t.image || 'https://placehold.co/80x80/2a1005/7c2d12?text=?';
+                
+                // Show Description if available
+                if (t.description && descEl) {
+                    descEl.innerHTML = sanitizeInput(t.description); // Safe injection
+                    descEl.classList.remove('hidden');
+                } else if (descEl) {
+                    descEl.classList.add('hidden');
+                }
+                
+                if (t.banner && bannerContainer) {
+                    bannerContainer.innerHTML = `<div class="w-full h-48 md:h-64 rounded-xl border-2 border-[#7c2d12] shadow-lg relative overflow-hidden bg-black"><img src="${t.banner}" class="w-full h-full object-cover object-center" onerror="this.src='${FALLBACK_BANNER}'"><div class="absolute inset-0 bg-gradient-to-t from-[#2a1005] to-transparent opacity-80 pointer-events-none"></div></div>`;
+                    bannerContainer.classList.remove('hidden');
+                }
 
-                // Description
-                const descBox = document.getElementById('detail-desc-box');
-                const descText = document.getElementById('detail-desc-text');
-                if (t.description) {
-                    descText.innerText = t.description;
-                    descBox.classList.remove('hidden');
-                } else { descBox.classList.add('hidden'); }
-
-                // Banner
-                const bannerContainer = document.getElementById('detail-banner-container');
-                if (t.banner) {
-                    bannerContainer.innerHTML = `<div class="w-full h-48 md:h-64 rounded-xl border-2 border-[#7c2d12] relative overflow-hidden bg-black shadow-lg"><img src="${t.banner}" class="w-full h-full object-cover" onerror="this.src='${FALLBACK_BANNER}'"></div>`;
-                } else { bannerContainer.innerHTML = ''; }
+                const actionsDiv = document.getElementById('detail-actions'); 
+                if(actionsDiv) {
+                    let linksHtml = '';
+                    linksHtml += `<a href="https://pump.fun/coin/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><img src="https://pump.fun/logo.png" width="16" class="rounded-full" onerror="this.style.display='none'"> Pump.fun</a>`;
+                    linksHtml += `<a href="https://solscan.io/token/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><i data-lucide="search" width="16"></i> Solscan</a>`;
+                    
+                    if (t.hasCommunityUpdate) {
+                        if (t.twitter) linksHtml += `<a href="${t.twitter}" target="_blank" class="social-btn"><i data-lucide="twitter" width="20"></i></a>`;
+                        if (t.website) linksHtml += `<a href="${t.website}" target="_blank" class="social-btn"><i data-lucide="globe" width="20"></i></a>`;
+                        if (t.telegram) linksHtml += `<a href="${t.telegram}" target="_blank" class="social-btn"><i data-lucide="send" width="20"></i></a>`;
+                    }
+                    actionsDiv.innerHTML = linksHtml; lucide.createIcons();
+                }
 
                 // Stats
-                document.getElementById('stat-kscore').innerText = t.hasCommunityUpdate ? (t.kScore || 0) : '🔒';
-                document.getElementById('stat-mcap').innerText = '$' + (t.marketCap || 0).toLocaleString();
-                document.getElementById('stat-vol').innerText = '$' + (t.volume24h || 0).toLocaleString();
-                document.getElementById('stat-1h').innerText = (t.change1h || 0).toFixed(2) + '%';
-                document.getElementById('stat-24h').innerText = (t.change24h || 0).toFixed(2) + '%';
-
-                // Chart
-                document.getElementById('detail-iframe').src = `https://dexscreener.com/solana/${mint}?embed=1&theme=dark&info=0`;
+                const sPrice = document.getElementById('stat-price'); if(sPrice) sPrice.innerText = formatMoney(t.priceUsd);
+                const sMcap = document.getElementById('stat-mcap'); if(sMcap) sMcap.innerText = formatCompact(t.marketCap);
+                const sVol = document.getElementById('stat-vol'); if(sVol) sVol.innerText = formatCompact(t.volume24h);
+                const s1h = document.getElementById('stat-chg1h'); if(s1h) s1h.innerHTML = formatPct(t.change1h);
+                const s24h = document.getElementById('stat-chg24h'); if(s24h) s24h.innerHTML = formatPct(t.change24h);
                 
-                loading.classList.add('hidden'); content.classList.remove('hidden');
-                lucide.createIcons();
+                const kEl = document.getElementById('stat-kscore');
+                if(kEl) {
+                    const hasScore = t.kScore && t.kScore > 0;
+                    const isVerified = t.hasCommunityUpdate;
+
+                    if (isVerified && hasScore) {
+                        kEl.innerText = t.kScore;
+                        kEl.classList.remove('text-gray-500'); kEl.classList.add('text-[#fb923c]');
+                        kEl.title = "Conviction Score";
+                    } else {
+                        kEl.innerText = '🔒';
+                        kEl.classList.remove('text-[#fb923c]'); kEl.classList.add('text-gray-500'); 
+                        kEl.title = "Requires Community Update";
+                    }
+                }
+
+                const tabsContainer = document.getElementById('pool-tabs-container'); 
+                if(tabsContainer) {
+                    tabsContainer.innerHTML = '';
+                    if (t.pairs && t.pairs.length > 0) {
+                        t.pairs.forEach((pair, idx) => {
+                            const tab = document.createElement('div'); tab.className = `pool-tab ${idx === 0 ? 'active' : ''}`;
+                            tab.id = `tab-${pair.pairAddress}`; tab.innerText = `${pair.dexId.toUpperCase()} ($${formatCompact(pair.liquidity)} Liq)`;
+                            tab.onclick = () => switchPool(pair.pairAddress, pair.dexId); tabsContainer.appendChild(tab);
+                        });
+                        const frame = document.getElementById('detail-iframe');
+                        if(frame) frame.src = `https://dexscreener.com/solana/${t.pairs[0].pairAddress}?embed=1&theme=dark&info=0`;
+                    } else { 
+                        const frame = document.getElementById('detail-iframe');
+                        if(frame) frame.src = `https://dexscreener.com/solana/${t.mint}?embed=1&theme=dark&info=0`; 
+                    }
+                }
+                
+                if(loadingDiv) loadingDiv.style.display = 'none'; 
+                if(contentDiv) contentDiv.style.display = 'block';
             }
-        } catch(e) {}
+        } catch (e) { console.error(e); if(loadingDiv) loadingDiv.innerText = "Error Loading Token Data"; }
     }
 
-    // --- Update Process ---
-    async function fetchTokenForUpdate(m) {
-        if(m.length < 32) return;
-        const res = await fetch(`${API_URL}/api/tokens?search=${m}`);
-        const data = await res.json();
-        if(data.success && data.tokens[0]) {
-            currentUpdateTokenData = data.tokens[0];
-            document.getElementById('update-token-img').src = currentUpdateTokenData.image;
-            document.getElementById('update-token-name').innerText = currentUpdateTokenData.name;
-            document.getElementById('update-token-ticker').innerText = currentUpdateTokenData.ticker;
-            document.getElementById('token-preview-info').classList.remove('hidden');
-        }
-    }
-
-    async function submitUpdate(e) {
-        e.preventDefault();
-        const status = document.getElementById('update-status');
-        status.classList.remove('hidden', 'text-red-500', 'text-green-500');
-        status.className = "mt-6 p-4 rounded-lg bg-[#451a03] border border-[#ea580c] text-[#ea580c] font-mono text-sm";
-        status.innerHTML = "Initializing Connection...";
-
-        try {
-            let connection, blockhash;
-            for(let url of RPC_ENDPOINTS) {
-                try {
-                    const conn = new solanaWeb3.Connection(url, 'confirmed');
-                    const bh = await conn.getLatestBlockhash();
-                    connection = conn; blockhash = bh.blockhash; break;
-                } catch(err) {}
-            }
-            if(!connection) throw new Error("Network latency high. Try again.");
-
-            const payer = new solanaWeb3.PublicKey(walletAddress);
-            const treasury = new solanaWeb3.PublicKey(feeConfig.treasury);
-            const mint = new solanaWeb3.PublicKey(feeConfig.tokenMint);
-
-            const tx = new solanaWeb3.Transaction();
-            tx.add(solanaWeb3.SystemProgram.transfer({ fromPubkey: payer, toPubkey: treasury, lamports: feeConfig.solFee * 1e9 }));
-
-            const getATA = async (own, m) => {
-                const [addr] = await solanaWeb3.PublicKey.findProgramAddress(
-                    [own.toBuffer(), new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA').toBuffer(), m.toBuffer()],
-                    new solanaWeb3.PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
-                );
-                return addr;
-            };
-
-            const sATA = await getATA(payer, mint);
-            const dATA = await getATA(treasury, mint);
-
-            const data = new Uint8Array(9);
-            data[0] = 3;
-            let amt = BigInt(Math.floor(feeConfig.tokenFee * 1e6));
-            for (let i = 0; i < 8; i++) { data[i+1] = Number(amt & 0xFFn); amt >>= 8n; }
-
-            tx.add(new solanaWeb3.TransactionInstruction({
-                keys: [{pubkey: sATA, isSigner: false, isWritable: true}, {pubkey: dATA, isSigner: false, isWritable: true}, {pubkey: payer, isSigner: true, isWritable: false}],
-                programId: new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
-                data: data
-            }));
-
-            tx.recentBlockhash = blockhash;
-            tx.feePayer = payer;
-
-            status.innerHTML = "Awaiting Signature...";
-            const { signature } = await walletProvider.signAndSendTransaction(tx);
-
-            status.innerHTML = `Transaction Broadcasted!<br>Verifying on-chain...<br><a href="https://solscan.io/tx/${signature}" target="_blank" class="tx-link">Solscan: ${signature.slice(0,10)}...</a>`;
-
-            const res = await fetch(`${API_URL}/api/request-update`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    mint: document.getElementById('update-mint').value,
-                    twitter: document.getElementById('update-twitter').value,
-                    website: document.getElementById('update-website').value,
-                    telegram: document.getElementById('update-telegram').value,
-                    banner: document.getElementById('update-banner').value,
-                    description: document.getElementById('update-description').value,
-                    signature, userPublicKey: walletAddress
-                })
-            });
-
-            const result = await res.json();
-            if(result.success) {
-                status.className = "mt-6 p-4 rounded-lg bg-green-900/20 border border-green-500 text-green-500 font-mono text-sm";
-                status.innerHTML = `✅ Submission Received!<br><a href="https://solscan.io/tx/${signature}" target="_blank" class="tx-link">Solscan: ${signature.slice(0,16)}...</a>`;
-            } else {
-                throw new Error(result.error);
-            }
-        } catch (e) {
-            status.className = "mt-6 p-4 rounded-lg bg-red-900/20 border border-red-500 text-red-500 font-mono text-sm";
-            status.innerText = "❌ " + e.message;
-        }
-    }
-
+    window.setSort = (sort, btn) => { currentSort = sort; currentPage = 1; fetchList(); };
+    window.handleSearch = (e) => { searchQuery = e.target.value; currentPage = 1; clearTimeout(window.searchTimeout); window.searchTimeout = setTimeout(fetchList, 1000); };
+    window.copyMint = () => { const el = document.getElementById('detail-mint'); if(el) navigator.clipboard.writeText(el.innerText); };
+    window.handleManualRefresh = () => { fetchList(); };
     lucide.createIcons();
+    
+    // Status Modal Toggle
+    window.toggleStatusModal = () => {
+        const modal = document.getElementById('status-modal');
+        if(modal) {
+             if(modal.style.opacity === '1' || modal.classList.contains('open')) {
+                 modal.classList.remove('open');
+                 modal.style.opacity = '0';
+                 modal.style.pointerEvents = 'none';
+             } else {
+                 modal.classList.add('open');
+                 modal.style.opacity = '1';
+                 modal.style.pointerEvents = 'auto';
+             }
+        }
+    }
 </script>
 </body>
 </html>
