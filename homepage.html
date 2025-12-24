@@ -16,8 +16,6 @@
         if (typeof window.buffer !== 'undefined') {
             window.Buffer = window.buffer.Buffer;
         }
-        // NOTE: We deliberately DO NOT polyfill 'process'. 
-        // Web3.js detects browser env by lack of process.
     </script>
 
     <!-- 2. Solana Web3.js -->
@@ -331,6 +329,13 @@
                 <label class="form-label">Website</label>
                 <input type="url" id="update-website" class="form-input" placeholder="https://...">
                 
+                <!-- NEW DESCRIPTION FIELD -->
+                <div class="mt-2">
+                    <label class="form-label">Description (Max 250 chars)</label>
+                    <textarea id="update-description" class="form-input h-24 resize-none" maxlength="250" placeholder="Briefly describe your token project..."></textarea>
+                    <div class="text-right text-[10px] text-[#9a3412] font-mono font-bold"><span id="char-count">0</span>/250</div>
+                </div>
+                
                 <div class="flex justify-between items-center mb-1 mt-2">
                     <label class="form-label mb-0">Banner Image URL</label>
                     <button type="button" class="info-btn flex items-center gap-1 text-xs" onclick="toggleInfoModal()">
@@ -370,6 +375,8 @@
                             <span id="detail-mint" class="text-xs text-[#9a3412] font-mono group-hover:text-[#ea580c] transition truncate max-w-[200px] md:max-w-none"></span>
                             <i data-lucide="copy" width="12" class="text-[#9a3412] group-hover:text-[#ea580c] flex-shrink-0"></i>
                         </div>
+                        <!-- Description Injection Point -->
+                        <div id="detail-desc" class="mt-3 text-sm text-[#ffedd5] font-sans leading-relaxed opacity-90 hidden"></div>
                     </div>
                 </div>
                 <div class="flex-1"></div>
@@ -516,6 +523,22 @@
     const TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
     const ASSOCIATED_TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
 
+    // !!! IMPORTANT: INSERT YOUR HELIUS KEY BELOW IF YOU HAVE ONE !!!
+    const HELIUS_API_KEY = "9cf39f1e-049f-49c7-8884-781b37344379"; // e.g. "your-uuid-here"
+
+    // Robust list of public RPCs to rotate through
+    // We dynamically add Helius to the TOP of the list if a key is provided
+    let RPC_ENDPOINTS = [
+        "https://api.mainnet-beta.solana.com", 
+        "https://solana-api.projectserum.com", 
+        "https://rpc.ankr.com/solana"
+    ];
+    
+    if (HELIUS_API_KEY && HELIUS_API_KEY.length > 5) {
+        RPC_ENDPOINTS.unshift(`https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`);
+        console.log("Helius RPC enabled");
+    }
+
     // --- State ---
     let currentSort = 'newest';
     let searchQuery = '';
@@ -534,6 +557,15 @@
     window.onload = async () => {
         handleRoute();
         await fetchFees();
+        
+        // Character counter listener
+        const descInput = document.getElementById('update-description');
+        const charCount = document.getElementById('char-count');
+        if(descInput && charCount) {
+            descInput.addEventListener('input', () => {
+                charCount.innerText = descInput.value.length;
+            });
+        }
     };
     window.addEventListener('hashchange', handleRoute);
 
@@ -551,6 +583,14 @@
                 if (tokEl) tokEl.innerText = `${data.tokenFee.toLocaleString()} TOKENS`;
             }
         } catch (e) { console.error("Fee fetch failed", e); }
+    }
+
+    // --- Helper: Input Sanitization ---
+    function sanitizeInput(str) {
+        if(!str) return '';
+        const div = document.createElement('div');
+        div.innerText = str;
+        return div.innerHTML; // Returns escaped HTML (safe to display)
     }
 
     // --- Wallet Logic (Rewritten) ---
@@ -675,6 +715,10 @@
         const website = document.getElementById('update-website').value;
         const telegram = document.getElementById('update-telegram').value;
         const banner = document.getElementById('update-banner').value;
+        const descInput = document.getElementById('update-description');
+        
+        // Capture and Sanitize Description
+        const description = descInput ? sanitizeInput(descInput.value.substring(0, 250)) : '';
 
         // Validation
         if (banner && !banner.match(/\.(jpeg|jpg|gif|png|webp)$/i)) {
@@ -683,12 +727,35 @@
             return;
         }
 
-        statusDiv.innerText = "Processing Transaction...";
+        statusDiv.innerText = "Initializing Transaction...";
         statusDiv.className = "mt-4 text-center text-sm font-mono text-[#ea580c]";
         statusDiv.classList.remove('hidden');
 
         try {
-            const connection = new solanaWeb3.Connection("https://rpc.ankr.com/solana", "confirmed");
+            // --- RPC ROTATION LOGIC ---
+            let connection;
+            let blockhash;
+            let rpcError;
+
+            // Try Helius first (if configured), then others
+            for (const endpoint of RPC_ENDPOINTS) {
+                try {
+                    const host = new URL(endpoint).hostname;
+                    statusDiv.innerText = `Connecting to ${host}...`;
+                    const conn = new solanaWeb3.Connection(endpoint, "confirmed");
+                    const latest = await conn.getLatestBlockhash();
+                    connection = conn;
+                    blockhash = latest.blockhash;
+                    break; // Success!
+                } catch (err) {
+                    console.warn(`RPC ${endpoint} failed:`, err);
+                    rpcError = err;
+                }
+            }
+
+            if (!connection || !blockhash) {
+                throw new Error(`All RPC endpoints failed. Please try again later. (Last error: ${rpcError?.message})`);
+            }
             
             // Public Keys
             const fromPubkey = new solanaWeb3.PublicKey(walletAddress);
@@ -696,7 +763,6 @@
             const tokenMintPubkey = new solanaWeb3.PublicKey(feeConfig.tokenMint);
 
             // Find ATAs (Associated Token Accounts)
-            // Helper to get address without library overhead
             const getATA = async (owner, mint) => {
                 const [addr] = await solanaWeb3.PublicKey.findProgramAddress(
                     [owner.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mint.toBytes()],
@@ -708,6 +774,7 @@
             const fromTokenAccount = await getATA(fromPubkey, tokenMintPubkey);
             const toTokenAccount = await getATA(toPubkey, tokenMintPubkey);
 
+            statusDiv.innerText = "Building Transaction...";
             const transaction = new solanaWeb3.Transaction();
 
             // 1. SOL Transfer
@@ -720,7 +787,6 @@
             );
 
             // 2. Token Transfer (Manual Instruction Data)
-            // Layout: [Instruction=3 (1 byte)] [Amount (8 bytes, little endian)]
             const decimals = 6;
             const rawAmount = BigInt(Math.floor(feeConfig.tokenFee * Math.pow(10, decimals)));
             
@@ -748,17 +814,17 @@
             transaction.add(transferIx);
 
             // Sign & Send
-            const { blockhash } = await connection.getLatestBlockhash();
             transaction.recentBlockhash = blockhash;
             transaction.feePayer = fromPubkey;
 
+            statusDiv.innerText = "Please Sign in Wallet...";
             const { signature } = await walletProvider.signAndSendTransaction(transaction);
             
             statusDiv.innerText = "Verifying Payment...";
 
             // 3. Backend Verification
             const payload = {
-                mint, twitter, website, telegram, banner,
+                mint, twitter, website, telegram, banner, description, // Included Description
                 signature: signature,
                 userPublicKey: walletAddress
             };
@@ -775,6 +841,7 @@
                 statusDiv.innerText = "✅ Success! Update queued.";
                 statusDiv.className = "mt-4 text-center text-sm font-mono text-green-500";
                 e.target.reset();
+                document.getElementById('char-count').innerText = "0";
             } else {
                 statusDiv.innerText = `❌ Verification Failed: ${dataRes.error}`;
                 statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500";
@@ -973,11 +1040,20 @@
                 const name = document.getElementById('detail-name');
                 const mintEl = document.getElementById('detail-mint');
                 const img = document.getElementById('detail-img');
+                const descEl = document.getElementById('detail-desc');
                 
                 if(ticker) ticker.innerText = t.ticker;
                 if(name) name.innerText = t.name;
                 if(mintEl) mintEl.innerText = t.mint;
                 if(img) img.src = t.image || 'https://placehold.co/80x80/2a1005/7c2d12?text=?';
+                
+                // Show Description if available
+                if (t.description && descEl) {
+                    descEl.innerHTML = sanitizeInput(t.description); // Safe injection
+                    descEl.classList.remove('hidden');
+                } else if (descEl) {
+                    descEl.classList.add('hidden');
+                }
                 
                 if (t.banner && bannerContainer) {
                     bannerContainer.innerHTML = `<div class="w-full h-48 md:h-64 rounded-xl border-2 border-[#7c2d12] shadow-lg relative overflow-hidden bg-black"><img src="${t.banner}" class="w-full h-full object-cover object-center" onerror="this.src='${FALLBACK_BANNER}'"><div class="absolute inset-0 bg-gradient-to-t from-[#2a1005] to-transparent opacity-80 pointer-events-none"></div></div>`;

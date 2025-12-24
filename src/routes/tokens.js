@@ -1,6 +1,6 @@
 /**
  * Token Routes
- * Updated: Payment Verification & Balance Proxy
+ * Updated: Payment Verification, Balance Proxy, Description Handling
  */
 const express = require('express');
 const axios = require('axios');
@@ -77,7 +77,6 @@ function init(deps) {
     }
 
     // --- NEW: BACKEND PROXY FOR BALANCES ---
-    // Fixes 403 Forbidden issues on frontend by routing requests through the server
     router.get('/proxy/balance/:wallet', async (req, res) => {
         try {
             const { wallet } = req.params;
@@ -87,7 +86,6 @@ function init(deps) {
 
             const pubKey = new PublicKey(wallet);
             
-            // Parallel fetch for speed
             const [solBalance, tokenAccounts] = await Promise.all([
                 solanaConnection.getBalance(pubKey),
                 solanaConnection.getParsedTokenAccountsByOwner(pubKey, { mint: new PublicKey(tokenMint) })
@@ -119,10 +117,16 @@ function init(deps) {
     
     router.post('/request-update', async (req, res) => {
         try {
-            const { mint, twitter, website, telegram, banner, signature, userPublicKey } = req.body;
+            const { mint, twitter, website, telegram, banner, description, signature, userPublicKey } = req.body;
             
             if (!mint || mint.length < 30) return res.status(400).json({ success: false, error: "Invalid Mint" });
             if (!signature || !userPublicKey) return res.status(400).json({ success: false, error: "Payment signature and wallet required" });
+
+            // Sanitize Description
+            let safeDesc = null;
+            if (description) {
+                safeDesc = description.substring(0, 250).replace(/<[^>]*>?/gm, ''); // Strip HTML
+            }
 
             try {
                 await verifyPayment(signature, userPublicKey);
@@ -131,13 +135,13 @@ function init(deps) {
                 return res.status(402).json({ success: false, error: payErr.message });
             }
 
-            const hasData = (twitter && twitter.length > 0) || (website && website.length > 0) || (telegram && telegram.length > 0) || (banner && banner.length > 0);
+            const hasData = (twitter && twitter.length > 0) || (website && website.length > 0) || (telegram && telegram.length > 0) || (banner && banner.length > 0) || (safeDesc && safeDesc.length > 0);
             if (!hasData) return res.status(400).json({ success: false, error: "No profile data provided" });
 
             await db.run(`
-                INSERT INTO token_updates (mint, twitter, website, telegram, banner, submittedAt, status, signature, payer) 
-                VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
-            `, [mint, twitter, website, telegram, banner, Date.now(), signature, userPublicKey]);
+                INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer) 
+                VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
+            `, [mint, twitter, website, telegram, banner, safeDesc, Date.now(), signature, userPublicKey]);
 
             res.json({ success: true, message: "Update queued successfully. Payment verified." });
         } catch (e) { 
@@ -258,7 +262,7 @@ function init(deps) {
                         ...token, marketCap: token.marketcap || 0, volume24h: token.volume24h || 0, priceUsd: token.priceusd || 0,
                         change1h: token.change1h || 0, change24h: token.change24h || 0, change5m: token.change5m || 0,
                         userPubkey: token.userpubkey, timestamp: parseInt(token.timestamp), twitter: token.twitter,
-                        website: token.website, telegram: token.tweeturl, banner: token.banner,
+                        website: token.website, telegram: token.tweeturl, banner: token.banner, description: token.description,
                         hasCommunityUpdate: token.hascommunityupdate || false, kScore: token.k_score || 0, pairs: pairs 
                     } 
                 };
@@ -282,6 +286,7 @@ function init(deps) {
 
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         try {
+            // Include description in the select
             const updates = await db.all(`SELECT u.*, t.name, t.ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`);
             res.json({ success: true, updates });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
@@ -292,13 +297,22 @@ function init(deps) {
         try {
             const update = await db.get('SELECT * FROM token_updates WHERE id = $1', [id]);
             if (!update) return res.status(404).json({ success: false, error: 'Request not found' });
+            
             const fields = []; const params = []; let idx = 1;
+            
             if (update.twitter) { fields.push(`twitter = $${idx++}`); params.push(update.twitter); }
             if (update.website) { fields.push(`website = $${idx++}`); params.push(update.website); }
             if (update.telegram) { fields.push(`tweetUrl = $${idx++}`); params.push(update.telegram); } 
             if (update.banner) { fields.push(`banner = $${idx++}`); params.push(update.banner); }
+            if (update.description) { fields.push(`description = $${idx++}`); params.push(update.description); }
+            
             fields.push(`hasCommunityUpdate = $${idx++}`); params.push(true);
-            if (fields.length > 0) { params.push(update.mint); await db.run(`UPDATE tokens SET ${fields.join(', ')} WHERE mint = $${idx}`, params); }
+            
+            if (fields.length > 0) { 
+                params.push(update.mint); 
+                await db.run(`UPDATE tokens SET ${fields.join(', ')} WHERE mint = $${idx}`, params); 
+            }
+            
             await db.run('DELETE FROM token_updates WHERE id = $1', [id]);
             res.json({ success: true, message: 'Approved' });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
@@ -314,13 +328,38 @@ function init(deps) {
         try {
             const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [req.params.mint]);
             if (!token) return res.status(404).json({ success: false, error: "Not Found" });
-            res.json({ success: true, token: { mint: token.mint, ticker: token.ticker, twitter: token.twitter, website: token.website, telegram: token.tweeturl, banner: token.banner, kScore: token.k_score } });
+            res.json({ success: true, token: { 
+                mint: token.mint, 
+                ticker: token.ticker, 
+                twitter: token.twitter, 
+                website: token.website, 
+                telegram: token.tweeturl, 
+                banner: token.banner, 
+                description: token.description, // Return desc
+                kScore: token.k_score 
+            }});
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.post('/admin/update-token', requireAdmin, async (req, res) => {
-        const { mint, twitter, website, telegram, banner } = req.body;
-        try { await db.run(`UPDATE tokens SET twitter = $1, website = $2, tweetUrl = $3, banner = $4, hasCommunityUpdate = TRUE WHERE mint = $5`, [twitter, website, telegram, banner, mint]); res.json({ success: true, message: "Token Updated Successfully" });
+        const { mint, twitter, website, telegram, banner, description } = req.body;
+        
+        let safeDesc = null;
+        if(description) safeDesc = description.substring(0, 250).replace(/<[^>]*>?/gm, '');
+
+        try { 
+            await db.run(`
+                UPDATE tokens SET 
+                    twitter = $1, 
+                    website = $2, 
+                    tweetUrl = $3, 
+                    banner = $4, 
+                    description = $5,
+                    hasCommunityUpdate = TRUE 
+                WHERE mint = $6`, 
+                [twitter, website, telegram, banner, safeDesc, mint]
+            ); 
+            res.json({ success: true, message: "Token Updated Successfully" });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 

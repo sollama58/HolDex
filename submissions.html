@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <!-- Head same as before -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HolDex | Admin Portal</title>
@@ -9,7 +8,6 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        /* Styles same as before */
         body { background-color: #2a1005; color: #ffedd5; font-family: 'Comic Neue', cursive; min-height: 100vh; font-size: 14px; }
         .form-input { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; padding: 12px; border-radius: 8px; width: 100%; font-family: 'JetBrains Mono'; outline: none; transition: border-color 0.2s; }
         .form-input:focus { border-color: #ea580c; }
@@ -25,11 +23,15 @@
         .nav-tab { padding: 10px 20px; color: #9a3412; font-weight: bold; border-bottom: 2px solid transparent; cursor: pointer; }
         .nav-tab.active { color: #ea580c; border-bottom-color: #ea580c; }
         .hidden { display: none; }
+        .updates-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+        .updates-table th { text-align: left; padding: 10px; color: #9a3412; border-bottom: 1px solid #7c2d12; font-size: 11px; text-transform: uppercase; }
+        .updates-table td { padding: 12px 10px; border-bottom: 1px solid rgba(124,45,18,0.3); vertical-align: top; }
+        .link-preview { font-size: 11px; color: #3b82f6; text-decoration: underline; word-break: break-all; }
+        .desc-preview { font-size: 11px; color: #fb923c; font-family: 'JetBrains Mono'; max-width: 200px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
     </style>
 </head>
 <body class="p-8">
 
-    <!-- Login Screen Same -->
     <div id="login-screen" class="max-w-md mx-auto mt-20 text-center">
         <h1 class="text-4xl font-bold text-[#ea580c] mb-8 font-sans">Admin Access</h1>
         <input type="password" id="admin-pass" class="form-input mb-4" placeholder="Enter Admin Password">
@@ -37,8 +39,7 @@
         <p id="login-error" class="text-red-500 mt-4 hidden">Invalid Password</p>
     </div>
 
-    <div id="admin-panel" class="max-w-6xl mx-auto hidden">
-        <!-- Header & Tabs Same -->
+    <div id="admin-panel" class="max-w-7xl mx-auto hidden">
         <div class="flex justify-between items-center mb-4 border-b border-[#7c2d12] pb-4">
             <h1 class="text-3xl font-bold text-white">Admin Control</h1>
             <button onclick="logout()" class="text-[#9a3412] hover:text-[#fb923c]">Logout</button>
@@ -49,12 +50,14 @@
             <div id="tab-manage" class="nav-tab" onclick="switchTab('manage')">Manage Token</div>
         </div>
 
+        <!-- PENDING UPDATES VIEW -->
         <div id="view-pending" class="space-y-4">
-            <div id="updates-list">
+            <div id="updates-list" class="overflow-x-auto">
                 <div class="text-center py-20 text-[#9a3412]">Loading requests...</div>
             </div>
         </div>
 
+        <!-- MANAGE TOKEN VIEW -->
         <div id="view-manage" class="hidden">
             <div class="bg-[#451a03] border border-[#7c2d12] rounded-xl p-8 max-w-2xl mx-auto">
                 <h3 class="text-xl font-bold text-white mb-6">Edit or Delete Token</h3>
@@ -65,15 +68,16 @@
                 </div>
 
                 <div id="manage-form" class="hidden space-y-4">
-                    <!-- Existing inputs (Ticker, Twitter, Website, Telegram, Banner) -->
-                    <!-- ... omitted for brevity ... -->
                     <div><label class="text-xs text-[#9a3412] uppercase font-bold">Ticker</label><input type="text" id="edit-ticker" class="form-input opacity-50" readonly></div>
                     <div><label class="text-xs text-[#9a3412] uppercase font-bold">Twitter</label><input type="text" id="edit-twitter" class="form-input"></div>
                     <div><label class="text-xs text-[#9a3412] uppercase font-bold">Website</label><input type="text" id="edit-website" class="form-input"></div>
                     <div><label class="text-xs text-[#9a3412] uppercase font-bold">Telegram</label><input type="text" id="edit-telegram" class="form-input"></div>
                     <div><label class="text-xs text-[#9a3412] uppercase font-bold">Banner URL</label><input type="text" id="edit-banner" class="form-input"></div>
+                    <div>
+                        <label class="text-xs text-[#9a3412] uppercase font-bold">Description (Max 250)</label>
+                        <textarea id="edit-description" class="form-input h-24 resize-none" maxlength="250"></textarea>
+                    </div>
 
-                    <!-- NEW K-SCORE REFRESH BUTTON -->
                     <div class="border-t border-[#7c2d12] pt-4 mt-6">
                         <div class="flex items-center justify-between mb-4">
                             <span class="text-[#fb923c] font-bold">Actions</span>
@@ -87,7 +91,6 @@
                         </div>
                     </div>
                 </div>
-                <p id="manage-msg" class="text-center mt-4 hidden"></p>
             </div>
         </div>
     </div>
@@ -96,12 +99,102 @@
     const API_URL = 'https://asdev-backend.onrender.com';
     let adminKey = '';
 
-    // ... (Login & Fetch logic same as before) ...
     function login() { const pass = document.getElementById('admin-pass').value; adminKey = pass; fetchUpdates(); }
-    function switchTab(tab) { document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active')); document.getElementById(`tab-${tab}`).classList.add('active'); if (tab === 'pending') { document.getElementById('view-pending').classList.remove('hidden'); document.getElementById('view-manage').classList.add('hidden'); fetchUpdates(); } else { document.getElementById('view-pending').classList.add('hidden'); document.getElementById('view-manage').classList.remove('hidden'); } }
-    async function fetchUpdates() { try { const res = await fetch(`${API_URL}/api/admin/updates`, { headers: { 'x-admin-auth': adminKey } }); const data = await res.json(); if (data.success) { document.getElementById('login-screen').classList.add('hidden'); document.getElementById('admin-panel').classList.remove('hidden'); renderUpdates(data.updates); } else { document.getElementById('login-error').classList.remove('hidden'); } } catch (e) { alert("Connection Failed"); } }
-    function renderUpdates(updates) { /* ... same as before ... */ const list = document.getElementById('updates-list'); list.innerHTML = updates.length ? updates.map(u => `...`).join('') : `<div class="text-center py-20 text-[#9a3412]">No pending updates.</div>`; }
-    async function handleAction(id, action) { /* ... same as before ... */ }
+    
+    function switchTab(tab) { 
+        document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active')); 
+        document.getElementById(`tab-${tab}`).classList.add('active'); 
+        if (tab === 'pending') { 
+            document.getElementById('view-pending').classList.remove('hidden'); 
+            document.getElementById('view-manage').classList.add('hidden'); 
+            fetchUpdates(); 
+        } else { 
+            document.getElementById('view-pending').classList.add('hidden'); 
+            document.getElementById('view-manage').classList.remove('hidden'); 
+        } 
+    }
+
+    async function fetchUpdates() { 
+        try { 
+            const res = await fetch(`${API_URL}/api/admin/updates`, { headers: { 'x-admin-auth': adminKey } }); 
+            const data = await res.json(); 
+            if (data.success) { 
+                document.getElementById('login-screen').classList.add('hidden'); 
+                document.getElementById('admin-panel').classList.remove('hidden'); 
+                renderUpdates(data.updates); 
+            } else { 
+                document.getElementById('login-error').classList.remove('hidden'); 
+            } 
+        } catch (e) { alert("Connection Failed"); } 
+    }
+
+    function renderUpdates(updates) {
+        const list = document.getElementById('updates-list');
+        if (!updates.length) { list.innerHTML = `<div class="text-center py-20 text-[#9a3412]">No pending updates.</div>`; return; }
+        
+        let html = `
+        <table class="updates-table">
+            <thead>
+                <tr>
+                    <th width="200">Asset</th>
+                    <th>Links</th>
+                    <th width="200">Description</th>
+                    <th width="150">Banner</th>
+                    <th width="200">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+        `;
+        
+        html += updates.map(u => `
+            <tr>
+                <td>
+                    <div class="flex items-center gap-3">
+                        <img src="${u.image || 'https://placehold.co/40'}" class="w-10 h-10 rounded border border-[#7c2d12]">
+                        <div>
+                            <div class="font-bold text-white">${u.ticker}</div>
+                            <div class="text-xs text-[#9a3412] font-mono">${u.mint.substring(0,8)}...</div>
+                        </div>
+                    </div>
+                </td>
+                <td>
+                    <div class="flex flex-col gap-1 text-xs">
+                        ${u.twitter ? `<a href="${u.twitter}" target="_blank" class="link-preview">Twitter</a>` : ''}
+                        ${u.website ? `<a href="${u.website}" target="_blank" class="link-preview">Website</a>` : ''}
+                        ${u.telegram ? `<a href="${u.telegram}" target="_blank" class="link-preview">Telegram</a>` : ''}
+                    </div>
+                </td>
+                <td>
+                    ${u.description ? `<div class="desc-preview" title="${u.description}">${u.description}</div>` : '<span class="text-[#9a3412]">-</span>'}
+                </td>
+                <td>
+                    ${u.banner ? `<a href="${u.banner}" target="_blank"><img src="${u.banner}" class="h-8 w-20 object-cover border border-[#7c2d12] rounded"></a>` : '<span class="text-[#9a3412]">-</span>'}
+                </td>
+                <td>
+                    <div class="flex gap-2">
+                        <button onclick="handleAction(${u.id}, 'approve')" class="action-btn btn-green text-xs">Approve</button>
+                        <button onclick="handleAction(${u.id}, 'reject')" class="action-btn btn-red text-xs">Reject</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+        html += `</tbody></table>`;
+        list.innerHTML = html;
+        lucide.createIcons();
+    }
+
+    async function handleAction(id, action) {
+        if (!confirm(`Are you sure you want to ${action}?`)) return;
+        try {
+            const res = await fetch(`${API_URL}/api/admin/${action}-update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-admin-auth': adminKey },
+                body: JSON.stringify({ id })
+            });
+            const data = await res.json();
+            if (data.success) { fetchUpdates(); } else { alert(data.error); }
+        } catch (e) { alert("Network Error"); }
+    }
 
     // --- MANAGE TOKEN LOGIC ---
     async function loadToken() {
@@ -116,6 +209,7 @@
                 document.getElementById('edit-website').value = data.token.website || '';
                 document.getElementById('edit-telegram').value = data.token.telegram || '';
                 document.getElementById('edit-banner').value = data.token.banner || '';
+                document.getElementById('edit-description').value = data.token.description || '';
             } else { alert("Token not found"); document.getElementById('manage-form').classList.add('hidden'); }
         } catch (e) { alert("Error loading token"); }
     }
@@ -126,7 +220,16 @@
         const website = document.getElementById('edit-website').value;
         const telegram = document.getElementById('edit-telegram').value;
         const banner = document.getElementById('edit-banner').value;
-        try { await fetch(`${API_URL}/api/admin/update-token`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-auth': adminKey }, body: JSON.stringify({ mint, twitter, website, telegram, banner }) }); alert("Token Updated!"); } catch(e) { alert("Network Error"); }
+        const description = document.getElementById('edit-description').value;
+        
+        try { 
+            await fetch(`${API_URL}/api/admin/update-token`, { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json', 'x-admin-auth': adminKey }, 
+                body: JSON.stringify({ mint, twitter, website, telegram, banner, description }) 
+            }); 
+            alert("Token Updated!"); 
+        } catch(e) { alert("Network Error"); }
     }
 
     async function deleteToken() {
@@ -135,16 +238,13 @@
         try { await fetch(`${API_URL}/api/admin/delete-token`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-auth': adminKey }, body: JSON.stringify({ mint }) }); alert("Token Deleted"); document.getElementById('manage-form').classList.add('hidden'); } catch(e) { alert("Network Error"); }
     }
 
-    // NEW: Refresh K-Score Function
     async function refreshKScore() {
         const mint = document.getElementById('manage-mint').value;
         if (!mint) return;
-        
-        const btn = event.currentTarget; // Get button ref to animate
+        const btn = event.currentTarget;
         const originalText = btn.innerHTML;
         btn.innerHTML = `<i data-lucide="loader-2" class="animate-spin" width="14"></i> Calculation...`;
         btn.disabled = true;
-
         try {
             const res = await fetch(`${API_URL}/api/admin/refresh-kscore`, {
                 method: 'POST',
@@ -152,19 +252,8 @@
                 body: JSON.stringify({ mint })
             });
             const data = await res.json();
-            
-            if (data.success) {
-                alert(data.message);
-            } else {
-                alert("Error: " + data.error);
-            }
-        } catch (e) {
-            alert("Network Error");
-        } finally {
-            btn.innerHTML = originalText;
-            btn.disabled = false;
-            lucide.createIcons();
-        }
+            if (data.success) alert(data.message); else alert("Error: " + data.error);
+        } catch (e) { alert("Network Error"); } finally { btn.innerHTML = originalText; btn.disabled = false; lucide.createIcons(); }
     }
 
     function logout() { location.reload(); }

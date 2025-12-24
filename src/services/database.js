@@ -4,7 +4,7 @@
  * 1. Added 'k_score' and 'last_k_calc' columns.
  * 2. Fixed 'tweetUrl' (Telegram) data loss in saveTokenData.
  * 3. Fixed timestamp not updating on conflict in saveTokenData.
- * 4. Updated 'token_updates' to store payment signature and payer.
+ * 4. Updated 'token_updates' to store payment signature, payer, AND description.
  */
 const { Pool } = require('pg');
 const config = require('../config/env');
@@ -103,7 +103,7 @@ async function initDB() {
         try { await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS k_score DOUBLE PRECISION DEFAULT 0;`); } catch (e) {}
         try { await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS last_k_calc BIGINT DEFAULT 0;`); } catch (e) {}
 
-        // Token Updates Queue (Modified for Payment)
+        // Token Updates Queue (Modified for Payment + Description)
         await pool.query(`
             CREATE TABLE IF NOT EXISTS token_updates (
                 id SERIAL PRIMARY KEY,
@@ -112,6 +112,7 @@ async function initDB() {
                 website TEXT,
                 telegram TEXT,
                 banner TEXT,
+                description TEXT, 
                 submittedAt BIGINT,
                 status TEXT DEFAULT 'pending',
                 signature TEXT UNIQUE, 
@@ -119,9 +120,11 @@ async function initDB() {
             );
         `);
 
-        // Migration for existing tables in case they exist without new columns
+        // Migration for existing tables
         try { await pool.query(`ALTER TABLE token_updates ADD COLUMN IF NOT EXISTS signature TEXT UNIQUE;`); } catch (e) {}
         try { await pool.query(`ALTER TABLE token_updates ADD COLUMN IF NOT EXISTS payer TEXT;`); } catch (e) {}
+        // New Migration for Description
+        try { await pool.query(`ALTER TABLE token_updates ADD COLUMN IF NOT EXISTS description TEXT;`); } catch (e) {}
 
         try {
             await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score DESC)`); 
@@ -151,7 +154,7 @@ async function saveTokenData(pubkey, mint, metadata, customTimestamp = null) {
             ON CONFLICT (mint) DO UPDATE SET
                 ticker = EXCLUDED.ticker,
                 name = EXCLUDED.name,
-                description = EXCLUDED.description,
+                description = COALESCE(EXCLUDED.description, tokens.description),
                 metadataUri = EXCLUDED.metadataUri,
                 image = EXCLUDED.image,
                 tweetUrl = EXCLUDED.tweetUrl,
