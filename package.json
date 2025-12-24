@@ -1,18 +1,16 @@
 {
   "name": "holdex-backend",
-  "version": "2.2.0",
-  "description": "Solana Token Explorer Backend with K-Score Analysis",
+  "version": "1.0.0",
+  "description": "Backend for HolDex Terminal",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "worker": "node src/worker.js",
-    "dev": "concurrently \"nodemon src/index.js\" \"nodemon src/worker.js\""
+    "dev": "nodemon src/index.js",
+    "backfill": "node src/scripts/backfillTokens.js"
   },
   "dependencies": {
-    "@solana/web3.js": "^1.87.6",
-    "axios": "^1.6.2",
+    "axios": "^1.6.0",
     "bs58": "^5.0.0",
-    "concurrently": "^8.2.2",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
@@ -20,12 +18,10 @@
     "helmet": "^7.1.0",
     "ioredis": "^5.3.2",
     "pg": "^8.11.3",
-    "winston": "^3.11.0"
+    "sqlite3": "^5.1.6",
+    "@solana/web3.js": "^1.87.6"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
-  },
-  "engines": {
-    "node": ">=18.0.0"
+    "nodemon": "^3.0.1"
   }
 }

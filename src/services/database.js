@@ -1,188 +1,122 @@
-/**
- * Database Service
- * Updated: 
- * 1. Added 'k_score' and 'last_k_calc' columns.
- * 2. Fixed 'tweetUrl' (Telegram) data loss in saveTokenData.
- * 3. Fixed timestamp not updating on conflict in saveTokenData.
- * 4. Updated 'token_updates' to store payment signature, payer, AND description.
- */
-const { Pool } = require('pg');
+const sqlite3 = require('sqlite3').verbose();
+const { open } = require('sqlite');
+const path = require('path');
 const config = require('../config/env');
-const logger = require('./logger');
-const { getRedis } = require('./redis');
+const redisClient = require('./redis').getClient();
 
-let pool = null;
+let dbInstance = null;
 
-const dbWrapper = {
-    async query(text, params) {
-        if (!pool) throw new Error("DB not initialized");
-        return pool.query(text, params);
-    },
-    async get(text, params = []) {
-        const res = await this.query(text, params);
-        return res.rows[0];
-    },
-    async all(text, params = []) {
-        const res = await this.query(text, params);
-        return res.rows;
-    },
-    async run(text, params = []) {
-        const res = await this.query(text, params);
-        return { rowCount: res.rowCount };
-    }
-};
+async function initDB() {
+    if (dbInstance) return dbInstance;
 
-async function smartCache(key, ttlSeconds, fetchFunction) {
-    const redis = getRedis();
-    if (redis) {
+    // Ensure we look for the DB in a place that persists (e.g., volume mount in Docker)
+    const dbPath = path.resolve(__dirname, '../../database.sqlite');
+    
+    dbInstance = await open({
+        filename: dbPath,
+        driver: sqlite3.Database
+    });
+
+    console.log("💾 SQLite Database Connected");
+
+    // --- CONCURRENCY OPTIMIZATION ---
+    // WAL (Write-Ahead Logging) allows simultaneous Readers and Writers.
+    // Critical for handling "hundreds of users" while updating metadata.
+    await dbInstance.exec('PRAGMA journal_mode = WAL;');
+
+    // Initialize Schema
+    await dbInstance.exec(`
+        CREATE TABLE IF NOT EXISTS tokens (
+            mint TEXT PRIMARY KEY,
+            name TEXT,
+            ticker TEXT,
+            image TEXT,
+            banner TEXT,
+            description TEXT,
+            website TEXT,
+            twitter TEXT,
+            tweetUrl TEXT,
+            telegram TEXT,
+            
+            marketCap REAL DEFAULT 0,
+            volume24h REAL DEFAULT 0,
+            priceUsd REAL DEFAULT 0,
+            
+            change5m REAL DEFAULT 0,
+            change1h REAL DEFAULT 0,
+            change24h REAL DEFAULT 0,
+            
+            timestamp INTEGER,
+            lastUpdated INTEGER,
+            
+            userPubkey TEXT,
+            hasCommunityUpdate BOOLEAN DEFAULT 0,
+            k_score INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS token_updates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mint TEXT,
+            twitter TEXT,
+            website TEXT,
+            telegram TEXT,
+            banner TEXT,
+            description TEXT,
+            submittedAt INTEGER,
+            status TEXT, -- 'pending', 'approved', 'rejected'
+            signature TEXT,
+            payer TEXT
+        );
+
+        -- PERFORMANCE INDEXES (Phase 1 Stabilizer) --
+        -- These speed up searches and sorting massively
+        CREATE INDEX IF NOT EXISTS idx_tokens_ticker ON tokens(ticker);
+        CREATE INDEX IF NOT EXISTS idx_tokens_name ON tokens(name);
+        CREATE INDEX IF NOT EXISTS idx_tokens_timestamp ON tokens(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score);
+    `);
+
+    return dbInstance;
+}
+
+// ... existing wrapper functions for caching ...
+async function smartCache(key, durationSeconds, fetchFunction) {
+    const redis = require('./redis').getClient();
+    
+    // Safety check for Redis connection
+    if (redis && redis.status === 'ready') {
         try {
             const cached = await redis.get(key);
             if (cached) return JSON.parse(cached);
-        } catch (e) {
-            logger.warn(`Redis Cache Miss/Error for ${key}: ${e.message}`);
-        }
+        } catch (e) { console.warn("Redis Get Error", e.message); }
     }
-    try {
-        const value = await fetchFunction();
-        if (value !== undefined && value !== null && redis) {
-            await redis.set(key, JSON.stringify(value), 'EX', ttlSeconds);
-        }
-        return value;
-    } catch (e) {
-        throw e;
-    }
-}
 
-async function initDB() {
-    if (!config.DATABASE_URL) throw new Error("DATABASE_URL is missing in .env");
+    const data = await fetchFunction();
 
-    try {
-        pool = new Pool({
-            connectionString: config.DATABASE_URL,
-            ssl: { rejectUnauthorized: false }, 
-            max: 20, 
-            idleTimeoutMillis: 30000
-        });
-
-        await pool.query('SELECT NOW()');
-        logger.info('Connected to PostgreSQL');
-
-        // Main Token Table
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS tokens (
-                id SERIAL PRIMARY KEY,
-                userPubkey TEXT,
-                mint TEXT UNIQUE,
-                ticker TEXT,
-                name TEXT,
-                description TEXT,
-                twitter TEXT,
-                website TEXT,
-                metadataUri TEXT,
-                image TEXT,
-                banner TEXT,
-                isMayhemMode BOOLEAN DEFAULT FALSE,
-                signature TEXT,
-                timestamp BIGINT,
-                volume24h DOUBLE PRECISION DEFAULT 0,
-                priceUsd DOUBLE PRECISION DEFAULT 0,
-                marketCap DOUBLE PRECISION DEFAULT 0,
-                holderCount INTEGER DEFAULT 0,
-                change5m DOUBLE PRECISION DEFAULT 0,
-                change1h DOUBLE PRECISION DEFAULT 0,
-                change24h DOUBLE PRECISION DEFAULT 0,
-                lastUpdated BIGINT,
-                tweetUrl TEXT,
-                complete BOOLEAN DEFAULT FALSE,
-                hasCommunityUpdate BOOLEAN DEFAULT FALSE,
-                k_score DOUBLE PRECISION DEFAULT 0,
-                last_k_calc BIGINT DEFAULT 0
-            );
-        `);
-        
-        try { await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS k_score DOUBLE PRECISION DEFAULT 0;`); } catch (e) {}
-        try { await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS last_k_calc BIGINT DEFAULT 0;`); } catch (e) {}
-
-        // Token Updates Queue (Modified for Payment + Description)
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS token_updates (
-                id SERIAL PRIMARY KEY,
-                mint TEXT NOT NULL,
-                twitter TEXT,
-                website TEXT,
-                telegram TEXT,
-                banner TEXT,
-                description TEXT, 
-                submittedAt BIGINT,
-                status TEXT DEFAULT 'pending',
-                signature TEXT UNIQUE, 
-                payer TEXT 
-            );
-        `);
-
-        // Migration for existing tables
-        try { await pool.query(`ALTER TABLE token_updates ADD COLUMN IF NOT EXISTS signature TEXT UNIQUE;`); } catch (e) {}
-        try { await pool.query(`ALTER TABLE token_updates ADD COLUMN IF NOT EXISTS payer TEXT;`); } catch (e) {}
-        // New Migration for Description
-        try { await pool.query(`ALTER TABLE token_updates ADD COLUMN IF NOT EXISTS description TEXT;`); } catch (e) {}
-
+    if (redis && redis.status === 'ready' && data) {
         try {
-            await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score DESC)`); 
-            await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_volume ON tokens(volume24h DESC)`);
-            await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_mcap ON tokens(marketCap DESC)`);
-            await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_time ON tokens(timestamp DESC)`);
-        } catch (idxErr) {
-            logger.warn('Index creation notice:', idxErr.message);
-        }
-
-        logger.info('Database Schema & Indices Initialized');
-
-    } catch (e) {
-        logger.error('Database initialization failed', { error: e.message });
-        throw e;
+            await redis.setex(key, durationSeconds, JSON.stringify(data));
+        } catch (e) { console.warn("Redis Set Error", e.message); }
     }
+
+    return data;
 }
 
-async function saveTokenData(pubkey, mint, metadata, customTimestamp = null) {
-    if (!pool) return;
-    try {
-        const ts = customTimestamp || Date.now();
-
-        await pool.query(`
-            INSERT INTO tokens (userPubkey, mint, ticker, name, description, twitter, website, metadataUri, image, isMayhemMode, marketCap, timestamp, tweetUrl)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-            ON CONFLICT (mint) DO UPDATE SET
-                ticker = EXCLUDED.ticker,
-                name = EXCLUDED.name,
-                description = COALESCE(EXCLUDED.description, tokens.description),
-                metadataUri = EXCLUDED.metadataUri,
-                image = EXCLUDED.image,
-                tweetUrl = EXCLUDED.tweetUrl,
-                timestamp = EXCLUDED.timestamp, 
-                marketCap = GREATEST(tokens.marketCap, EXCLUDED.marketCap) 
-        `, [
-            pubkey, 
-            mint, 
-            metadata.ticker, 
-            metadata.name, 
-            metadata.description,
-            metadata.twitter, 
-            metadata.website, 
-            metadata.metadataUri,
-            metadata.image, 
-            metadata.isMayhemMode ? true : false,
-            metadata.marketCap || 0, 
-            ts, 
-            metadata.telegram 
-        ]);
-    } catch (e) {
-        logger.error("Save Token Error", { error: e.message });
-    }
+async function saveTokenData(db, mint, metadata, timestamp = Date.now()) {
+    const d = db || dbInstance;
+    await d.run(`
+        INSERT INTO tokens (mint, name, ticker, image, marketCap, volume24h, priceUsd, timestamp, lastUpdated)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT(mint) DO UPDATE SET
+            marketCap = excluded.marketCap,
+            volume24h = excluded.volume24h,
+            priceUsd = excluded.priceUsd,
+            lastUpdated = excluded.lastUpdated
+    `, [mint, metadata.name, metadata.ticker, metadata.image, metadata.marketCap, metadata.volume24h, metadata.priceUsd, timestamp, Date.now()]);
 }
 
-module.exports = {
-    initDB,
-    getDB: () => dbWrapper,
+module.exports = { 
+    initDB, 
     smartCache,
     saveTokenData
 };

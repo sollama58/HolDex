@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  # The Backend Application Service
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      # Connects to the 'redis' service defined below
+      - REDIS_URL=redis://redis:6379
+      # 5 Minutes in milliseconds
+      - METADATA_UPDATE_INTERVAL=300000
+      # Ensure this matches the password in your src/config/env.js
+      - ADMIN_PASSWORD=admin123 
+    depends_on:
+      - redis
+    volumes:
+      # Persist SQLite database file outside the container so data isn't lost on restart
+      - ./database.sqlite:/usr/src/app/database.sqlite
+    restart: always
+
+  # Redis Service for Caching
+  redis:
+    image: "redis:alpine"
+    ports:
+      - "6379:6379"
+    restart: always
+
+# Define volumes if needed (sqlite file is mapped directly above)
+volumes:
+  sqlite_data:

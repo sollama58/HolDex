@@ -1,57 +1,75 @@
-require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const http = require('http');
-const rateLimit = require('express-rate-limit');
+const rateLimit = require('express-rate-limit'); // NEW: Import Rate Limiter
 const config = require('./config/env');
-const { initDB, getDB } = require('./services/database');
+const { initDB } = require('./services/database');
 const { initRedis } = require('./services/redis');
 const tokenRoutes = require('./routes/tokens');
-const { calculateTokenScore } = require('./tasks/kScoreUpdater'); // Keep for on-demand admin endpoint
+const metadataUpdater = require('./tasks/metadataUpdater');
+const kScoreUpdater = require('./tasks/kScoreUpdater');
+const newTokenListener = require('./tasks/newTokenListener');
 
-const globalState = {
-    lastBackendUpdate: Date.now()
-};
+const app = express();
 
-// Rate Limiter: 200 requests per 15 minutes per IP
-const limiter = rateLimit({
+// --- SECURITY & MIDDLEWARE ---
+app.use(helmet());
+app.use(cors({ origin: config.CORS_ORIGINS }));
+app.use(express.json());
+
+// --- RATE LIMITING (Phase 1 Stabilizer) ---
+// This ensures your server doesn't crash from spam bots
+
+// 1. Global Limiter: Basic protection (500 requests per 15 mins per IP)
+const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, 
-    max: 200, 
-    standardHeaders: true, 
+    max: 500, 
+    standardHeaders: true,
     legacyHeaders: false,
     message: { success: false, error: "Too many requests, please try again later." }
 });
+app.use(globalLimiter);
+
+// 2. Strict Limiter: For Search & Updates (30 requests per 1 min)
+const strictLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, 
+    max: 30, 
+    message: { success: false, error: "Rate limit exceeded. Please slow down." }
+});
+
+// --- INITIALIZATION ---
 
 async function startServer() {
-    console.log('💎 Starting HolDex API Server...');
-    await initDB();
-    const redis = initRedis();
+    try {
+        // 1. Init Services
+        const db = await initDB();
+        const redis = await initRedis();
 
-    const app = express();
-    
-    // Security & Middleware
-    app.use(helmet());
-    app.use(cors({ origin: config.CORS_ORIGINS }));
-    app.use(express.json({ limit: '10kb' })); 
-    app.use(limiter); 
+        // 2. Init Tasks
+        // Pass dependencies to tasks
+        const deps = { db, redis, globalState: { lastBackendUpdate: Date.now() } };
+        
+        // Start Background Workers
+        metadataUpdater.start(deps);
+        kScoreUpdater.start(deps);
+        newTokenListener.start(deps);
 
-    const deps = { db: getDB(), redis, globalState, devKeypair: null };
+        // 3. Init Routes
+        // Apply Strict Limiter to Search & Updates
+        app.use('/api/request-update', strictLimiter);
+        app.use('/api/tokens', strictLimiter); // Protects the search query
+        
+        app.use('/api', tokenRoutes.init(deps));
 
-    app.use('/api', tokenRoutes.init(deps));
-    
-    app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: Date.now(), uptime: process.uptime(), role: 'API' }));
-
-    // NOTE: Background tasks are now run by 'src/worker.js' to decouple load.
-    // The API server only handles HTTP requests.
-
-    const server = http.createServer(app);
-    server.listen(config.PORT, () => {
-        console.log(`✅ API Server running on port ${config.PORT}`);
-    });
+        // 4. Start Listener
+        app.listen(config.PORT, () => {
+            console.log(`🔥 HolDex Backend v2.3 running on port ${config.PORT}`);
+            console.log(`🛡️ Rate Limiting Active`);
+        });
+    } catch (err) {
+        console.error("Fatal Server Startup Error:", err);
+        process.exit(1);
+    }
 }
 
-startServer().catch(err => {
-    console.error('❌ Fatal Server Error:', err);
-    process.exit(1);
-});
+startServer();
