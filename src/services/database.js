@@ -3,17 +3,17 @@ const { open } = require('sqlite');
 const path = require('path');
 const config = require('../config/env');
 
-// FIXED: Removed the top-level require causing the crash.
-// const redisClient = require('./redis').getClient(); 
-
 let dbInstance = null;
 
 async function initDB() {
     if (dbInstance) return dbInstance;
 
-    // Ensure we look for the DB in a place that persists (e.g., volume mount in Docker)
-    const dbPath = path.resolve(__dirname, '../../database.sqlite');
+    // FIX: Ensure persistent path outside of src (one level up from src/services)
+    // If running in Docker, map volume to /usr/src/app/data/database.sqlite
+    const dbPath = process.env.DB_PATH || path.resolve(__dirname, '../../database.sqlite');
     
+    console.log(`🔌 Connecting to SQLite at: ${dbPath}`);
+
     dbInstance = await open({
         filename: dbPath,
         driver: sqlite3.Database
@@ -21,12 +21,10 @@ async function initDB() {
 
     console.log("💾 SQLite Database Connected");
 
-    // --- CONCURRENCY OPTIMIZATION ---
-    // WAL (Write-Ahead Logging) allows simultaneous Readers and Writers.
-    // Critical for handling "hundreds of users" while updating metadata.
+    // WAL Mode for Concurrency
     await dbInstance.exec('PRAGMA journal_mode = WAL;');
 
-    // Initialize Schema
+    // Initialize Schema (IF NOT EXISTS ensures we don't reset data)
     await dbInstance.exec(`
         CREATE TABLE IF NOT EXISTS tokens (
             mint TEXT PRIMARY KEY,
@@ -50,8 +48,6 @@ async function initDB() {
             
             timestamp INTEGER,
             lastUpdated INTEGER,
-            
-            -- Added missing column for K-Score tracking
             last_k_calc INTEGER DEFAULT 0,
             
             userPubkey TEXT,
@@ -68,29 +64,25 @@ async function initDB() {
             banner TEXT,
             description TEXT,
             submittedAt INTEGER,
-            status TEXT, -- 'pending', 'approved', 'rejected'
+            status TEXT,
             signature TEXT,
             payer TEXT
         );
 
-        -- PERFORMANCE INDEXES (Phase 1 Stabilizer) --
-        -- These speed up searches and sorting massively
+        -- PERFORMANCE INDEXES
         CREATE INDEX IF NOT EXISTS idx_tokens_ticker ON tokens(ticker);
         CREATE INDEX IF NOT EXISTS idx_tokens_name ON tokens(name);
         CREATE INDEX IF NOT EXISTS idx_tokens_timestamp ON tokens(timestamp);
         CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score);
     `);
 
-    // --- AUTO MIGRATION ---
-    // Check if last_k_calc exists (for existing databases)
+    // Auto-Migration for missing columns (Non-Destructive)
     try {
         const columns = await dbInstance.all("PRAGMA table_info(tokens)");
         const hasLastKCalc = columns.some(c => c.name === 'last_k_calc');
-        
         if (!hasLastKCalc) {
             console.log("⚠️ Migrating DB: Adding missing column 'last_k_calc'...");
             await dbInstance.exec("ALTER TABLE tokens ADD COLUMN last_k_calc INTEGER DEFAULT 0");
-            console.log("✅ Migration Successful");
         }
     } catch (e) {
         console.error("Migration Error:", e.message);
@@ -99,13 +91,11 @@ async function initDB() {
     return dbInstance;
 }
 
-// ... existing wrapper functions for caching ...
+// ... caching wrapper ...
 async function smartCache(key, durationSeconds, fetchFunction) {
-    // Dynamic require to prevent loading order issues
     const { getClient } = require('./redis'); 
     const redis = getClient();
     
-    // Safety check for Redis connection
     if (redis && redis.status === 'ready') {
         try {
             const cached = await redis.get(key);
