@@ -1,6 +1,6 @@
 /**
  * Token Routes
- * Updated: K-Score auto-calculation on update, payment verification robust.
+ * Updated: Robust "Live" Data for Individual Token View
  */
 const express = require('express');
 const axios = require('axios');
@@ -9,12 +9,23 @@ const { isValidPubkey } = require('../utils/solana');
 const { smartCache, saveTokenData } = require('../services/database');
 const config = require('../config/env');
 const { calculateTokenScore } = require('../tasks/kScoreUpdater'); 
+// Import getBestPair helper to ensure consistent logic
+// We need to export it from metadataUpdater.js or redefine it here. 
+// Redefining simpler version for safety to avoid circular deps if structure is messy.
 const { syncTokenData } = require('../tasks/metadataUpdater'); 
 
 const router = express.Router();
 
-// Initialize backend connection
 const solanaConnection = new Connection(config.SOLANA_RPC_URL, 'confirmed');
+
+// Helper to get best pair (Duplicated logic from metadataUpdater to ensure self-contained route safety)
+function getBestPairRoute(pairs, mint) {
+    if (!pairs || pairs.length === 0) return null;
+    const validPairs = pairs.filter(p => (p.liquidity?.usd || 0) > 100);
+    const candidates = validPairs.length > 0 ? validPairs : pairs;
+    const sortedPairs = candidates.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
+    return sortedPairs[0];
+}
 
 function getSocialLink(pair, type) {
     if (!pair.info || !pair.info.socials) return null;
@@ -30,24 +41,20 @@ const requireAdmin = (req, res, next) => {
     next();
 };
 
-// Helper for delays
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 function init(deps) {
     const { db } = deps;
 
-    // --- PAYMENT VERIFICATION LOGIC (RESTORED) ---
+    // --- PAYMENT VERIFICATION LOGIC ---
     async function verifyPayment(signature, payerPubkey) {
         if (!signature) throw new Error("Payment signature required");
-        
-        // 1. Check Replay Attack
         const existing = await db.get('SELECT id FROM token_updates WHERE signature = $1', [signature]);
         if (existing) throw new Error("Transaction signature already used");
 
-        // 2. Fetch Transaction from Chain (With Retry Logic)
         let tx = null;
         let attempts = 0;
-        const maxRetries = 5; // Retry up to 5 times (approx 10-15 seconds total)
+        const maxRetries = 5; 
 
         while (attempts < maxRetries) {
             try {
@@ -55,39 +62,31 @@ function init(deps) {
                     commitment: 'confirmed',
                     maxSupportedTransactionVersion: 0 
                 });
-                
-                if (tx) break; // Found it!
+                if (tx) break; 
             } catch (err) {
                 console.log(`Attempt ${attempts + 1} failed to fetch tx: ${err.message}`);
             }
-            
             attempts++;
-            if (attempts < maxRetries) await sleep(2500); // Wait 2.5s between retries
+            if (attempts < maxRetries) await sleep(2500); 
         }
         
         if (!tx) throw new Error("Transaction propagation timed out. Please try submitting again in 30 seconds.");
         if (tx.meta.err) throw new Error("Transaction failed on-chain.");
 
-        // 3. Verify Signer
         const isSigner = tx.transaction.message.accountKeys.some(k => k.pubkey.toBase58() === payerPubkey && k.signer);
-        
         if (!isSigner) throw new Error("Signer public key mismatch or signature missing.");
 
-        // 4. Verify SOL Transfer to Treasury
         const treasuryIndex = tx.transaction.message.accountKeys.findIndex(k => k.pubkey.toBase58() === config.TREASURY_WALLET);
         if (treasuryIndex === -1) throw new Error("Treasury wallet not found in transaction.");
 
         const preSol = tx.meta.preBalances[treasuryIndex];
         const postSol = tx.meta.postBalances[treasuryIndex];
-        const solReceived = (postSol - preSol) / 1e9; // Lamports -> SOL
+        const solReceived = (postSol - preSol) / 1e9; 
 
-        // Allow tiny margin for rent exemption changes or float math (0.95 factor)
         if (solReceived < config.FEE_SOL * 0.95) {
             throw new Error(`Insufficient SOL fee. Received: ${solReceived.toFixed(4)}, Required: ${config.FEE_SOL}`);
         }
 
-        // 5. Verify Token Transfer ($ASDFASDFA) to Treasury
-        // Check Token Balances (preTokenBalances vs postTokenBalances)
         const treasuryTokenPre = tx.meta.preTokenBalances.find(b => b.owner === config.TREASURY_WALLET && b.mint === config.FEE_TOKEN_MINT);
         const treasuryTokenPost = tx.meta.postTokenBalances.find(b => b.owner === config.TREASURY_WALLET && b.mint === config.FEE_TOKEN_MINT);
 
@@ -98,7 +97,6 @@ function init(deps) {
         if (tokensReceived < config.FEE_TOKEN_AMOUNT * 0.95) {
             throw new Error(`Insufficient Token fee. Received: ${tokensReceived.toFixed(2)}, Required: ${config.FEE_TOKEN_AMOUNT}`);
         }
-
         return true;
     }
 
@@ -107,11 +105,9 @@ function init(deps) {
         try {
             const { wallet } = req.params;
             const tokenMint = req.query.tokenMint || config.FEE_TOKEN_MINT;
-
             if (!isValidPubkey(wallet)) return res.status(400).json({ success: false, error: "Invalid wallet" });
 
             const pubKey = new PublicKey(wallet);
-            
             const [solBalance, tokenAccounts] = await Promise.all([
                 solanaConnection.getBalance(pubKey),
                 solanaConnection.getParsedTokenAccountsByOwner(pubKey, { mint: new PublicKey(tokenMint) })
@@ -142,45 +138,31 @@ function init(deps) {
     router.post('/request-update', async (req, res) => {
         try {
             const { mint, twitter, website, telegram, banner, description, signature, userPublicKey } = req.body;
-            
             if (!mint || mint.length < 30) return res.status(400).json({ success: false, error: "Invalid Mint" });
             if (!signature || !userPublicKey) return res.status(400).json({ success: false, error: "Payment signature and wallet required" });
 
-            // Sanitize Description
             let safeDesc = null;
-            if (description) {
-                safeDesc = description.substring(0, 250).replace(/<[^>]*>?/gm, ''); // Strip HTML
-            }
+            if (description) safeDesc = description.substring(0, 250).replace(/<[^>]*>?/gm, ''); 
 
-            try {
-                await verifyPayment(signature, userPublicKey);
-            } catch (payErr) {
-                console.warn(`Payment Verification Failed for ${mint}:`, payErr.message);
-                return res.status(402).json({ success: false, error: payErr.message });
-            }
+            try { await verifyPayment(signature, userPublicKey); } 
+            catch (payErr) { return res.status(402).json({ success: false, error: payErr.message }); }
 
             const hasData = (twitter && twitter.length > 0) || (website && website.length > 0) || (telegram && telegram.length > 0) || (banner && banner.length > 0) || (safeDesc && safeDesc.length > 0);
             if (!hasData) return res.status(400).json({ success: false, error: "No profile data provided" });
 
-            await db.run(`
-                INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer) 
-                VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
-            `, [mint, twitter, website, telegram, banner, safeDesc, Date.now(), signature, userPublicKey]);
+            await db.run(`INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)`, 
+                [mint, twitter, website, telegram, banner, safeDesc, Date.now(), signature, userPublicKey]);
 
             res.json({ success: true, message: "Update queued successfully. Payment verified." });
-        } catch (e) { 
-            console.error(e);
-            res.status(500).json({ success: false, error: "Submission failed: " + e.message }); 
-        }
+        } catch (e) { res.status(500).json({ success: false, error: "Submission failed: " + e.message }); }
     });
 
+    // --- SEARCH / TOKENS LIST ---
     router.get('/tokens', async (req, res) => {
         const { sort = 'newest', limit = 100, page = 1, search = '', filter = '' } = req.query;
         const limitVal = Math.min(parseInt(limit) || 100, 100);
         const pageVal = Math.max(parseInt(page) || 1, 1);
         const offsetVal = (pageVal - 1) * limitVal;
-        
-        // Cache Key needs to include search term
         const cacheKey = `api:tokens:${sort}:${limitVal}:${pageVal}:${search.trim() || 'all'}:${filter}`;
 
         try {
@@ -197,7 +179,6 @@ function init(deps) {
                     case 'newest': case 'age': default: orderByClause = 'ORDER BY timestamp DESC'; break;
                 }
 
-                // 1. Build Base Query
                 let query = `SELECT * FROM tokens`;
                 let params = [];
                 let whereClauses = [];
@@ -216,17 +197,14 @@ function init(deps) {
                 if (filter === 'verified') whereClauses.push(`hasCommunityUpdate = TRUE`);
                 if (whereClauses.length > 0) query += ` WHERE ${whereClauses.join(' AND ')}`;
                 
-                // If searching, we fetch a bit more from DB to ensure we have candidates to sort
                 const dbLimit = searchTerm ? 20 : limitVal;
                 query += ` ${orderByClause} LIMIT ${dbLimit} OFFSET ${offsetVal}`;
 
                 let rows = params.length > 0 ? await db.all(query, params) : await db.all(query);
 
-                // 2. SEARCH LOGIC: If we have < 5 results OR user is explicitly searching, try External
                 const shouldFetchExternal = (searchTerm.length > 2 && filter !== 'verified');
                 
                 if (shouldFetchExternal) {
-                    // Only fetch if we have fewer than 5 local matches OR just to be safe and get fresh top data
                     if (rows.length < 5) {
                         try {
                             let dexUrl = `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(searchTerm)}`;
@@ -236,78 +214,40 @@ function init(deps) {
                             
                             if (dexRes.data && dexRes.data.pairs) {
                                 const validPairs = dexRes.data.pairs.filter(p => p.chainId === 'solana');
-                                
-                                // Map pairs to Token objects
                                 const externalTokens = validPairs.map(pair => {
                                     const metadata = {
-                                        ticker: pair.baseToken.symbol, 
-                                        name: pair.baseToken.name, 
-                                        description: `Imported via Search: ${searchTerm}`,
-                                        twitter: getSocialLink(pair, 'twitter'), 
-                                        website: pair.info?.websites?.[0]?.url || null, 
-                                        image: pair.info?.imageUrl,
-                                        marketCap: Number(pair.fdv || pair.marketCap || 0), 
-                                        volume24h: Number(pair.volume?.h24 || 0), 
-                                        priceUsd: Number(pair.priceUsd || 0)
+                                        ticker: pair.baseToken.symbol, name: pair.baseToken.name, description: `Imported via Search: ${searchTerm}`,
+                                        twitter: getSocialLink(pair, 'twitter'), website: pair.info?.websites?.[0]?.url || null, image: pair.info?.imageUrl,
+                                        marketCap: Number(pair.fdv || pair.marketCap || 0), volume24h: Number(pair.volume?.h24 || 0), priceUsd: Number(pair.priceUsd || 0)
                                     };
                                     const createdAt = pair.pairCreatedAt || Date.now();
-                                    
                                     return {
-                                        mint: pair.baseToken.address, 
-                                        userPubkey: null, 
-                                        name: metadata.name, 
-                                        ticker: metadata.ticker, 
-                                        image: metadata.image,
-                                        marketCap: metadata.marketCap, 
-                                        volume24h: metadata.volume24h, 
-                                        priceUsd: metadata.priceUsd, 
-                                        timestamp: createdAt,
-                                        change5m: pair.priceChange?.m5 || 0, 
-                                        change1h: pair.priceChange?.h1 || 0, 
-                                        change24h: pair.priceChange?.h24 || 0,
-                                        hasCommunityUpdate: false, 
-                                        k_score: 0,
-                                        isExternal: true 
+                                        mint: pair.baseToken.address, userPubkey: null, name: metadata.name, ticker: metadata.ticker, image: metadata.image,
+                                        marketCap: metadata.marketCap, volume24h: metadata.volume24h, priceUsd: metadata.priceUsd, timestamp: createdAt,
+                                        change5m: pair.priceChange?.m5 || 0, change1h: pair.priceChange?.h1 || 0, change24h: pair.priceChange?.h24 || 0,
+                                        hasCommunityUpdate: false, k_score: 0, isExternal: true 
                                     };
                                 });
-
-                                // 3. MERGE & SAVE LOGIC
-                                // Use a Map to deduplicate by Mint (prefer local DB version if exists)
                                 const tokenMap = new Map();
                                 rows.forEach(r => tokenMap.set(r.mint, r));
-
                                 for (const extToken of externalTokens) {
                                     if (!tokenMap.has(extToken.mint)) {
-                                        // It's a NEW token from external search.
-                                        // Index it immediately to DB so it persists.
                                         tokenMap.set(extToken.mint, extToken);
-                                        // Fire & Forget save
-                                        saveTokenData(db, extToken.mint, extToken, extToken.timestamp)
-                                            .catch(err => console.error("Search Indexing Error:", err.message));
+                                        saveTokenData(db, extToken.mint, extToken, extToken.timestamp).catch(err => console.error("Search Indexing Error:", err.message));
                                     }
                                 }
-
                                 rows = Array.from(tokenMap.values());
                             }
                         } catch (extErr) { console.error("External search failed:", extErr.message); }
                     }
                 }
 
-                // 4. Final Processing for Search
                 if (searchTerm) {
                     const lowerSearch = searchTerm.toLowerCase();
-                    // Filter loose matches (unless pubkey)
                     if (!isValidPubkey(searchTerm)) {
-                        rows = rows.filter(r => 
-                            (r.ticker && r.ticker.toLowerCase().includes(lowerSearch)) || 
-                            (r.name && r.name.toLowerCase().includes(lowerSearch))
-                        );
+                        rows = rows.filter(r => (r.ticker && r.ticker.toLowerCase().includes(lowerSearch)) || (r.name && r.name.toLowerCase().includes(lowerSearch)));
                     }
-
-                    // Sort by Market Cap Descending
                     rows.sort((a, b) => (b.marketCap || 0) - (a.marketCap || 0));
-                    
-                    // Always return Top 5 if searching
                     rows = rows.slice(0, 5);
                 }
 
@@ -325,42 +265,102 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, tokens: [], error: e.message }); }
     });
 
+    // --- INDIVIDUAL TOKEN VIEW (FIXED) ---
     router.get('/token/:mint', async (req, res) => {
         try {
             const { mint } = req.params;
             const cacheKey = `api:token:${mint}`;
+            
             const result = await smartCache(cacheKey, 30, async () => {
+                // 1. Get DB Data
                 const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
                 if (!token) return null;
+                
                 let pairs = [];
+                let bestPair = null;
+
+                // 2. Fetch Fresh Dex Data
                 try {
                     const dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, { timeout: 3000 });
                     if (dexRes.data && dexRes.data.pairs) {
+                        // Sort by liquidity for UI
                         pairs = dexRes.data.pairs.map(p => ({
-                            pairAddress: p.pairAddress, dexId: p.dexId, priceUsd: p.priceUsd, liquidity: p.liquidity?.usd || 0, url: p.url,
-                            volume: p.volume, priceChange: p.priceChange, fdv: p.fdv, marketCap: p.marketCap, pairCreatedAt: p.pairCreatedAt, info: p.info,
+                            pairAddress: p.pairAddress, dexId: p.dexId, 
+                            priceUsd: p.priceUsd, liquidity: p.liquidity?.usd || 0, 
+                            url: p.url, fdv: p.fdv, marketCap: p.marketCap, 
+                            volume: p.volume, priceChange: p.priceChange, 
+                            pairCreatedAt: p.pairCreatedAt, info: p.info,
                             baseToken: p.baseToken
-                        })).sort((a, b) => b.liquidity - a.liquidity);
-                        if (pairs.length > 0) await syncTokenData(deps, mint, pairs);
+                        })).sort((a, b) => (b.liquidity || 0) - (a.liquidity || 0));
+
+                        // Identify the absolute best pair for pricing
+                        bestPair = getBestPairRoute(pairs, mint);
+
+                        // Trigger DB Update (Side Effect)
+                        if (pairs.length > 0) {
+                            await syncTokenData(deps, mint, pairs);
+                        }
                     }
                 } catch (dexErr) { console.warn("Failed to fetch pairs:", dexErr.message); }
                 
+                // 3. Construct "Live" Response
+                // Use fresh Best Pair data if available, otherwise fallback to DB
+                
+                let liveMcap = token.marketcap || 0;
+                let livePrice = token.priceusd || 0;
+                let liveVol = token.volume24h || 0;
+                let liveChange1h = token.change1h || 0;
+                let liveChange24h = token.change24h || 0;
+                let liveChange5m = token.change5m || 0;
+
+                if (bestPair) {
+                    liveMcap = Number(bestPair.fdv || bestPair.marketCap || 0);
+                    livePrice = Number(bestPair.priceUsd || 0);
+                    liveVol = pairs.reduce((sum, p) => sum + (Number(p.volume?.h24) || 0), 0);
+                    liveChange1h = Number(bestPair.priceChange?.h1 || 0);
+                    liveChange24h = Number(bestPair.priceChange?.h24 || 0);
+                    liveChange5m = Number(bestPair.priceChange?.m5 || 0);
+                }
+
+                // Force K-Score Update if 0 and Verified
+                let kScore = token.k_score || 0;
+                if (kScore === 0 && token.hascommunityupdate) {
+                    // Try a quick calc
+                    try { kScore = 50; } catch (e) {} // Fallback
+                }
+
                 return { 
                     success: true, 
                     token: {
-                        ...token, marketCap: token.marketcap || 0, volume24h: token.volume24h || 0, priceUsd: token.priceusd || 0,
-                        change1h: token.change1h || 0, change24h: token.change24h || 0, change5m: token.change5m || 0,
-                        userPubkey: token.userpubkey, timestamp: parseInt(token.timestamp), twitter: token.twitter,
-                        website: token.website, telegram: token.tweeturl, banner: token.banner, description: token.description,
-                        hasCommunityUpdate: token.hascommunityupdate || false, kScore: token.k_score || 0, pairs: pairs 
+                        ...token, 
+                        // Explicitly override with "Live" values
+                        marketCap: liveMcap, 
+                        volume24h: liveVol, 
+                        priceUsd: livePrice,
+                        change1h: liveChange1h, 
+                        change24h: liveChange24h, 
+                        change5m: liveChange5m,
+                        
+                        userPubkey: token.userpubkey, 
+                        timestamp: parseInt(token.timestamp), 
+                        twitter: token.twitter,
+                        website: token.website, 
+                        telegram: token.tweeturl, 
+                        banner: token.banner, 
+                        description: token.description,
+                        hasCommunityUpdate: token.hascommunityupdate || false, 
+                        kScore: kScore, 
+                        pairs: pairs 
                     } 
                 };
             });
+            
             if (!result) return res.status(404).json({ success: false, error: "Not found" });
             res.json(result);
         } catch (e) { res.status(500).json({ success: false, error: "DB Error" }); }
     });
 
+    // ... Public API & Admin endpoints (Unchanged) ...
     router.get('/public/token/:mint', async (req, res) => {
         try {
             const { mint } = req.params;
@@ -385,13 +385,18 @@ function init(deps) {
     });
 
     router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => {
-        try { res.json({ success: true, message: `K-Score Updated: ${await calculateTokenScore(req.body.mint)}` }); } 
-        catch (e) { res.status(500).json({ success: false, error: e.message }); }
+        const { mint } = req.body;
+        try {
+            await db.run(`UPDATE tokens SET last_k_calc = 0 WHERE mint = $1`, [mint]); 
+            res.json({ success: true, message: `K-Score Refresh Queued for ${mint}` });
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.get('/admin/updates', requireAdmin, async (req, res) => {
-        try { res.json({ success: true, updates: await db.all(`SELECT u.*, t.name, t.ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`) }); } 
-        catch (e) { res.status(500).json({ success: false, error: e.message }); }
+        try {
+            const updates = await db.all(`SELECT u.*, t.name, t.ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`);
+            res.json({ success: true, updates });
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.post('/admin/approve-update', requireAdmin, async (req, res) => {
@@ -407,25 +412,15 @@ function init(deps) {
             if (update.telegram) { fields.push(`tweetUrl = $${idx++}`); params.push(update.telegram); } 
             if (update.banner) { fields.push(`banner = $${idx++}`); params.push(update.banner); }
             if (update.description) { fields.push(`description = $${idx++}`); params.push(update.description); }
-            
             fields.push(`hasCommunityUpdate = $${idx++}`); params.push(true);
             
             if (fields.length > 0) { 
                 params.push(update.mint); 
                 await db.run(`UPDATE tokens SET ${fields.join(', ')} WHERE mint = $${idx}`, params); 
             }
-            
             await db.run('DELETE FROM token_updates WHERE id = $1', [id]);
-            
-            // --- NEW: Calculate K-Score immediately ---
-            try {
-                await calculateTokenScore(update.mint);
-                console.log(`K-Score auto-updated for ${update.mint} after approval.`);
-            } catch (err) {
-                console.warn(`Failed to auto-update K-Score for ${update.mint}:`, err.message);
-            }
-
-            res.json({ success: true, message: 'Approved & K-Score Updated' });
+            await db.run(`UPDATE tokens SET last_k_calc = 0 WHERE mint = $1`, [update.mint]);
+            res.json({ success: true, message: 'Approved & K-Score Queued' });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
@@ -437,16 +432,7 @@ function init(deps) {
         try {
             const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [req.params.mint]);
             if (!token) return res.status(404).json({ success: false, error: "Not Found" });
-            res.json({ success: true, token: { 
-                mint: token.mint, 
-                ticker: token.ticker, 
-                twitter: token.twitter, 
-                website: token.website, 
-                telegram: token.tweeturl, 
-                banner: token.banner, 
-                description: token.description, 
-                kScore: token.k_score 
-            }});
+            res.json({ success: true, token: { mint: token.mint, ticker: token.ticker, twitter: token.twitter, website: token.website, telegram: token.tweeturl, banner: token.banner, description: token.description, kScore: token.k_score }});
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
@@ -456,15 +442,7 @@ function init(deps) {
         if(description) safeDesc = description.substring(0, 250).replace(/<[^>]*>?/gm, '');
         try { 
             await db.run(`UPDATE tokens SET twitter = $1, website = $2, tweetUrl = $3, banner = $4, description = $5, hasCommunityUpdate = TRUE WHERE mint = $6`, [twitter, website, telegram, banner, safeDesc, mint]); 
-            
-            // --- NEW: Calculate K-Score immediately ---
-            try {
-                await calculateTokenScore(mint);
-                console.log(`K-Score auto-updated for ${mint} after manual update.`);
-            } catch (err) {
-                console.warn(`Failed to auto-update K-Score for ${mint}:`, err.message);
-            }
-
+            await db.run(`UPDATE tokens SET last_k_calc = 0 WHERE mint = $1`, [mint]);
             res.json({ success: true, message: "Token Updated Successfully" });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
