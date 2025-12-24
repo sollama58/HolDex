@@ -6,6 +6,7 @@
  * - Added robust Retry Logic for API calls (fixes data gaps on 429 errors).
  * - Improved logging for better visibility.
  * - Added safety checks for database values.
+ * - Refactored logic to allow single-token updates from API.
  */
 const axios = require('axios');
 const config = require('../config/env');
@@ -76,8 +77,61 @@ async function fetchWithRetry(url, retries = 3) {
     }
 }
 
+/**
+ * Core logic to update a token in DB based on DexScreener pairs data.
+ * Can be used by the batch updater OR the single token view.
+ */
+async function syncTokenData(deps, mint, pairs) {
+    const { db } = deps;
+    
+    if (!pairs || pairs.length === 0) return;
+
+    // A. Calculate Aggregate Volume (Sum of ALL pools)
+    const totalVolume = pairs.reduce((sum, p) => sum + (Number(p.volume?.h24) || 0), 0);
+
+    // B. Select "Best Pair" for Price & Changes
+    const bestPair = getBestPair(pairs, mint);
+    
+    if (!bestPair) return;
+
+    // Prepare Data
+    const marketCap = Number(bestPair.fdv || bestPair.marketCap || 0);
+    const priceUsd = Number(bestPair.priceUsd || 0);
+    const change5m = Number(bestPair.priceChange?.m5 || 0);
+    const change1h = Number(bestPair.priceChange?.h1 || 0);
+    const change24h = Number(bestPair.priceChange?.h24 || 0);
+    const pairCreatedAt = bestPair.pairCreatedAt;
+    const imageUrl = bestPair.info?.imageUrl;
+
+    // C. Construct Query
+    const setClauses = [];
+    const queryParams = [];
+    const addParam = (val) => { queryParams.push(val); return `$${queryParams.length}`; };
+
+    setClauses.push(`volume24h = ${addParam(totalVolume)}`); // Using Aggregate
+    setClauses.push(`marketCap = ${addParam(marketCap)}`);    // Using Best Pair
+    setClauses.push(`priceUsd = ${addParam(priceUsd)}`);      // Using Best Pair
+    setClauses.push(`change5m = ${addParam(change5m)}`);      // Using Best Pair
+    setClauses.push(`change1h = ${addParam(change1h)}`);      // Using Best Pair
+    setClauses.push(`change24h = ${addParam(change24h)}`);    // Using Best Pair
+    setClauses.push(`lastUpdated = ${addParam(Date.now())}`);
+
+    if (imageUrl) setClauses.push(`image = ${addParam(imageUrl)}`);
+    
+    // Only update timestamp if it looks valid and isn't wildly in the future
+    if (pairCreatedAt && pairCreatedAt < Date.now() + 86400000) {
+        setClauses.push(`timestamp = ${addParam(pairCreatedAt)}`);
+    }
+
+    const whereClause = `WHERE mint = ${addParam(mint)}`;
+    const fullQuery = `UPDATE tokens SET ${setClauses.join(', ')} ${whereClause}`;
+
+    await db.run(fullQuery, queryParams);
+}
+
 async function updateMetadata(deps) {
     const { db, globalState } = deps;
+    logger.info("⏱️ Metadata Updater: Starting cycle...");
 
     // 1. Select candidates (New or Active or High Cap)
     const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -97,12 +151,11 @@ async function updateMetadata(deps) {
     }
 
     if (!tokens || tokens.length === 0) {
-        // Optional: Log if empty just to know the task ran
-        // logger.debug("Updater: No active tokens to update.");
+        logger.info("ℹ️ Metadata Updater: No active tokens found matching criteria (Age < 24h OR Vol > 1k OR MC > 5k).");
         return;
     }
 
-    logger.info(`🔄 Updater: Refreshing ${tokens.length} active tokens...`);
+    logger.info(`🔄 Metadata Updater: Refreshing ${tokens.length} active tokens...`);
 
     const chunks = chunkArray(tokens, 30);
     
@@ -112,7 +165,6 @@ async function updateMetadata(deps) {
         try {
             // Using the new Retry Logic here
             const dexRes = await fetchWithRetry(`https://api.dexscreener.com/latest/dex/tokens/${mints}`);
-
             const pairsData = dexRes.data?.pairs || [];
             
             // Group pairs by Mint ID
@@ -126,56 +178,10 @@ async function updateMetadata(deps) {
             // Process each token in the chunk
             const updatePromises = chunk.map(t => {
                 const pairs = pairsByMint[t.mint] || [];
-                
-                if (pairs.length === 0) return Promise.resolve(); // No data found
-
-                // A. Calculate Aggregate Volume (Sum of ALL pools)
-                const totalVolume = pairs.reduce((sum, p) => sum + (Number(p.volume?.h24) || 0), 0);
-
-                // B. Select "Best Pair" for Price & Changes
-                const bestPair = getBestPair(pairs, t.mint);
-                
-                if (!bestPair) return Promise.resolve();
-
-                // Prepare Data
-                const marketCap = Number(bestPair.fdv || bestPair.marketCap || 0);
-                const priceUsd = Number(bestPair.priceUsd || 0);
-                const change5m = Number(bestPair.priceChange?.m5 || 0);
-                const change1h = Number(bestPair.priceChange?.h1 || 0);
-                const change24h = Number(bestPair.priceChange?.h24 || 0);
-                const pairCreatedAt = bestPair.pairCreatedAt;
-                const imageUrl = bestPair.info?.imageUrl;
-
-                // C. Construct Query
-                const setClauses = [];
-                const queryParams = [];
-                const addParam = (val) => { queryParams.push(val); return `$${queryParams.length}`; };
-
-                setClauses.push(`volume24h = ${addParam(totalVolume)}`); // Using Aggregate
-                setClauses.push(`marketCap = ${addParam(marketCap)}`);    // Using Best Pair
-                setClauses.push(`priceUsd = ${addParam(priceUsd)}`);      // Using Best Pair
-                setClauses.push(`change5m = ${addParam(change5m)}`);      // Using Best Pair
-                setClauses.push(`change1h = ${addParam(change1h)}`);      // Using Best Pair
-                setClauses.push(`change24h = ${addParam(change24h)}`);    // Using Best Pair
-                setClauses.push(`lastUpdated = ${addParam(Date.now())}`);
-
-                if (imageUrl) setClauses.push(`image = ${addParam(imageUrl)}`);
-                
-                // Only update timestamp if it looks valid and isn't wildly in the future
-                if (pairCreatedAt && pairCreatedAt < Date.now() + 86400000) {
-                    setClauses.push(`timestamp = ${addParam(pairCreatedAt)}`);
-                }
-
-                const whereClause = `WHERE mint = ${addParam(t.mint)}`;
-                const fullQuery = `UPDATE tokens SET ${setClauses.join(', ')} ${whereClause}`;
-
-                return db.run(fullQuery, queryParams);
+                return syncTokenData(deps, t.mint, pairs);
             });
 
             await Promise.all(updatePromises);
-            
-            // Log progress occasionally
-            // logger.info(`Updated batch of ${chunk.length} tokens`);
             
             // Respect Rate Limits
             await delay(1100);
@@ -186,7 +192,7 @@ async function updateMetadata(deps) {
     }
 
     globalState.lastBackendUpdate = Date.now();
-    logger.info("✅ Updater: Cycle complete.");
+    logger.info("✅ Metadata Updater: Cycle complete.");
 }
 
 function start(deps) {
@@ -194,7 +200,7 @@ function start(deps) {
     setTimeout(() => updateMetadata(deps), 5000);
     // Then run on interval
     setInterval(() => updateMetadata(deps), config.METADATA_UPDATE_INTERVAL);
-    logger.info("🚀 Metadata updater started (Prioritized Mode: Bonk > Pump > Liq)");
+    logger.info(`🚀 Metadata updater started (Interval: ${config.METADATA_UPDATE_INTERVAL / 60000}m)`);
 }
 
-module.exports = { updateMetadata, start };
+module.exports = { updateMetadata, start, syncTokenData };

@@ -1,6 +1,7 @@
 /**
  * Token Routes
  * Updated: Payment Verification with Retry Logic, Balance Proxy, Description Handling
+ * Updated: Auto-refresh metadata on single token view
  */
 const express = require('express');
 const axios = require('axios');
@@ -9,6 +10,8 @@ const { isValidPubkey } = require('../utils/solana');
 const { smartCache, saveTokenData } = require('../services/database');
 const config = require('../config/env');
 const { calculateTokenScore } = require('../tasks/kScoreUpdater'); 
+const { syncTokenData } = require('../tasks/metadataUpdater'); // Import shared update logic
+
 const router = express.Router();
 
 // Initialize backend connection
@@ -269,15 +272,29 @@ function init(deps) {
             const result = await smartCache(cacheKey, 30, async () => {
                 const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
                 if (!token) return null;
+                
                 let pairs = [];
                 try {
                     const dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, { timeout: 3000 });
                     if (dexRes.data && dexRes.data.pairs) {
                         pairs = dexRes.data.pairs.map(p => ({
-                            pairAddress: p.pairAddress, dexId: p.dexId, priceUsd: p.priceUsd, liquidity: p.liquidity?.usd || 0, url: p.url
+                            pairAddress: p.pairAddress, dexId: p.dexId, priceUsd: p.priceUsd, liquidity: p.liquidity?.usd || 0, url: p.url,
+                            volume: p.volume, priceChange: p.priceChange, fdv: p.fdv, marketCap: p.marketCap, pairCreatedAt: p.pairCreatedAt, info: p.info,
+                            baseToken: p.baseToken
                         })).sort((a, b) => b.liquidity - a.liquidity);
+
+                        // --- AUTO-UPDATE LOGIC ---
+                        // Since we just fetched fresh data, update the database for this specific token
+                        // This ensures the view is always eventually consistent with the latest fetch
+                        if (pairs.length > 0) {
+                            // Fire and forget (don't await) to not slow down read significantly, 
+                            // or await if we want strict consistency.
+                            // Given smartCache is wrapping this, awaiting is safer.
+                            await syncTokenData(deps, mint, pairs);
+                        }
                     }
                 } catch (dexErr) { console.warn("Failed to fetch pairs:", dexErr.message); }
+                
                 return { 
                     success: true, 
                     token: {
