@@ -1,6 +1,7 @@
 /**
  * Metadata Updater (Stabilized Version)
  * Implements Pagination & Locking to handle high concurrency.
+ * UPDATED: Strict logic to pull price/mcap from Largest Liquidity Pool.
  */
 const axios = require('axios');
 const config = require('../config/env');
@@ -9,7 +10,6 @@ const { logger } = require('../services');
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // --- LOCKING MECHANISM ---
-// Prevents multiple update cycles from overlapping and crashing memory
 let isRunning = false;
 
 // Helper: Batch fetch with retry
@@ -24,15 +24,34 @@ async function fetchWithRetry(url, retries = 3) {
     }
 }
 
-// Logic to determine best pair (kept from previous version)
+// Logic to determine the best pair for Price/MCap data
 function getBestPair(pairs, mint) {
     if (!pairs || pairs.length === 0) return null;
-    const sortedPairs = [...pairs].sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
-    const pumpPair = sortedPairs.find(p => p.dexId === 'pump');
-    const raydiumPair = sortedPairs.find(p => p.dexId === 'raydium');
+
+    // 1. Sort all pairs by LIQUIDITY (USD) Descending
+    // This is the most reliable way to get the "real" price.
+    // We filter out pairs with very low liquidity to avoid noise.
+    const validPairs = pairs.filter(p => (p.liquidity?.usd || 0) > 100);
     
-    if (mint === 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263' && raydiumPair) return raydiumPair;
-    if (pumpPair) return pumpPair;
+    // Fallback to all pairs if everything is low liquidity (e.g. new launch)
+    const candidates = validPairs.length > 0 ? validPairs : pairs;
+
+    const sortedPairs = candidates.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
+
+    // --- RULE 1: BONK Token Exception (Legacy) ---
+    // Keep specific rule if requested, otherwise rely on liquidity.
+    const raydiumPair = sortedPairs.find(p => p.dexId === 'raydium');
+    if (mint === 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263' && raydiumPair) {
+        return raydiumPair;
+    }
+
+    // --- RULE 2: PumpFun Handling ---
+    // Previously we prioritized Pump.fun. Now we only prioritize it if it actually has
+    // the highest liquidity (which `sortedPairs[0]` handles automatically).
+    // However, if the user explicitly wants Pump data for Pump tokens even if Raydium is bigger
+    // (unlikely for "Market Cap" accuracy), we can add logic.
+    // Current Decision: TRUST LIQUIDITY. The market decides the price.
+    
     return sortedPairs[0];
 }
 
@@ -40,9 +59,24 @@ async function syncTokenData(deps, mint, pairs) {
     const { db } = deps;
     if (!pairs || pairs.length === 0) return;
 
+    // A. Calculate Aggregate Volume (Sum of ALL pools)
+    // Volume is global, so we sum it up.
     const totalVolume = pairs.reduce((sum, p) => sum + (Number(p.volume?.h24) || 0), 0);
+
+    // B. Select "Best Pair" for Price & Market Cap
     const bestPair = getBestPair(pairs, mint);
+    
     if (!bestPair) return;
+
+    // Prepare Data
+    // Use FDV (Fully Diluted Valuation) as Market Cap standard for Solana tokens
+    // Fallback to marketCap property if FDV is missing.
+    const marketCap = Number(bestPair.fdv || bestPair.marketCap || 0);
+    const priceUsd = Number(bestPair.priceUsd || 0);
+    
+    const change5m = Number(bestPair.priceChange?.m5 || 0);
+    const change1h = Number(bestPair.priceChange?.h1 || 0);
+    const change24h = Number(bestPair.priceChange?.h24 || 0);
 
     const query = `
         UPDATE tokens SET 
@@ -54,11 +88,11 @@ async function syncTokenData(deps, mint, pairs) {
 
     const params = [
         totalVolume,
-        Number(bestPair.fdv || bestPair.marketCap || 0),
-        Number(bestPair.priceUsd || 0),
-        Number(bestPair.priceChange?.m5 || 0),
-        Number(bestPair.priceChange?.h1 || 0),
-        Number(bestPair.priceChange?.h24 || 0),
+        marketCap,
+        priceUsd,
+        change5m,
+        change1h,
+        change24h,
         Date.now(),
         mint
     ];
@@ -70,7 +104,6 @@ async function syncTokenData(deps, mint, pairs) {
  * Main Update Function (Paged & Locked)
  */
 async function updateMetadata(deps) {
-    // 1. Check Lock
     if (isRunning) {
         logger.warn("⚠️ Metadata Updater: Previous cycle still active. Skipping this run.");
         return;
@@ -78,7 +111,7 @@ async function updateMetadata(deps) {
     isRunning = true;
 
     const { db, globalState } = deps;
-    const BATCH_SIZE = 50; // DexScreener supports up to 30 officially, but 50 usually works or we can split
+    const BATCH_SIZE = 50; 
     let offset = 0;
     let hasMore = true;
     let totalProcessed = 0;
@@ -87,8 +120,6 @@ async function updateMetadata(deps) {
 
     try {
         while (hasMore) {
-            // 2. Fetch Batch from DB (Pagination)
-            // This prevents loading 10,000 tokens into memory at once
             const tokens = await db.all(`SELECT mint FROM tokens LIMIT $1 OFFSET $2`, [BATCH_SIZE, offset]);
 
             if (!tokens || tokens.length === 0) {
@@ -96,12 +127,9 @@ async function updateMetadata(deps) {
                 break;
             }
 
-            // 3. Process Batch
             const mints = tokens.map(t => t.mint).join(',');
             
             try {
-                // We request 50, but DexScreener might want fewer. 
-                // If this fails often, reduce BATCH_SIZE to 30.
                 const dexRes = await fetchWithRetry(`https://api.dexscreener.com/latest/dex/tokens/${mints}`);
                 const pairsData = dexRes.data?.pairs || [];
                 
@@ -122,11 +150,9 @@ async function updateMetadata(deps) {
                 logger.error(`❌ Batch Error (Offset ${offset}): ${e.message}`);
             }
 
-            // 4. Next Batch & Rate Limit
             totalProcessed += tokens.length;
             offset += BATCH_SIZE;
             
-            // Wait 1.1s to respect DexScreener rate limits (approx 50-60 calls/min)
             await delay(1100);
         }
 
@@ -136,7 +162,6 @@ async function updateMetadata(deps) {
     } catch (fatalError) {
         logger.error(`🔥 Metadata Updater FATAL: ${fatalError.message}`);
     } finally {
-        // 5. Release Lock
         isRunning = false;
     }
 }
