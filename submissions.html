@@ -28,6 +28,7 @@
         .updates-table td { padding: 12px 10px; border-bottom: 1px solid rgba(124,45,18,0.3); vertical-align: top; }
         .link-preview { font-size: 11px; color: #3b82f6; text-decoration: underline; word-break: break-all; }
         .desc-preview { font-size: 11px; color: #fb923c; font-family: 'JetBrains Mono'; max-width: 200px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+        .hash-link { font-family: 'JetBrains Mono'; font-size: 10px; color: #fb923c; text-decoration: underline; }
     </style>
 </head>
 <body class="p-8">
@@ -47,6 +48,7 @@
 
         <div class="flex gap-4 mb-8">
             <div id="tab-pending" class="nav-tab active" onclick="switchTab('pending')">Pending Updates</div>
+            <div id="tab-history" class="nav-tab" onclick="switchTab('history')">Request History</div>
             <div id="tab-manage" class="nav-tab" onclick="switchTab('manage')">Manage Token</div>
         </div>
 
@@ -54,6 +56,13 @@
         <div id="view-pending" class="space-y-4">
             <div id="updates-list" class="overflow-x-auto">
                 <div class="text-center py-20 text-[#9a3412]">Loading requests...</div>
+            </div>
+        </div>
+
+        <!-- HISTORY VIEW -->
+        <div id="view-history" class="space-y-4 hidden">
+            <div id="history-list" class="overflow-x-auto">
+                <div class="text-center py-20 text-[#9a3412]">Loading history...</div>
             </div>
         </div>
 
@@ -80,12 +89,12 @@
 
                     <div class="border-t border-[#7c2d12] pt-4 mt-6">
                         <div class="flex items-center justify-between mb-4">
-                            <span class="text-[#fb923c] font-bold">Actions</span>
+                            <span class="text-[#fb923c] font-bold">Manual K-Score Trigger</span>
                             <button onclick="refreshKScore()" class="action-btn btn-orange flex items-center gap-2">
-                                <i data-lucide="refresh-cw" width="14"></i> Force K-Score Refresh
+                                <i data-lucide="zap" width="14"></i> Force K-Score Refresh
                             </button>
                         </div>
-                        <div class="flex justify-between">
+                        <div class="flex justify-between mt-8 pt-4 border-t border-[#7c2d12]">
                             <button onclick="deleteToken()" class="action-btn btn-red">Delete Token</button>
                             <button onclick="saveToken()" class="action-btn btn-green">Save Changes</button>
                         </div>
@@ -104,16 +113,23 @@
     function switchTab(tab) { 
         document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active')); 
         document.getElementById(`tab-${tab}`).classList.add('active'); 
+        
+        document.getElementById('view-pending').classList.add('hidden');
+        document.getElementById('view-history').classList.add('hidden');
+        document.getElementById('view-manage').classList.add('hidden');
+
         if (tab === 'pending') { 
             document.getElementById('view-pending').classList.remove('hidden'); 
-            document.getElementById('view-manage').classList.add('hidden'); 
             fetchUpdates(); 
+        } else if (tab === 'history') {
+            document.getElementById('view-history').classList.remove('hidden'); 
+            fetchHistory();
         } else { 
-            document.getElementById('view-pending').classList.add('hidden'); 
             document.getElementById('view-manage').classList.remove('hidden'); 
         } 
     }
 
+    // --- FETCH PENDING ---
     async function fetchUpdates() { 
         try { 
             const res = await fetch(`${API_URL}/api/admin/updates`, { headers: { 'x-admin-auth': adminKey } }); 
@@ -121,32 +137,60 @@
             if (data.success) { 
                 document.getElementById('login-screen').classList.add('hidden'); 
                 document.getElementById('admin-panel').classList.remove('hidden'); 
-                renderUpdates(data.updates); 
+                renderUpdates(data.updates, 'updates-list', true); 
             } else { 
                 document.getElementById('login-error').classList.remove('hidden'); 
             } 
         } catch (e) { alert("Connection Failed"); } 
     }
 
-    function renderUpdates(updates) {
-        const list = document.getElementById('updates-list');
-        if (!updates.length) { list.innerHTML = `<div class="text-center py-20 text-[#9a3412]">No pending updates.</div>`; return; }
+    // --- FETCH HISTORY ---
+    async function fetchHistory() { 
+        try { 
+            const res = await fetch(`${API_URL}/api/admin/updates?type=history`, { headers: { 'x-admin-auth': adminKey } }); 
+            const data = await res.json(); 
+            if (data.success) { 
+                renderUpdates(data.updates, 'history-list', false); 
+            }
+        } catch (e) { console.error("History fetch failed"); } 
+    }
+
+    function renderUpdates(updates, elementId, isPending) {
+        const list = document.getElementById(elementId);
+        if (!updates.length) { list.innerHTML = `<div class="text-center py-20 text-[#9a3412]">No records found.</div>`; return; }
         
         let html = `
         <table class="updates-table">
             <thead>
                 <tr>
                     <th width="200">Asset</th>
+                    <th>Payment Info</th>
                     <th>Links</th>
                     <th width="200">Description</th>
                     <th width="150">Banner</th>
-                    <th width="200">Actions</th>
+                    <th width="200">${isPending ? 'Actions' : 'Status'}</th>
                 </tr>
             </thead>
             <tbody>
         `;
         
-        html += updates.map(u => `
+        html += updates.map(u => {
+            const txLink = u.signature ? `<a href="https://solscan.io/tx/${u.signature}" target="_blank" class="hash-link">Tx: ${u.signature.substring(0,8)}...</a>` : '<span class="text-xs text-gray-500">No Tx</span>';
+            const payer = u.payer ? `<div class="text-[10px] text-[#9a3412]">By: ${u.payer.substring(0,6)}...</div>` : '';
+            
+            let actionCol = '';
+            if (isPending) {
+                actionCol = `
+                    <div class="flex gap-2">
+                        <button onclick="handleAction(${u.id}, 'approve')" class="action-btn btn-green text-xs">Approve</button>
+                        <button onclick="handleAction(${u.id}, 'reject')" class="action-btn btn-red text-xs">Reject</button>
+                    </div>`;
+            } else {
+                const color = u.status === 'approved' ? 'text-green-500' : 'text-red-500';
+                actionCol = `<span class="${color} font-bold uppercase text-xs">${u.status}</span>`;
+            }
+
+            return `
             <tr>
                 <td>
                     <div class="flex items-center gap-3">
@@ -155,6 +199,12 @@
                             <div class="font-bold text-white">${u.ticker}</div>
                             <div class="text-xs text-[#9a3412] font-mono">${u.mint.substring(0,8)}...</div>
                         </div>
+                    </div>
+                </td>
+                <td>
+                    <div class="flex flex-col">
+                        ${txLink}
+                        ${payer}
                     </div>
                 </td>
                 <td>
@@ -170,14 +220,9 @@
                 <td>
                     ${u.banner ? `<a href="${u.banner}" target="_blank"><img src="${u.banner}" class="h-8 w-20 object-cover border border-[#7c2d12] rounded"></a>` : '<span class="text-[#9a3412]">-</span>'}
                 </td>
-                <td>
-                    <div class="flex gap-2">
-                        <button onclick="handleAction(${u.id}, 'approve')" class="action-btn btn-green text-xs">Approve</button>
-                        <button onclick="handleAction(${u.id}, 'reject')" class="action-btn btn-red text-xs">Reject</button>
-                    </div>
-                </td>
+                <td>${actionCol}</td>
             </tr>
-        `).join('');
+        `}).join('');
         html += `</tbody></table>`;
         list.innerHTML = html;
         lucide.createIcons();

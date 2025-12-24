@@ -1,6 +1,6 @@
 /**
  * Token Routes
- * Updated: Robust "Live" Data for Individual Token View
+ * Updated: Robust Persistence for History and Transactions
  */
 const express = require('express');
 const axios = require('axios');
@@ -147,6 +147,7 @@ function init(deps) {
             const hasData = (twitter && twitter.length > 0) || (website && website.length > 0) || (telegram && telegram.length > 0) || (banner && banner.length > 0) || (safeDesc && safeDesc.length > 0);
             if (!hasData) return res.status(400).json({ success: false, error: "No profile data provided" });
 
+            // PERSISTENCE: This INSERT saves the transaction (signature) and payer immediately
             await db.run(`INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)`, 
                 [mint, twitter, website, telegram, banner, safeDesc, Date.now(), signature, userPublicKey]);
 
@@ -408,13 +409,24 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
+    // UPDATED: Now supports type=history to fetch non-pending
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         try {
-            const updates = await db.all(`SELECT u.*, t.name, t.ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`);
+            const { type } = req.query;
+            let sql = `SELECT u.*, t.name, t.ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`;
+            
+            if (type === 'history') {
+                sql += ` WHERE u.status != 'pending' ORDER BY u.submittedAt DESC LIMIT 100`;
+            } else {
+                sql += ` WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`;
+            }
+            
+            const updates = await db.all(sql);
             res.json({ success: true, updates });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
+    // UPDATED: Now updates status to 'approved' instead of deleting
     router.post('/admin/approve-update', requireAdmin, async (req, res) => {
         const { id } = req.body;
         try {
@@ -435,17 +447,23 @@ function init(deps) {
                 await db.run(`UPDATE tokens SET ${fields.join(', ')} WHERE mint = $${idx}`, params); 
             }
             
-            await db.run('DELETE FROM token_updates WHERE id = $1', [id]);
+            // HISTORY: Mark as approved, do not delete
+            await db.run("UPDATE token_updates SET status = 'approved' WHERE id = $1", [id]);
             
-            // --- NEW: Calculate K-Score IMMEDIATELY ---
+            // Calculate K-Score IMMEDIATELY
             await kScoreUpdater.updateSingleToken(deps, update.mint);
             
             res.json({ success: true, message: 'Approved & K-Score Calculated' });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
+    // UPDATED: Now updates status to 'rejected' instead of deleting
     router.post('/admin/reject-update', requireAdmin, async (req, res) => {
-        try { await db.run('DELETE FROM token_updates WHERE id = $1', [req.body.id]); res.json({ success: true, message: 'Rejected' }); } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+        try { 
+            // HISTORY: Mark as rejected, do not delete
+            await db.run("UPDATE token_updates SET status = 'rejected' WHERE id = $1", [req.body.id]); 
+            res.json({ success: true, message: 'Rejected' }); 
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.get('/admin/token/:mint', requireAdmin, async (req, res) => {

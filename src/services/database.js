@@ -108,7 +108,7 @@ async function initDB() {
             CREATE INDEX IF NOT EXISTS idx_tokens_mcap ON tokens(marketCap); 
         `);
 
-        // --- AUTO-MIGRATION (Column Repair) ---
+        // --- AUTO-MIGRATION (Column Repair - Tokens) ---
         const columns = await dbInstance.all("PRAGMA table_info(tokens)");
         const columnNames = columns.map(c => c.name);
 
@@ -118,13 +118,27 @@ async function initDB() {
 
         for (const col of requiredColumns) {
             if (!columnNames.includes(col)) {
-                console.log(`⚠️ Auto-Migrating: Adding missing column '${col}'...`);
+                console.log(`⚠️ Auto-Migrating: Adding missing column '${col}' to tokens...`);
                 let type = 'INTEGER DEFAULT 0';
                 if (col === 'hasCommunityUpdate') type = 'BOOLEAN DEFAULT 0';
                 if (col === 'marketCap') type = 'REAL DEFAULT 0';
                 if (col === 'banner' || col === 'description') type = 'TEXT';
                 
                 await dbInstance.exec(`ALTER TABLE tokens ADD COLUMN ${col} ${type}`);
+            }
+        }
+
+        // --- AUTO-MIGRATION (Column Repair - Token Updates) ---
+        // Critical for persistence of history across app versions
+        const updateCols = await dbInstance.all("PRAGMA table_info(token_updates)");
+        const updateColNames = updateCols.map(c => c.name);
+        
+        const requiredUpdateCols = ['signature', 'payer', 'status', 'description', 'banner', 'website', 'twitter', 'telegram'];
+
+        for (const col of requiredUpdateCols) {
+            if (!updateColNames.includes(col)) {
+                console.log(`⚠️ Auto-Migrating: Adding missing column '${col}' to token_updates...`);
+                await dbInstance.exec(`ALTER TABLE token_updates ADD COLUMN ${col} TEXT`);
             }
         }
         
