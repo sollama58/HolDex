@@ -59,19 +59,39 @@ async function updateMetadata(deps) {
                 const mint = pair.baseToken.address;
                 const existing = updates.get(mint);
                 
-                // Get most liquid pair
-                if (!existing || (pair.liquidity?.usd > existing.liquidity)) {
+                // Safe values (default to 0 to prevent comparison errors)
+                const pairLiq = pair.liquidity?.usd || 0;
+                const pairVol = pair.volume?.h24 || 0;
+                
+                if (!existing) {
                     updates.set(mint, {
                         marketCap: pair.fdv || pair.marketCap || 0,
-                        volume24h: pair.volume?.h24 || 0,
+                        volume24h: pairVol, // Start with this pair's volume
                         priceUsd: pair.priceUsd || 0,
-                        liquidity: pair.liquidity?.usd || 0,
+                        liquidity: pairLiq,
                         imageUrl: pair.info?.imageUrl,
                         change5m: pair.priceChange?.m5 || 0,
                         change1h: pair.priceChange?.h1 || 0,
                         change24h: pair.priceChange?.h24 || 0,
                         pairCreatedAt: pair.pairCreatedAt 
                     });
+                } else {
+                    // 1. Aggregate Volume (Sum volume from all pools)
+                    existing.volume24h += pairVol;
+
+                    // 2. Select Largest Liquidity Pool for Price/Stats
+                    // We check strictly if this pair is bigger than the stored one
+                    if (pairLiq > existing.liquidity) {
+                        existing.liquidity = pairLiq;
+                        existing.marketCap = pair.fdv || pair.marketCap || 0;
+                        existing.priceUsd = pair.priceUsd || 0;
+                        existing.imageUrl = pair.info?.imageUrl || existing.imageUrl;
+                        existing.change5m = pair.priceChange?.m5 || 0;
+                        existing.change1h = pair.priceChange?.h1 || 0;
+                        existing.change24h = pair.priceChange?.h24 || 0;
+                        existing.pairCreatedAt = pair.pairCreatedAt;
+                        // Note: We do NOT overwrite volume24h here, we aggregated it above.
+                    }
                 }
             }
 
@@ -136,7 +156,7 @@ async function updateMetadata(deps) {
 function start(deps) {
     setTimeout(() => updateMetadata(deps), 5000);
     setInterval(() => updateMetadata(deps), config.METADATA_UPDATE_INTERVAL);
-    logger.info("Metadata updater started (Dynamic Query Mode)");
+    logger.info("Metadata updater started (Global Volume + Best Pool Mode)");
 }
 
 module.exports = { updateMetadata, start };
