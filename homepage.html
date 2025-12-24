@@ -612,6 +612,7 @@
         }
     }
 
+    // UPDATED: Use Backend Proxy for Balances to avoid CORS/403
     async function refreshBalances() {
         if (!walletAddress) return;
         
@@ -619,27 +620,18 @@
         icon.classList.add('animate-spin');
 
         try {
-            const connection = new solanaWeb3.Connection("https://api.mainnet-beta.solana.com", "confirmed");
-            const pubKey = new solanaWeb3.PublicKey(walletAddress);
+            const tokenMint = feeConfig.tokenMint || '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump';
+            const res = await fetch(`${API_URL}/api/proxy/balance/${walletAddress}?tokenMint=${tokenMint}`);
+            const data = await res.json();
 
-            // 1. Fetch SOL Balance
-            const solBal = await connection.getBalance(pubKey);
-            document.getElementById('balance-sol').innerText = (solBal / solanaWeb3.LAMPORTS_PER_SOL).toFixed(4);
-
-            // 2. Fetch Token Balance ($ASDFASDFA)
-            // We use the mint from feeConfig, or fallback if not loaded yet
-            const mintAddr = feeConfig.tokenMint || '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump';
-            
-            const tokenAccounts = await connection.getParsedTokenAccountsByOwner(pubKey, {
-                mint: new solanaWeb3.PublicKey(mintAddr)
-            });
-
-            let tokenBal = 0;
-            if (tokenAccounts.value.length > 0) {
-                tokenBal = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.uiAmount;
+            if (data.success) {
+                document.getElementById('balance-sol').innerText = (data.sol || 0).toFixed(4);
+                document.getElementById('balance-token').innerText = (data.tokens || 0).toLocaleString();
+            } else {
+                console.error("Balance Proxy Failed:", data.error);
+                document.getElementById('balance-sol').innerText = "Err";
+                document.getElementById('balance-token').innerText = "Err";
             }
-            document.getElementById('balance-token').innerText = tokenBal.toLocaleString();
-
         } catch (e) {
             console.error("Balance Refresh Failed", e);
         } finally {
@@ -670,8 +662,8 @@
         statusDiv.classList.remove('hidden', 'text-red-500', 'text-green-500'); statusDiv.classList.add('text-[#ea580c]');
 
         try {
-            // 1. Construct Transaction
-            const connection = new solanaWeb3.Connection("https://api.mainnet-beta.solana.com", "confirmed");
+            // 1. Construct Transaction using Ankr (Better public RPC)
+            const connection = new solanaWeb3.Connection("https://rpc.ankr.com/solana", "confirmed");
             const fromPubkey = new solanaWeb3.PublicKey(walletAddress);
             const toPubkey = new solanaWeb3.PublicKey(feeConfig.treasury);
             const tokenMintPubkey = new solanaWeb3.PublicKey(feeConfig.tokenMint);

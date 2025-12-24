@@ -1,6 +1,6 @@
 /**
  * Token Routes
- * Updated: Payment Verification for Updates
+ * Updated: Payment Verification & Balance Proxy
  */
 const express = require('express');
 const axios = require('axios');
@@ -10,6 +10,9 @@ const { smartCache, saveTokenData } = require('../services/database');
 const config = require('../config/env');
 const { calculateTokenScore } = require('../tasks/kScoreUpdater'); 
 const router = express.Router();
+
+// Initialize backend connection
+const solanaConnection = new Connection(config.SOLANA_RPC_URL, 'confirmed');
 
 function getSocialLink(pair, type) {
     if (!pair.info || !pair.info.socials) return null;
@@ -37,8 +40,7 @@ function init(deps) {
         if (existing) throw new Error("Transaction signature already used");
 
         // 2. Fetch Transaction from Chain
-        const connection = new Connection(config.SOLANA_RPC_URL, 'confirmed');
-        const tx = await connection.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 });
+        const tx = await solanaConnection.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 });
         
         if (!tx) throw new Error("Transaction not found. Please wait 10s and try again.");
         if (tx.meta.err) throw new Error("Transaction failed on-chain.");
@@ -55,17 +57,14 @@ function init(deps) {
         const postSol = tx.meta.postBalances[treasuryIndex];
         const solReceived = (postSol - preSol) / 1e9; // Lamports -> SOL
 
-        // Allow tiny margin for error if needed, but strict is better
         if (solReceived < config.FEE_SOL * 0.99) {
             throw new Error(`Insufficient SOL fee. Received: ${solReceived.toFixed(4)}, Required: ${config.FEE_SOL}`);
         }
 
         // 5. Verify Token Transfer ($ASDFASDFA) to Treasury
-        // We look at Token Balance changes for the Treasury Wallet and specific Mint
         const treasuryTokenPre = tx.meta.preTokenBalances.find(b => b.owner === config.TREASURY_WALLET && b.mint === config.FEE_TOKEN_MINT);
         const treasuryTokenPost = tx.meta.postTokenBalances.find(b => b.owner === config.TREASURY_WALLET && b.mint === config.FEE_TOKEN_MINT);
 
-        // UI Amount is the human readable float (e.g. 5000.00)
         const preAmt = treasuryTokenPre ? (treasuryTokenPre.uiTokenAmount.uiAmount || 0) : 0;
         const postAmt = treasuryTokenPost ? (treasuryTokenPost.uiTokenAmount.uiAmount || 0) : 0;
         const tokensReceived = postAmt - preAmt;
@@ -77,9 +76,37 @@ function init(deps) {
         return true;
     }
 
+    // --- NEW: BACKEND PROXY FOR BALANCES ---
+    // Fixes 403 Forbidden issues on frontend by routing requests through the server
+    router.get('/proxy/balance/:wallet', async (req, res) => {
+        try {
+            const { wallet } = req.params;
+            const tokenMint = req.query.tokenMint || config.FEE_TOKEN_MINT;
+
+            if (!isValidPubkey(wallet)) return res.status(400).json({ success: false, error: "Invalid wallet" });
+
+            const pubKey = new PublicKey(wallet);
+            
+            // Parallel fetch for speed
+            const [solBalance, tokenAccounts] = await Promise.all([
+                solanaConnection.getBalance(pubKey),
+                solanaConnection.getParsedTokenAccountsByOwner(pubKey, { mint: new PublicKey(tokenMint) })
+            ]);
+
+            const sol = solBalance / 1e9;
+            const tokens = tokenAccounts.value.length > 0 
+                ? tokenAccounts.value[0].account.data.parsed.info.tokenAmount.uiAmount 
+                : 0;
+
+            res.json({ success: true, sol, tokens });
+        } catch (e) {
+            console.error("Proxy Balance Error:", e.message);
+            res.status(500).json({ success: false, error: "Failed to fetch balance" });
+        }
+    });
+
     // --- PUBLIC ENDPOINTS ---
 
-    // PUBLIC: Get Config (for frontend to know fees)
     router.get('/config/fees', (req, res) => {
         res.json({
             success: true,
@@ -90,7 +117,6 @@ function init(deps) {
         });
     });
     
-    // UPDATED: Request Update with Payment
     router.post('/request-update', async (req, res) => {
         try {
             const { mint, twitter, website, telegram, banner, signature, userPublicKey } = req.body;
@@ -98,7 +124,6 @@ function init(deps) {
             if (!mint || mint.length < 30) return res.status(400).json({ success: false, error: "Invalid Mint" });
             if (!signature || !userPublicKey) return res.status(400).json({ success: false, error: "Payment signature and wallet required" });
 
-            // Verify Payment
             try {
                 await verifyPayment(signature, userPublicKey);
             } catch (payErr) {
@@ -109,7 +134,6 @@ function init(deps) {
             const hasData = (twitter && twitter.length > 0) || (website && website.length > 0) || (telegram && telegram.length > 0) || (banner && banner.length > 0);
             if (!hasData) return res.status(400).json({ success: false, error: "No profile data provided" });
 
-            // Insert Record with Payment Info
             await db.run(`
                 INSERT INTO token_updates (mint, twitter, website, telegram, banner, submittedAt, status, signature, payer) 
                 VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
@@ -163,7 +187,6 @@ function init(deps) {
 
                 let rows = params.length > 0 ? await db.all(query, params) : await db.all(query);
 
-                // External Search
                 const needsExternalFetch = (filter !== 'verified' && pageVal === 1 && search && search.trim().length > 2 && (rows.length < 5 || isValidPubkey(search.trim())));
                 if (needsExternalFetch) {
                     try {
@@ -259,7 +282,6 @@ function init(deps) {
 
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         try {
-            // Updated to fetch payment info too (optional)
             const updates = await db.all(`SELECT u.*, t.name, t.ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`);
             res.json({ success: true, updates });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
