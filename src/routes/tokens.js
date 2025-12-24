@@ -1,6 +1,7 @@
 /**
  * Token Routes
  * Integrates payment verification, admin tools, and the shared metadata updater.
+ * NEW: Added /public/token/:mint endpoint for external integrations.
  */
 const express = require('express');
 const axios = require('axios');
@@ -262,7 +263,6 @@ function init(deps) {
                         })).sort((a, b) => b.liquidity - a.liquidity);
 
                         // --- AUTO-UPDATE LOGIC ---
-                        // Trigger immediate background update for this token
                         if (pairs.length > 0) {
                             await syncTokenData(deps, mint, pairs);
                         }
@@ -283,6 +283,53 @@ function init(deps) {
             if (!result) return res.status(404).json({ success: false, error: "Not found" });
             res.json(result);
         } catch (e) { res.status(500).json({ success: false, error: "DB Error" }); }
+    });
+
+    // --- PUBLIC API FOR EXTERNAL INTEGRATION (NEW) ---
+    router.get('/public/token/:mint', async (req, res) => {
+        try {
+            const { mint } = req.params;
+            
+            // Re-use smartCache to protect DB
+            const cacheKey = `api:public:${mint}`;
+            const result = await smartCache(cacheKey, 30, async () => {
+                const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+                if (!token) return null;
+
+                return {
+                    success: true,
+                    data: {
+                        name: token.name,
+                        ticker: token.ticker,
+                        mint: token.mint,
+                        description: token.description || "",
+                        images: {
+                            icon: token.image,
+                            banner: token.banner || null
+                        },
+                        socials: {
+                            twitter: token.twitter || null,
+                            telegram: token.tweeturl || null, // Mapped from tweetUrl column
+                            website: token.website || null
+                        },
+                        stats: {
+                            kScore: token.k_score || 0,
+                            marketCap: token.marketCap || 0,
+                            volume24h: token.volume24h || 0,
+                            updatedAt: parseInt(token.lastUpdated || Date.now())
+                        },
+                        verified: token.hascommunityupdate || false
+                    }
+                };
+            });
+
+            if (!result) return res.status(404).json({ success: false, error: "Token not found" });
+            res.json(result);
+
+        } catch (e) {
+            console.error("Public API Error:", e);
+            res.status(500).json({ success: false, error: "Internal Server Error" });
+        }
     });
 
     // --- ADMIN ENDPOINTS ---
