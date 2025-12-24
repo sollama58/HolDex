@@ -1088,7 +1088,8 @@
                     let linksHtml = '';
                     
                     // 1. Jupiter Link (Replaces Pump.fun)
-                    linksHtml += `<a href="https://jup.ag/swap/SOL-${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow bg-[#191e29] border-[#c7f284] text-[#c7f284] hover:bg-[#c7f284] hover:text-[#000]">Jupiter Swap</a>`;
+                    // Updated to use ?sell=SOL_MINT&buy=TOKEN_MINT format
+                    linksHtml += `<a href="https://jup.ag/swap?sell=So11111111111111111111111111111111111111112&buy=${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow bg-[#191e29] border-[#c7f284] text-[#c7f284] hover:bg-[#c7f284] hover:text-[#000]">Jupiter Swap</a>`;
                     
                     // 2. Solscan Link
                     linksHtml += `<a href="https://solscan.io/token/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><i data-lucide="search" width="16"></i> Solscan</a>`;
