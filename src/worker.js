@@ -4,11 +4,12 @@
  * Decoupled from the main API server to ensure responsiveness.
  */
 require('dotenv').config();
-const { initDB, getDB } = require('./services/database');
+const { initDB } = require('./services/database');
 const { initRedis } = require('./services/redis');
 const metadataUpdater = require('./tasks/metadataUpdater');
 const newTokenListener = require('./tasks/newTokenListener');
 const kScoreUpdater = require('./tasks/kScoreUpdater');
+const priceIndexer = require('./tasks/priceIndexer'); // NEW
 const { logger } = require('./services');
 
 const globalState = {
@@ -19,24 +20,27 @@ async function startWorker() {
     logger.info('⚙️ Starting HolDex Background Worker...');
     
     // Initialize shared resources
-    await initDB();
-    const redis = initRedis();
+    const db = await initDB(); // Updated: await the init
+    const redis = await initRedis();
 
-    const deps = { db: getDB(), redis, globalState };
+    const deps = { db, redis, globalState };
 
     // --- START TASKS ---
     logger.info('🚀 Launching Background Tasks...');
     
-    // 1. New Token Listener (DexScreener Feed)
-    // Runs continuously to find new pairs/migrations
+    // 1. New Price Indexer (The Main Engine)
+    // Tracks prices via Helius RPC
+    priceIndexer.start(deps);
+
+    // 2. New Token Listener 
+    // Finds new pairs on DexScreener to populate the DB
     newTokenListener.start(deps);  
     
-    // 2. Metadata Updater (Price/Volume Refresh)
-    // Runs every 60s to update existing tokens
+    // 3. Metadata Updater (Legacy/Fallback)
+    // Keeps non-indexed tokens fresh
     metadataUpdater.start(deps);   
     
-    // 3. K-Score Updater (Helius Analysis)
-    // Runs every 6h (rolling) to calculate conviction scores
+    // 4. K-Score Updater (Helius Analysis)
     kScoreUpdater.start(deps);
 
     logger.info('✅ Worker fully operational.');
@@ -45,7 +49,6 @@ async function startWorker() {
 // Handle crashes
 process.on('uncaughtException', (err) => {
     logger.error('❌ Worker Uncaught Exception:', err);
-    // In production, use a process manager (PM2) to restart
     process.exit(1); 
 });
 

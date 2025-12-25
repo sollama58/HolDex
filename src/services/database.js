@@ -29,7 +29,6 @@ async function initDB() {
     }
 
     // 2. Create Compatibility Wrapper
-    // This allows us to keep using db.get, db.all, db.run syntax across the app
     dbWrapper = {
         pool,
         // Fetch single row
@@ -61,8 +60,7 @@ async function initDB() {
 
 async function initSchema(db) {
     try {
-        // --- TOKENS TABLE ---
-        // Converted types: REAL -> DOUBLE PRECISION, INTEGER -> BIGINT
+        // --- TOKENS TABLE (Existing) ---
         await db.exec(`
             CREATE TABLE IF NOT EXISTS tokens (
                 mint TEXT PRIMARY KEY,
@@ -94,8 +92,7 @@ async function initSchema(db) {
             );
         `);
 
-        // --- UPDATES TABLE ---
-        // Converted: AUTOINCREMENT -> SERIAL
+        // --- UPDATES TABLE (Existing) ---
         await db.exec(`
             CREATE TABLE IF NOT EXISTS token_updates (
                 id SERIAL PRIMARY KEY,
@@ -112,37 +109,47 @@ async function initSchema(db) {
             );
         `);
 
+        // --- NEW: POOLS TABLE (For Indexer) ---
+        // Stores the vault addresses we need to watch
+        await db.exec(`
+            CREATE TABLE IF NOT EXISTS pools (
+                symbol TEXT PRIMARY KEY,
+                name TEXT,
+                base_vault TEXT,
+                quote_vault TEXT,
+                base_decimals INTEGER,
+                quote_decimals INTEGER
+            );
+        `);
+
+        // --- NEW: CANDLES TABLE (For Charts) ---
+        // Stores OHLC data for the charts
+        await db.exec(`
+            CREATE TABLE IF NOT EXISTS candles (
+                symbol TEXT,
+                time BIGINT, 
+                open DOUBLE PRECISION,
+                high DOUBLE PRECISION,
+                low DOUBLE PRECISION,
+                close DOUBLE PRECISION,
+                PRIMARY KEY (symbol, time)
+            );
+        `);
+
         // --- INDEXES ---
         await db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_ticker ON tokens(ticker);`);
         await db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_name ON tokens(name);`);
         await db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_timestamp ON tokens(timestamp);`);
         await db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score);`);
-        await db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_mcap ON tokens(marketCap);`);
+        await db.exec(`CREATE INDEX IF NOT EXISTS idx_candles_time ON candles(symbol, time DESC);`);
 
-        // --- AUTO-MIGRATION (Column Repair) ---
-        // PostgreSQL specific: Check information_schema
-        const res = await db.all(`
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_name = 'tokens';
+        // --- SEED INITIAL POOL (Example) ---
+        // We seed SOL/USDC so the chart works immediately for testing
+        await db.run(`
+            INSERT INTO pools (symbol, name, base_vault, quote_vault, base_decimals, quote_decimals)
+            VALUES ('SOL', 'SOL / USDC', 'DQyrAcCrDXQ7NeoqGgDCZwBvWDcYmFCjSb9JtteuvPpz', 'HLmqeL62xR1QoZ1HKKbXRrdN1p3ph9EHDW6o72a6WzGV', 9, 6)
+            ON CONFLICT (symbol) DO NOTHING;
         `);
-        const existingCols = res.map(r => r.column_name);
-
-        const requiredColumns = [
-            { name: 'last_k_calc', type: 'BIGINT DEFAULT 0' },
-            { name: 'k_score', type: 'INTEGER DEFAULT 0' },
-            { name: 'hascommunityupdate', type: 'BOOLEAN DEFAULT FALSE' }, // Postgres stores lowercase
-            { name: 'banner', type: 'TEXT' },
-            { name: 'description', type: 'TEXT' }
-        ];
-
-        for (const col of requiredColumns) {
-            // Check lowercase because Postgres returns lowercase column names
-            if (!existingCols.includes(col.name.toLowerCase())) {
-                console.log(`⚠️ Auto-Migrating: Adding missing column '${col.name}' to tokens...`);
-                await db.exec(`ALTER TABLE tokens ADD COLUMN ${col.name} ${col.type}`);
-            }
-        }
         
     } catch (err) {
         console.error("❌ Database Schema Init Error:", err);
@@ -182,7 +189,6 @@ async function saveTokenData(db, mint, metadata, timestamp = Date.now()) {
     const d = db || dbWrapper;
     if (!d) return;
     try {
-        // Postgres ON CONFLICT syntax is standard
         await d.run(`
             INSERT INTO tokens (
                 mint, name, ticker, image, 
