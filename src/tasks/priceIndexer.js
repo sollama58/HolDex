@@ -1,7 +1,8 @@
 /**
- * Price Indexer (The Engine)
- * Replaces DexScreener dependency for price tracking.
- * Polls Helius RPC directly for Vault Balances to calculate Price.
+ * Price Indexer (Refactored for Stability)
+ * - Uses 'mint' as key instead of 'symbol'
+ * - Handles empty pool tables gracefully
+ * - Batches RPC calls efficiently
  */
 const { Connection, PublicKey } = require('@solana/web3.js');
 const config = require('../config/env');
@@ -13,19 +14,15 @@ const HELIUS_RPC = config.HELIUS_API_KEY
 
 const connection = new Connection(HELIUS_RPC);
 
-// RECURSIVE LOOP: Better than setInterval
 async function startLoop(deps) {
     try {
         const start = Date.now();
-        logger.info(`[Indexer] Starting price cycle...`);
-        
         await updatePrices(deps);
         
+        // Ensure we don't spam if the cycle is too fast
         const duration = Date.now() - start;
-        logger.info(`[Indexer] Cycle took ${duration}ms`);
-
-        // Wait remaining time to hit 60s cadence
-        const delay = Math.max(0, 60000 - duration);
+        const delay = Math.max(10000, 60000 - duration); // Minimum 10s delay, aim for 60s cycle
+        
         setTimeout(() => startLoop(deps), delay);
 
     } catch (e) {
@@ -37,33 +34,37 @@ async function startLoop(deps) {
 async function updatePrices(deps) {
     const { db } = deps;
 
-    // 1. Fetch Pools Config from DB
-    // (You populate this table when discovering new tokens)
+    // 1. Fetch Pools Config
+    // NOTE: This table MUST be populated by a separate task that resolves Vault addresses.
+    // If this list is empty, the indexer does nothing.
     const pools = await db.all('SELECT * FROM pools');
     
     if (!pools || pools.length === 0) {
-        logger.warn("[Indexer] No pools to track. Waiting for discovery...");
+        // Be verbose about this because it's a common setup error
+        logger.warn("[Indexer] ⚠️  Pools table is empty! No prices will be indexed. Please run a pool discovery task.");
         return;
     }
 
-    // 2. Map Keys
+    // 2. Map Keys for RPC
     const keysToFetch = [];
-    
+    // We map keys back to the pool object for easy lookup later
+    const poolMap = new Map(); 
+
     pools.forEach(p => {
         try {
-            // Validate keys to prevent crash
             if (p.base_vault && p.quote_vault) {
                 keysToFetch.push(new PublicKey(p.base_vault));
                 keysToFetch.push(new PublicKey(p.quote_vault));
+                poolMap.set(p.mint, p);
             }
         } catch (e) {
-            logger.warn(`[Indexer] Invalid keys for ${p.symbol}`);
+            logger.warn(`[Indexer] Invalid keys for ${p.mint}`);
         }
     });
 
     if (keysToFetch.length === 0) return;
 
-    // 3. Batch Fetch (Chunk size 100 for Helius)
+    // 3. Batch Fetch (Chunk size 100)
     const balances = new Map();
     const CHUNK_SIZE = 100;
     
@@ -73,7 +74,6 @@ async function updatePrices(deps) {
             const infos = await connection.getMultipleAccountsInfo(chunk);
             infos.forEach((info, idx) => {
                 if (info) {
-                    // Parse Little Endian u64 from byte 64 (SPL Token Layout)
                     const amount = info.data.readBigUInt64LE(64);
                     balances.set(chunk[idx].toBase58(), Number(amount));
                 }
@@ -83,9 +83,9 @@ async function updatePrices(deps) {
         }
     }
 
-    // 4. Calculate Prices & Prepare Secure Query
+    // 4. Calculate Prices
     const now = Math.floor(Date.now() / 1000);
-    const timeBucket = now - (now % 60); // Align to minute
+    const timeBucket = now - (now % 60); // 1-minute buckets
 
     const queryValues = [];
     const placeholders = [];
@@ -99,29 +99,27 @@ async function updatePrices(deps) {
             const baseVal = baseRaw / (10 ** p.base_decimals);
             const quoteVal = quoteRaw / (10 ** p.quote_decimals);
             
+            // Basic CPMM Price = Quote / Base
             if (baseVal > 0) {
                 const price = quoteVal / baseVal;
 
-                // FIX: Parameterized Query Construction
-                // We add the values to the flat array
-                queryValues.push(p.symbol, timeBucket, price);
+                // Push flatten values
+                queryValues.push(p.mint, timeBucket, price);
                 
-                // Format: ($1, $2, $3, $3, $3, $3) -> (symbol, time, open, high, low, close)
-                // We assume OHLC are same for this snapshot
+                // ($1, $2, $3, $3, $3, $3) = (mint, time, open, high, low, close)
                 placeholders.push(`($${paramIndex}, $${paramIndex+1}, $${paramIndex+2}, $${paramIndex+2}, $${paramIndex+2}, $${paramIndex+2})`);
                 
-                paramIndex += 3; // We used 3 unique values per row
+                paramIndex += 3; 
             }
         }
     });
 
     // 5. Bulk Upsert
     if (placeholders.length > 0) {
-        // We construct one massive query
         const query = `
-            INSERT INTO candles (symbol, time, open, high, low, close)
+            INSERT INTO candles (mint, time, open, high, low, close)
             VALUES ${placeholders.join(', ')}
-            ON CONFLICT (symbol, time) DO UPDATE SET
+            ON CONFLICT (mint, time) DO UPDATE SET
                 high = GREATEST(candles.high, EXCLUDED.high),
                 low = LEAST(candles.low, EXCLUDED.low),
                 close = EXCLUDED.close;
@@ -129,7 +127,7 @@ async function updatePrices(deps) {
 
         try {
             await db.run(query, queryValues);
-            logger.info(`[Indexer] Saved ${placeholders.length} prices to DB.`);
+            logger.info(`[Indexer] Updated candles for ${placeholders.length} pools.`);
         } catch (err) {
             logger.error(`[Indexer] DB Write Failed: ${err.message}`);
         }
@@ -137,7 +135,6 @@ async function updatePrices(deps) {
 }
 
 function start(deps) {
-    // Initial delay to let DB connect
     setTimeout(() => startLoop(deps), 5000);
 }
 

@@ -1,22 +1,17 @@
 /**
  * Token Routes
  * Platform: PostgreSQL
- * Optimization: Added History Endpoint for Custom Charts
+ * Updated: History endpoint uses MINT instead of SYMBOL
  */
 const express = require('express');
 const axios = require('axios');
-const { Connection, PublicKey } = require('@solana/web3.js');
 const { isValidPubkey } = require('../utils/solana');
-const { smartCache, saveTokenData } = require('../services/database');
+const { smartCache } = require('../services/database');
 const { getClient } = require('../services/redis'); 
 const config = require('../config/env');
-const kScoreUpdater = require('../tasks/kScoreUpdater'); 
-const { syncTokenData } = require('../tasks/metadataUpdater'); 
 
 const router = express.Router();
-const solanaConnection = new Connection(config.SOLANA_RPC_URL, 'confirmed');
 
-// --- HELPER: GLOBAL RATE LIMITER ---
 async function checkExternalRateLimit() {
     try {
         const redis = getClient();
@@ -35,37 +30,27 @@ async function checkExternalRateLimit() {
     }
 }
 
-const requireAdmin = (req, res, next) => {
-    const authHeader = req.headers['x-admin-auth'];
-    if (!authHeader || authHeader !== config.ADMIN_PASSWORD) {
-        return res.status(403).json({ success: false, error: 'Unauthorized' });
-    }
-    next();
-};
-
 function init(deps) {
     const { db } = deps;
 
-    // --- NEW: HISTORY ENDPOINT FOR CHART ---
-    // Fetches OHLC candles from our local Postgres
-    router.get('/history/:symbol', async (req, res) => {
-        const { symbol } = req.params;
+    // --- HISTORY ENDPOINT (UPDATED) ---
+    // Fetches OHLC candles by MINT
+    router.get('/history/:mint', async (req, res) => {
+        const { mint } = req.params;
         
-        // Cache this response for 30s to save DB load
-        res.set('Cache-Control', 'public, max-age=30');
+        // Cache this response for 10s
+        res.set('Cache-Control', 'public, max-age=10');
 
         try {
             // Get last 2000 candles
             const candles = await db.all(`
                 SELECT time, open, high, low, close 
                 FROM candles 
-                WHERE symbol = $1 
+                WHERE mint = $1 
                 ORDER BY time ASC 
                 LIMIT 2000
-            `, [symbol]);
+            `, [mint]);
 
-            // If empty, user might be requesting by Mint address but we indexed by 'SOL' symbol
-            // For now, we return empty list if not found.
             res.json(candles || []);
         } catch (e) {
             console.error("History Error:", e);
@@ -73,7 +58,7 @@ function init(deps) {
         }
     });
 
-    // --- SEARCH / TOKENS LIST (OPTIMIZED) ---
+    // --- SEARCH / TOKENS LIST ---
     router.get('/tokens', async (req, res) => {
         const { sort = 'newest', limit = 100, page = 1, search = '', filter = '' } = req.query;
         const limitVal = Math.min(parseInt(limit) || 100, 100);
@@ -113,20 +98,18 @@ function init(deps) {
                     rows = await db.all(query);
                 }
 
-                // External Search Logic (Simplified for brevity)
+                // External Search Fallback
                 const isTooShort = searchTerm.length < 3;
                 if (searchTerm.length > 0 && !isTooShort && await checkExternalRateLimit()) {
                     try {
                         const extKey = `ext:${searchTerm}`;
                         const extTokens = await smartCache(extKey, 300, async () => {
-                             // Only search generic if no result locally
                              if(rows.length > 0) return [];
                              const d = await axios.get(`https://api.dexscreener.com/latest/dex/search?q=${searchTerm}`);
                              return d.data?.pairs || [];
                         });
                         
                         if(extTokens && extTokens.length) {
-                             // Simplified merging logic
                              const found = extTokens.filter(p => p.chainId === 'solana')[0];
                              if(found && !rows.find(r => r.mint === found.baseToken.address)) {
                                  rows.push({
@@ -163,7 +146,7 @@ function init(deps) {
             const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
             let tokenData = token || { mint, name: 'Unknown', ticker: 'Unknown' };
             
-            // Note: We still fetch pairs info for Metadata, but chart data now comes from /history
+            // Still fetch pairs for metadata purposes if needed
             try {
                 const dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, { timeout: 3000 });
                 if (dexRes.data?.pairs) {
