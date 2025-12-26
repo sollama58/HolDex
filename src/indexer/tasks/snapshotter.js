@@ -6,85 +6,109 @@ const logger = require('../../services/logger');
 async function runSnapshotCycle() {
     const db = getDB();
     const connection = getConnection();
-
-    // 1. Get Active Pools (Limit 100 for batch 1)
-    const pools = await db.all("SELECT pool_address, mint, dex FROM active_trackers LIMIT 100");
-    if (pools.length === 0) return;
-
-    logger.info(`📸 Snapshot: Updating ${pools.length} active pools...`);
-
-    const poolKeys = pools.map(p => new PublicKey(p.pool_address));
-
-    // 2. Fetch All Accounts efficiently
-    const accounts = await connection.getMultipleAccountsInfo(poolKeys);
-
-    // Round to nearest minute for clean charting
+    const BATCH_SIZE = 100;
+    
+    // Timestamp for this entire cycle (aligned to minute)
     const timestamp = Math.floor(Date.now() / 60000) * 60000;
+    
+    logger.info(`📸 Snapshot Cycle Starting [${new Date(timestamp).toISOString()}]`);
 
-    for (let i = 0; i < pools.length; i++) {
-        const pool = pools[i];
-        const account = accounts[i];
-        
-        if (!account) continue;
+    let offset = 0;
+    let processed = 0;
+    let keepFetching = true;
 
-        let price = 0;
-
+    while (keepFetching) {
         try {
-            if (pool.dex === 'pump') {
-                const data = account.data;
-                // Pump.fun Curve Layout: 8 (disc) + 8 (vToken) + 8 (vSol) + 8 (rToken) + 8 (rSol)
-                const virtualTokenReserves = data.readBigUInt64LE(8);
-                const virtualSolReserves = data.readBigUInt64LE(16);
+            // 1. Fetch Batch using Pagination
+            // We order by priority first to ensure trending tokens get updated first in the cycle
+            const pools = await db.all(`
+                SELECT pool_address, mint, dex 
+                FROM active_trackers 
+                ORDER BY priority DESC, pool_address ASC 
+                LIMIT ${BATCH_SIZE} OFFSET ${offset}
+            `);
+
+            if (pools.length === 0) {
+                keepFetching = false;
+                break;
+            }
+
+            const poolKeys = pools.map(p => new PublicKey(p.pool_address));
+
+            // 2. RPC Call (Batch of 100 max)
+            // Note: Helius/Solana limits getMultipleAccounts to 100 keys
+            const accounts = await connection.getMultipleAccountsInfo(poolKeys);
+
+            // 3. Process Accounts
+            const updates = [];
+            
+            for (let i = 0; i < pools.length; i++) {
+                const pool = pools[i];
+                const account = accounts[i];
                 
-                // Price in SOL
-                if (Number(virtualTokenReserves) > 0) {
-                    price = Number(virtualSolReserves) / Number(virtualTokenReserves);
+                if (!account) continue;
+
+                let price = 0;
+
+                try {
+                    if (pool.dex === 'pump') {
+                        const data = account.data;
+                        // Pump.fun Curve Layout: 8 (disc) + 8 (vToken) + 8 (vSol)
+                        // Read BigUInt64LE
+                        const virtualTokenReserves = data.readBigUInt64LE(8);
+                        const virtualSolReserves = data.readBigUInt64LE(16);
+                        
+                        if (Number(virtualTokenReserves) > 0) {
+                            price = Number(virtualSolReserves) / Number(virtualTokenReserves);
+                        }
+                    }
+
+                    if (price > 0) {
+                        // Optimistic Snapshot: 
+                        // We assume "close" is the current price. 
+                        // The aggregation logic (in routes) will determine Open/High/Low from these 1m snapshots.
+                        updates.push(db.run(`
+                            INSERT INTO candles_1m (pool_address, timestamp, open, high, low, close, volume)
+                            VALUES ($1, $2, $3, $3, $3, $3, 0)
+                            ON CONFLICT(pool_address, timestamp) 
+                            DO UPDATE SET close = $3, high = GREATEST(candles_1m.high, $3), low = LEAST(candles_1m.low, $3)
+                        `, [pool.pool_address, timestamp, price]));
+                    }
+                } catch (err) {
+                    // Fail silently for individual pool errors to not block batch
                 }
             }
 
-            if (price > 0) {
-                // Get previous close to determine 'Open' for this minute
-                const prev = await db.get(
-                    `SELECT close FROM candles_1m WHERE pool_address = $1 ORDER BY timestamp DESC LIMIT 1`, 
-                    [pool.pool_address]
-                );
-                
-                // If no previous candle, Open = Current Price. Else Open = Prev Close.
-                const open = prev ? prev.close : price;
+            // Execute batch writes in parallel
+            await Promise.all(updates);
+            
+            processed += pools.length;
+            offset += BATCH_SIZE;
 
-                // For a 1-minute snapshot, High/Low are approximate to the Open/Close range
-                // In Phase 2, we would listen to every trade to get true High/Low
-                await db.run(`
-                    INSERT INTO candles_1m (pool_address, timestamp, open, high, low, close)
-                    VALUES ($1, $2, $3, $4, $5, $6)
-                    ON CONFLICT(pool_address, timestamp) 
-                    DO UPDATE SET close = excluded.close, high = GREATEST(candles_1m.high, excluded.close), low = LEAST(candles_1m.low, excluded.close)
-                `, [
-                    pool.pool_address, 
-                    timestamp, 
-                    open, 
-                    Math.max(open, price), 
-                    Math.min(open, price), 
-                    price
-                ]);
-            }
+            // Rate limit protection: Sleep 100ms between batches to be nice to RPC
+            await new Promise(r => setTimeout(r, 100));
+
         } catch (err) {
-            logger.error(`Error snapshotting pool ${pool.pool_address}: ${err.message}`);
+            logger.error(`Snapshot Batch Error (Offset ${offset}): ${err.message}`);
+            // Break loop on fatal DB/RPC error to prevent infinite loops, but allows retry next minute
+            keepFetching = false; 
         }
     }
+    
+    logger.info(`📸 Snapshot Cycle Complete. Processed ${processed} pools.`);
 }
 
 function startSnapshotter() {
-    // Align with the clock (run at :00 seconds)
     const now = new Date();
+    // Align with the clock (run at :00 seconds)
     const delay = 60000 - (now.getSeconds() * 1000 + now.getMilliseconds());
     
+    logger.info(`📸 Snapshot Engine scheduling first run in ${delay}ms`);
+
     setTimeout(() => {
         runSnapshotCycle();
         setInterval(runSnapshotCycle, 60000);
     }, delay);
-    
-    logger.info("📸 Snapshot Engine Started (60s Interval)");
 }
 
 module.exports = { startSnapshotter };
