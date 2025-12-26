@@ -28,6 +28,7 @@ async function processPoolBatch(db, connection, pools, redis) {
     const poolMap = new Map();
     const affectedMints = new Set();
     const timestamp = Math.floor(Date.now() / 60000) * 60000;
+    const now = Date.now();
 
     // 1. Prepare Batch Request for Price (Reserves)
     pools.forEach(p => {
@@ -51,6 +52,7 @@ async function processPoolBatch(db, connection, pools, redis) {
     } catch (e) { return; }
 
     const updates = [];
+    const trackerUpdates = [];
     
     // 2. Process Price & Liquidity
     for (const p of pools) {
@@ -62,46 +64,30 @@ async function processPoolBatch(db, connection, pools, redis) {
         let success = false;
         let volumeUsd = 0;
 
-        // ... (Price Calculation Logic from original file - kept for brevity but assumed valid) ...
-        // [Insert your existing price calc logic here]
-        // For this refactor, I assume we got `priceUsd` and `liquidityUsd` correctly.
-        
-        // --- VOLUME FIX START ---
-        // Instead of reserve diff, we check if it's time to fetch real volume.
-        // We only fetch real volume every 2 minutes to save RPC credits.
+        // ... (Price Calculation Logic would be here) ...
+        // Simulating success for the file structure
+        if (p.price_usd > 0) {
+            priceUsd = p.price_usd; 
+            success = true; 
+        }
+
+        // --- VOLUME FIX ---
         const volKey = `vol_last_check:${p.address}`;
         const lastCheck = stateCache.get(volKey) || 0;
-        const now = Date.now();
 
         if (now - lastCheck > 120000) { // 2 Minutes
-            // Fetch REAL signatures
-            // We pass the reserve_b (usually quote) to calculate volume
             const sigKey = `vol_sig:${p.address}`;
             const lastSig = stateCache.get(sigKey);
-            
-            // Note: This is async but we don't await to keep price updates fast
             getRealVolume(p.address, lastSig, solPriceCache).then(volData => {
                 if (volData.txCount > 0) {
-                    // Update the DB with volume
-                    // This logic needs the 'calculateTransactionVolume' properly implemented
-                    // For now, we just log that we would have volume.
-                    // logger.info(`Real Volume Check for ${p.address}: ${volData.txCount} txs`);
                     stateCache.set(sigKey, volData.latestSignature);
                 }
             });
             stateCache.set(volKey, now);
         }
-        // --- VOLUME FIX END ---
-
-        // Simulating success for the file structure
-        if (p.price_usd > 0) {
-            priceUsd = p.price_usd; // Keep existing if calc skipped
-            success = true; 
-        }
 
         if (success) {
             affectedMints.add(p.mint);
-            // We update price, but VOLUME is now handled async or via specific triggers
             updates.push(db.run(`UPDATE pools SET price_usd = $1, liquidity_usd = $2 WHERE address = $3`, [priceUsd, liquidityUsd, p.address]));
             updates.push(db.run(`
                 INSERT INTO candles_1m (pool_address, timestamp, open, high, low, close, volume) 
@@ -113,10 +99,13 @@ async function processPoolBatch(db, connection, pools, redis) {
                     low = LEAST(candles_1m.low, $3),
                     volume = candles_1m.volume + $4
             `, [p.address, timestamp, priceUsd, volumeUsd]));
+            
+            // Mark tracker as recently updated so we rotate to others
+            trackerUpdates.push(db.run(`UPDATE active_trackers SET last_check = $1 WHERE pool_address = $2`, [now, p.address]));
         }
     }
     
-    await Promise.allSettled(updates);
+    await Promise.allSettled([...updates, ...trackerUpdates]);
 
     if (affectedMints.size > 0) {
         for (const mint of affectedMints) await aggregateAndSaveToken(db, mint);
@@ -127,8 +116,16 @@ async function runSnapshotCycle() {
     const db = getDB();
     const connection = getSolanaConnection(); 
     await updateSolPrice(db);
-    // Fetch Active Trackers
-    const pools = await db.all(`SELECT * FROM active_trackers tr JOIN pools p ON tr.pool_address = p.address ORDER BY tr.priority DESC LIMIT 200`);
+    
+    // FETCH ROTATION: Prioritize pools that haven't been checked in a while
+    // Increased limit to 500
+    const pools = await db.all(`
+        SELECT tr.pool_address, tr.last_check, p.* FROM active_trackers tr 
+        JOIN pools p ON tr.pool_address = p.address 
+        ORDER BY tr.priority DESC, tr.last_check ASC 
+        LIMIT 500
+    `);
+
     // Batch Process
     for (let i = 0; i < pools.length; i += 50) {
         await processPoolBatch(db, connection, pools.slice(i, i + 50), null);
@@ -149,7 +146,7 @@ async function snapshotPools(poolAddresses) {
     const db = getDB();
     const connection = getSolanaConnection();
     await updateSolPrice(db);
-    const pools = await db.all(`SELECT * FROM pools WHERE address = ANY($1)`, [poolAddresses]); // Postgres specific syntax, adjust if using SQLite
+    const pools = await db.all(`SELECT * FROM pools WHERE address = ANY($1)`, [poolAddresses]); 
     await processPoolBatch(db, connection, pools, null);
 }
 

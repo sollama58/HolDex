@@ -98,12 +98,10 @@ async function findPumpFunCurve(mintAddress, results) {
 }
 
 /**
- * STRATEGY 3: Raydium V4 GPA (Fallback)
- * Only runs if GeckoTerminal fails to find anything.
+ * STRATEGY 3: Raydium V4 GPA (Fallback & Enricher)
+ * Only runs if GeckoTerminal fails to find anything OR to enrich missing reserves.
  */
 async function findRaydiumV4Pools(mintAddress, results) {
-    if (results.length > 0) return;
-
     try {
         const mintB58 = new PublicKey(mintAddress).toBuffer();
         const filtersBase = [{ dataSize: 752 }, { memcmp: { offset: 400, bytes: mintB58 } }];
@@ -117,21 +115,33 @@ async function findRaydiumV4Pools(mintAddress, results) {
         ]);
 
         const process = (acc) => {
+            const pairAddress = acc.pubkey.toBase58();
             const d = acc.account.data;
+            const reserveA = new PublicKey(d.subarray(SLICE_OFF_BASE_VAULT, SLICE_OFF_BASE_VAULT + 32)).toBase58();
+            const reserveB = new PublicKey(d.subarray(SLICE_OFF_QUOTE_VAULT, SLICE_OFF_QUOTE_VAULT + 32)).toBase58();
+
+            // CHECK: Do we already have this pool from GeckoTerminal?
+            const existing = results.find(r => r.pairAddress === pairAddress);
+            if (existing) {
+                // ENRICH: Add the vault addresses if missing so Snapshotter can work
+                if (!existing.reserve_a) existing.reserve_a = reserveA;
+                if (!existing.reserve_b) existing.reserve_b = reserveB;
+                return;
+            }
+
             const bMint = new PublicKey(d.subarray(SLICE_OFF_BASE_MINT, SLICE_OFF_BASE_MINT + 32)).toBase58();
             const qMint = new PublicKey(d.subarray(SLICE_OFF_QUOTE_MINT, SLICE_OFF_QUOTE_MINT + 32)).toBase58();
             
             if (!bMint || !qMint) return;
-            if (results.find(r => r.pairAddress === acc.pubkey.toBase58())) return;
 
             results.push({
-                pairAddress: acc.pubkey.toBase58(),
+                pairAddress: pairAddress,
                 dexId: 'raydium',
                 type: 'v4',
                 baseToken: { address: bMint },
                 quoteToken: { address: qMint },
-                reserve_a: new PublicKey(d.subarray(SLICE_OFF_BASE_VAULT, SLICE_OFF_BASE_VAULT + 32)).toBase58(),
-                reserve_b: new PublicKey(d.subarray(SLICE_OFF_QUOTE_VAULT, SLICE_OFF_QUOTE_VAULT + 32)).toBase58(),
+                reserve_a: reserveA,
+                reserve_b: reserveB,
                 liquidity: { usd: 0 },
                 volume: { h24: 0 },
                 priceUsd: 0
@@ -161,10 +171,10 @@ async function findPoolsOnChain(mintAddress) {
     // 2. Check Pump.fun On-Chain (Critical for new launches)
     await findPumpFunCurve(mintAddress, pools);
 
-    // 3. Fallback to Raydium Scan (If Gecko is slow/down)
-    if (pools.length === 0) {
-        await findRaydiumV4Pools(mintAddress, pools);
-    }
+    // 3. ALWAYS Run Raydium Scan
+    // This ensures we get the "Reserve/Vault" addresses that GeckoTerminal usually misses.
+    // Without Reserves, the Snapshotter cannot index candles.
+    await findRaydiumV4Pools(mintAddress, pools);
 
     if (pools.length > 0) {
         logger.info(`🔍 Discovery: Found ${pools.length} pools for ${mintAddress}`);
