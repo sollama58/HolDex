@@ -16,26 +16,19 @@ async function processToken(mint) {
     logger.info(`⚙️ Worker: Processing ${mint}...`);
 
     try {
-        // 1. Fetch Metadata (Off-chain)
         const meta = await fetchTokenMetadata(mint);
         
-        // 2. Fetch Supply (On-chain)
         let supply = '1000000000';
         let decimals = 9;
         try {
             const supplyInfo = await connection.getTokenSupply(new PublicKey(mint));
             supply = supplyInfo.value.amount;
             decimals = supplyInfo.value.decimals;
-        } catch (e) {
-            logger.warn(`Failed to fetch supply for ${mint}: ${e.message}`);
-        }
+        } catch (e) {}
 
-        // 3. Find Pools (On-chain & API)
         const pools = await findPoolsOnChain(mint);
 
-        // 4. Index Pools
         for (const pool of pools) {
-            // enableIndexing now handles token extraction robustly (object vs string)
             await enableIndexing(db, mint, {
                 pairAddress: pool.pairAddress,
                 dexId: pool.dexId,
@@ -49,14 +42,12 @@ async function processToken(mint) {
             });
         }
 
-        // 5. Update Token Record
         const baseData = {
             name: meta?.name || 'Unknown',
             ticker: meta?.symbol || 'UNKNOWN',
             image: meta?.image || null,
         };
 
-        // Fallback checks for critical fields
         const finalSupply = supply || '0';
         const finalDecimals = decimals || 9;
 
@@ -79,7 +70,6 @@ async function processToken(mint) {
             Date.now()
         ]);
 
-        // 6. Aggregate Stats
         await aggregateAndSaveToken(db, mint);
         logger.info(`✅ Worker: Finished ${mint}`);
 
@@ -90,41 +80,41 @@ async function processToken(mint) {
 
 async function startWorker() {
     try {
-        logger.info("🛠️ Worker: Starting...");
-        
-        // Initialize services
+        // initDB and connectRedis are handled by index.js if running in same process,
+        // but explicit init here is safe (idempotent)
         await initDB();
         await connectRedis();
         
         const redis = getClient();
         if (!redis) {
-            throw new Error("Redis client failed to initialize.");
+            // If redis fails, worker just acts dead, preventing crash loop of main process if imported
+            logger.warn("⚠️ Worker: Redis not available. Worker disabled.");
+            return;
         }
 
-        logger.info("🛠️ Worker: Services Ready. Waiting for jobs...");
+        logger.info("🛠️ Worker: Listening for jobs...");
 
-        // Job Loop
-        while (true) {
+        // Job Loop - Non-blocking
+        const runLoop = async () => {
             try {
-                // RPOP is non-blocking in ioredis, so we poll
                 const item = await redis.rpop(QUEUE_KEY);
-                
                 if (item) {
                     await processToken(item);
+                    setTimeout(runLoop, 100); // Fast next job
                 } else {
-                    // Sleep 2 seconds if queue empty
-                    await new Promise(r => setTimeout(r, 2000));
+                    setTimeout(runLoop, 2000); // Sleep if empty
                 }
             } catch (err) {
                 logger.error(`Worker Loop Error: ${err.message}`);
-                await new Promise(r => setTimeout(r, 5000));
+                setTimeout(runLoop, 5000);
             }
-        }
+        };
+        
+        runLoop();
 
     } catch (e) {
         logger.error(`Worker Fatal Error: ${e.message}`);
-        process.exit(1);
     }
 }
 
-startWorker();
+module.exports = { startWorker };

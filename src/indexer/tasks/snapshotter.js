@@ -26,13 +26,10 @@ async function processPoolBatch(db, connection, pools, redis) {
     const timestamp = Math.floor(Date.now() / 60000) * 60000;
     const now = Date.now();
     
-    // --- SELF-HEAL: Check for missing reserves ---
+    // --- SELF-HEAL ---
     const poolsNeedingReserves = pools.filter(p => p.dex !== 'pumpfun' && (!p.reserve_a || !p.reserve_b));
     if (poolsNeedingReserves.length > 0) {
-        // logger.info(`🩹 Self-Healing: Fetching reserves for ${poolsNeedingReserves.length} pools...`);
         await enrichPoolsWithReserves(poolsNeedingReserves);
-        
-        // Save enriched reserves to DB so next time is faster
         const fixPromises = poolsNeedingReserves.map(p => {
             if (p.reserve_a && p.reserve_b) {
                 return db.query(`UPDATE pools SET reserve_a = $1, reserve_b = $2 WHERE address = $3`, [p.reserve_a, p.reserve_b, p.address]);
@@ -40,7 +37,6 @@ async function processPoolBatch(db, connection, pools, redis) {
         });
         await Promise.allSettled(fixPromises);
     }
-    // ---------------------------------------------
 
     const keysToFetch = [];
     const poolMap = new Map();
@@ -61,10 +57,7 @@ async function processPoolBatch(db, connection, pools, redis) {
     });
 
     if (keysToFetch.length === 0) {
-        // Mark checked to allow rotation even if broken
-        for (const p of pools) {
-            await db.query(`UPDATE active_trackers SET last_check = $1 WHERE pool_address = $2`, [now, p.address]);
-        }
+        for (const p of pools) await db.query(`UPDATE active_trackers SET last_check = $1 WHERE pool_address = $2`, [now, p.address]);
         return;
     }
 
@@ -72,7 +65,8 @@ async function processPoolBatch(db, connection, pools, redis) {
     try { 
         accounts = await retryRPC((conn) => conn.getMultipleAccountsInfo(keysToFetch));
     } catch (e) {
-        // Failed RPC, skip but don't crash
+        // Log failure
+        logger.warn(`Batch RPC Failed for ${pools.length} pools: ${e.message}`);
         return;
     }
 
@@ -80,7 +74,6 @@ async function processPoolBatch(db, connection, pools, redis) {
     const trackerUpdates = [];
     
     for (const p of pools) {
-        // Always rotate
         trackerUpdates.push(db.query(`UPDATE active_trackers SET last_check = $1 WHERE pool_address = $2`, [now, p.address]));
 
         const task = poolMap.get(p.address);
@@ -109,23 +102,14 @@ async function processPoolBatch(db, connection, pools, redis) {
                 if (task.type === 'pumpfun') {
                     reserveA = Number(accB.data.readBigUInt64LE(8)); 
                     reserveB = Number(accB.data.readBigUInt64LE(16)); 
-                    decA = 6;
-                    decB = 9;
+                    decA = 6; decB = 9;
                 } else {
                     reserveA = readAmount(accA.data);
                     reserveB = readAmount(accB.data);
-                    
                     const isBQuote = QUOTE_TOKENS[p.token_b];
                     const isAQuote = QUOTE_TOKENS[p.token_a];
-                    
-                    if (isBQuote) {
-                        decB = isBQuote.decimals;
-                        // Use default 6 for unknown token base
-                        decA = 6; 
-                    } else if (isAQuote) {
-                        decA = isAQuote.decimals;
-                        decB = 6;
-                    }
+                    if (isBQuote) { decB = isBQuote.decimals; decA = 6; } 
+                    else if (isAQuote) { decA = isAQuote.decimals; decB = 6; }
                 }
 
                 if (reserveA > 0 && reserveB > 0) {
@@ -135,29 +119,25 @@ async function processPoolBatch(db, connection, pools, redis) {
                     
                     let quotePrice = 0;
                     if (QUOTE_TOKENS[p.token_b] || p.token_b === 'So11111111111111111111111111111111111111112') {
-                        if (p.token_b.includes('So111')) quotePrice = solPriceCache;
-                        else quotePrice = 1;
+                        if (p.token_b.includes('So111')) quotePrice = solPriceCache; else quotePrice = 1;
                         priceUsd = priceInB * quotePrice;
                         liquidityUsd = rawB * quotePrice * 2; 
                     } else if (QUOTE_TOKENS[p.token_a]) {
-                        if (p.token_a.includes('So111')) quotePrice = solPriceCache;
-                        else quotePrice = 1;
+                        if (p.token_a.includes('So111')) quotePrice = solPriceCache; else quotePrice = 1;
                         priceUsd = (1 / priceInB) * quotePrice;
                         liquidityUsd = rawA * quotePrice * 2;
                     }
 
                     if (priceUsd > 0) {
                         success = true;
-                        // Log significant updates occasionally to verify liveness
-                        if (Math.random() < 0.05) { 
-                            logger.info(`💧 Price Update: ${p.mint} -> $${priceUsd.toFixed(6)}`);
-                        }
+                        // Log a sample update to confirm math is working
+                        // logger.debug(`Updated ${p.address}: $${priceUsd.toFixed(6)}`);
                     }
                 }
             } catch (err) {}
         }
 
-        // Volume Check (Async)
+        // Volume
         const volKey = `vol_last_check:${p.address}`;
         const lastCheck = stateCache.get(volKey) || 0;
         if (now - lastCheck > 120000) { 
@@ -198,7 +178,6 @@ async function runSnapshotCycle() {
         const connection = getSolanaConnection(); 
         await updateSolPrice(db);
         
-        // Fetch pools, prioritizing those not recently checked
         const res = await db.query(`
             SELECT tr.pool_address, tr.last_check, p.* FROM active_trackers tr 
             JOIN pools p ON tr.pool_address = p.address 
@@ -206,6 +185,9 @@ async function runSnapshotCycle() {
             LIMIT 200
         `);
         const pools = res.rows;
+
+        // HEARTBEAT LOG
+        logger.info(`⏱️ Snapshotter: Checking ${pools.length} pools (Cache: $${solPriceCache.toFixed(2)})`);
 
         for (let i = 0; i < pools.length; i += 50) {
             await processPoolBatch(db, connection, pools.slice(i, i + 50), null);

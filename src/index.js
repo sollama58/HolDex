@@ -7,7 +7,9 @@ const config = require('./config/env');
 const logger = require('./services/logger');
 const { initDB, getDB } = require('./services/database');
 const { connectRedis } = require('./services/redis');
-const { startSnapshotter } = require('./indexer/tasks/snapshotter'); // Import Snapshotter
+const { startSnapshotter } = require('./indexer/tasks/snapshotter'); 
+const { startWorker } = require('./worker'); // Import Worker
+const { startNewTokenListener } = require('./tasks/newTokenListener'); // Import Listener
 const tokensRoutes = require('./routes/tokens');
 
 const app = express();
@@ -67,8 +69,16 @@ async function startServer() {
         // 2. Initialize Redis
         await connectRedis();
 
-        // 3. Start Background Tasks (The Snapshotter)
+        // 3. Start Background Services
+        // Snapshotter: Updates prices for tracked tokens
         startSnapshotter();
+        
+        // Worker: Processes metadata/heavy tasks from queue
+        // Note: We run this in the same process for simplicity in this environment
+        startWorker().catch(e => logger.error(`Worker Start Error: ${e.message}`));
+
+        // Listener: Listens for new Raydium/PumpFun pools on-chain
+        startNewTokenListener().catch(e => logger.error(`Listener Start Error: ${e.message}`));
 
         // 4. Initialize Routes
         app.use('/api', tokensRoutes.init({ db: getDB() }));
