@@ -16,7 +16,7 @@ async function finalReset() {
     await new Promise(r => setTimeout(r, 3000));
 
     try {
-        // 1. DROP EVERYTHING
+        // 1. DROP EVERYTHING (Reverse Order of Dependencies)
         console.log("🔥 Dropping old tables...");
         await pool.query(`DROP TABLE IF EXISTS k_scores CASCADE;`);
         await pool.query(`DROP TABLE IF EXISTS token_updates CASCADE;`);
@@ -33,7 +33,7 @@ async function finalReset() {
                 symbol TEXT,
                 name TEXT,
                 image TEXT,
-                decimals INTEGER,
+                decimals INTEGER DEFAULT 6,
                 supply TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -47,6 +47,7 @@ async function finalReset() {
                 change1h DOUBLE PRECISION DEFAULT 0,
                 change5m DOUBLE PRECISION DEFAULT 0,
                 priceUsd DOUBLE PRECISION DEFAULT 0,
+                liquidity DOUBLE PRECISION DEFAULT 0, -- CRITICAL: For sorting/filtering
                 
                 hasCommunityUpdate BOOLEAN DEFAULT FALSE,
                 timestamp BIGINT DEFAULT 0
@@ -74,7 +75,7 @@ async function finalReset() {
                 reserve_b TEXT
             );
         `);
-        // Remove restrictive constraints if any auto-created (though PRIMARY KEY address prevents duplicates)
+        // Note: No unique constraint on (mint, dex) to allow multiple Raydium pools for one token
         
         // 4. CREATE CANDLES
         console.log("🏗️  Creating 'candles_1m' table...");
@@ -128,13 +129,17 @@ async function finalReset() {
 
         // 6. INDEXES
         console.log("⚡ Applying Indexes...");
+        // API Sorting Indexes
         await pool.query(`CREATE INDEX idx_tokens_kscore ON tokens(k_score DESC);`);
         await pool.query(`CREATE INDEX idx_tokens_mcap ON tokens(marketCap DESC);`);
         await pool.query(`CREATE INDEX idx_tokens_volume ON tokens(volume24h DESC);`);
         await pool.query(`CREATE INDEX idx_tokens_timestamp ON tokens(timestamp DESC);`);
+        await pool.query(`CREATE INDEX idx_tokens_liquidity ON tokens(liquidity DESC);`);
+        
+        // Lookup Indexes
+        await pool.query(`CREATE INDEX idx_pools_mint ON pools(mint);`); // Faster joins
+        await pool.query(`CREATE INDEX idx_pools_liquidity ON pools(liquidity_usd DESC);`); // For "Best Pool" logic
         await pool.query(`CREATE INDEX idx_candles_pool_time ON candles_1m(pool_address, timestamp DESC);`);
-        // Crucial for finding "Best Pool"
-        await pool.query(`CREATE INDEX idx_pools_mint_liquidity ON pools(mint, liquidity_usd DESC);`);
 
         console.log("-------------------------------------");
         console.log("✅ SUCCESS. Database is ready for production.");
@@ -142,6 +147,7 @@ async function finalReset() {
 
     } catch (error) {
         console.error("❌ Init Failed:", error.message);
+        process.exit(1);
     } finally {
         await pool.end();
     }

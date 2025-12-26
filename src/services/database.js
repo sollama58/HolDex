@@ -147,7 +147,7 @@ const saveTokenData = async (db, mint, data, timestamp) => {
           symbol = EXCLUDED.symbol,
           image = COALESCE(EXCLUDED.image, tokens.image),
           marketCap = EXCLUDED.marketCap,
-          volume24h = EXCLUDED.volume24h,
+          volume24h = EXCLUDED.volume_24h, -- Ensure this matches your DB column name
           priceUsd = EXCLUDED.priceUsd,
           change1h = EXCLUDED.change1h,
           change24h = EXCLUDED.change24h,
