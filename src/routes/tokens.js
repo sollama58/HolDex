@@ -1,4 +1,5 @@
 const express = require('express');
+const axios = require('axios');
 const { PublicKey } = require('@solana/web3.js');
 const { isValidPubkey } = require('../utils/solana');
 const { smartCache, enableIndexing, aggregateAndSaveToken } = require('../services/database'); 
@@ -26,6 +27,44 @@ const requireAdmin = (req, res, next) => {
 
 function init(deps) {
     const { db } = deps;
+
+    // --- HELPER: FALLBACK CHART DATA ---
+    async function fetchExternalCandles(poolAddress, resolution) {
+        try {
+            // Map our resolution to GeckoTerminal timeframe
+            // Input: '5', '15', '60', '240', 'D'
+            // GT: day, hour, minute. aggregate=minutes
+            
+            let timeframe = 'minute';
+            let aggregate = 1;
+            
+            if (resolution === '5') aggregate = 5;
+            else if (resolution === '15') aggregate = 15;
+            else if (resolution === '60') { timeframe = 'hour'; aggregate = 1; }
+            else if (resolution === '240') { timeframe = 'hour'; aggregate = 4; }
+            else if (resolution === 'D') { timeframe = 'day'; aggregate = 1; }
+
+            const url = `https://api.geckoterminal.com/api/v2/networks/solana/pools/${poolAddress}/ohlcv/${timeframe}?aggregate=${aggregate}&limit=100`;
+            
+            // logger.info(`Using External Chart Data: ${url}`);
+            
+            const response = await axios.get(url, { timeout: 5000 });
+            const data = response.data.data.attributes.ohlcv_list;
+            
+            // Format [time, open, high, low, close, volume] to { time, open, high, low, close }
+            return data.map(c => ({
+                time: c[0],
+                open: c[1],
+                high: c[2],
+                low: c[3],
+                close: c[4],
+                volume: c[5]
+            })).reverse(); // GT returns newest first usually, we sort by time in frontend anyway
+        } catch (e) {
+            // logger.warn(`External Candle Fetch Failed: ${e.message}`);
+            return [];
+        }
+    }
 
     async function verifyPayment(signature, payerPubkey) {
         if (!signature) throw new Error("Payment signature required");
@@ -106,14 +145,13 @@ function init(deps) {
         const { resolution = '5', from, to, poolAddress } = req.query; 
         
         try {
-            const resMinutes = parseInt(resolution);
+            const resMinutes = parseInt(resolution === 'D' ? 1440 : resolution);
             const resMs = resMinutes * 60 * 1000;
-            const fromMs = parseInt(from) * 1000 || (Date.now() - 24 * 60 * 60 * 1000);
-            const toMs = parseInt(to) * 1000 || Date.now();
             
-            const cacheKey = `chart:${mint}:${poolAddress || 'best'}:${resolution}:${Math.floor(Date.now() / 30000)}`; 
+            // Cache shortened to 10 seconds to allow faster refresh
+            const cacheKey = `chart:${mint}:${poolAddress || 'best'}:${resolution}:${Math.floor(Date.now() / 10000)}`; 
 
-            const result = await smartCache(cacheKey, 30, async () => {
+            const result = await smartCache(cacheKey, 10, async () => {
                 let targetPoolAddress = poolAddress;
 
                 if (!targetPoolAddress) {
@@ -122,6 +160,10 @@ function init(deps) {
                     targetPoolAddress = bestPool.address;
                 }
 
+                const fromMs = parseInt(from) * 1000 || (Date.now() - 24 * 60 * 60 * 1000);
+                const toMs = parseInt(to) * 1000 || Date.now();
+
+                // 1. Try Internal DB First
                 const rows = await db.all(`
                     SELECT timestamp, open, high, low, close, volume 
                     FROM candles_1m 
@@ -131,9 +173,18 @@ function init(deps) {
                     ORDER BY timestamp ASC
                 `, [targetPoolAddress, fromMs, toMs]);
                 
+                // 2. FALLBACK: If internal DB has too little data (< 10 candles), use External API
+                // This ensures "newly indexed" tokens still have charts immediately.
+                if (!rows || rows.length < 5) {
+                    const extCandles = await fetchExternalCandles(targetPoolAddress, resolution);
+                    if (extCandles.length > 0) {
+                        return { success: true, candles: extCandles, source: 'external' };
+                    }
+                }
+
+                // ... (Internal Candle processing logic) ...
                 if (!rows || rows.length === 0) return { success: true, candles: [] };
 
-                // ... (Candle processing logic retained) ...
                 const candles = [];
                 let currentCandle = null;
 
@@ -162,7 +213,7 @@ function init(deps) {
                     candles.push(currentCandle);
                 }
                 
-                return { success: true, candles };
+                return { success: true, candles, source: 'internal' };
             });
 
             res.json(result);
@@ -255,11 +306,6 @@ function init(deps) {
             const request = await db.get(`SELECT * FROM token_updates WHERE id = $1`, [id]);
             if (!request) return res.status(404).json({ success: false, error: "Request not found" });
 
-            // 1. Update Token Metadata in DB
-            // We use COALESCE to keep existing data if the update field is empty, 
-            // BUT usually an update replaces the old data. 
-            // Here we assume the admin wants to apply the non-empty fields.
-            
             const meta = {
                 twitter: request.twitter,
                 website: request.website,
@@ -276,15 +322,7 @@ function init(deps) {
                 WHERE mint = $2
             `, [JSON.stringify(meta), request.mint]);
 
-            // Also update columns for easier querying
-            // (Only if your schema has specific columns for these, otherwise JSONB is fine)
-            // The provided schema has specific columns in 'token_updates' but 'tokens' table structure varies.
-            // Let's assume JSONB metadata is the source of truth for display.
-
-            // 2. Mark Request as Approved
             await db.run(`UPDATE token_updates SET status = 'approved' WHERE id = $1`, [id]);
-
-            // 3. Trigger K-Score Recalc (Boost score)
             await updateSingleToken({ db }, request.mint);
 
             res.json({ success: true });
@@ -309,16 +347,12 @@ function init(deps) {
             const token = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]);
             if (!token) return res.status(404).json({ success: false, error: "Token not found" });
 
-            // Extract metadata if available
             let meta = {};
             try { 
                 if (typeof token.metadata === 'string') meta = JSON.parse(token.metadata);
                 else meta = token.metadata || {};
             } catch(e) {}
 
-            // Community metadata usually stored in 'community' key inside metadata jsonb
-            // OR strictly in the token row if you added columns. 
-            // Let's assume we pull from the JSONB for the form.
             const community = meta.community || {};
 
             res.json({ 
@@ -363,36 +397,22 @@ function init(deps) {
         logger.warn(`🗑️  ADMIN: Executing HARD DELETE for ${mint}`);
 
         try {
-            // 1. Find all pools for this token to delete their candles/trackers
             const pools = await db.all(`SELECT address FROM pools WHERE mint = $1`, [mint]);
             const poolAddresses = pools.map(p => p.address);
 
             if (poolAddresses.length > 0) {
-                // Delete Candles
-                // Need to handle array for SQL IN clause safely
-                // PG supports ANY($1) for arrays
                 await db.run(`DELETE FROM candles_1m WHERE pool_address = ANY($1)`, [poolAddresses]);
-                
-                // Delete Trackers
                 await db.run(`DELETE FROM active_trackers WHERE pool_address = ANY($1)`, [poolAddresses]);
             }
 
-            // 2. Delete Pools
             await db.run(`DELETE FROM pools WHERE mint = $1`, [mint]);
-
-            // 3. Delete K-Scores & Updates
             await db.run(`DELETE FROM k_scores WHERE mint = $1`, [mint]);
             await db.run(`DELETE FROM token_updates WHERE mint = $1`, [mint]);
-
-            // 4. Delete Token
             await db.run(`DELETE FROM tokens WHERE mint = $1`, [mint]);
 
-            // 5. Clear Redis Cache (Best Effort)
             const redis = getClient();
             if (redis) {
                 await redis.del(`token:detail:${mint}`);
-                // Note: Clearing list caches is harder without keys matching patterns, 
-                // but they usually expire in 3-5 seconds anyway.
             }
 
             logger.info(`✅ ADMIN: Deleted ${mint} and all associated history.`);
@@ -453,32 +473,6 @@ function init(deps) {
                 if (pairs.length > 0) {
                     const mainPool = pairs[0];
                     if (mainPool.price_usd > 0) tokenData.priceUsd = mainPool.price_usd;
-                    
-                    const now = Date.now();
-                    const oneHourAgo = now - (60 * 60 * 1000);
-                    const twentyFourHoursAgo = now - (24 * 60 * 60 * 1000);
-
-                    const [c1h, c24h, oldest] = await Promise.all([
-                        db.get(`SELECT close FROM candles_1m WHERE pool_address = $1 AND timestamp <= $2 ORDER BY timestamp DESC LIMIT 1`, [mainPool.address, oneHourAgo]),
-                        db.get(`SELECT close FROM candles_1m WHERE pool_address = $1 AND timestamp <= $2 ORDER BY timestamp DESC LIMIT 1`, [mainPool.address, twentyFourHoursAgo]),
-                        db.get(`SELECT close, timestamp FROM candles_1m WHERE pool_address = $1 ORDER BY timestamp ASC LIMIT 1`, [mainPool.address])
-                    ]);
-
-                    if (c1h && c1h.close > 0) {
-                        tokenData.change1h = ((tokenData.priceUsd - c1h.close) / c1h.close) * 100;
-                    } else if (oldest && oldest.close > 0 && oldest.timestamp < (now - 60000)) {
-                        tokenData.change1h = ((tokenData.priceUsd - oldest.close) / oldest.close) * 100;
-                    } else {
-                        tokenData.change1h = 0;
-                    }
-                    
-                    if (c24h && c24h.close > 0) {
-                        tokenData.change24h = ((tokenData.priceUsd - c24h.close) / c24h.close) * 100;
-                    } else if (oldest && oldest.close > 0 && oldest.timestamp < (now - 300000)) {
-                        tokenData.change24h = ((tokenData.priceUsd - oldest.close) / oldest.close) * 100;
-                    } else {
-                        tokenData.change24h = 0;
-                    }
                 }
 
                 return { success: true, token: { ...tokenData, pairs } };

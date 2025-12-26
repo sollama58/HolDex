@@ -37,6 +37,7 @@ async function initDB() {
             client.release();
             logger.info(`📦 Database: Connection Successful.`);
 
+            // Schema Creation (Idempotent)
             await pool.query(`
                 CREATE TABLE IF NOT EXISTS tokens (
                     mint TEXT PRIMARY KEY,
@@ -229,9 +230,10 @@ async function aggregateAndSaveToken(db, mint) {
 
         const price = parseFloat(mainPool.price_usd || 0);
 
-        let change24h = 0;
-        let change1h = 0;
-        let change5m = 0;
+        // --- INTELLIGENT CHANGE CALCULATION ---
+        let change24h = null;
+        let change1h = null;
+        let change5m = null;
 
         if (price > 0) {
             const now = Date.now();
@@ -253,18 +255,41 @@ async function aggregateAndSaveToken(db, mint) {
                 getPriceAt(time5m)
             ]);
 
+            // Only calculate if we found a historical candle
             if (p24h) change24h = ((price - p24h) / p24h) * 100;
             if (p1h) change1h = ((price - p1h) / p1h) * 100;
             if (p5m) change5m = ((price - p5m) / p5m) * 100;
         }
 
-        await db.run(`
-            UPDATE tokens 
-            SET liquidity = $1, volume24h = $2, priceUsd = $3, 
-                marketCap = ($3 * CAST(supply AS DOUBLE PRECISION) / POWER(10, decimals)),
-                change24h = $5, change1h = $6, change5m = $7
-            WHERE mint = $4
-        `, [totalLiq, totalVol, price, mint, change24h, change1h, change5m]);
+        // --- SAFE UPDATE ---
+        // If change24h is null (because we have no history), we DO NOT update that column.
+        // This prevents overwriting valid data fetched by the MetadataUpdater (GeckoTerminal) with '0'.
+        
+        const updates = [];
+        const params = [totalLiq, totalVol, price, mint];
+        let query = `UPDATE tokens SET liquidity = $1, volume24h = $2, priceUsd = $3`;
+        
+        // Always calculate Mcap based on new price
+        query += `, marketCap = ($3 * CAST(supply AS DOUBLE PRECISION) / POWER(10, decimals))`;
+
+        let pIdx = 5;
+
+        if (change24h !== null) {
+            query += `, change24h = $${pIdx++}`;
+            params.push(change24h);
+        }
+        if (change1h !== null) {
+            query += `, change1h = $${pIdx++}`;
+            params.push(change1h);
+        }
+        if (change5m !== null) {
+            query += `, change5m = $${pIdx++}`;
+            params.push(change5m);
+        }
+
+        query += ` WHERE mint = $4`;
+
+        await db.run(query, params);
         
     } catch (err) {
         logger.error(`Aggregation Error ${mint}: ${err.message}`);
