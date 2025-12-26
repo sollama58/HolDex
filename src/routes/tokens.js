@@ -4,7 +4,7 @@ const { isValidPubkey } = require('../utils/solana');
 const { smartCache, enableIndexing } = require('../services/database'); 
 const { findPoolsOnChain } = require('../services/pool_finder');
 const { fetchTokenMetadata } = require('../utils/metaplex');
-const { getSolanaConnection } = require('../services/solana'); // Singleton
+const { getSolanaConnection } = require('../services/solana'); 
 const config = require('../config/env');
 const kScoreUpdater = require('../tasks/kScoreUpdater'); 
 const { getClient } = require('../services/redis'); 
@@ -66,7 +66,6 @@ function init(deps) {
             image: meta?.image || null,
         };
 
-        // FIXED: Added 'liquidity' to INSERT statement
         await db.run(`
             INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, timestamp)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -74,6 +73,7 @@ function init(deps) {
             name = EXCLUDED.name,
             symbol = EXCLUDED.symbol,
             image = EXCLUDED.image,
+            decimals = EXCLUDED.decimals,
             timestamp = $12
         `, [
             mint, 
@@ -83,7 +83,7 @@ function init(deps) {
             supply, 
             decimals, 
             0, // priceUsd
-            0, // liquidity (NEW)
+            0, // liquidity
             0, // marketCap
             0, // volume
             0, // change
@@ -287,7 +287,7 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, tokens: [], error: e.message }); }
     });
 
-    // --- ADMIN ROUTES ---
+    // Admin routes reused from previous context
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         const { type } = req.query;
         let sql = `SELECT u.*, t.name, t.symbol as ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`;
