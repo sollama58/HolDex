@@ -21,8 +21,8 @@
     <!-- 2. Solana Web3.js -->
     <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
 
-    <!-- 3. Lightweight Charts (TradingView) - NEW Internal Chart Engine -->
-    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <!-- 3. Lightweight Charts (TradingView) - PINNED VERSION for Stability -->
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 
     <!-- 4. Styling & Icons -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -803,7 +803,11 @@
         initChart();
         
         // SAFEGUARD: If initChart failed (e.g. 0 size), stop here
-        if (!chartInstance || !candleSeries) return;
+        if (!chartInstance || !candleSeries) {
+            // Try one more time, maybe DOM is ready now
+            initChart();
+            if (!chartInstance || !candleSeries) return;
+        }
 
         try {
             // Determine 'from' based on resolution to get a decent initial view
@@ -1447,11 +1451,20 @@
                     tabsContainer.innerHTML = '';
                     if (t.pairs && t.pairs.length > 0) {
                         t.pairs.forEach((pair, idx) => {
-                            const tab = document.createElement('div'); tab.className = `pool-tab ${idx === 0 ? 'active' : ''}`;
-                            // SAFEGUARD: pair.dexId might be undefined
-                            const dexName = (pair.dexId || 'Unknown').toUpperCase();
-                            tab.id = `tab-${pair.pairAddress}`; tab.innerText = `${dexName} ($${formatCompact(pair.liquidity)} Liq)`;
-                            tab.onclick = () => switchPool(pair.pairAddress, pair.dexId); tabsContainer.appendChild(tab);
+                            // SAFEGUARD: Missing Pair or DexID
+                            if (!pair) return;
+                            const tab = document.createElement('div'); 
+                            tab.className = `pool-tab ${idx === 0 ? 'active' : ''}`;
+                            
+                            // SAFEGUARD: Ensure String before UpperCase
+                            let dexId = "UNKNOWN";
+                            if (pair.dexId) dexId = String(pair.dexId);
+                            const dexName = dexId.toUpperCase();
+
+                            tab.id = `tab-${pair.pairAddress}`; 
+                            tab.innerText = `${dexName} ($${formatCompact(pair.liquidity)} Liq)`;
+                            tab.onclick = () => switchPool(pair.pairAddress, pair.dexId); 
+                            tabsContainer.appendChild(tab);
                         });
                     }
                 }
