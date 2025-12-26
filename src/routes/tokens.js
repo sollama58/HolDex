@@ -96,9 +96,7 @@ function init(deps) {
         await enqueueTokenUpdate(mint);
 
         if (poolAddresses.length > 0) {
-            // Wait for initial snapshot to get price immediately
             await snapshotPools(poolAddresses).catch(e => console.error("Immediate snapshot error:", e.message));
-            // Force aggregation to update token stats
             await aggregateAndSaveToken(db, mint);
         }
 
@@ -204,9 +202,8 @@ function init(deps) {
             
             if (!token) {
                 try {
-                    // Start indexing
                     const indexed = await indexTokenOnChain(mint);
-                    token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]); // Refetch after aggregation
+                    token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]); 
                     pairs = indexed.pairs || [];
                 } catch (e) {}
             }
@@ -284,7 +281,6 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, tokens: [], error: e.message }); }
     });
 
-    // Admin routes reused from previous context
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         const { type } = req.query;
         let sql = `SELECT u.*, t.name, t.symbol as ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`;
@@ -299,6 +295,7 @@ function init(deps) {
         let currentMeta = token?.metadata || {};
         if (typeof currentMeta === 'string') currentMeta = JSON.parse(currentMeta);
         const newMeta = { ...currentMeta, ...update }; 
+        // FIX: Ensure boolean syntax is consistent, though Postgres allows casting in updates usually.
         await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE WHERE mint = $2`, [JSON.stringify(newMeta), update.mint]);
         await db.run("UPDATE token_updates SET status = 'approved' WHERE id = $1", [id]);
         res.json({success: true});

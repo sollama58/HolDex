@@ -1,156 +1,92 @@
-const { Connection, PublicKey } = require('@solana/web3.js');
-const config = require('../config/env');
 const { logger } = require('../services');
 
-const solanaConnection = new Connection(config.SOLANA_RPC_URL, 'confirmed');
+const INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 Hours
 
-// Helper sleep function
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-async function getHolderCount(mintAddress) {
-    try {
-        // Strategy: Use getTokenLargestAccounts to check top 20 holders.
-        const largestAccounts = await solanaConnection.getTokenLargestAccounts(new PublicKey(mintAddress));
-        return largestAccounts.value || [];
-    } catch (e) {
-        return null;
-    }
-}
-
-/**
- * Shared Scoring Logic
- * Used by both the batch updater and the single-token API
- */
-async function computeScoreInternal(mint, dbData = null) {
-    let score = 0;
-    
-    try {
-        // 1. Verification / Community Update (Max 50 pts)
-        // If we have DB data, check verification status
-        if (dbData && (dbData.hasCommunityUpdate || dbData.hascommunityupdate)) {
-            score += 50;
-        } else {
-            // If no DB data passed, we assume base score or 0
-            // (The API route calls this, usually without knowing if it's verified yet unless passed)
-            // We give a small "Discovery" points base
-            score += 10;
-        }
-
-        // 2. Volume (Max 20 pts)
-        if (dbData) {
-            const vol = dbData.volume24h || 0;
-            if (vol > 100000) score += 20;
-            else if (vol > 10000) score += 10;
-        }
-
-        // 3. Holder Analysis (RPC) - Max 20 pts
-        // We only do this if it's a critical update, as it eats RPC credits
-        const holders = await getHolderCount(mint);
-        if (holders && holders.length > 0) {
-            // Basic check: If we can fetch holders, the chain data is alive
-            score += 20; 
-            
-            // Advanced: Check concentration (placeholder logic for future expansion)
-            // const topHolder = holders[0];
-            // if (topHolder.uiAmount > supply * 0.5) score -= 10; 
-        }
-
-        // 4. Age/Market Cap Boost (Max 10 pts)
-        if (dbData) {
-             const mcap = dbData.marketCap || dbData.marketcap || 0;
-             if (mcap > 100000) score += 10;
-        }
-
-        return Math.min(score, 100);
-        
-    } catch (e) {
-        console.error(`Score Calc Error ${mint}:`, e.message);
-        return 10; // Default low score on error
-    }
-}
-
-/**
- * Updates a single token's score immediately in the DB.
- * Used by Admin Approval route.
- */
-async function updateSingleToken(deps, mint) {
+async function updateKScore(deps) {
     const { db } = deps;
-    try {
-        const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
-        if (!token) return;
-
-        logger.info(`⚡ Immediate K-Score Calc triggered for ${token.ticker}`);
-        const score = await computeScoreInternal(mint, token);
-
-        await db.run(`
-            UPDATE tokens 
-            SET k_score = $1, last_k_calc = $2 
-            WHERE mint = $3
-        `, [score, Date.now(), mint]);
-        
-        return score;
-    } catch (e) {
-        logger.error(`Failed single update for ${mint}:`, e);
-        return 0;
-    }
-}
-
-async function updateKScores(deps) {
-    const { db } = deps;
-    
-    logger.info("虫 K-Score Updater: Starting cycle...");
+    logger.info("🧠 K-Score Updater: Starting Cycle...");
 
     try {
+        // FIX: Replaced "hasCommunityUpdate = 1" with "hasCommunityUpdate = TRUE"
+        // In PostgreSQL, booleans must be compared with boolean literals
         const tokens = await db.all(`
             SELECT * FROM tokens 
-            WHERE hasCommunityUpdate = 1 
+            WHERE hasCommunityUpdate = TRUE 
             OR volume24h > 5000
         `);
 
         if (!tokens || tokens.length === 0) {
-            logger.info("虫 K-Score: No eligible tokens found.");
+            logger.info("🧠 K-Score: No eligible tokens found.");
             return;
         }
 
-        logger.info(`虫 K-Score: Updating ${tokens.length} tokens...`);
+        logger.info(`🧠 K-Score: Analyzing ${tokens.length} tokens...`);
 
-        for (const t of tokens) {
+        for (const token of tokens) {
             try {
-                // Use the shared scoring logic
-                const score = await computeScoreInternal(t.mint, t);
+                // Simple heuristic score calculation since Helius dependency was removed/simplified
+                let score = 50; // Base Score
 
-                // Update DB
-                await db.run(`
-                    UPDATE tokens 
-                    SET k_score = $1, last_k_calc = $2 
-                    WHERE mint = $3
-                `, [score, Date.now(), t.mint]);
+                // Volume Boost
+                if (token.volume24h > 100000) score += 20;
+                else if (token.volume24h > 10000) score += 10;
 
+                // Liquidity Boost
+                if (token.liquidity > 50000) score += 20;
+                else if (token.liquidity > 5000) score += 10;
+
+                // Community Update Boost
+                // FIX: Check for boolean true, not integer 1
+                if (token.hascommunityupdate === true || token.hasCommunityUpdate === true) score += 10;
+
+                // Cap at 99
+                score = Math.min(score, 99);
+
+                await db.run(
+                    `UPDATE tokens SET k_score = $1 WHERE mint = $2`, 
+                    [score, token.mint]
+                );
             } catch (err) {
-                console.warn(`Failed K-Score for ${t.mint}: ${err.message}`);
+                logger.warn(`Failed to update K-Score for ${token.mint}: ${err.message}`);
             }
-            
-            await sleep(50); 
         }
         
-        logger.info("虫 K-Score Updater: Cycle complete.");
+        logger.info("🧠 K-Score Updater: Cycle Complete.");
 
+    } catch (err) {
+        logger.error(`K-Score Cycle Error: ${err.message}`, { stack: err.stack });
+    }
+}
+
+async function updateSingleToken(deps, mint) {
+    // Helper for immediate updates (e.g. via Admin API)
+    const { db } = deps;
+    try {
+        // Recalculate based on current DB stats
+        const token = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]);
+        if (!token) return 0;
+
+        let score = 50;
+        if (token.volume24h > 100000) score += 20;
+        else if (token.volume24h > 10000) score += 10;
+
+        if (token.liquidity > 50000) score += 20;
+        else if (token.liquidity > 5000) score += 10;
+
+        if (token.hascommunityupdate === true) score += 10;
+
+        score = Math.min(score, 99);
+
+        await db.run(`UPDATE tokens SET k_score = $1 WHERE mint = $2`, [score, mint]);
+        return score;
     } catch (e) {
-        logger.error("K-Score Cycle Error", e);
+        return 0;
     }
 }
 
 function start(deps) {
-    // Run every 10 minutes
-    setInterval(() => updateKScores(deps), 600000);
-    // Run once immediately after startup (delay 10s)
-    setTimeout(() => updateKScores(deps), 10000);
+    updateKScore(deps); // Run immediately on start
+    setInterval(() => updateKScore(deps), INTERVAL_MS);
 }
 
-module.exports = { 
-    start, 
-    updateSingleToken, // Exported for Routes
-    calculateTokenScore: async (mint) => {
-        return await computeScoreInternal(mint, null);
-    }
-};
+module.exports = { start, updateSingleToken };
