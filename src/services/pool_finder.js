@@ -1,16 +1,16 @@
-const { PublicKey } = require('@solana/web3.js');
+const { PublicKey, Connection } = require('@solana/web3.js');
 const { retryRPC, getSolanaConnection } = require('./solana');
 const logger = require('./logger');
 
 // --- PROGRAM IDS ---
 const PROG_ID_RAYDIUM_V4 = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
-const PROG_ID_RAYDIUM_CPMM = new PublicKey('CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C'); // New Standard
-const PROG_ID_PUMPSWAP = new PublicKey('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA'); // PumpSwap (Fall 2025)
+const PROG_ID_RAYDIUM_CPMM = new PublicKey('CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C'); 
+const PROG_ID_PUMPSWAP = new PublicKey('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA'); 
 const PROG_ID_METEORA_DLMM = new PublicKey('LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo');
 const PROG_ID_ORCA_WHIRLPOOL = new PublicKey('whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc');
 const PROG_ID_PUMPFUN = new PublicKey('6EF8rrecthR5DkzonjNwu78hRvfCKubJ14M5uBEwF6P');
 
-// --- OFFSETS (Raydium V4) ---
+// --- OFFSETS ---
 const RAY_SLICE = { offset: 320, length: 144 };
 const SLICE_OFF_BASE_VAULT = 0;   
 const SLICE_OFF_QUOTE_VAULT = 32; 
@@ -18,15 +18,38 @@ const SLICE_OFF_BASE_MINT = 80;
 const SLICE_OFF_QUOTE_MINT = 112; 
 
 /**
- * Strategy 1: Direct GPA (GetProgramAccounts) Scan
- * Best for Raydium V4 where we know exact offsets and there are many pools.
+ * Robust Connection Getter
+ * Ensures we have a valid web3.Connection object with required methods.
+ */
+function getValidConnection() {
+    let conn = null;
+    try {
+        conn = getSolanaConnection();
+    } catch (e) {
+        logger.warn('getSolanaConnection failed, falling back to new instance');
+    }
+
+    // Check if the returned object is a valid Connection (has key methods)
+    if (conn && typeof conn.getTokenAccountsByMint === 'function') {
+        return conn;
+    }
+
+    logger.warn('⚠️ getSolanaConnection() returned invalid object. Instantiating fallback Connection.');
+    
+    // Fallback: Create a standard connection
+    const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+    return new Connection(rpcUrl, 'confirmed');
+}
+
+/**
+ * Strategy 1: Direct GPA Scan (Raydium V4)
  */
 async function findRaydiumV4Pools(mintB58, results) {
     try {
         const filtersBase = [{ dataSize: 752 }, { memcmp: { offset: 400, bytes: mintB58 } }];
         const filtersQuote = [{ dataSize: 752 }, { memcmp: { offset: 432, bytes: mintB58 } }];
 
-        const connection = getSolanaConnection();
+        const connection = getValidConnection();
 
         const [baseAccts, quoteAccts] = await Promise.all([
             retryRPC(() => connection.getProgramAccounts(PROG_ID_RAYDIUM_V4, { filters: filtersBase, dataSlice: RAY_SLICE })),
@@ -77,7 +100,7 @@ async function findPumpFunCurve(mintAddress, results) {
             PROG_ID_PUMPFUN
         );
 
-        const connection = getSolanaConnection();
+        const connection = getValidConnection();
         const info = await retryRPC(() => connection.getAccountInfo(bondingCurve));
         
         if (info) {
@@ -86,9 +109,9 @@ async function findPumpFunCurve(mintAddress, results) {
                 dexId: 'pumpfun',
                 type: 'bonding_curve',
                 baseToken: { address: mintAddress },
-                quoteToken: { address: 'So11111111111111111111111111111111111111112' }, // SOL
-                reserve_a: bondingCurveVault.toBase58(), // Token Reserve
-                reserve_b: bondingCurve.toBase58(),      // SOL Reserve (Virtual)
+                quoteToken: { address: 'So11111111111111111111111111111111111111112' }, 
+                reserve_a: bondingCurveVault.toBase58(), 
+                reserve_b: bondingCurve.toBase58(),      
                 liquidity: { usd: 0 },
                 volume: { h24: 0 },
                 priceUsd: 0
@@ -101,15 +124,20 @@ async function findPumpFunCurve(mintAddress, results) {
 
 /**
  * Strategy 3: Token Account Trace (Robust Fallback)
- * Fixes: Uses getSolanaConnection() explicitly
+ * Handles PumpSwap, Raydium CPMM, Meteora, Orca
  */
 async function findPoolsByTokenOwnership(mintAddress, results) {
     try {
-        const connection = getSolanaConnection();
+        const connection = getValidConnection();
         const mint = new PublicKey(mintAddress);
+        const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 
-        // Explicitly call on 'connection' variable
-        const tokenAccounts = await retryRPC(() => connection.getTokenAccountsByMint(mint, { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }));
+        // Check if connection is valid before call
+        if (typeof connection.getTokenAccountsByMint !== 'function') {
+            throw new Error("Connection object missing getTokenAccountsByMint");
+        }
+
+        const tokenAccounts = await retryRPC(() => connection.getTokenAccountsByMint(mint, { programId: TOKEN_PROGRAM_ID }));
 
         for (const { pubkey, account } of tokenAccounts.value) {
             if (account.data.length < 64) continue;
@@ -157,6 +185,7 @@ async function parseGenericAnchorPool(connection, poolAddress, dexId, type, myMi
         const myMintBuffer = new PublicKey(myMint).toBuffer();
         let matchedOffset = -1;
         
+        // Scan for my mint in the pool state
         for (let i = 8; i < 200; i++) {
             if (data.subarray(i, i + 32).equals(myMintBuffer)) {
                 matchedOffset = i;
@@ -173,6 +202,7 @@ async function parseGenericAnchorPool(connection, poolAddress, dexId, type, myMi
             mintA = new PublicKey(data.subarray(168, 200)).toBase58();
             mintB = new PublicKey(data.subarray(200, 232)).toBase58();
         } else {
+             // Generic Heuristic
              const candidates = [];
              for(let i=8; i<200; i+=32) {
                  try {
