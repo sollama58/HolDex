@@ -41,14 +41,15 @@ const dbWrapper = {
 };
 
 const initDB = async () => {
-    // Note: Use src/scripts/force_init.js or fix_multiswap.js for schema changes
-    // This function assumes schema is consistent.
+    // This function assumes schema is created via reset script.
+    // It is kept lightweight to avoid re-running CREATE statements on every boot
+    // if we are relying on the reset script for the "Golden Schema".
     logger.info('Database Service Initialized');
 };
 
-// --- MULTI-POOL AGGREGATION ---
+// --- AGGREGATION LOGIC (The Core Fix) ---
 
-// 1. Enable Indexing (Upsert Pool)
+// 1. Enable Indexing for a specific pool (Upsert Pool Data)
 const enableIndexing = async (db, mint, pair) => {
     if (!pair || !pair.pairAddress) return;
     
@@ -56,7 +57,8 @@ const enableIndexing = async (db, mint, pair) => {
     const vol = Number(pair.volume?.h24 || 0);
     const price = Number(pair.priceUsd || 0);
 
-    // Update Pool Metadata
+    // Update the POOL record
+    // ON CONFLICT(address) handles updates to existing pools
     await db.run(`
         INSERT INTO pools (address, mint, dex, token_a, token_b, created_at, liquidity_usd, volume_24h, price_usd)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -65,12 +67,16 @@ const enableIndexing = async (db, mint, pair) => {
             volume_24h = EXCLUDED.volume_24h,
             price_usd = EXCLUDED.price_usd
     `, [
-        pair.pairAddress, mint, pair.dexId, 
-        pair.baseToken.address, pair.quoteToken.address, 
-        Date.now(), liq, vol, price
+        pair.pairAddress, 
+        mint, 
+        pair.dexId, 
+        pair.baseToken.address, 
+        pair.quoteToken.address, 
+        Date.now(),
+        liq, vol, price
     ]);
     
-    // Add to Active Trackers for Snapshotter
+    // Enable Active Tracking for Snapshotter
     await db.run(`
         INSERT INTO active_trackers (pool_address, last_check) 
         VALUES ($1, $2) 
@@ -94,10 +100,10 @@ const aggregateAndSaveToken = async (db, mint, baseData) => {
     let bestPool = null;
 
     for (const pool of pools) {
-        // Sum Volume from all pools
+        // Sum Volume from all pools (Raydium + Orca + etc)
         totalVolume += (pool.volume_24h || 0);
         
-        // Find Largest Pool by Liquidity
+        // Find Largest Pool by Liquidity for Price Source
         if ((pool.liquidity_usd || 0) > maxLiq) {
             maxLiq = pool.liquidity_usd;
             bestPool = pool;
@@ -108,19 +114,21 @@ const aggregateAndSaveToken = async (db, mint, baseData) => {
     // Price comes from the Largest Pool (most accurate)
     const finalPrice = bestPool ? (bestPool.price_usd || baseData.priceUsd) : baseData.priceUsd;
     
-    // Market Cap Recalculation (Approximation based on new price)
-    // If we have a base mcap and price, we can adjust it ratio-wise, 
-    // but typically taking the input mcap is safer unless we track supply.
+    // D. Recalculate Market Cap
+    // If we have FDV from the base data (DexScreener), we prefer that.
+    // Otherwise we can estimate via Supply * Price if available.
+    // For now, we trust the input data but update the Price and Volume fields.
+    
     const finalData = {
         ...baseData,
-        volume24h: totalVolume, // Aggregated
-        priceUsd: finalPrice,   // Best Pool Price
+        volume24h: totalVolume, // AGGREGATED
+        priceUsd: finalPrice,   // BEST SOURCE
     };
 
     await saveTokenData(db, mint, finalData, Date.now());
 };
 
-// 3. Raw Token Save
+// 3. Raw Save (Low Level)
 const saveTokenData = async (db, mint, data, timestamp) => {
     const cols = [
         'name', 'symbol', 'image', 'marketCap', 'volume24h', 
@@ -153,6 +161,5 @@ module.exports = {
   initDB,
   smartCache,
   enableIndexing,
-  aggregateAndSaveToken,
-  saveTokenData
+  aggregateAndSaveToken
 };
