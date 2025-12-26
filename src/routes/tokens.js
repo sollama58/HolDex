@@ -34,21 +34,17 @@ function init(deps) {
     }
 
     async function indexTokenOnChain(mint) {
-        // 1. Fetch Metadata (Robust: Helius -> Fallback Metaplex)
         const meta = await fetchTokenMetadata(mint);
         
-        // 2. Fetch Supply 
         let supply = '0';
         try {
             const supplyInfo = await solanaConnection.getTokenSupply(new PublicKey(mint));
             supply = supplyInfo.value.amount; 
         } catch (e) { console.warn(`Failed to fetch supply for ${mint}`); }
 
-        // 3. Find Pools (Transaction Scan -> Global Scan)
         const pools = await findPoolsOnChain(mint);
         const poolAddresses = [];
 
-        // 4. Save Pools
         for (const pool of pools) {
             poolAddresses.push(pool.pairAddress);
             await enableIndexing(db, mint, {
@@ -62,7 +58,6 @@ function init(deps) {
             });
         }
 
-        // 5. Save Token Data (Initial Insert)
         const baseData = {
             name: meta?.name || 'Unknown',
             ticker: meta?.symbol || 'UNKNOWN',
@@ -81,16 +76,11 @@ function init(deps) {
             supply = EXCLUDED.supply
         `, [mint, baseData.name, baseData.ticker, baseData.image, supply, Date.now()]);
 
-        // --- ⚡ CRITICAL FIX: IMMEDIATE DATA POPULATION ⚡ ---
         if (poolAddresses.length > 0) {
-            // A. Force Snapshot (Get Price NOW)
             await snapshotPools(poolAddresses);
-            
-            // B. Force Stats Calc (Get MarketCap NOW)
             await updateTokenStats(mint);
         }
 
-        // 6. Fetch Final Data to return to UI
         const finalToken = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]);
 
         return { 
@@ -101,7 +91,7 @@ function init(deps) {
         };
     }
 
-    // --- ENDPOINTS --- (Unchanged except using indexTokenOnChain)
+    // --- ENDPOINTS ---
     
     router.get('/config/fees', (req, res) => {
         res.json({ success: true, solFee: config.FEE_SOL, tokenFee: config.FEE_TOKEN_AMOUNT, tokenMint: config.FEE_TOKEN_MINT, treasury: config.TREASURY_WALLET });
@@ -125,23 +115,27 @@ function init(deps) {
         try {
             const { mint, twitter, website, telegram, banner, description, signature, userPublicKey } = req.body;
             if (!mint || mint.length < 30) return res.status(400).json({ success: false, error: "Invalid Mint" });
-            
             try { await verifyPayment(signature, userPublicKey); } catch (payErr) { return res.status(402).json({ success: false, error: payErr.message }); }
-            
             await db.run(`INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)`, [mint, twitter, website, telegram, banner, description, Date.now(), signature, userPublicKey]);
-            
             try { await indexTokenOnChain(mint); } catch (err) { console.error("Auto-Index failed:", err.message); }
-
             res.json({ success: true, message: "Update queued. Indexing started." });
         } catch (e) { res.status(500).json({ success: false, error: "Submission failed: " + e.message }); }
     });
 
+    /**
+     * CANDLES ENDPOINT (UPDATED FOR AGGREGATION)
+     * Handles 1m -> 5m/15m/1h/4h/1d aggregation
+     */
     router.get('/token/:mint/candles', async (req, res) => {
         const { mint } = req.params;
-        const { resolution = '60', from, to } = req.query; 
+        const { resolution = '5', from, to } = req.query; // Default to 5m
         
+        const resMinutes = parseInt(resolution);
+        const resMs = resMinutes * 60 * 1000;
+
         const fromMs = parseInt(from) * 1000 || (Date.now() - 24 * 60 * 60 * 1000);
         const toMs = parseInt(to) * 1000 || Date.now();
+
         const cacheKey = `chart:${mint}:${resolution}:${Math.floor(toMs / 60000)}`; 
 
         try {
@@ -149,6 +143,7 @@ function init(deps) {
                 let pool = await db.get(`SELECT address FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC LIMIT 1`, [mint]);
                 if (!pool) return { success: false, error: "Token not indexed yet" };
 
+                // 1. Fetch Raw 1m Candles
                 const rows = await db.all(`
                     SELECT timestamp, open, high, low, close, volume 
                     FROM candles_1m 
@@ -158,10 +153,52 @@ function init(deps) {
                     ORDER BY timestamp ASC
                 `, [pool.address, fromMs, toMs]);
                 
-                const candles = rows.map(r => ({
-                    time: Math.floor(parseInt(r.timestamp) / 1000),
-                    open: r.open, high: r.high, low: r.low, close: r.close
-                }));
+                // 2. Direct Return if Resolution is 1m (though removed from UI)
+                if (resMinutes === 1) {
+                    return { success: true, candles: rows.map(r => ({
+                        time: Math.floor(parseInt(r.timestamp) / 1000),
+                        open: r.open, high: r.high, low: r.low, close: r.close
+                    }))};
+                }
+
+                // 3. Aggregate for Higher Timeframes (5m, 15m, etc.)
+                const candles = [];
+                let currentCandle = null;
+
+                for (const r of rows) {
+                    const time = parseInt(r.timestamp);
+                    // Floor time to nearest resolution bucket
+                    const bucketStart = Math.floor(time / resMs) * resMs;
+
+                    if (!currentCandle || currentCandle.timeMs !== bucketStart) {
+                        if (currentCandle) {
+                            currentCandle.time = Math.floor(currentCandle.timeMs / 1000); // Send seconds to UI
+                            delete currentCandle.timeMs;
+                            candles.push(currentCandle);
+                        }
+                        currentCandle = {
+                            timeMs: bucketStart,
+                            open: r.open,
+                            high: r.high,
+                            low: r.low,
+                            close: r.close,
+                            volume: 0 
+                        };
+                    }
+
+                    // Update Aggregated Candle High/Low/Close
+                    if (r.high > currentCandle.high) currentCandle.high = r.high;
+                    if (r.low < currentCandle.low) currentCandle.low = r.low;
+                    currentCandle.close = r.close;
+                    if (r.volume) currentCandle.volume += r.volume;
+                }
+
+                // Push last candle
+                if (currentCandle) {
+                    currentCandle.time = Math.floor(currentCandle.timeMs / 1000);
+                    delete currentCandle.timeMs;
+                    candles.push(currentCandle);
+                }
                 
                 return { success: true, candles };
             });
@@ -187,7 +224,6 @@ function init(deps) {
             }
 
             if (isAddressSearch && rows.length === 0) {
-                // AUTO-INDEX ON SEARCH
                 const newData = await indexTokenOnChain(search);
                 if (newData.name !== 'Unknown') {
                     rows.push({ ...newData, mint: search, hasCommunityUpdate: false, kScore: 0, timestamp: Date.now() });
@@ -237,7 +273,6 @@ function init(deps) {
         res.json({ success: true, token: { ...tokenData, pairs } });
     });
 
-    // --- ADMIN ROUTES ---
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         const { type } = req.query;
         let sql = `SELECT u.*, t.name, t.symbol as ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`;
