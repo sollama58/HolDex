@@ -28,12 +28,13 @@ async function runSnapshotCycle() {
 
     try {
         while (keepFetching) {
-            // 1. Fetch Batch using Pagination
-            // We order by priority first to ensure trending tokens get updated first
+            // 1. Fetch Batch using Pagination & JOIN
+            // FIX: We join 'active_trackers' with 'pools' to get mint & dex info
             const pools = await db.all(`
-                SELECT pool_address, mint, dex 
-                FROM active_trackers 
-                ORDER BY priority DESC, pool_address ASC 
+                SELECT t.pool_address, p.mint, p.dex 
+                FROM active_trackers t
+                JOIN pools p ON t.pool_address = p.address
+                ORDER BY t.priority DESC, t.pool_address ASC 
                 LIMIT ${BATCH_SIZE} OFFSET ${offset}
             `);
 
@@ -44,7 +45,7 @@ async function runSnapshotCycle() {
 
             const poolKeys = pools.map(p => new PublicKey(p.pool_address));
 
-            // 2. RPC Call (Batch of 100 max)
+            // 2. RPC Call
             const accounts = await connection.getMultipleAccountsInfo(poolKeys);
 
             // 3. Process Accounts
@@ -59,13 +60,15 @@ async function runSnapshotCycle() {
                 try {
                     if (pool.dex === 'pump') {
                         const data = account.data;
-                        // Pump.fun Curve Layout
                         const virtualTokenReserves = data.readBigUInt64LE(8);
                         const virtualSolReserves = data.readBigUInt64LE(16);
                         
                         if (Number(virtualTokenReserves) > 0) {
                             price = Number(virtualSolReserves) / Number(virtualTokenReserves);
                         }
+                    } else if (pool.dex === 'raydium') {
+                        // Basic Raydium AMM support (future proofing)
+                        // This usually requires layout parsing, skipping for now to prevent crashes
                     }
 
                     if (price > 0) {
@@ -84,7 +87,6 @@ async function runSnapshotCycle() {
             processed += pools.length;
             offset += BATCH_SIZE;
 
-            // Rate limit protection
             await new Promise(r => setTimeout(r, 100));
         }
     } catch (err) {
