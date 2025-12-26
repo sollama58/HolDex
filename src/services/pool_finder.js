@@ -1,96 +1,67 @@
 const { PublicKey } = require('@solana/web3.js');
+const axios = require('axios'); // Requires axios
 const { getSolanaConnection, retryRPC } = require('./solana'); 
 const logger = require('./logger');
 
 // --- CONSTANTS ---
 const RAYDIUM_V4_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
-const METEORA_DLMM_PROGRAM_ID = new PublicKey('LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo');
 const PUMPFUN_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
 
-// --- OFFSETS ---
-
-// Raydium V4
 const RAY_V4_OFFSET_BASE_MINT = 400;
 const RAY_V4_OFFSET_QUOTE_MINT = 432;
 const RAY_V4_OFFSET_BASE_VAULT = 320;
 const RAY_V4_OFFSET_QUOTE_VAULT = 352;
 
-// Meteora DLMM (Standard Anchor Layout assumption)
-const METEORA_OFFSET_TOKEN_X = 8;
-const METEORA_OFFSET_TOKEN_Y = 40;
-const METEORA_OFFSET_RESERVE_X = 72;
-const METEORA_OFFSET_RESERVE_Y = 104;
-
-/**
- * STRATEGY: "Multi-Protocol Deep Scan"
- * Finds pools across PumpFun (Bonding Curve), Raydium, and Meteora simultaneously.
- */
 async function findPoolsOnChain(mintAddress) {
-    const connection = getSolanaConnection();
     const pools = [];
     const mint = new PublicKey(mintAddress);
     const mintBase58 = mint.toBase58();
 
-    logger.info(`🔍 Deep Scan for ${mintBase58} (Raydium, Meteora, PumpFun)...`);
+    logger.info(`🔍 Deep Scan for ${mintBase58}...`);
 
     try {
-        const promises = [];
+        // STRATEGY A: RPC SCAN (Program Accounts)
+        // Note: This often fails on public RPCs due to resource limits.
+        const rpcPromises = [];
 
-        // 1. PUMPFUN CHECK (Deterministic PDA)
-        // This is the "Pre-Bonded" or "Bonded on PumpSwap" state.
-        promises.push((async () => {
+        // 1. PUMPFUN (PDA - Deterministic, usually works)
+        rpcPromises.push((async () => {
             try {
                 const [bondingCurve] = PublicKey.findProgramAddressSync(
                     [Buffer.from("bonding-curve"), mint.toBuffer()],
                     PUMPFUN_PROGRAM_ID
                 );
-                
-                // Check if account exists
-                const info = await connection.getAccountInfo(bondingCurve);
+                const info = await retryRPC((conn) => conn.getAccountInfo(bondingCurve));
                 if (info) {
                     pools.push({
                         pairAddress: bondingCurve.toBase58(),
                         dexId: 'pumpfun',
                         baseToken: { address: mintBase58 },
-                        quoteToken: { address: 'So11111111111111111111111111111111111111112' }, // PumpFun is always paired with SOL
-                        reserve_a: bondingCurve.toBase58(), // Reserves are inside the account itself
+                        quoteToken: { address: 'So11111111111111111111111111111111111111112' },
+                        reserve_a: bondingCurve.toBase58(), 
                         reserve_b: bondingCurve.toBase58(),
                         liquidity: { usd: 0 },
                         labels: ['bonding-curve']
                     });
-                    logger.info(`💊 Found PumpFun Bonding Curve for ${mintBase58}`);
                 }
-            } catch (err) {
-                // Ignore derivation errors
-            }
+            } catch (err) {}
         })());
 
-        // 2. RAYDIUM V4 SCAN
-        // This catches "Bonded on Raydium" (Migrated tokens).
-        promises.push((async () => {
-            const filtersBase = [
-                { dataSize: 752 },
-                { memcmp: { offset: RAY_V4_OFFSET_BASE_MINT, bytes: mintBase58 } }
-            ];
-            const filtersQuote = [
-                { dataSize: 752 },
-                { memcmp: { offset: RAY_V4_OFFSET_QUOTE_MINT, bytes: mintBase58 } }
-            ];
+        // 2. RAYDIUM (Program Accounts - often fails)
+        const onChainScan = async () => {
+            const filtersBase = [{ dataSize: 752 }, { memcmp: { offset: RAY_V4_OFFSET_BASE_MINT, bytes: mintBase58 } }];
+            const filtersQuote = [{ dataSize: 752 }, { memcmp: { offset: RAY_V4_OFFSET_QUOTE_MINT, bytes: mintBase58 } }];
 
             const [baseAccounts, quoteAccounts] = await Promise.all([
-                retryRPC(() => connection.getProgramAccounts(RAYDIUM_V4_PROGRAM_ID, { filters: filtersBase })),
-                retryRPC(() => connection.getProgramAccounts(RAYDIUM_V4_PROGRAM_ID, { filters: filtersQuote }))
+                retryRPC((c) => c.getProgramAccounts(RAYDIUM_V4_PROGRAM_ID, { filters: filtersBase })),
+                retryRPC((c) => c.getProgramAccounts(RAYDIUM_V4_PROGRAM_ID, { filters: filtersQuote }))
             ]);
 
-            const processRayAccount = (acc, isBase) => {
+            const processRay = (acc, isBase) => {
                 const data = acc.account.data;
                 const pairAddress = acc.pubkey.toBase58();
-                
-                // Extract Mints
                 const baseMint = new PublicKey(data.subarray(RAY_V4_OFFSET_BASE_MINT, RAY_V4_OFFSET_BASE_MINT + 32)).toBase58();
                 const quoteMint = new PublicKey(data.subarray(RAY_V4_OFFSET_QUOTE_MINT, RAY_V4_OFFSET_QUOTE_MINT + 32)).toBase58();
-                
-                // Extract Vaults
                 const baseVault = new PublicKey(data.subarray(RAY_V4_OFFSET_BASE_VAULT, RAY_V4_OFFSET_BASE_VAULT + 32)).toBase58();
                 const quoteVault = new PublicKey(data.subarray(RAY_V4_OFFSET_QUOTE_VAULT, RAY_V4_OFFSET_QUOTE_VAULT + 32)).toBase58();
 
@@ -105,54 +76,43 @@ async function findPoolsOnChain(mintAddress) {
                 });
             };
 
-            baseAccounts.forEach(a => processRayAccount(a, true));
-            quoteAccounts.forEach(a => processRayAccount(a, false));
-        })());
+            baseAccounts.forEach(a => processRay(a, true));
+            quoteAccounts.forEach(a => processRay(a, false));
+        };
+        
+        rpcPromises.push(onChainScan().catch(e => logger.warn(`On-Chain Raydium Scan skipped: ${e.message}`)));
+        
+        await Promise.all(rpcPromises);
 
-        // 3. METEORA DLMM SCAN
-        promises.push((async () => {
-             // Look for LbPair accounts where TokenX or TokenY is our mint
-             const filtersX = [
-                 { memcmp: { offset: METEORA_OFFSET_TOKEN_X, bytes: mintBase58 } }
-             ];
-             const filtersY = [
-                 { memcmp: { offset: METEORA_OFFSET_TOKEN_Y, bytes: mintBase58 } }
-             ];
+        // STRATEGY B: API FALLBACK
+        // If RPC found nothing, or just pumpfun, try external API to find the main pool.
+        if (pools.length === 0 || (pools.length === 1 && pools[0].dexId === 'pumpfun')) {
+             try {
+                 logger.info("🌍 RPC Scan yielded low results. Trying external API fallback...");
+                 const res = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${mintBase58}`);
+                 if (res.data && res.data.pairs) {
+                     res.data.pairs.forEach(pair => {
+                         if (pair.chainId === 'solana' && pair.dexId === 'raydium') {
+                             pools.push({
+                                 pairAddress: pair.pairAddress,
+                                 dexId: 'raydium',
+                                 baseToken: pair.baseToken,
+                                 quoteToken: pair.quoteToken,
+                                 liquidity: pair.liquidity,
+                                 volume: pair.volume,
+                                 priceUsd: Number(pair.priceUsd), // Pre-fill price in case on-chain fails
+                                 // We don't have vaults here, so snapshotter might skip on-chain calc
+                                 // but at least the pool exists in DB now.
+                             });
+                         }
+                     });
+                 }
+             } catch (e) {
+                 logger.warn(`API Fallback failed: ${e.message}`);
+             }
+        }
 
-             const [xAccounts, yAccounts] = await Promise.all([
-                 retryRPC(() => connection.getProgramAccounts(METEORA_DLMM_PROGRAM_ID, { filters: filtersX })),
-                 retryRPC(() => connection.getProgramAccounts(METEORA_DLMM_PROGRAM_ID, { filters: filtersY }))
-             ]);
-
-             const processMeteoraAccount = (acc) => {
-                 const data = acc.account.data;
-                 const pairAddress = acc.pubkey.toBase58();
-                 
-                 if (data.length < 140) return; 
-
-                 const tokenX = new PublicKey(data.subarray(METEORA_OFFSET_TOKEN_X, METEORA_OFFSET_TOKEN_X + 32)).toBase58();
-                 const tokenY = new PublicKey(data.subarray(METEORA_OFFSET_TOKEN_Y, METEORA_OFFSET_TOKEN_Y + 32)).toBase58();
-                 const reserveX = new PublicKey(data.subarray(METEORA_OFFSET_RESERVE_X, METEORA_OFFSET_RESERVE_X + 32)).toBase58();
-                 const reserveY = new PublicKey(data.subarray(METEORA_OFFSET_RESERVE_Y, METEORA_OFFSET_RESERVE_Y + 32)).toBase58();
-
-                 pools.push({
-                     pairAddress,
-                     dexId: 'meteora',
-                     baseToken: { address: tokenX },
-                     quoteToken: { address: tokenY },
-                     reserve_a: reserveX,
-                     reserve_b: reserveY,
-                     liquidity: { usd: 0 }
-                 });
-             };
-
-             xAccounts.forEach(processMeteoraAccount);
-             yAccounts.forEach(processMeteoraAccount);
-        })());
-
-        await Promise.all(promises);
-
-        // Deduplicate Pools
+        // Deduplicate
         const uniquePools = [];
         const seen = new Set();
         for (const p of pools) {
@@ -160,10 +120,6 @@ async function findPoolsOnChain(mintAddress) {
                 seen.add(p.pairAddress);
                 uniquePools.push(p);
             }
-        }
-        
-        if (uniquePools.length > 0) {
-            logger.info(`✅ Found ${uniquePools.length} pools for ${mintBase58}`);
         }
         
         return uniquePools;

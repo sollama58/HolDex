@@ -1,39 +1,46 @@
 require('dotenv').config();
 
-// Helper to parse comma-separated lists, defaulting to '*'
+// Helper to parse comma-separated lists
 const parseCors = (val) => {
-    // If explicitly set to '*', return '*'
     if (val === '*') return '*';
-    
-    // If not set, default to '*' (Public API behavior)
     if (!val) return '*';
-
-    // Parse the list
     const origins = val.split(',').map(origin => origin.trim());
-    
-    // AUTO-FIX: Always ensure your production domains are allowed
-    // This prevents accidental lockouts if you set CORS_ORIGINS to just 'localhost'
     const required = ['https://www.alonisthe.dev', 'https://alonisthe.dev'];
     required.forEach(req => {
         if (!origins.includes(req)) origins.push(req);
     });
-    
     return origins;
 };
+
+// --- AUTO-DETECT RPC CONFIGURATION ---
+// Prioritize Helius API Key if available and no specific RPC URL is overridden
+let rpcUrl = process.env.SOLANA_RPC_URL;
+const heliusKey = process.env.HELIUS_API_KEY;
+
+if (!rpcUrl && heliusKey) {
+    // Standard Helius RPC Endpoint
+    rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusKey}`;
+}
+
+// Fallback to Public RPC if neither is set
+if (!rpcUrl) {
+    rpcUrl = 'https://api.mainnet-beta.solana.com';
+}
 
 module.exports = {
     PORT: process.env.PORT || 3000,
     DATABASE_URL: process.env.DATABASE_URL || 'postgresql://user:password@localhost:5432/holdex',
     REDIS_URL: process.env.REDIS_URL || 'redis://redis:6379',
-    SOLANA_RPC_URL: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
     
-    // Updated Parsing Logic
+    // The resolved RPC URL (Helius > Custom > Public)
+    SOLANA_RPC_URL: rpcUrl,
+    
     CORS_ORIGINS: parseCors(process.env.CORS_ORIGINS),
     
     METADATA_UPDATE_INTERVAL: parseInt(process.env.METADATA_UPDATE_INTERVAL) || 300000, 
     HOLDER_SCAN_INTERVAL: parseInt(process.env.HOLDER_SCAN_INTERVAL) || 300000,
     ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'admin123',
-    HELIUS_API_KEY: process.env.HELIUS_API_KEY || '',
+    HELIUS_API_KEY: heliusKey || '',
 
     // --- PAYMENT CONFIGURATION ---
     TREASURY_WALLET: process.env.TREASURY_WALLET || 'EbZ4wYq4bYq4bYq4bYq4bYq4bYq4bYq4bYq4bYq4bYq4', 
