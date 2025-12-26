@@ -44,7 +44,11 @@ function rotateConnection() {
 
 async function retryRPC(fn, retries = 3, delay = 1000) {
     try {
-        return await fn(getSolanaConnection());
+        // Ensure we pass a connection object
+        const conn = getSolanaConnection();
+        if (!conn) throw new Error("Failed to acquire Solana Connection");
+        
+        return await fn(conn);
     } catch (err) {
         const msg = err.message ? err.message.toLowerCase() : '';
         

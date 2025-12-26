@@ -37,16 +37,30 @@ function getValidConnection() {
 
     // 2. Validate the imported connection
     // It must have the method we need: getTokenAccountsByMint
+    // Note: Some newer web3.js versions or specific RPC configs might exclude this.
     if (conn && typeof conn.getTokenAccountsByMint === 'function') {
         _cachedConnection = conn;
         return conn;
     }
 
+    if (conn) {
+        logger.warn(`[WARN] ⚠️ getSolanaConnection() returned invalid object. Missing getTokenAccountsByMint.`);
+    }
+
     // 3. Create Fallback (Only happens once)
-    logger.warn('⚠️ Service Connection lacks required methods. Initializing dedicated fallback connection.');
+    logger.warn('⚠️ Initializing dedicated fallback connection for Pool Finder.');
     
-    const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
-    _cachedConnection = new Connection(rpcUrl, 'confirmed');
+    try {
+        const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+        _cachedConnection = new Connection(rpcUrl, 'confirmed');
+        
+        // Final sanity check on fallback
+        if (typeof _cachedConnection.getTokenAccountsByMint !== 'function') {
+            logger.error("❌ Fallback Connection also missing getTokenAccountsByMint. Strategy 3 will be disabled.");
+        }
+    } catch (err) {
+        logger.error(`❌ Failed to create fallback connection: ${err.message}`);
+    }
     
     return _cachedConnection;
 }
@@ -60,6 +74,7 @@ async function findRaydiumV4Pools(mintB58, results) {
         const filtersQuote = [{ dataSize: 752 }, { memcmp: { offset: 432, bytes: mintB58 } }];
 
         const connection = getValidConnection();
+        if (!connection) return;
 
         const [baseAccts, quoteAccts] = await Promise.all([
             retryRPC(() => connection.getProgramAccounts(PROG_ID_RAYDIUM_V4, { filters: filtersBase, dataSlice: RAY_SLICE })),
@@ -111,6 +126,8 @@ async function findPumpFunCurve(mintAddress, results) {
         );
 
         const connection = getValidConnection();
+        if (!connection) return;
+
         const info = await retryRPC(() => connection.getAccountInfo(bondingCurve));
         
         if (info) {
@@ -139,6 +156,17 @@ async function findPumpFunCurve(mintAddress, results) {
 async function findPoolsByTokenOwnership(mintAddress, results) {
     try {
         const connection = getValidConnection();
+        if (!connection) {
+            logger.warn("Strategy 3 Skipped: No Valid Connection");
+            return;
+        }
+
+        // CRITICAL FIX: Check if method exists before calling
+        if (typeof connection.getTokenAccountsByMint !== 'function') {
+            logger.debug(`Strategy 3 Skipped: getTokenAccountsByMint not available on connection object.`);
+            return;
+        }
+
         const mint = new PublicKey(mintAddress);
         const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 
