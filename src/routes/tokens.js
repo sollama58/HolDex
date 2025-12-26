@@ -31,10 +31,6 @@ function init(deps) {
     // --- HELPER: FALLBACK CHART DATA ---
     async function fetchExternalCandles(poolAddress, resolution) {
         try {
-            // Map our resolution to GeckoTerminal timeframe
-            // Input: '5', '15', '60', '240', 'D'
-            // GT: day, hour, minute. aggregate=minutes
-            
             let timeframe = 'minute';
             let aggregate = 1;
             
@@ -46,12 +42,9 @@ function init(deps) {
 
             const url = `https://api.geckoterminal.com/api/v2/networks/solana/pools/${poolAddress}/ohlcv/${timeframe}?aggregate=${aggregate}&limit=100`;
             
-            // logger.info(`Using External Chart Data: ${url}`);
-            
             const response = await axios.get(url, { timeout: 5000 });
             const data = response.data.data.attributes.ohlcv_list;
             
-            // Format [time, open, high, low, close, volume] to { time, open, high, low, close }
             return data.map(c => ({
                 time: c[0],
                 open: c[1],
@@ -59,22 +52,41 @@ function init(deps) {
                 low: c[3],
                 close: c[4],
                 volume: c[5]
-            })).reverse(); // GT returns newest first usually, we sort by time in frontend anyway
+            })).reverse();
         } catch (e) {
-            // logger.warn(`External Candle Fetch Failed: ${e.message}`);
             return [];
+        }
+    }
+
+    // --- HELPER: INITIAL MARKET DATA FETCH ---
+    async function fetchInitialMarketData(mint) {
+        try {
+            // Fetch basic stats from GeckoTerminal to populate data immediately
+            const url = `https://api.geckoterminal.com/api/v2/networks/solana/tokens/${mint}`;
+            const res = await axios.get(url, { timeout: 3000 });
+            const attrs = res.data.data.attributes;
+            
+            return {
+                priceUsd: parseFloat(attrs.price_usd || 0),
+                volume24h: parseFloat(attrs.volume_usd?.h24 || 0),
+                change24h: parseFloat(attrs.price_change_percentage?.h24 || 0),
+                marketCap: parseFloat(attrs.fdv_usd || attrs.market_cap_usd || 0)
+            };
+        } catch (e) {
+            // logger.warn(`Initial Market Data Fetch Failed for ${mint}: ${e.message}`);
+            return null;
         }
     }
 
     async function verifyPayment(signature, payerPubkey) {
         if (!signature) throw new Error("Payment signature required");
-        // Check if signature already used
         const existing = await db.get('SELECT id FROM token_updates WHERE signature = $1', [signature]);
         if (existing) throw new Error("Transaction signature already used");
         return true; 
     }
 
     async function indexTokenOnChain(mint) {
+        // 1. Fetch Metadata (On-chain)
         const meta = await fetchTokenMetadata(mint);
         
         let supply = '1000000000'; 
@@ -85,6 +97,7 @@ function init(deps) {
             decimals = supplyInfo.value.decimals;
         } catch (e) {}
 
+        // 2. Find Pools (On-chain)
         const pools = await findPoolsOnChain(mint);
         const poolAddresses = [];
 
@@ -103,11 +116,20 @@ function init(deps) {
             });
         }
 
+        // 3. Fetch Initial Market Stats (GeckoTerminal) - NEW
+        // This prevents "blank" 24h change when first indexing
+        const marketData = await fetchInitialMarketData(mint);
+        
         const baseData = {
             name: meta?.name || 'Unknown',
             ticker: meta?.symbol || 'UNKNOWN',
             image: meta?.image || null,
         };
+
+        const initialPrice = marketData?.priceUsd || 0;
+        const initialVol = marketData?.volume24h || 0;
+        const initialChange = marketData?.change24h || 0;
+        const initialMcap = marketData?.marketCap || 0;
 
         await db.run(`
             INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, timestamp)
@@ -117,6 +139,7 @@ function init(deps) {
             symbol = EXCLUDED.symbol,
             image = EXCLUDED.image,
             decimals = EXCLUDED.decimals
+            -- We do NOT overwrite price/change on conflict here, let the aggregator handle that
         `, [
             mint, 
             baseData.name, 
@@ -124,7 +147,11 @@ function init(deps) {
             baseData.image, 
             supply, 
             decimals, 
-            0, 0, 0, 0, 0, 
+            initialPrice, 
+            0, // Liquidity updated by aggregator 
+            initialMcap, 
+            initialVol, 
+            initialChange, 
             Date.now()
         ]);
 
@@ -140,7 +167,7 @@ function init(deps) {
 
     // --- PUBLIC ROUTES ---
 
-    // 1. PROXY: Get Blockhash (Hides Helius Key)
+    // 1. PROXY: Get Blockhash
     router.get('/proxy/blockhash', async (req, res) => {
         try {
             const { blockhash, lastValidBlockHeight } = await solanaConnection.getLatestBlockhash('confirmed');
@@ -151,10 +178,10 @@ function init(deps) {
         }
     });
 
-    // 2. PROXY: Send Transaction (Hides Helius Key)
+    // 2. PROXY: Send Transaction
     router.post('/proxy/send-tx', async (req, res) => {
         try {
-            const { signedTx } = req.body; // base64 string
+            const { signedTx } = req.body; 
             if (!signedTx) return res.status(400).json({ success: false, error: "No transaction data" });
 
             const txBuffer = Buffer.from(signedTx, 'base64');
@@ -178,7 +205,6 @@ function init(deps) {
             const resMinutes = parseInt(resolution === 'D' ? 1440 : resolution);
             const resMs = resMinutes * 60 * 1000;
             
-            // Cache shortened to 10 seconds to allow faster refresh
             const cacheKey = `chart:${mint}:${poolAddress || 'best'}:${resolution}:${Math.floor(Date.now() / 10000)}`; 
 
             const result = await smartCache(cacheKey, 10, async () => {
@@ -203,8 +229,7 @@ function init(deps) {
                     ORDER BY timestamp ASC
                 `, [targetPoolAddress, fromMs, toMs]);
                 
-                // 2. FALLBACK: If internal DB has too little data (< 10 candles), use External API
-                // This ensures "newly indexed" tokens still have charts immediately.
+                // 2. FALLBACK: External API if internal data is sparse
                 if (!rows || rows.length < 5) {
                     const extCandles = await fetchExternalCandles(targetPoolAddress, resolution);
                     if (extCandles.length > 0) {
@@ -212,7 +237,6 @@ function init(deps) {
                     }
                 }
 
-                // ... (Internal Candle processing logic) ...
                 if (!rows || rows.length === 0) return { success: true, candles: [] };
 
                 const candles = [];
@@ -288,7 +312,7 @@ function init(deps) {
         try {
             if (!mint || mint.length < 30) return res.status(400).json({ success: false, error: "Invalid Mint" });
 
-            // Verify Payment on-chain (or check DB if sig used)
+            // Verify Payment
             try {
                 await verifyPayment(signature, userPublicKey);
             } catch (payErr) {
@@ -300,7 +324,6 @@ function init(deps) {
                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
             `, [mint, twitter, website, telegram, banner, description, Date.now(), signature, userPublicKey]);
 
-            // Trigger an index refresh just in case
             try { await indexTokenOnChain(mint); } catch (err) {}
 
             res.json({ success: true, message: "Update queued." });
@@ -311,18 +334,15 @@ function init(deps) {
     });
 
     // --- ADMIN ROUTES (Protected) ---
-
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         const { type } = req.query;
         try {
             let sql = `SELECT u.*, t.symbol as ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`;
-            
             if (type === 'history') {
                 sql += ` WHERE u.status != 'pending' ORDER BY u.submittedAt DESC LIMIT 50`;
             } else {
                 sql += ` WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`;
             }
-
             const updates = await db.all(sql);
             res.json({ success: true, updates });
         } catch (e) {

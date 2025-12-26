@@ -749,7 +749,14 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
 
     const formatMoney = (val) => { if (val === undefined || val === null || isNaN(val)) return "$0.00"; return val < 0.01 ? '$' + val.toExponential(2) : '$' + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }); };
     const formatCompact = (val) => { if (val === undefined || val === null || isNaN(val)) return "$0"; return '$' + new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val); };
-    const formatPct = (val) => { if (val === undefined || val === null || isNaN(val) || val === 0) return `<span class="text-[#9a3412]">-</span>`; const cls = val > 0 ? 'pill-green' : (val < 0 ? 'pill-red' : 'text-[#9a3412]'); return `<span class="pill ${cls}">${val > 0 ? '+' : ''}${val.toFixed(2)}%</span>`; };
+    
+    // UPDATED FORMAT PCT to allow 0.00%
+    const formatPct = (val) => { 
+        if (val === undefined || val === null || isNaN(val)) return `<span class="text-[#9a3412]">-</span>`; 
+        const cls = val > 0 ? 'pill-green' : (val < 0 ? 'pill-red' : 'text-gray-400'); // Gray for 0%
+        return `<span class="pill ${cls}">${val > 0 ? '+' : ''}${val.toFixed(2)}%</span>`; 
+    };
+
     const timeAgo = (ts) => { if (!ts) return ''; const seconds = Math.floor((Date.now() - ts) / 1000); return seconds < 60 ? `${seconds}s ago` : (seconds < 3600 ? `${Math.floor(seconds/60)}m ago` : `${Math.floor(seconds/3600)}h ago`); };
     function renderTokenMedia(url, className, fallbackText = '?') { const fallback = `https://placehold.co/80x80/2a1005/7c2d12?text=${fallbackText}`; const safeUrl = url || fallback; const isVideo = safeUrl.match(/\.(mp4|webm|mov)$/i); if (isVideo) { return `<video src="${safeUrl}" class="${className}" autoplay loop muted playsinline poster="${fallback}"></video>`; } return `<img src="${safeUrl}" class="${className}" loading="lazy" onerror="this.onerror=null;this.src='${fallback}'">`; }
     function navigateTo(path) { window.location.hash = path; }
