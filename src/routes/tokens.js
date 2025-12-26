@@ -224,7 +224,9 @@ function init(deps) {
 
     router.get('/token/:mint', async (req, res) => {
         const { mint } = req.params;
+        // Decrease cache time to ensure price updates are fresh
         const cacheKey = `token:detail:${mint}`;
+        
         const result = await smartCache(cacheKey, 5, async () => {
             let token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
             let pairs = await db.all('SELECT * FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC', [mint]);
@@ -237,8 +239,55 @@ function init(deps) {
                 } catch (e) {}
             }
             
-            let tokenData = token || { mint, name: 'Unknown', ticker: 'Unknown' };
+            if (!token) return { success: false, error: "Token not found" };
+
+            let tokenData = { ...token };
             if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
+
+            // 1. Unwrap Community Metadata (if available)
+            // This exposes banner, description, and social links to the frontend
+            if (tokenData.metadata) {
+                try {
+                    const meta = typeof tokenData.metadata === 'string' ? JSON.parse(tokenData.metadata) : tokenData.metadata;
+                    if (meta.banner) tokenData.banner = meta.banner;
+                    if (meta.description) tokenData.description = meta.description;
+                    if (meta.twitter) tokenData.twitter = meta.twitter;
+                    if (meta.telegram) tokenData.telegram = meta.telegram;
+                    if (meta.website) tokenData.website = meta.website;
+                } catch (e) {
+                    console.error("Error parsing metadata for mint:", mint, e);
+                }
+            }
+
+            // 2. Dynamic Price/Change Calculation from Largest Pool
+            // This ensures percent changes are accurate to the most liquid market
+            if (pairs.length > 0) {
+                const mainPool = pairs[0]; // Largest liquidity pool
+                
+                // Use main pool price as the source of truth
+                if (mainPool.price_usd > 0) {
+                    tokenData.priceUsd = mainPool.price_usd;
+                }
+
+                // Calculate percent changes manually from candles to ensure accuracy
+                const now = Date.now();
+                const oneHourAgo = now - (60 * 60 * 1000);
+                const twentyFourHoursAgo = now - (24 * 60 * 60 * 1000);
+
+                const [candle1h, candle24h] = await Promise.all([
+                    db.get(`SELECT close FROM candles_1m WHERE pool_address = $1 AND timestamp <= $2 ORDER BY timestamp DESC LIMIT 1`, [mainPool.address, oneHourAgo]),
+                    db.get(`SELECT close FROM candles_1m WHERE pool_address = $1 AND timestamp <= $2 ORDER BY timestamp DESC LIMIT 1`, [mainPool.address, twentyFourHoursAgo])
+                ]);
+
+                if (candle1h && candle1h.close > 0) {
+                    tokenData.change1h = ((tokenData.priceUsd - candle1h.close) / candle1h.close) * 100;
+                }
+                
+                if (candle24h && candle24h.close > 0) {
+                    tokenData.change24h = ((tokenData.priceUsd - candle24h.close) / candle24h.close) * 100;
+                }
+            }
+
             return { success: true, token: { ...tokenData, pairs } };
         });
         res.json(result);
