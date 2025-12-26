@@ -7,21 +7,16 @@ const config = require('./config/env');
 const logger = require('./services/logger');
 const { initDB, getDB } = require('./services/database');
 
-// --- ROUTES ---
 const tokensRoutes = require('./routes/tokens');
+// Only import Snapshotter, NOT the PumpListener
 const { startSnapshotter } = require('./indexer/tasks/snapshotter');
-
-// Note: pumpfun listener removed to prevent auto-indexing of all new tokens.
-// const { startPumpListener } = require('./indexer/listeners/pumpfun'); 
 
 const app = express();
 
-// 1. Security & Middleware
 app.use(helmet());
-app.use(cors({ origin: '*' })); // Allow all for public API
+app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// Global Rate Limiting
 const limiter = rateLimit({
     windowMs: 1 * 60 * 1000, 
     max: 500, 
@@ -30,13 +25,8 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// 2. Health Check
 app.get('/health', (req, res) => {
-    res.json({ 
-        status: 'ok', 
-        timestamp: Date.now(),
-        service: 'HolDEX API' 
-    });
+    res.json({ status: 'ok', timestamp: Date.now(), service: 'HolDEX API' });
 });
 
 async function startServer() {
@@ -55,9 +45,9 @@ async function startServer() {
             logger.info(`✅ API: Listening on port ${PORT}`);
         });
 
-        // D. Start Background Services
-        // We only run the snapshotter now. New tokens are added via Search/Update only.
-        logger.info('🔄 System: Starting Background Snapshotter...');
+        // D. Start Snapshotter (Background)
+        // This keeps prices updated for tokens you have ALREADY indexed via search/update
+        logger.info('🔄 System: Starting Snapshotter...');
         startSnapshotter();
 
     } catch (error) {

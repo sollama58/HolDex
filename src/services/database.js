@@ -55,7 +55,7 @@ const initDB = async () => {
         mint TEXT PRIMARY KEY,
         symbol TEXT,
         name TEXT,
-        image TEXT, -- Added explicitly
+        image TEXT,
         decimals INTEGER,
         supply TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -74,7 +74,7 @@ const initDB = async () => {
       );
     `);
 
-    // SELF-HEALING: Ensure 'image' column exists if table was created previously
+    // SELF-HEALING: Ensure columns exist
     await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS image TEXT;`);
     await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS k_score INTEGER DEFAULT 0;`);
     await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS marketCap DOUBLE PRECISION DEFAULT 0;`);
@@ -117,7 +117,6 @@ const initDB = async () => {
       );
     `);
 
-    // SELF-HEALING: Ensure 'mint' exists in pools
     await pool.query(`ALTER TABLE pools ADD COLUMN IF NOT EXISTS mint TEXT;`);
     await pool.query(`ALTER TABLE pools ADD COLUMN IF NOT EXISTS dex TEXT;`);
 
@@ -188,10 +187,11 @@ const saveTokenData = async (db, mint, data, timestamp) => {
 const enableIndexing = async (db, mint, pair) => {
     if (!pair || !pair.pairAddress) return;
     
+    // FIX: ON CONFLICT(address) to prevent 'pools_pkey' violation
     await db.run(`
         INSERT INTO pools (address, mint, dex, token_a, token_b, created_at)
         VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT(mint, dex) DO NOTHING
+        ON CONFLICT(address) DO NOTHING
     `, [
         pair.pairAddress, 
         mint, 
