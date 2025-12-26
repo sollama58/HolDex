@@ -32,7 +32,7 @@
         }
     </script>
     <style>
-        body { background-color: #2a1005; color: #ffedd5; font-family: 'Comic Neue', cursive; min-height: 100vh; font-size: 14px; overflow-x: hidden; padding-bottom: 60px; }
+        body { background-color: #2a1005; color: #ffedd5; font-family: 'Comic Neue', cursive; min-height: 100vh; font-size: 14px; overflow-x: hidden; padding-bottom: 80px; }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: #2a1005; }
         ::-webkit-scrollbar-thumb { background: #7c2d12; border-radius: 4px; border: 1px solid #451a03; }
@@ -129,6 +129,15 @@
         .code-block { background: #0f0502; border: 1px solid #7c2d12; padding: 16px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #fb923c; overflow-x: auto; position: relative; }
         .code-copy-btn { position: absolute; top: 8px; right: 8px; background: #451a03; border: 1px solid #7c2d12; color: #9a3412; padding: 4px 8px; border-radius: 4px; font-size: 10px; cursor: pointer; transition: all 0.2s; }
         .code-copy-btn:hover { border-color: #ea580c; color: #fff; }
+        
+        /* Footer Styles */
+        footer { box-shadow: 0 -4px 10px rgba(0,0,0,0.5); }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+        .status-dot.online { background: #22c55e; box-shadow: 0 0 5px #22c55e; animation: pulse 2s infinite; }
+        .status-dot.offline { background: #ef4444; box-shadow: 0 0 5px #ef4444; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        .footer-wallet-btn { background: #451a03; border: 1px solid #7c2d12; padding: 4px 12px; border-radius: 6px; color: #fb923c; font-weight: bold; font-size: 11px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px; }
+        .footer-wallet-btn:hover { border-color: #ea580c; color: #fff; }
     </style>
 </head>
 <body>
@@ -366,7 +375,33 @@
     </div>
 </main>
 
-<!-- API DOCUMENTATION MODAL (NEW) -->
+<!-- NEW: STATUS FOOTER -->
+<footer class="fixed bottom-0 w-full bg-[#1a0a05] border-t border-[#7c2d12] px-4 py-2 z-50 flex justify-between items-center text-xs font-mono">
+    <div class="flex items-center gap-4">
+        <div class="flex items-center gap-2">
+            <span id="footer-status-dot" class="status-dot offline"></span>
+            <span id="footer-status-text" class="text-[#9a3412]">Connecting...</span>
+        </div>
+        <div class="hidden md:block text-[#9a3412]">|</div>
+        <div class="hidden md:block text-[#9a3412]">
+            Last Update: <span id="footer-last-update" class="text-[#fb923c] font-bold">--:--:--</span>
+        </div>
+    </div>
+    
+    <!-- Footer Wallet Widget -->
+    <div class="flex items-center gap-3">
+        <div id="footer-wallet-display" class="hidden items-center gap-2">
+            <span class="text-[#22c55e] font-bold flex items-center gap-1"><i data-lucide="check-circle" width="10"></i> Connected</span>
+            <span class="text-[#9a3412]">|</span>
+            <button onclick="disconnectWallet()" class="text-[#ef4444] hover:text-[#f87171] font-bold">Disconnect</button>
+        </div>
+        <button id="footer-connect-btn" onclick="openWalletModal()" class="footer-wallet-btn">
+            <i data-lucide="wallet" width="12"></i> Connect Wallet
+        </button>
+    </div>
+</footer>
+
+<!-- API DOCUMENTATION MODAL -->
 <div id="api-docs-modal" class="modal-overlay" onclick="toggleApiModal()">
     <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto relative shadow-2xl" onclick="event.stopPropagation()">
         <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleApiModal()"><i data-lucide="x" width="24"></i></button>
@@ -427,7 +462,7 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     </div>
 </div>
 
-<!-- LP DETAILS MODAL (NEW) -->
+<!-- LP DETAILS MODAL -->
 <div id="lp-modal" class="modal-overlay" onclick="toggleLpModal()">
     <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto relative shadow-2xl" onclick="event.stopPropagation()">
         <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleLpModal()"><i data-lucide="x" width="24"></i></button>
@@ -639,10 +674,49 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     function closeWalletModal() { document.getElementById('wallet-modal').classList.remove('open'); isWalletModalOpen = false; }
     async function connectProvider(providerName) { let provider = null; if (providerName === 'phantom' && window.solana && window.solana.isPhantom) provider = window.solana; else if (providerName === 'solflare' && window.solflare) provider = window.solflare; if (!provider) { alert(`${providerName} not found.`); return; } try { const resp = await provider.connect(); walletAddress = resp.publicKey.toString(); walletProvider = provider; closeWalletModal(); updateWalletUI(true); refreshBalances(); } catch (err) { console.error(err); alert("Connection failed."); } }
     function disconnectWallet() { if (walletProvider?.disconnect) walletProvider.disconnect(); walletAddress = null; walletProvider = null; updateWalletUI(false); }
-    function updateWalletUI(connected) { const discDiv = document.getElementById('wallet-disconnected'); const connDiv = document.getElementById('wallet-connected'); const submitBtn = document.getElementById('submit-btn'); const displayAddr = document.getElementById('display-address'); if (connected) { const shortAddr = walletAddress.slice(0,4) + '...' + walletAddress.slice(-4); if (discDiv) discDiv.classList.add('hidden'); if (connDiv) connDiv.classList.remove('hidden'); if (displayAddr) displayAddr.innerText = shortAddr; if (submitBtn) submitBtn.disabled = false; } else { if (discDiv) discDiv.classList.remove('hidden'); if (connDiv) connDiv.classList.add('hidden'); if (submitBtn) submitBtn.disabled = true; } lucide.createIcons(); }
+    
+    // UPDATED WALLET UI HANDLER
+    function updateWalletUI(connected) { 
+        const discDiv = document.getElementById('wallet-disconnected'); 
+        const connDiv = document.getElementById('wallet-connected'); 
+        const submitBtn = document.getElementById('submit-btn'); 
+        const displayAddr = document.getElementById('display-address');
+        
+        // Footer Elements
+        const footerBtn = document.getElementById('footer-connect-btn');
+        const footerDisp = document.getElementById('footer-wallet-display');
+        
+        if (connected) { 
+            const shortAddr = walletAddress.slice(0,4) + '...' + walletAddress.slice(-4); 
+            
+            // Update View
+            if (discDiv) discDiv.classList.add('hidden'); 
+            if (connDiv) connDiv.classList.remove('hidden'); 
+            if (displayAddr) displayAddr.innerText = shortAddr; 
+            if (submitBtn) submitBtn.disabled = false;
+            
+            // Update Footer
+            if (footerBtn) footerBtn.classList.add('hidden');
+            if (footerDisp) footerDisp.classList.remove('hidden');
+            if (footerDisp) footerDisp.classList.add('flex');
+            
+        } else { 
+            // Update View
+            if (discDiv) discDiv.classList.remove('hidden'); 
+            if (connDiv) connDiv.classList.add('hidden'); 
+            if (submitBtn) submitBtn.disabled = true; 
+            
+            // Update Footer
+            if (footerBtn) footerBtn.classList.remove('hidden');
+            if (footerDisp) footerDisp.classList.add('hidden');
+            if (footerDisp) footerDisp.classList.remove('flex');
+        } 
+        lucide.createIcons(); 
+    }
+    
     async function refreshBalances() { if (!walletAddress) return; const icon = document.getElementById('refresh-icon'); if (icon) icon.classList.add('animate-spin'); try { const tokenMint = feeConfig.tokenMint; const res = await fetch(`${API_URL}/api/proxy/balance/${walletAddress}?tokenMint=${tokenMint}`); const data = await res.json(); const solEl = document.getElementById('balance-sol'); const tokEl = document.getElementById('balance-token'); if (data.success) { if(solEl) solEl.innerText = (data.sol || 0).toFixed(4); if(tokEl) tokEl.innerText = (data.tokens || 0).toLocaleString(); } else { if(solEl) solEl.innerText = "Err"; if(tokEl) tokEl.innerText = "Err"; } } catch (e) { console.error("Balance Refresh Failed", e); } finally { if (icon) setTimeout(() => icon.classList.remove('animate-spin'), 500); } }
 
-    // --- UPDATED SUBMIT FUNCTION (Uses Proxy) ---
+    // ... (Submit Update function remains same) ...
     async function submitUpdate(e) { 
         e.preventDefault(); 
         if (!walletAddress || !walletProvider) { alert("Please connect wallet first"); return; } 
@@ -666,7 +740,6 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         statusDiv.classList.remove('hidden'); 
 
         try { 
-            // 1. Get Blockhash via Proxy
             const bhRes = await fetch(`${API_URL}/api/proxy/blockhash`);
             const bhData = await bhRes.json();
             if(!bhData.success) throw new Error("Failed to get blockhash from backend");
@@ -705,12 +778,9 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             
             statusDiv.innerText = "Please Sign in Wallet..."; 
             
-            // 2. Sign Only (Do not send via wallet RPC)
             const signedTx = await walletProvider.signTransaction(transaction); 
             
-            // 3. Serialize & Send via Backend Proxy
             const serialized = signedTx.serialize();
-            // Use browser Buffer polyfill to ensure correct Base64
             const base64Tx = window.Buffer.from(serialized).toString('base64');
             
             statusDiv.innerText = "Broadcasting (Premium RPC)...";
@@ -749,14 +819,11 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
 
     const formatMoney = (val) => { if (val === undefined || val === null || isNaN(val)) return "$0.00"; return val < 0.01 ? '$' + val.toExponential(2) : '$' + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }); };
     const formatCompact = (val) => { if (val === undefined || val === null || isNaN(val)) return "$0"; return '$' + new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val); };
-    
-    // UPDATED FORMAT PCT to allow 0.00%
     const formatPct = (val) => { 
         if (val === undefined || val === null || isNaN(val)) return `<span class="text-[#9a3412]">-</span>`; 
-        const cls = val > 0 ? 'pill-green' : (val < 0 ? 'pill-red' : 'text-gray-400'); // Gray for 0%
+        const cls = val > 0 ? 'pill-green' : (val < 0 ? 'pill-red' : 'text-gray-400'); 
         return `<span class="pill ${cls}">${val > 0 ? '+' : ''}${val.toFixed(2)}%</span>`; 
     };
-
     const timeAgo = (ts) => { if (!ts) return ''; const seconds = Math.floor((Date.now() - ts) / 1000); return seconds < 60 ? `${seconds}s ago` : (seconds < 3600 ? `${Math.floor(seconds/60)}m ago` : `${Math.floor(seconds/3600)}h ago`); };
     function renderTokenMedia(url, className, fallbackText = '?') { const fallback = `https://placehold.co/80x80/2a1005/7c2d12?text=${fallbackText}`; const safeUrl = url || fallback; const isVideo = safeUrl.match(/\.(mp4|webm|mov)$/i); if (isVideo) { return `<video src="${safeUrl}" class="${className}" autoplay loop muted playsinline poster="${fallback}"></video>`; } return `<img src="${safeUrl}" class="${className}" loading="lazy" onerror="this.onerror=null;this.src='${fallback}'">`; }
     function navigateTo(path) { window.location.hash = path; }
@@ -768,17 +835,100 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     function toggleInfoModal() { const modal = document.getElementById('info-modal'); isInfoModalOpen = !isInfoModalOpen; if (isInfoModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
     function toggleVerifiedFilter() { isVerifiedFilter = !isVerifiedFilter; const btn = document.getElementById('filter-verified'); if(btn) { if (isVerifiedFilter) btn.classList.add('active'); else btn.classList.remove('active'); } currentPage = 1; fetchList(); }
     function toggleZeroVolFilter() { isZeroVolHidden = !isZeroVolHidden; const btn = document.getElementById('filter-zerovol'); if(btn) { if (isZeroVolHidden) btn.classList.add('active'); else btn.classList.remove('active'); } currentPage = 1; fetchList(); }
-    async function fetchList() { try { const pDisplay = document.getElementById('page-display'); const prev = document.getElementById('btn-prev'); const next = document.getElementById('btn-next'); if(pDisplay) pDisplay.innerText = `Page ${currentPage}`; if(prev) prev.disabled = currentPage <= 1; let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&search=${encodeURIComponent(searchQuery)}&limit=100&page=${currentPage}`; if (isVerifiedFilter) endpoint += '&filter=verified'; const res = await fetch(endpoint); const data = await res.json(); if (data.success) { renderTable(data.tokens); if(next) next.disabled = data.tokens.length < 100; } } catch (e) { console.error("API Connection Failed", e); } }
+    
+    // UPDATED FETCH LIST WITH FOOTER UPDATE
+    async function fetchList() { 
+        try { 
+            const pDisplay = document.getElementById('page-display'); 
+            const prev = document.getElementById('btn-prev'); 
+            const next = document.getElementById('btn-next'); 
+            
+            // Footer Elements
+            const dot = document.getElementById('footer-status-dot');
+            const txt = document.getElementById('footer-status-text');
+            const time = document.getElementById('footer-last-update');
+
+            if(pDisplay) pDisplay.innerText = `Page ${currentPage}`; 
+            if(prev) prev.disabled = currentPage <= 1; 
+            
+            let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&search=${encodeURIComponent(searchQuery)}&limit=100&page=${currentPage}`; 
+            if (isVerifiedFilter) endpoint += '&filter=verified'; 
+            
+            const res = await fetch(endpoint); 
+            const data = await res.json(); 
+            
+            if (data.success) { 
+                renderTable(data.tokens); 
+                if(next) next.disabled = data.tokens.length < 100; 
+
+                // Update Footer Status
+                if(dot) { dot.classList.remove('offline'); dot.classList.add('online'); }
+                if(txt) txt.innerText = "System Online";
+                if(time) time.innerText = new Date().toLocaleTimeString();
+            } else {
+                if(dot) { dot.classList.add('offline'); dot.classList.remove('online'); }
+                if(txt) txt.innerText = "API Error";
+            }
+        } catch (e) { 
+            console.error("API Connection Failed", e); 
+            const dot = document.getElementById('footer-status-dot');
+            const txt = document.getElementById('footer-status-text');
+            if(dot) { dot.classList.add('offline'); dot.classList.remove('online'); }
+            if(txt) txt.innerText = "Disconnected";
+        } 
+    }
+
     function changePage(delta) { currentPage += delta; if (currentPage < 1) currentPage = 1; if (pollingInterval) clearInterval(pollingInterval); const tbody = document.getElementById('table-body'); if(tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-orange-700 font-mono animate-pulse">Loading Page ${currentPage}...</td></tr>`; fetchList().then(() => { if (currentPage === 1) { pollingInterval = setInterval(fetchList, 5000); } }); }
-    function renderTable(tokens) { const tbody = document.getElementById('table-body'); if(!tbody) return; let displayTokens = tokens; if (isZeroVolHidden) { displayTokens = tokens.filter(t => (t.volume24h || 0) > 0); } if (displayTokens.length === 0) { tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-[#9a3412] font-mono">${searchQuery ? `Searching global network for "${searchQuery}"...` : 'No tokens found.'}</td></tr>`; return; } tbody.innerHTML = displayTokens.map(t => { const score = t.kScore || t.k_score || 0; const isVerified = t.hasCommunityUpdate || t.hascommunityupdate; const mcap = Number(t.marketCap || t.marketcap || 0); const vol = Number(t.volume24h || 0); const chg1h = t.change1h || 0; const chg5m = t.change5m || 0; const chg24h = t.change24h || 0; let kScoreDisplay; if (isVerified) { if (score > 0) { kScoreDisplay = `${score}${score > 50 ? ' 💎' : ''}`; } else { kScoreDisplay = `<span title="Calculating Score..." class="animate-pulse">🕒</span>`; } } else { kScoreDisplay = '<span title="Community Update Required" class="text-gray-500">🔒</span>'; } const mediaHtml = renderTokenMedia(t.image, "img-token group-hover:border-[#ea580c] transition"); return ` <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group"> <td><div class="flex items-center gap-3">${mediaHtml}<div class="flex flex-col min-w-0"><div class="flex items-center gap-2"><span class="font-bold text-white text-sm group-hover:text-[#ea580c] transition truncate font-sans tracking-wide">${t.ticker}</span>${isVerified ? '<span title="Verified Community Update" class="verified-badge"><i data-lucide="check" width="12"></i></span>' : ''}</div><span class="text-[10px] text-[#9a3412] truncate max-w-[120px] md:max-w-[200px] font-mono group-hover:text-[#fb923c]">${t.name}</span></div></div></td> <td class="text-right text-[#fb923c] font-mono font-bold">${kScoreDisplay}</td> <td class="hidden md:table-cell text-right">${formatPct(chg5m)}</td> <td class="hidden md:table-cell text-right">${formatPct(chg1h)}</td> <td class="text-right">${formatPct(chg24h)}</td> <td class="text-right font-mono text-[#fb923c] font-bold">${formatCompact(mcap)}</td> <td class="text-right font-mono text-[#22c55e]">${formatCompact(vol)}</td> <td class="hidden md:table-cell text-right text-xs text-[#9a3412] font-mono">${timeAgo(t.timestamp)}</td> </tr> `}).join(''); lucide.createIcons(); }
+    
+    // UPDATED RENDER TABLE WITH CLIENT SIDE VERIFIED FILTER
+    function renderTable(tokens) { 
+        const tbody = document.getElementById('table-body'); 
+        if(!tbody) return; 
+        
+        let displayTokens = tokens; 
+        
+        // Client-side filtering as fallback/enforcer
+        if (isVerifiedFilter) {
+            displayTokens = displayTokens.filter(t => t.hasCommunityUpdate || t.hascommunityupdate);
+        }
+
+        if (isZeroVolHidden) { 
+            displayTokens = displayTokens.filter(t => (t.volume24h || 0) > 0); 
+        } 
+        
+        if (displayTokens.length === 0) { 
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-[#9a3412] font-mono">${searchQuery ? `Searching global network for "${searchQuery}"...` : 'No tokens found.'}</td></tr>`; 
+            return; 
+        } 
+        
+        tbody.innerHTML = displayTokens.map(t => { 
+            const score = t.kScore || t.k_score || 0; 
+            const isVerified = t.hasCommunityUpdate || t.hascommunityupdate; 
+            const mcap = Number(t.marketCap || t.marketcap || 0); 
+            const vol = Number(t.volume24h || 0); 
+            const chg1h = t.change1h || 0; 
+            const chg5m = t.change5m || 0; 
+            const chg24h = t.change24h || 0; 
+            
+            let kScoreDisplay; 
+            if (isVerified) { 
+                if (score > 0) { kScoreDisplay = `${score}${score > 50 ? ' 💎' : ''}`; } 
+                else { kScoreDisplay = `<span title="Calculating Score..." class="animate-pulse">🕒</span>`; } 
+            } else { 
+                kScoreDisplay = '<span title="Community Update Required" class="text-gray-500">🔒</span>'; 
+            } 
+            
+            const mediaHtml = renderTokenMedia(t.image, "img-token group-hover:border-[#ea580c] transition"); 
+            return ` <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group"> <td><div class="flex items-center gap-3">${mediaHtml}<div class="flex flex-col min-w-0"><div class="flex items-center gap-2"><span class="font-bold text-white text-sm group-hover:text-[#ea580c] transition truncate font-sans tracking-wide">${t.ticker}</span>${isVerified ? '<span title="Verified Community Update" class="verified-badge"><i data-lucide="check" width="12"></i></span>' : ''}</div><span class="text-[10px] text-[#9a3412] truncate max-w-[120px] md:max-w-[200px] font-mono group-hover:text-[#fb923c]">${t.name}</span></div></div></td> <td class="text-right text-[#fb923c] font-mono font-bold">${kScoreDisplay}</td> <td class="hidden md:table-cell text-right">${formatPct(chg5m)}</td> <td class="hidden md:table-cell text-right">${formatPct(chg1h)}</td> <td class="text-right">${formatPct(chg24h)}</td> <td class="text-right font-mono text-[#fb923c] font-bold">${formatCompact(mcap)}</td> <td class="text-right font-mono text-[#22c55e]">${formatCompact(vol)}</td> <td class="hidden md:table-cell text-right text-xs text-[#9a3412] font-mono">${timeAgo(t.timestamp)}</td> </tr> `;
+        }).join(''); 
+        lucide.createIcons(); 
+    }
 
     window.handleSearch = (e) => { searchQuery = e.target.value; const clearBtn = document.getElementById('clear-search-btn'); if (searchQuery.length > 0) { clearBtn.style.display = 'block'; } else { clearBtn.style.display = 'none'; } currentPage = 1; clearTimeout(window.searchTimeout); window.searchTimeout = setTimeout(fetchList, 1000); };
     window.clearSearch = () => { const input = document.getElementById('search'); input.value = ''; searchQuery = ''; document.getElementById('clear-search-btn').style.display = 'none'; currentPage = 1; fetchList(); };
     window.copyMint = () => { const el = document.getElementById('detail-mint'); if(el) navigator.clipboard.writeText(el.innerText); };
     window.handleManualRefresh = () => { fetchList(); };
     window.toggleApiModal = () => { const modal = document.getElementById('api-docs-modal'); isApiModalOpen = !isApiModalOpen; if (isApiModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
-    
-    // NEW: LP Modal Toggle
     window.toggleLpModal = () => { const modal = document.getElementById('lp-modal'); isLpModalOpen = !isLpModalOpen; if (isLpModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
 
     // SHOW DETAIL VIEW
