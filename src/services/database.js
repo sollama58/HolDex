@@ -41,125 +41,22 @@ const dbWrapper = {
 };
 
 const initDB = async () => {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS tokens (
-        mint TEXT PRIMARY KEY,
-        symbol TEXT,
-        name TEXT,
-        image TEXT,
-        decimals INTEGER,
-        supply TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        metadata JSONB,
-        k_score INTEGER DEFAULT 0,
-        marketCap DOUBLE PRECISION DEFAULT 0,
-        volume24h DOUBLE PRECISION DEFAULT 0,
-        change24h DOUBLE PRECISION DEFAULT 0,
-        change1h DOUBLE PRECISION DEFAULT 0,
-        change5m DOUBLE PRECISION DEFAULT 0,
-        priceUsd DOUBLE PRECISION DEFAULT 0,
-        hasCommunityUpdate BOOLEAN DEFAULT FALSE,
-        timestamp BIGINT DEFAULT 0
-      );
-    `);
-
-    // Ensure columns exist
-    await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS image TEXT;`);
-    await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS k_score INTEGER DEFAULT 0;`);
-    await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS marketCap DOUBLE PRECISION DEFAULT 0;`);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS k_scores (
-        mint TEXT PRIMARY KEY REFERENCES tokens(mint),
-        score INTEGER,
-        metrics JSONB,
-        calculated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS token_updates (
-        id SERIAL PRIMARY KEY,
-        mint TEXT NOT NULL,
-        twitter TEXT,
-        website TEXT,
-        telegram TEXT,
-        banner TEXT,
-        description TEXT,
-        status TEXT DEFAULT 'pending', 
-        signature TEXT UNIQUE,
-        payer TEXT,
-        submittedAt BIGINT
-      );
-    `);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS pools (
-          address TEXT PRIMARY KEY,       
-          mint TEXT NOT NULL,             
-          dex TEXT NOT NULL,              
-          token_a TEXT NOT NULL,          
-          token_b TEXT NOT NULL,          
-          created_at BIGINT DEFAULT 0,
-          liquidity_usd DOUBLE PRECISION DEFAULT 0,
-          volume_24h DOUBLE PRECISION DEFAULT 0,
-          price_usd DOUBLE PRECISION DEFAULT 0
-      );
-    `);
-    
-    // Ensure we don't have the old restrictive constraint
-    try { await pool.query(`ALTER TABLE pools DROP CONSTRAINT IF EXISTS pools_mint_dex_key;`); } catch(e) {}
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS candles_1m (
-          pool_address TEXT NOT NULL,
-          timestamp BIGINT NOT NULL,
-          open DOUBLE PRECISION,
-          high DOUBLE PRECISION,
-          low DOUBLE PRECISION,
-          close DOUBLE PRECISION,
-          volume DOUBLE PRECISION DEFAULT 0,
-          PRIMARY KEY (pool_address, timestamp)
-      );
-    `);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS active_trackers (
-          pool_address TEXT PRIMARY KEY,
-          last_check BIGINT DEFAULT 0,
-          priority INTEGER DEFAULT 1
-      );
-    `);
-
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score DESC);`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_mcap ON tokens(marketCap DESC);`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_volume ON tokens(volume24h DESC);`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_timestamp ON tokens(timestamp DESC);`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_candles_pool_time ON candles_1m(pool_address, timestamp DESC);`);
-    // New index for finding best pool quickly
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_pools_mint_liquidity ON pools(mint, liquidity_usd DESC);`);
-
-    logger.info('Database initialized (Multi-Pool Ready)');
-  } catch (error) {
-    logger.error('Database initialization failed', error);
-    process.exit(1);
-  }
+    // Note: Use src/scripts/force_init.js or fix_multiswap.js for schema changes
+    // This function assumes schema is consistent.
+    logger.info('Database Service Initialized');
 };
 
-// --- AGGREGATION LOGIC ---
+// --- MULTI-POOL AGGREGATION ---
 
-// 1. Enable Indexing for a specific pool (Upsert Pool Data)
+// 1. Enable Indexing (Upsert Pool)
 const enableIndexing = async (db, mint, pair) => {
     if (!pair || !pair.pairAddress) return;
     
-    // Parse stats safely
     const liq = Number(pair.liquidity?.usd || 0);
     const vol = Number(pair.volume?.h24 || 0);
     const price = Number(pair.priceUsd || 0);
 
-    // Update the POOL record
+    // Update Pool Metadata
     await db.run(`
         INSERT INTO pools (address, mint, dex, token_a, token_b, created_at, liquidity_usd, volume_24h, price_usd)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -168,16 +65,12 @@ const enableIndexing = async (db, mint, pair) => {
             volume_24h = EXCLUDED.volume_24h,
             price_usd = EXCLUDED.price_usd
     `, [
-        pair.pairAddress, 
-        mint, 
-        pair.dexId, 
-        pair.baseToken.address, 
-        pair.quoteToken.address, 
-        Date.now(),
-        liq, vol, price
+        pair.pairAddress, mint, pair.dexId, 
+        pair.baseToken.address, pair.quoteToken.address, 
+        Date.now(), liq, vol, price
     ]);
     
-    // Enable Active Tracking for Snapshotter
+    // Add to Active Trackers for Snapshotter
     await db.run(`
         INSERT INTO active_trackers (pool_address, last_check) 
         VALUES ($1, $2) 
@@ -191,7 +84,6 @@ const aggregateAndSaveToken = async (db, mint, baseData) => {
     const pools = await db.all(`SELECT * FROM pools WHERE mint = $1`, [mint]);
     
     if (!pools || pools.length === 0) {
-        // Fallback: Just save what we have if no pools indexed yet
         await saveTokenData(db, mint, baseData, Date.now());
         return;
     }
@@ -202,10 +94,10 @@ const aggregateAndSaveToken = async (db, mint, baseData) => {
     let bestPool = null;
 
     for (const pool of pools) {
-        // Sum Volume
+        // Sum Volume from all pools
         totalVolume += (pool.volume_24h || 0);
         
-        // Find Largest Pool
+        // Find Largest Pool by Liquidity
         if ((pool.liquidity_usd || 0) > maxLiq) {
             maxLiq = pool.liquidity_usd;
             bestPool = pool;
@@ -213,26 +105,22 @@ const aggregateAndSaveToken = async (db, mint, baseData) => {
     }
 
     // C. Derive Final Stats
-    // If we found a "best pool", use its price. Otherwise fallback to provided data.
+    // Price comes from the Largest Pool (most accurate)
     const finalPrice = bestPool ? (bestPool.price_usd || baseData.priceUsd) : baseData.priceUsd;
     
-    // Recalculate Market Cap based on new Price (FDV = Supply * Price)
-    // Note: We might not have supply easily, so we scale the input mcap by price ratio if needed,
-    // or better: use the FDV from the best pool pair if we had it. 
-    // For simplicity: We trust the input MarketCap but update it if price changed significantly?
-    // Actually, sticking to the Best Pool's price for display is safest.
-    
+    // Market Cap Recalculation (Approximation based on new price)
+    // If we have a base mcap and price, we can adjust it ratio-wise, 
+    // but typically taking the input mcap is safer unless we track supply.
     const finalData = {
         ...baseData,
-        volume24h: totalVolume, // AGGREGATED VOLUME
-        priceUsd: finalPrice,   // PRICE FROM LARGEST POOL
-        // Note: You might want to recalculate marketCap here if you have supply
+        volume24h: totalVolume, // Aggregated
+        priceUsd: finalPrice,   // Best Pool Price
     };
 
     await saveTokenData(db, mint, finalData, Date.now());
 };
 
-// 3. Raw Save (Low Level)
+// 3. Raw Token Save
 const saveTokenData = async (db, mint, data, timestamp) => {
     const cols = [
         'name', 'symbol', 'image', 'marketCap', 'volume24h', 
@@ -265,5 +153,6 @@ module.exports = {
   initDB,
   smartCache,
   enableIndexing,
-  aggregateAndSaveToken
+  aggregateAndSaveToken,
+  saveTokenData
 };
