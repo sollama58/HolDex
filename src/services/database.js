@@ -25,7 +25,6 @@ async function initDB() {
         client.release();
         logger.info(`📦 Database: Connection Successful.`);
 
-        // --- SCHEMA ---
         await pool.query(`
             CREATE TABLE IF NOT EXISTS tokens (
                 mint TEXT PRIMARY KEY,
@@ -106,7 +105,6 @@ async function initDB() {
             CREATE INDEX IF NOT EXISTS idx_candles_pool_time ON candles_1m(pool_address, timestamp);
         `);
 
-        // --- WRAPPER (SQLite Compatibility Layer) ---
         dbWrapper = {
             query: (text, params) => pool.query(text, params),
             get: async (text, params) => { const res = await pool.query(text, params); return res.rows[0]; },
@@ -127,7 +125,6 @@ function getDB() {
     return dbWrapper;
 }
 
-// --- HELPER: Smart Caching ---
 async function smartCache(key, ttlSeconds, fetchFn) {
     const redis = getClient();
     if (redis) {
@@ -143,20 +140,18 @@ async function smartCache(key, ttlSeconds, fetchFn) {
     return data;
 }
 
-// --- HELPER: Indexing Enabler (FIXED) ---
 async function enableIndexing(db, mint, poolData) {
     if (!poolData || !poolData.pairAddress) return;
 
-    // ROBUST RESOLVER: Handles string, object {address: ...}, or null
     const resolveToken = (val, fallback) => {
         if (!val) return fallback;
         if (typeof val === 'string') return val;
         if (typeof val === 'object' && val.address) return val.address;
-        return fallback; // If object but no address, return fallback
+        return fallback; 
     };
 
-    const tokenA = resolveToken(poolData.baseToken, mint); // Fallback to Mint
-    const tokenB = resolveToken(poolData.quoteToken, 'So11111111111111111111111111111111111111112'); // Fallback to SOL
+    const tokenA = resolveToken(poolData.baseToken, mint); 
+    const tokenB = resolveToken(poolData.quoteToken, 'So11111111111111111111111111111111111111112'); 
 
     try {
         await db.run(`
@@ -197,7 +192,9 @@ async function enableIndexing(db, mint, poolData) {
     }
 }
 
-// --- HELPER: Aggregation ---
+// --- AGGREGATION LOGIC (UPDATED) ---
+// 1. Sum Liquidity/Volume from ALL pools.
+// 2. Take Price and % Changes from LARGEST pool only.
 async function aggregateAndSaveToken(db, mint) {
     try {
         const pools = await db.all(`SELECT * FROM pools WHERE mint = $1`, [mint]);
@@ -205,23 +202,65 @@ async function aggregateAndSaveToken(db, mint) {
 
         let totalLiq = 0;
         let totalVol = 0;
-        let maxPrice = 0;
-        let mainPool = pools[0];
+        let mainPool = pools[0]; // Start with first as main
         
         for (const p of pools) {
-            totalLiq += parseFloat(p.liquidity_usd || 0);
-            totalVol += parseFloat(p.volume_24h || 0);
-            if (parseFloat(p.liquidity_usd || 0) > parseFloat(mainPool.liquidity_usd || 0)) {
+            const liq = parseFloat(p.liquidity_usd || 0);
+            const vol = parseFloat(p.volume_24h || 0);
+            
+            // Summation for Total Stats
+            totalLiq += liq;
+            totalVol += vol;
+
+            // Determine Largest Pool by Liquidity
+            if (liq > parseFloat(mainPool.liquidity_usd || 0)) {
                 mainPool = p;
             }
         }
-        maxPrice = parseFloat(mainPool.price_usd || 0);
 
+        const price = parseFloat(mainPool.price_usd || 0);
+
+        // --- Calculate % Changes using Main Pool Candles ---
+        let change24h = 0;
+        let change1h = 0;
+        let change5m = 0;
+
+        if (price > 0) {
+            const now = Date.now();
+            const time24h = now - (24 * 60 * 60 * 1000);
+            const time1h = now - (60 * 60 * 1000);
+            const time5m = now - (5 * 60 * 1000);
+
+            // Fetch closest candle close price for each timeframe
+            const getPriceAt = async (ts) => {
+                const row = await db.get(
+                    `SELECT close FROM candles_1m WHERE pool_address = $1 AND timestamp <= $2 ORDER BY timestamp DESC LIMIT 1`, 
+                    [mainPool.address, ts]
+                );
+                return row ? parseFloat(row.close) : null;
+            };
+
+            const [p24h, p1h, p5m] = await Promise.all([
+                getPriceAt(time24h),
+                getPriceAt(time1h),
+                getPriceAt(time5m)
+            ]);
+
+            // Calculate percentages
+            if (p24h) change24h = ((price - p24h) / p24h) * 100;
+            if (p1h) change1h = ((price - p1h) / p1h) * 100;
+            if (p5m) change5m = ((price - p5m) / p5m) * 100;
+        }
+
+        // --- Update Token Table ---
+        // This ensures the homepage (which queries 'tokens') has accurate % changes
         await db.run(`
             UPDATE tokens 
-            SET liquidity = $1, volume24h = $2, priceUsd = $3, marketCap = ($3 * CAST(supply AS DOUBLE PRECISION) / POWER(10, decimals))
+            SET liquidity = $1, volume24h = $2, priceUsd = $3, 
+                marketCap = ($3 * CAST(supply AS DOUBLE PRECISION) / POWER(10, decimals)),
+                change24h = $5, change1h = $6, change5m = $7
             WHERE mint = $4
-        `, [totalLiq, totalVol, maxPrice, mint]);
+        `, [totalLiq, totalVol, price, mint, change24h, change1h, change5m]);
         
     } catch (err) {
         logger.error(`Aggregation Error ${mint}: ${err.message}`);

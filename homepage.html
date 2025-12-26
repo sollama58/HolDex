@@ -5,10 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HolDex | The Terminal Fire Explorer</title>
     
-    <!-- ========================================== -->
-    <!-- 1. ESSENTIAL LIBRARIES                     -->
-    <!-- ========================================== -->
-    
     <script src="https://bundle.run/buffer@6.0.3"></script>
     <script>
         if (typeof window.buffer !== 'undefined') {
@@ -339,18 +335,21 @@
                 <div class="stat-card"><span class="stat-label">24H</span><span id="stat-chg24h" class="stat-value">-</span></div>
             </div>
             
-            <div id="pool-tabs-container" class="flex gap-4 border-b border-[#7c2d12] mb-4 overflow-x-auto"></div>
+            <div class="flex justify-between items-center border-b border-[#7c2d12] mb-4 pb-2">
+                <div class="flex items-center gap-2">
+                    <div class="text-[#fb923c] font-bold font-mono text-sm flex items-center gap-2"><i data-lucide="activity" width="16"></i> INTERNAL FEED <span id="chart-pool-name" class="text-xs text-[#9a3412] ml-2"></span></div>
+                </div>
+                <button onclick="toggleLpModal()" class="text-xs text-[#9a3412] hover:text-[#fb923c] font-bold font-mono flex items-center gap-1 border border-[#7c2d12] px-2 py-1 rounded bg-[#2a1005] hover:border-[#ea580c]">
+                    <i data-lucide="layers" width="12"></i> View LP Details
+                </button>
+            </div>
             
             <div class="chart-wrapper">
                 <div class="chart-header">
-                     <div class="flex items-center gap-2">
-                         <div class="text-[#fb923c] font-bold font-mono text-sm flex items-center gap-2"><i data-lucide="activity" width="16"></i> INTERNAL FEED <span id="chart-pool-name" class="text-xs text-[#9a3412] ml-2"></span></div>
-                         
-                         <!-- CHART MODE TOGGLE -->
-                         <div class="flex items-center gap-1 bg-[#0f0502] p-1 rounded-lg border border-[#7c2d12] ml-4">
-                             <button onclick="setChartMode('price')" class="mode-btn active" id="mode-price">Price</button>
-                             <button onclick="setChartMode('mcap')" class="mode-btn" id="mode-mcap">M.Cap</button>
-                         </div>
+                     <!-- CHART MODE TOGGLE -->
+                     <div class="flex items-center gap-1 bg-[#0f0502] p-1 rounded-lg border border-[#7c2d12] mr-auto">
+                         <button onclick="setChartMode('price')" class="mode-btn active" id="mode-price">Price</button>
+                         <button onclick="setChartMode('mcap')" class="mode-btn" id="mode-mcap">M.Cap</button>
                      </div>
                      
                      <div class="flex items-center gap-1 bg-[#0f0502] p-1 rounded-lg border border-[#7c2d12]">
@@ -428,6 +427,30 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     </div>
 </div>
 
+<!-- LP DETAILS MODAL (NEW) -->
+<div id="lp-modal" class="modal-overlay" onclick="toggleLpModal()">
+    <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto relative shadow-2xl" onclick="event.stopPropagation()">
+        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleLpModal()"><i data-lucide="x" width="24"></i></button>
+        <h3 class="text-xl font-bold text-white mb-6 font-sans">Liquidity Pools</h3>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm text-[#ffedd5]">
+                <thead class="text-[#9a3412] uppercase text-xs font-bold border-b border-[#7c2d12]">
+                    <tr>
+                        <th class="px-4 py-3">DEX</th>
+                        <th class="px-4 py-3 text-right">Price</th>
+                        <th class="px-4 py-3 text-right">Liquidity</th>
+                        <th class="px-4 py-3 text-right">Vol 24h</th>
+                        <th class="px-4 py-3"></th>
+                    </tr>
+                </thead>
+                <tbody id="lp-list-body">
+                    <!-- Populated via JS -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
 <div id="wallet-modal" class="modal-overlay">
     <div class="bg-[#2a1005] border-2 border-[#ea580c] p-6 rounded-2xl max-w-sm w-full shadow-2xl relative" onclick="event.stopPropagation()">
         <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="closeWalletModal()"><i data-lucide="x" width="24"></i></button>
@@ -482,6 +505,7 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     let isConnected = true;
     let isInfoModalOpen = false;
     let isApiModalOpen = false;
+    let isLpModalOpen = false;
     let isWalletModalOpen = false;
     let currentPage = 1;
     let isVerifiedFilter = false;
@@ -499,6 +523,7 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     let currentResolution = '60';
     let currentChartMode = 'price'; // 'price' or 'mcap'
     let currentNormalizedSupply = 1;
+    let currentTokenPairs = [];
 
     window.onload = async () => { handleRoute(); await fetchFees(); lucide.createIcons(); const descInput = document.getElementById('update-description'); const charCount = document.getElementById('char-count'); if(descInput && charCount) { descInput.addEventListener('input', () => { charCount.innerText = descInput.value.length; }); } };
     window.addEventListener('hashchange', handleRoute);
@@ -607,18 +632,6 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         } catch (e) { console.error("Chart Fetch Failed", e); }
     }
 
-    // --- POOL SWITCHING & DETAILS ---
-    window.switchPool = (pairAddress, dexId, dexName) => {
-        document.querySelectorAll('.pool-tab').forEach(t => t.classList.remove('active')); 
-        const tab = document.getElementById(`tab-${pairAddress}`); 
-        if(tab) tab.classList.add('active');
-        
-        const label = document.getElementById('chart-pool-name');
-        if(label) label.innerText = `— ${dexName || dexId.toUpperCase()}`;
-        
-        fetchCandles(currentMint, pairAddress);
-    };
-
     // ... (Standard Helpers) ...
     async function fetchFees() { try { const res = await fetch(`${API_URL}/api/config/fees`); const data = await res.json(); if (data.success) { feeConfig = data; const solEl = document.getElementById('fee-sol'); const tokEl = document.getElementById('fee-token'); if (solEl) solEl.innerText = `${data.solFee} SOL`; if (tokEl) tokEl.innerText = `${data.tokenFee.toLocaleString()} TOKENS`; } } catch (e) { console.error("Fee fetch failed", e); } }
     function sanitizeInput(str) { if(!str) return ''; const div = document.createElement('div'); div.innerText = str; return div.innerHTML; }
@@ -654,6 +667,9 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     window.copyMint = () => { const el = document.getElementById('detail-mint'); if(el) navigator.clipboard.writeText(el.innerText); };
     window.handleManualRefresh = () => { fetchList(); };
     window.toggleApiModal = () => { const modal = document.getElementById('api-docs-modal'); isApiModalOpen = !isApiModalOpen; if (isApiModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
+    
+    // NEW: LP Modal Toggle
+    window.toggleLpModal = () => { const modal = document.getElementById('lp-modal'); isLpModalOpen = !isLpModalOpen; if (isLpModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
 
     // SHOW DETAIL VIEW
     async function showDetailView(mint) {
@@ -695,7 +711,6 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
                 const descEl = document.getElementById('detail-desc');
                 
                 // --- DESCRIPTION DISPLAY ---
-                // Render description if available, regardless of strict verification status
                 if (t.description && descEl) { 
                     descEl.innerHTML = sanitizeInput(t.description); 
                     descEl.classList.remove('hidden'); 
@@ -719,7 +734,6 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
                          linksHtml += `<div class="flex items-center px-4 py-2 bg-green-900/30 border border-green-500 text-green-500 rounded-xl font-bold uppercase text-xs tracking-wider h-14"><i data-lucide="shield-check" width="18" class="mr-2"></i> VERIFIED</div>`;
                     }
                     
-                    // Render social buttons if links exist (merged from metadata)
                     if (t.twitter) linksHtml += `<a href="${t.twitter}" target="_blank" class="social-btn-lg"><i data-lucide="twitter" width="24"></i></a>`;
                     if (t.website) linksHtml += `<a href="${t.website}" target="_blank" class="social-btn-lg"><i data-lucide="globe" width="24"></i></a>`;
                     if (t.telegram) linksHtml += `<a href="${t.telegram}" target="_blank" class="social-btn-lg"><i data-lucide="send" width="24"></i></a>`;
@@ -748,35 +762,53 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
                     } else { kEl.innerText = '🔒'; kEl.classList.remove('text-[#fb923c]', 'animate-pulse'); kEl.classList.add('text-gray-500'); kEl.title = "Requires Community Update"; }
                 }
 
-                // POOL TABS LOGIC
-                const tabsContainer = document.getElementById('pool-tabs-container'); 
-                if(tabsContainer) {
-                    tabsContainer.innerHTML = '';
-                    if (t.pairs && t.pairs.length > 0) {
-                        t.pairs.forEach((pair, idx) => {
-                            if (!pair) return;
-                            const tab = document.createElement('div'); 
-                            tab.className = `pool-tab ${idx === 0 ? 'active' : ''}`;
-                            let dexId = String(pair.dex || pair.dexId || "Unknown");
-                            const dexName = dexId.toUpperCase();
-                            tab.id = `tab-${pair.address || pair.pairAddress}`; 
-                            tab.innerText = `${dexName} ($${formatCompact(pair.liquidity_usd || pair.liquidity)})`;
-                            tab.onclick = () => switchPool(pair.address || pair.pairAddress, dexId, dexName); 
-                            tabsContainer.appendChild(tab);
+                // POOL LOGIC & MODAL POPULATION
+                currentTokenPairs = t.pairs || [];
+                const lpBody = document.getElementById('lp-list-body');
+                if(lpBody) {
+                    lpBody.innerHTML = '';
+                    if (currentTokenPairs.length > 0) {
+                        // Find Largest Pool for Chart
+                        let largestPool = currentTokenPairs[0];
+                        currentTokenPairs.forEach(p => {
+                            if((p.liquidity_usd || 0) > (largestPool.liquidity_usd || 0)) largestPool = p;
                         });
-                        
-                        // Set Initial Pool Name for Chart Label
-                        const initialPair = t.pairs[0];
-                        const initialDex = String(initialPair.dex || initialPair.dexId || "Unknown").toUpperCase();
+
+                        // Set Chart Label
+                        const dexName = String(largestPool.dex || largestPool.dexId || "Unknown").toUpperCase();
                         const label = document.getElementById('chart-pool-name');
-                        if(label) label.innerText = `— ${initialDex}`;
+                        if(label) label.innerText = `— ${dexName} (Largest Pool)`;
+                        
+                        // Populate Modal
+                        currentTokenPairs.forEach(pair => {
+                            const pDex = String(pair.dex || pair.dexId || "Unknown").toUpperCase();
+                            const pPrice = formatMoney(pair.price_usd || pair.priceUsd || 0);
+                            const pLiq = formatCompact(pair.liquidity_usd || pair.liquidity || 0);
+                            const pVol = formatCompact(pair.volume_24h || pair.volume?.h24 || 0);
+                            const isMain = pair.address === largestPool.address;
+                            
+                            const row = document.createElement('tr');
+                            row.className = "hover:bg-[#451a03] transition border-b border-[#7c2d12] last:border-0";
+                            row.innerHTML = `
+                                <td class="px-4 py-3 font-mono font-bold text-[#fb923c]">${pDex} ${isMain ? '<span class="text-[10px] bg-[#ea580c] text-white px-1 rounded ml-1">MAIN</span>' : ''}</td>
+                                <td class="px-4 py-3 text-right font-mono">${pPrice}</td>
+                                <td class="px-4 py-3 text-right font-mono text-[#22c55e]">${pLiq}</td>
+                                <td class="px-4 py-3 text-right font-mono">${pVol}</td>
+                                <td class="px-4 py-3 text-right"><a href="https://solscan.io/account/${pair.address || pair.pairAddress}" target="_blank" class="text-[#9a3412] hover:text-[#fb923c]"><i data-lucide="external-link" width="14"></i></a></td>
+                            `;
+                            lpBody.appendChild(row);
+                        });
+                        lucide.createIcons();
+                        
+                        // Wait slightly for UI to settle then fetch candles
+                        setTimeout(async () => { await fetchCandles(mint); }, 100);
+                    } else {
+                        lpBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-[#9a3412]">No pools found.</td></tr>`;
                     }
                 }
                 
                 if(loadingDiv) loadingDiv.style.display = 'none'; 
                 if(contentDiv) contentDiv.style.display = 'block';
-
-                setTimeout(async () => { await fetchCandles(mint); }, 100);
             }
         } catch (e) { console.error(e); if(loadingDiv) loadingDiv.innerText = "Error Loading Token Data"; }
     }
