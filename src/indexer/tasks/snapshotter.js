@@ -3,7 +3,6 @@ const { getSolanaConnection } = require('../../services/solana');
 const { getDB } = require('../../services/database');
 const { getClient } = require('../../services/redis');
 const logger = require('../../services/logger');
-const axios = require('axios');
 
 // Memory Fallback
 const stateCache = new Map();
@@ -20,15 +19,18 @@ const decimalCache = new Map();
 
 async function updateSolPrice(db) {
     try {
+        // 1. Try DB
         const pool = await db.get(`SELECT price_usd FROM pools WHERE token_a = 'So11111111111111111111111111111111111111112' ORDER BY liquidity_usd DESC LIMIT 1`);
         if (pool && pool.price_usd > 0) {
             solPriceCache = pool.price_usd;
             return;
         }
-        const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd', { timeout: 2000 });
-        if (response.data?.solana?.usd) solPriceCache = response.data.solana.usd;
+        // 2. Try External (Native Fetch)
+        const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd');
+        const data = await res.json();
+        if (data?.solana?.usd) solPriceCache = data.solana.usd;
     } catch (e) {
-        if (solPriceCache === 0) solPriceCache = 150; 
+        if (solPriceCache === 0) solPriceCache = 150; // Hard fallback
     }
 }
 
@@ -36,7 +38,12 @@ async function fetchMintDecimals(connection, mints) {
     const missing = mints.filter(m => !decimalCache.has(m) && !QUOTE_TOKENS[m]);
     if (missing.length === 0) return;
     try {
-        const publicKeys = missing.map(m => new PublicKey(m));
+        const publicKeys = [];
+        // validate keys
+        for(const m of missing) {
+            try { publicKeys.push(new PublicKey(m)); } catch(e){}
+        }
+
         for (let i = 0; i < publicKeys.length; i += 50) {
             const chunk = publicKeys.slice(i, i + 50);
             const infos = await connection.getMultipleAccountsInfo(chunk);
@@ -58,19 +65,24 @@ async function processPoolBatch(db, connection, pools, redis) {
     const uniqueMints = new Set();
     const timestamp = Math.floor(Date.now() / 60000) * 60000;
 
+    // Pre-process and validate keys
     pools.forEach(p => {
-        if (p.mint) uniqueMints.add(p.mint);
-        if (p.dexId === 'pumpfun') {
-            if (p.reserve_a) {
-                keysToFetch.push(new PublicKey(p.reserve_a));
-                poolMap.set(p.address, { type: 'pumpfun', idx: keysToFetch.length - 1 });
+        try {
+            if (p.mint) uniqueMints.add(p.mint);
+            if (p.dexId === 'pumpfun') {
+                if (p.reserve_a) {
+                    keysToFetch.push(new PublicKey(p.reserve_a));
+                    poolMap.set(p.address, { type: 'pumpfun', idx: keysToFetch.length - 1 });
+                }
+            } else {
+                if (p.reserve_a && p.reserve_b) {
+                    keysToFetch.push(new PublicKey(p.reserve_a));
+                    keysToFetch.push(new PublicKey(p.reserve_b));
+                    poolMap.set(p.address, { type: 'standard', idxA: keysToFetch.length - 2, idxB: keysToFetch.length - 1 });
+                }
             }
-        } else {
-            if (p.reserve_a && p.reserve_b) {
-                keysToFetch.push(new PublicKey(p.reserve_a));
-                keysToFetch.push(new PublicKey(p.reserve_b));
-                poolMap.set(p.address, { type: 'standard', idxA: keysToFetch.length - 2, idxB: keysToFetch.length - 1 });
-            }
+        } catch(e) {
+            logger.warn(`Invalid pool keys for ${p.address}: ${e.message}`);
         }
     });
 
@@ -79,7 +91,7 @@ async function processPoolBatch(db, connection, pools, redis) {
     let accounts = [];
     if (keysToFetch.length > 0) {
         try { accounts = await connection.getMultipleAccountsInfo(keysToFetch); } 
-        catch (e) { return; }
+        catch (e) { logger.warn(`RPC Fetch failed: ${e.message}`); return; }
     }
 
     const updates = [];
@@ -97,11 +109,13 @@ async function processPoolBatch(db, connection, pools, redis) {
         let isPumpFunComplete = false;
 
         // --- 1. DATA EXTRACTION ---
-        if (task.type === 'pumpfun') {
-            const acc = accounts[task.idx];
-            if (!acc) continue;
-            try {
+        try {
+            if (task.type === 'pumpfun') {
+                const acc = accounts[task.idx];
+                if (!acc) continue;
                 const data = acc.data;
+                if (data.length < 40) continue; // Safety check
+
                 const virtualToken = Number(data.readBigUInt64LE(8));
                 const virtualSol = Number(data.readBigUInt64LE(16));
                 const realSol = Number(data.readBigUInt64LE(32));
@@ -119,37 +133,41 @@ async function processPoolBatch(db, connection, pools, redis) {
                 rawB = virtualSol;
                 quoteAmount = virtualSol / 1e9; 
                 quotePrice = solPriceCache;
-            } catch(e) { continue; }
-        } else {
-            const accA = accounts[task.idxA];
-            const accB = accounts[task.idxB];
-            if (!accA || !accB) continue;
+            } else {
+                const accA = accounts[task.idxA];
+                const accB = accounts[task.idxB];
+                if (!accA || !accB) continue;
+                if (accA.data.length < 70 || accB.data.length < 70) continue;
 
-            rawA = Number(accA.data.readBigUInt64LE(64));
-            rawB = Number(accB.data.readBigUInt64LE(64));
-            if (rawA === 0 || rawB === 0) continue;
+                rawA = Number(accA.data.readBigUInt64LE(64));
+                rawB = Number(accB.data.readBigUInt64LE(64));
+                if (rawA === 0 || rawB === 0) continue;
 
-            let quoteIsA = false;
-            let quoteDecimals = 9;
-            if (QUOTE_TOKENS[p.token_a]) {
-                quoteIsA = true;
-                quoteDecimals = QUOTE_TOKENS[p.token_a].decimals;
-                quotePrice = p.token_a.startsWith('So11') ? solPriceCache : 1.0;
-            } else if (QUOTE_TOKENS[p.token_b]) {
-                quoteIsA = false;
-                quoteDecimals = QUOTE_TOKENS[p.token_b].decimals;
-                quotePrice = p.token_b.startsWith('So11') ? solPriceCache : 1.0;
-            } else { continue; }
+                let quoteIsA = false;
+                let quoteDecimals = 9;
+                if (QUOTE_TOKENS[p.token_a]) {
+                    quoteIsA = true;
+                    quoteDecimals = QUOTE_TOKENS[p.token_a].decimals;
+                    quotePrice = p.token_a.startsWith('So11') ? solPriceCache : 1.0;
+                } else if (QUOTE_TOKENS[p.token_b]) {
+                    quoteIsA = false;
+                    quoteDecimals = QUOTE_TOKENS[p.token_b].decimals;
+                    quotePrice = p.token_b.startsWith('So11') ? solPriceCache : 1.0;
+                } else { continue; }
 
-            const quoteRaw = quoteIsA ? rawA : rawB;
-            const baseRaw = quoteIsA ? rawB : rawA;
-            const baseDecimals = decimalCache.get(p.mint) || 9;
-            
-            quoteAmount = quoteRaw / Math.pow(10, quoteDecimals);
-            const baseAmount = baseRaw / Math.pow(10, baseDecimals);
+                const quoteRaw = quoteIsA ? rawA : rawB;
+                const baseRaw = quoteIsA ? rawB : rawA;
+                const baseDecimals = decimalCache.get(p.mint) || 9;
+                
+                quoteAmount = quoteRaw / Math.pow(10, quoteDecimals);
+                const baseAmount = baseRaw / Math.pow(10, baseDecimals);
 
-            priceUsd = (quoteAmount / baseAmount) * quotePrice;
-            liquidityUsd = quoteAmount * quotePrice * 2;
+                priceUsd = (quoteAmount / baseAmount) * quotePrice;
+                liquidityUsd = quoteAmount * quotePrice * 2;
+            }
+        } catch(e) {
+            logger.error(`Parse error ${p.address}: ${e.message}`);
+            continue;
         }
 
         // --- 2. VOLUME LOGIC ---
@@ -157,42 +175,40 @@ async function processPoolBatch(db, connection, pools, redis) {
         const cacheKey = `pool_state:${p.address}`;
         let lastState = null;
 
-        if (redis) {
-            const s = await redis.get(cacheKey);
-            if (s) lastState = JSON.parse(s);
-        }
-        if (!lastState) lastState = stateCache.get(cacheKey);
+        try {
+            if (redis) {
+                const s = await redis.get(cacheKey);
+                if (s) lastState = JSON.parse(s);
+            }
+            if (!lastState) lastState = stateCache.get(cacheKey);
 
-        if (lastState) {
-            const delta = Math.abs(quoteAmount - lastState.quoteAmount);
-            
-            if (task.type === 'pumpfun') {
-                const migrationEvent = (!lastState.complete && isPumpFunComplete);
-                if (!migrationEvent && delta > 0.0000001) {
-                    volumeUsd = delta * quotePrice;
-                }
-            } else {
-                const currentK = rawA * rawB;
-                const prevK = lastState.k;
-                const kRatio = prevK > 0 ? currentK / prevK : 1;
-                // Strict liquidity check
-                const isLiquidityEvent = (kRatio > 1.01 || kRatio < 0.99);
+            if (lastState) {
+                const delta = Math.abs(quoteAmount - lastState.quoteAmount);
+                
+                if (task.type === 'pumpfun') {
+                    const migrationEvent = (!lastState.complete && isPumpFunComplete);
+                    if (!migrationEvent && delta > 0.0000001) {
+                        volumeUsd = delta * quotePrice;
+                    }
+                } else {
+                    const currentK = rawA * rawB;
+                    const prevK = lastState.k;
+                    const kRatio = prevK > 0 ? currentK / prevK : 1;
+                    const isLiquidityEvent = (kRatio > 1.01 || kRatio < 0.99);
 
-                if (!isLiquidityEvent && delta > 0.000001) {
-                    volumeUsd = delta * quotePrice;
+                    if (!isLiquidityEvent && delta > 0.000001) {
+                        volumeUsd = delta * quotePrice;
+                    }
                 }
             }
-        }
-
-        // DEBUG: Log if we actually found volume
-        if (volumeUsd > 1) {
-            // logger.info(`Vol detected: ${p.address} = $${volumeUsd.toFixed(2)}`);
-        }
+        } catch(e) { logger.warn(`Volume calc error: ${e.message}`); }
 
         // Update State
         const newState = { k: rawA * rawB, quoteAmount, timestamp: Date.now(), complete: isPumpFunComplete };
         stateCache.set(cacheKey, newState);
-        if (redis) redis.set(cacheKey, JSON.stringify(newState), 'EX', 3600);
+        if (redis) {
+            redis.set(cacheKey, JSON.stringify(newState), 'EX', 3600).catch(() => {});
+        }
 
         // --- 3. DB UPDATES ---
         if (isFinite(priceUsd)) {
@@ -211,7 +227,7 @@ async function processPoolBatch(db, connection, pools, redis) {
         }
     }
 
-    await Promise.all(updates);
+    await Promise.allSettled(updates);
 }
 
 async function runSnapshotCycle() {
@@ -222,10 +238,12 @@ async function runSnapshotCycle() {
 
     try {
         const pools = await db.all(`SELECT * FROM active_trackers tr JOIN pools p ON tr.pool_address = p.address ORDER BY tr.priority DESC`);
+        logger.info(`📸 Snapshotting ${pools.length} pools...`);
+        
         for (let i = 0; i < pools.length; i += 50) {
             const batch = pools.slice(i, i + 50);
             await processPoolBatch(db, connection, batch, redis);
-            await new Promise(r => setTimeout(r, 100)); // Pacing
+            await new Promise(r => setTimeout(r, 50)); 
         }
     } catch (e) {
         logger.error(`Snapshot Error: ${e.message}`);
