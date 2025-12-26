@@ -1,26 +1,20 @@
 const express = require('express');
-const { Connection, PublicKey } = require('@solana/web3.js');
+const { PublicKey } = require('@solana/web3.js');
 const { isValidPubkey } = require('../utils/solana');
-const { smartCache, enableIndexing, getDB } = require('../services/database'); 
+const { smartCache, enableIndexing } = require('../services/database'); 
 const { findPoolsOnChain } = require('../services/pool_finder');
 const { fetchTokenMetadata } = require('../utils/metaplex');
+const { getSolanaConnection } = require('../services/solana'); // Singleton
 const config = require('../config/env');
 const kScoreUpdater = require('../tasks/kScoreUpdater'); 
 const { getClient } = require('../services/redis'); 
-
-const { snapshotPools } = require('../indexer/tasks/snapshotter');
+const { enqueueTokenUpdate } = require('../services/queue'); // Queue
+const { snapshotPools } = require('../indexer/tasks/snapshotter'); // Keep fallback
 const { fetchSolscanData } = require('../services/solscan');
 
 const router = express.Router();
-const solanaConnection = new Connection(config.SOLANA_RPC_URL, 'confirmed');
-
-const requireAdmin = (req, res, next) => {
-    const authHeader = req.headers['x-admin-auth'];
-    if (!authHeader || authHeader !== config.ADMIN_PASSWORD) {
-        return res.status(403).json({ success: false, error: 'Unauthorized' });
-    }
-    next();
-};
+// Use Singleton Connection
+const solanaConnection = getSolanaConnection();
 
 function init(deps) {
     const { db } = deps;
@@ -33,25 +27,19 @@ function init(deps) {
     }
 
     async function indexTokenOnChain(mint) {
-        // 1. Fetch Metadata
         const meta = await fetchTokenMetadata(mint);
-        
-        let supply = '1000000000'; // Default 1B
+        let supply = '1000000000'; 
         let decimals = 9; 
         
         try {
             const supplyInfo = await solanaConnection.getTokenSupply(new PublicKey(mint));
             supply = supplyInfo.value.amount;
             decimals = supplyInfo.value.decimals;
-        } catch (e) {
-            // Supply fetch might fail for some accounts, default is acceptable
-        }
+        } catch (e) {}
 
-        // 2. Find Pools
         const pools = await findPoolsOnChain(mint);
         const poolAddresses = [];
 
-        // 3. Register Pools for Indexing
         for (const pool of pools) {
             poolAddresses.push(pool.pairAddress);
             await enableIndexing(db, mint, {
@@ -71,8 +59,6 @@ function init(deps) {
             image: meta?.image || null,
         };
 
-        // 4. Upsert Token Record
-        // We initialize with 0, but the snapshotter below will fix it immediately.
         await db.run(`
             INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, marketCap, volume24h, change24h, timestamp)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -83,9 +69,15 @@ function init(deps) {
             timestamp = $11
         `, [mint, baseData.name, baseData.ticker, baseData.image, supply, decimals, 0, 0, 0, 0, Date.now()]);
 
-        // 5. Trigger Immediate Snapshot to populate Price/Liq
+        // SCALABILITY UPGRADE:
+        // 1. Push to Queue for background processing (Sustainability)
+        await enqueueTokenUpdate(mint);
+
+        // 2. Perform one immediate snapshot for UX (Response Time)
+        // We only snapshot found pools, we don't do the heavy discovery here again.
         if (poolAddresses.length > 0) {
-            await snapshotPools(poolAddresses);
+            // Fire and forget (don't await) to speed up HTTP response
+            snapshotPools(poolAddresses).catch(e => console.error("Immediate snapshot error:", e.message));
         }
 
         return { ...baseData, pairs: pools };
@@ -125,14 +117,10 @@ function init(deps) {
     router.get('/token/:mint/candles', async (req, res) => {
         const { mint } = req.params;
         const { resolution = '5', from, to } = req.query; 
-        
         const resMinutes = parseInt(resolution);
         const resMs = resMinutes * 60 * 1000;
-
         const fromMs = parseInt(from) * 1000 || (Date.now() - 24 * 60 * 60 * 1000);
         const toMs = parseInt(to) * 1000 || Date.now();
-
-        // Cache candle responses for 30s
         const cacheKey = `chart:${mint}:${resolution}:${Math.floor(Date.now() / 30000)}`; 
 
         try {
@@ -158,39 +146,27 @@ function init(deps) {
 
                 const candles = [];
                 let currentCandle = null;
-
                 for (const r of rows) {
                     const time = parseInt(r.timestamp);
                     const bucketStart = Math.floor(time / resMs) * resMs;
-
                     if (!currentCandle || currentCandle.timeMs !== bucketStart) {
                         if (currentCandle) {
                             currentCandle.time = Math.floor(currentCandle.timeMs / 1000); 
                             delete currentCandle.timeMs;
                             candles.push(currentCandle);
                         }
-                        currentCandle = {
-                            timeMs: bucketStart,
-                            open: r.open,
-                            high: r.high,
-                            low: r.low,
-                            close: r.close,
-                            volume: 0 
-                        };
+                        currentCandle = { timeMs: bucketStart, open: r.open, high: r.high, low: r.low, close: r.close, volume: 0 };
                     }
-
                     if (r.high > currentCandle.high) currentCandle.high = r.high;
                     if (r.low < currentCandle.low) currentCandle.low = r.low;
                     currentCandle.close = r.close;
                     if (r.volume) currentCandle.volume += r.volume;
                 }
-
                 if (currentCandle) {
                     currentCandle.time = Math.floor(currentCandle.timeMs / 1000);
                     delete currentCandle.timeMs;
                     candles.push(currentCandle);
                 }
-                
                 return { success: true, candles };
             });
             res.json(result);
@@ -199,14 +175,11 @@ function init(deps) {
 
     router.get('/token/:mint', async (req, res) => {
         const { mint } = req.params;
-        
-        // Short cache (5s) for real-time feel
         const cacheKey = `token:detail:${mint}`;
         const result = await smartCache(cacheKey, 5, async () => {
             let token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
             let pairs = await db.all('SELECT * FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC', [mint]);
             
-            // If token missing, try to auto-index
             if (!token) {
                 try {
                     const indexed = await indexTokenOnChain(mint);
@@ -215,13 +188,11 @@ function init(deps) {
                 } catch (e) {}
             }
             
-            // Fallback: If token price is 0 but we have pool data, use pool data
             if (token && (!token.priceUsd || token.priceUsd === 0) && pairs.length > 0) {
                  const bestPool = pairs[0];
                  if (bestPool.price_usd > 0) {
                      token.priceUsd = bestPool.price_usd;
                      token.liquidity = bestPool.liquidity_usd;
-                     // Estimate marketcap
                      const supply = token.supply ? (token.supply / Math.pow(10, token.decimals)) : 1000000000;
                      token.marketCap = bestPool.price_usd * supply;
                  }
@@ -229,18 +200,14 @@ function init(deps) {
             
             let tokenData = token || { mint, name: 'Unknown', ticker: 'Unknown' };
             if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
-
             return { success: true, token: { ...tokenData, pairs } };
         });
-
         res.json(result);
     });
 
     router.get('/tokens', async (req, res) => {
         const { search = '', sort = 'kscore', page = 1 } = req.query;
-
         try {
-            // Global Response Caching
             const isGenericView = !search;
             const cacheKey = `api:tokens:list:${sort}:${page}:${isGenericView ? 'generic' : search}`;
             const redis = getClient();
@@ -259,7 +226,6 @@ function init(deps) {
             if (search.length > 0) {
                 if (isAddressSearch) {
                     rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
-                    // Auto-index if not found
                     if (rows.length === 0) {
                          await indexTokenOnChain(search);
                          rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
@@ -277,9 +243,6 @@ function init(deps) {
                 const offset = (page - 1) * 100;
                 rows = await db.all(`SELECT * FROM tokens ORDER BY ${orderBy} LIMIT 100 OFFSET ${offset}`);
             }
-
-            // NOTE: We rely on the snapshotter to keep the 'tokens' table updated.
-            // If rows have 0 price but exist in pools, the next snapshot cycle will fix them.
 
             const responsePayload = {
                 success: true,
@@ -301,25 +264,20 @@ function init(deps) {
                 }))
             };
 
-            if (isGenericView && redis) {
-                await redis.set(cacheKey, JSON.stringify(responsePayload), 'EX', 3);
-            }
-
+            if (isGenericView && redis) await redis.set(cacheKey, JSON.stringify(responsePayload), 'EX', 3);
             res.setHeader('X-Cache', 'MISS');
             return res.json(responsePayload);
 
         } catch (e) { res.status(500).json({ success: false, tokens: [], error: e.message }); }
     });
 
-    // --- ADMIN ROUTES ---
-
+    // Admin routes reused from previous context
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         const { type } = req.query;
         let sql = `SELECT u.*, t.name, t.symbol as ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`;
         sql += type === 'history' ? ` WHERE u.status != 'pending' ORDER BY u.submittedAt DESC LIMIT 100` : ` WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`;
         res.json({ success: true, updates: await db.all(sql) });
     });
-
     router.post('/admin/approve-update', requireAdmin, async (req, res) => {
         const { id } = req.body;
         const update = await db.get('SELECT * FROM token_updates WHERE id = $1', [id]);
@@ -332,12 +290,10 @@ function init(deps) {
         await db.run("UPDATE token_updates SET status = 'approved' WHERE id = $1", [id]);
         res.json({success: true});
     });
-
     router.post('/admin/reject-update', requireAdmin, async (req, res) => {
         await db.run("UPDATE token_updates SET status = 'rejected' WHERE id = $1", [req.body.id]); 
         res.json({ success: true }); 
     });
-
     router.get('/admin/token/:mint', requireAdmin, async (req, res) => {
         const { mint } = req.params;
         const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
@@ -346,7 +302,6 @@ function init(deps) {
         if (token.metadata) meta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata;
         res.json({ success: true, token: { mint: token.mint, ticker: token.symbol, twitter: meta.twitter, website: meta.website, telegram: meta.telegram, banner: meta.banner, description: meta.description } });
     });
-
     router.post('/admin/update-token', requireAdmin, async (req, res) => {
         const { mint, twitter, website, telegram, banner, description } = req.body;
         const token = await db.get('SELECT metadata FROM tokens WHERE mint = $1', [mint]);
@@ -357,7 +312,6 @@ function init(deps) {
         await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE WHERE mint = $2`, [JSON.stringify(newMeta), mint]);
         res.json({ success: true });
     });
-
     router.post('/admin/delete-token', requireAdmin, async (req, res) => {
         const { mint } = req.body;
         await db.run('DELETE FROM k_scores WHERE mint = $1', [mint]);
@@ -366,7 +320,6 @@ function init(deps) {
         await db.run('DELETE FROM tokens WHERE mint = $1', [mint]);
         res.json({ success: true });
     });
-
     router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => {
         const { mint } = req.body;
         const score = await kScoreUpdater.updateSingleToken({ db }, mint);
