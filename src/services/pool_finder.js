@@ -1,26 +1,16 @@
 const { PublicKey } = require('@solana/web3.js');
-const { getSolanaConnection, retryRPC } = require('./solana'); // Uses Singleton
+const { getSolanaConnection, retryRPC } = require('./solana'); 
 const logger = require('./logger');
 
 // --- PROGRAM IDs ---
 const PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
 const RAYDIUM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
-const RAYDIUM_CPMM_PROGRAM_ID = new PublicKey('CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK'); // Newer PumpFun migrations often use this or Standard
+// Common Program ID for Standard AMMs including some Raydium forks
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-
-// Known Quote Mints (SOL, USDC)
-const QUOTES = [
-    'So11111111111111111111111111111111111111112', 
-    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
-];
 
 /**
  * STRATEGY: "The Supply Hog"
- * Liquidity Pools (almost) always hold the vast majority of a token's supply.
- * Instead of scanning history, we just look at who owns the tokens RIGHT NOW.
- * * 1. Get Top Token Account.
- * 2. Check who owns that account (The Pool Authority).
- * 3. Check who owns the Authority (The DEX Program).
+ * Finds pools by checking who holds the most tokens.
  */
 async function findPoolsByLiquidityDistribution(mint) {
     const connection = getSolanaConnection();
@@ -28,16 +18,16 @@ async function findPoolsByLiquidityDistribution(mint) {
     const mintPubkey = new PublicKey(mint);
 
     try {
-        // 1. Get Top Holders (The LP Vault is usually #1 or #2)
+        // 1. Get Top Holders
         const largestAccounts = await retryRPC(() => connection.getTokenLargestAccounts(mintPubkey));
         if (!largestAccounts.value || largestAccounts.value.length === 0) return [];
 
-        // Check top 3 accounts (bonding curve, raydium vault, etc)
-        const topAccounts = largestAccounts.value.slice(0, 3);
+        // Check top 5 accounts to be safe
+        const topAccounts = largestAccounts.value.slice(0, 5);
         
         for (const account of topAccounts) {
-            // Filter out tiny accounts (noise)
-            if (account.uiAmount < 1000) continue; 
+            // Filter out tiny accounts
+            if (account.uiAmount < 100) continue; 
 
             const vaultAddress = new PublicKey(account.address);
             
@@ -55,23 +45,20 @@ async function findPoolsByLiquidityDistribution(mint) {
             const ownerProgram = ownerInfo.owner.toBase58();
             let dexId = 'unknown';
 
+            // Heuristics for DEX identification
             if (ownerProgram === RAYDIUM_PROGRAM_ID.toBase58()) dexId = 'raydium';
-            else if (ownerProgram === RAYDIUM_CPMM_PROGRAM_ID.toBase58()) dexId = 'raydium_cpmm';
             else if (ownerProgram === PUMP_PROGRAM_ID.toBase58()) dexId = 'pump';
-            else if (ownerProgram === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') continue; // User wallet
-            else if (ownerProgram === '11111111111111111111111111111111') continue; // System
+            // Meteora / Orca / Others could be added here
             
-            // If we found a DEX program owning the supply, we found the pool!
-            if (dexId !== 'unknown' || (account.uiAmount > 100000000)) { // Capture generic heavy holders too
+            // If it's a known DEX or we just want to track generic AMMs
+            if (dexId !== 'unknown' || ownerProgram !== TOKEN_PROGRAM_ID.toBase58()) {
                  pools.push({
-                    pairAddress: ownerAddress.toBase58(), // The Pool Authority/State
-                    dexId: dexId,
+                    pairAddress: ownerAddress.toBase58(), 
+                    dexId: dexId === 'unknown' ? 'raydium' : dexId, // Default to raydium logic for unknown AMMs as it's most common
                     baseToken: { address: mint },
-                    quoteToken: { address: 'So11111111111111111111111111111111111111112' }, // Default SOL
+                    quoteToken: { address: 'So11111111111111111111111111111111111111112' }, // Assume SOL pairing initially
                     liquidity: { usd: 0 },
-                    // We save the Vault address so Snapshotter doesn't have to search again
-                    reserve_a: vaultAddress.toBase58(), 
-                    // reserve_b will be found by snapshotter scanning the pairAddress
+                    reserve_a: vaultAddress.toBase58() // We found one vault, snapshotter will find the other
                 });
             }
         }
@@ -93,7 +80,7 @@ async function findPoolsOnChain(mintAddress) {
     try {
         const promises = [];
 
-        // 1. DETERMINISTIC: Pump Bonding Curve (Always check this first)
+        // 1. DETERMINISTIC: Pump Bonding Curve
         const [pumpCurve] = PublicKey.findProgramAddressSync(
             [Buffer.from("bonding-curve"), mint.toBuffer()],
             PUMP_PROGRAM_ID
@@ -101,7 +88,6 @@ async function findPoolsOnChain(mintAddress) {
         promises.push(
              retryRPC(() => getSolanaConnection().getAccountInfo(pumpCurve)).then(info => {
                 if (info && info.owner.equals(PUMP_PROGRAM_ID) && info.data.length >= 40) {
-                     // We add it. Snapshotter will determine if it's bonded (empty) or active.
                      return [{
                         pairAddress: pumpCurve.toString(),
                         dexId: 'pump',
@@ -113,21 +99,8 @@ async function findPoolsOnChain(mintAddress) {
              }).catch(() => [])
         );
 
-        // 2. DISCOVERY: Supply Hog Strategy (Finds Raydium, PumpSwap, Etc)
+        // 2. DISCOVERY: Supply Hog Strategy
         promises.push(findPoolsByLiquidityDistribution(mintBase58));
-
-        // 3. LEGACY: Raydium Standard Program Account Scan (Backup)
-        const conn = getSolanaConnection();
-        promises.push(
-            retryRPC(() => conn.getProgramAccounts(RAYDIUM_PROGRAM_ID, {
-                filters: [{ dataSize: 752 }, { memcmp: { offset: 400, bytes: mintBase58 } }]
-            })).then(res => res.map(p => ({
-                pairAddress: p.pubkey.toString(),
-                dexId: 'raydium',
-                baseToken: { address: mintBase58 },
-                quoteToken: { address: new PublicKey(p.account.data.subarray(432, 464)).toBase58() }
-            }))).catch(() => [])
-        );
 
         const results = await Promise.allSettled(promises);
         results.forEach(res => {
@@ -136,12 +109,12 @@ async function findPoolsOnChain(mintAddress) {
             }
         });
 
-        // Deduplicate (Prefer 'raydium' over 'unknown' if duplicates exist)
+        // Deduplicate
         const uniquePools = [];
         const seen = new Set();
         
-        // Sort pools: Raydium/Pump first, unknown last
         pools.sort((a, b) => {
+            // Prioritize named DEXes over unknown
             const scoreA = (a.dexId === 'raydium' || a.dexId === 'pump') ? 1 : 0;
             const scoreB = (b.dexId === 'raydium' || b.dexId === 'pump') ? 1 : 0;
             return scoreB - scoreA;
@@ -151,9 +124,8 @@ async function findPoolsOnChain(mintAddress) {
             if (!seen.has(p.pairAddress)) {
                 seen.add(p.pairAddress);
                 p.liquidity = p.liquidity || { usd: 0 };
-                // Defaults
                 if (!p.quoteToken) p.quoteToken = { address: 'So11111111111111111111111111111111111111112' }; 
-                if (!p.baseToken) p.baseToken = { address: 'Unknown' }; 
+                if (!p.baseToken) p.baseToken = { address: mintBase58 }; 
                 uniquePools.push(p);
             }
         }
