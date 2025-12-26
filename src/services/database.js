@@ -42,12 +42,10 @@ const dbWrapper = {
 
 const initDB = async () => {
     // This function assumes schema is created via reset script.
-    // It is kept lightweight to avoid re-running CREATE statements on every boot
-    // if we are relying on the reset script for the "Golden Schema".
     logger.info('Database Service Initialized');
 };
 
-// --- AGGREGATION LOGIC (The Core Fix) ---
+// --- AGGREGATION LOGIC ---
 
 // 1. Enable Indexing for a specific pool (Upsert Pool Data)
 const enableIndexing = async (db, mint, pair) => {
@@ -57,12 +55,18 @@ const enableIndexing = async (db, mint, pair) => {
     const vol = Number(pair.volume?.h24 || 0);
     const price = Number(pair.priceUsd || 0);
 
-    // Update the POOL record
-    // ON CONFLICT(address) handles updates to existing pools
+    // Update the POOL record with RESERVES
     await db.run(`
-        INSERT INTO pools (address, mint, dex, token_a, token_b, created_at, liquidity_usd, volume_24h, price_usd)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        INSERT INTO pools (
+            address, mint, dex, 
+            token_a, token_b, 
+            reserve_a, reserve_b,
+            created_at, liquidity_usd, volume_24h, price_usd
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         ON CONFLICT(address) DO UPDATE SET
+            reserve_a = EXCLUDED.reserve_a,
+            reserve_b = EXCLUDED.reserve_b,
             liquidity_usd = EXCLUDED.liquidity_usd,
             volume_24h = EXCLUDED.volume_24h,
             price_usd = EXCLUDED.price_usd
@@ -72,6 +76,8 @@ const enableIndexing = async (db, mint, pair) => {
         pair.dexId, 
         pair.baseToken.address, 
         pair.quoteToken.address, 
+        pair.reserve_a || null, // NEW: Critical for snapshotter
+        pair.reserve_b || null, // NEW: Critical for snapshotter
         Date.now(),
         liq, vol, price
     ]);
@@ -86,7 +92,6 @@ const enableIndexing = async (db, mint, pair) => {
 
 // 2. Aggregate Stats across ALL pools for a Mint
 const aggregateAndSaveToken = async (db, mint, baseData) => {
-    // A. Fetch all pools for this mint
     const pools = await db.all(`SELECT * FROM pools WHERE mint = $1`, [mint]);
     
     if (!pools || pools.length === 0) {
@@ -94,35 +99,24 @@ const aggregateAndSaveToken = async (db, mint, baseData) => {
         return;
     }
 
-    // B. Calculate Aggregates
     let totalVolume = 0;
     let maxLiq = -1;
     let bestPool = null;
 
     for (const pool of pools) {
-        // Sum Volume from all pools (Raydium + Orca + etc)
         totalVolume += (pool.volume_24h || 0);
-        
-        // Find Largest Pool by Liquidity for Price Source
         if ((pool.liquidity_usd || 0) > maxLiq) {
             maxLiq = pool.liquidity_usd;
             bestPool = pool;
         }
     }
 
-    // C. Derive Final Stats
-    // Price comes from the Largest Pool (most accurate)
     const finalPrice = bestPool ? (bestPool.price_usd || baseData.priceUsd) : baseData.priceUsd;
-    
-    // D. Recalculate Market Cap
-    // If we have FDV from the base data (DexScreener), we prefer that.
-    // Otherwise we can estimate via Supply * Price if available.
-    // For now, we trust the input data but update the Price and Volume fields.
     
     const finalData = {
         ...baseData,
-        volume24h: totalVolume, // AGGREGATED
-        priceUsd: finalPrice,   // BEST SOURCE
+        volume24h: totalVolume,
+        priceUsd: finalPrice,
     };
 
     await saveTokenData(db, mint, finalData, Date.now());
@@ -147,7 +141,7 @@ const saveTokenData = async (db, mint, data, timestamp) => {
           symbol = EXCLUDED.symbol,
           image = COALESCE(EXCLUDED.image, tokens.image),
           marketCap = EXCLUDED.marketCap,
-          volume24h = EXCLUDED.volume_24h, -- Ensure this matches your DB column name
+          volume24h = EXCLUDED.volume_24h,
           priceUsd = EXCLUDED.priceUsd,
           change1h = EXCLUDED.change1h,
           change24h = EXCLUDED.change24h,

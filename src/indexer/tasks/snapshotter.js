@@ -38,7 +38,6 @@ async function fetchMintDecimals(connection, mints) {
     const missing = mints.filter(m => !decimalCache.has(m) && !QUOTE_TOKENS[m]);
     if (missing.length === 0) return;
 
-    // Default missing to 9 immediately to prevent blocking
     missing.forEach(m => decimalCache.set(m, 9)); 
 
     try {
@@ -49,7 +48,6 @@ async function fetchMintDecimals(connection, mints) {
 
         for (let i = 0; i < publicKeys.length; i += 50) {
             const chunk = publicKeys.slice(i, i + 50);
-            // Use retryRPC here
             const infos = await retryRPC((conn) => conn.getMultipleAccountsInfo(chunk));
             
             infos.forEach((info, idx) => {
@@ -74,11 +72,13 @@ async function processPoolBatch(db, connection, pools, redis) {
         try {
             if (p.mint) uniqueMints.add(p.mint);
             
-            // Only try to fetch if we have valid reserve addresses
-            if (p.dexId === 'pumpfun' && p.reserve_a) {
+            // PumpFun uses bonding curve as reserve
+            if (p.dex === 'pumpfun' && p.reserve_a) {
                  keysToFetch.push(new PublicKey(p.reserve_a));
                  poolMap.set(p.address, { type: 'pumpfun', idx: keysToFetch.length - 1 });
-            } else if (p.reserve_a && p.reserve_b) {
+            } 
+            // Standard Pools (Raydium, Orca) use SPL Vaults
+            else if (p.reserve_a && p.reserve_b) {
                  keysToFetch.push(new PublicKey(p.reserve_a));
                  keysToFetch.push(new PublicKey(p.reserve_b));
                  poolMap.set(p.address, { type: 'standard', idxA: keysToFetch.length - 2, idxB: keysToFetch.length - 1 });
@@ -102,54 +102,53 @@ async function processPoolBatch(db, connection, pools, redis) {
     
     for (const p of pools) {
         const task = poolMap.get(p.address);
-        
-        // If we didn't map it (missing reserves), skip on-chain calc
         if (!task) continue;
 
         let quoteAmount = 0;
         let priceUsd = 0;
         let liquidityUsd = 0;
-        let rawA = 0;
-        let rawB = 0;
-        let quotePrice = 0;
-        let isPumpFunComplete = false;
         let success = false;
+        let volumeUsd = 0;
 
         try {
+            // --- PUMPFUN LOGIC ---
             if (task.type === 'pumpfun') {
                 const acc = accounts[task.idx];
                 if (!acc) continue;
                 const data = acc.data;
+                // Bonding curve layout check
                 if (data.length < 40) continue; 
 
                 const virtualToken = Number(data.readBigUInt64LE(8));
                 const virtualSol = Number(data.readBigUInt64LE(16));
                 const realSol = Number(data.readBigUInt64LE(32));
-                isPumpFunComplete = data[48] === 1;
 
                 if (virtualToken > 0 && virtualSol > 0) {
-                    priceUsd = ((virtualSol / 1e9) / (virtualToken / 1e6)) * solPriceCache;
+                    // Price = Virtual Sol / Virtual Token * SOL Price
+                    const priceInSol = (virtualSol / 1e9) / (virtualToken / 1e6);
+                    priceUsd = priceInSol * solPriceCache;
                 }
                 liquidityUsd = (realSol / 1e9) * solPriceCache * 2; 
 
-                rawA = virtualToken;
-                rawB = virtualSol;
-                quoteAmount = virtualSol / 1e9; 
-                quotePrice = solPriceCache;
+                quoteAmount = virtualSol / 1e9;
                 success = true;
 
+            // --- STANDARD LOGIC (Raydium / Orca) ---
             } else {
                 const accA = accounts[task.idxA];
                 const accB = accounts[task.idxB];
                 if (!accA || !accB) continue;
                 
-                rawA = Number(accA.data.readBigUInt64LE(64));
-                rawB = Number(accB.data.readBigUInt64LE(64));
+                // SPL Token Account Amount is at offset 64 (u64)
+                const rawA = Number(accA.data.readBigUInt64LE(64));
+                const rawB = Number(accB.data.readBigUInt64LE(64));
+                
                 if (rawA === 0 || rawB === 0) continue;
 
                 let quoteIsA = false;
                 let quoteDecimals = 9;
-                
+                let quotePrice = 1;
+
                 if (QUOTE_TOKENS[p.token_a]) {
                     quoteIsA = true;
                     quoteDecimals = QUOTE_TOKENS[p.token_a].decimals;
@@ -158,7 +157,10 @@ async function processPoolBatch(db, connection, pools, redis) {
                     quoteIsA = false;
                     quoteDecimals = QUOTE_TOKENS[p.token_b].decimals;
                     quotePrice = p.token_b.startsWith('So11') ? solPriceCache : 1.0;
-                } else { continue; }
+                } else { 
+                    // Unknown quote, skip calculation
+                    continue; 
+                }
 
                 const quoteRaw = quoteIsA ? rawA : rawB;
                 const baseRaw = quoteIsA ? rawB : rawA;
@@ -178,7 +180,6 @@ async function processPoolBatch(db, connection, pools, redis) {
         if (!success) continue;
 
         // Volume Calc
-        let volumeUsd = 0;
         const cacheKey = `pool_state:${p.address}`;
         try {
             let lastState = stateCache.get(cacheKey);
@@ -189,16 +190,19 @@ async function processPoolBatch(db, connection, pools, redis) {
 
             if (lastState) {
                 const delta = Math.abs(quoteAmount - lastState.quoteAmount);
+                // Filter noise
                 if (delta > 0.000001) { 
+                    const quotePrice = p.dex === 'pumpfun' ? solPriceCache : 1; 
                     volumeUsd = delta * quotePrice;
                 }
             }
-            const newState = { quoteAmount, timestamp: Date.now(), complete: isPumpFunComplete };
+            const newState = { quoteAmount, timestamp: Date.now() };
             stateCache.set(cacheKey, newState);
             if(redis) redis.set(cacheKey, JSON.stringify(newState), 'EX', 3600).catch(()=>{});
         } catch(e){}
 
         if (priceUsd > 0) {
+            // PG Syntax: $1, $2
             updates.push(db.run(`UPDATE pools SET price_usd = $1, liquidity_usd = $2 WHERE address = $3`, [priceUsd, liquidityUsd, p.address]));
             updates.push(db.run(`
                 INSERT INTO candles_1m (pool_address, timestamp, open, high, low, close, volume) 
@@ -250,7 +254,9 @@ async function snapshotPools(poolAddresses) {
     const redis = getClient();
     const connection = getSolanaConnection();
     await updateSolPrice(db);
-    const pools = await db.all(`SELECT * FROM pools WHERE address IN (${poolAddresses.map(p => `'${p}'`).join(',')})`);
+    // PG Syntax: array join for string replacement
+    const placeholders = poolAddresses.map((_, i) => `$${i+1}`).join(',');
+    const pools = await db.all(`SELECT * FROM pools WHERE address IN (${placeholders})`, poolAddresses);
     await processPoolBatch(db, connection, pools, redis);
 }
 

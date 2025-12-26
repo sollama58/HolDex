@@ -52,11 +52,13 @@ function init(deps) {
             await enableIndexing(db, mint, {
                 pairAddress: pool.pairAddress,
                 dexId: pool.dexId,
-                liquidity: { usd: 0 },
-                volume: { h24: 0 },
-                priceUsd: 0,
+                liquidity: pool.liquidity || { usd: 0 },
+                volume: pool.volume || { h24: 0 },
+                priceUsd: pool.priceUsd || 0,
                 baseToken: pool.baseToken,
-                quoteToken: pool.quoteToken
+                quoteToken: pool.quoteToken,
+                reserve_a: pool.reserve_a, // Pass through
+                reserve_b: pool.reserve_b  // Pass through
             });
         }
 
@@ -287,7 +289,6 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, tokens: [], error: e.message }); }
     });
 
-    // Admin routes reused from previous context
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         const { type } = req.query;
         let sql = `SELECT u.*, t.name, t.symbol as ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`;
