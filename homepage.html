@@ -373,12 +373,42 @@
     </div>
 </div>
 
+<!-- INFO MODAL -->
+<div id="info-modal" class="modal-overlay" onclick="toggleInfoModal()">
+    <div class="bg-[#2a1005] border-2 border-[#7c2d12] p-6 rounded-2xl max-w-md w-full shadow-2xl relative" onclick="event.stopPropagation()">
+        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleInfoModal()"><i data-lucide="x" width="24"></i></button>
+        <h3 class="text-xl font-bold text-white mb-4 font-sans">How to upload a Banner?</h3>
+        <ol class="list-decimal list-inside text-[#ffedd5] space-y-3 mb-6 font-mono text-sm">
+            <li>Go to <a href="https://imgur.com/upload" target="_blank" class="text-[#ea580c] underline hover:text-[#fb923c]">imgur.com/upload</a></li>
+            <li>Upload your banner image (Rec: 1500x500px).</li>
+            <li>Right-click the uploaded image and select <strong>"Copy Image Address"</strong>.</li>
+            <li>Paste the URL here. It must end in .jpg, .png, or .webp.</li>
+        </ol>
+        <div class="bg-[#451a03] p-3 rounded border border-[#7c2d12] text-xs text-[#9a3412]">
+            <strong>Note:</strong> We do not host images directly to keep the protocol decentralized and lightweight.
+        </div>
+    </div>
+</div>
+
+<!-- PREVIEW MODAL -->
+<div id="preview-modal" class="modal-overlay">
+    <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto relative shadow-2xl" onclick="event.stopPropagation()">
+        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white z-50" onclick="closePreview()"><i data-lucide="x" width="24"></i></button>
+        <h3 class="text-xl font-bold text-white mb-6 font-sans">Preview Changes</h3>
+        <div id="preview-container"></div>
+        <div class="mt-8 flex justify-end">
+             <button onclick="closePreview()" class="action-btn text-xs">Close Preview</button>
+        </div>
+    </div>
+</div>
+
 <script>
     const API_URL = 'https://asdev-backend.onrender.com';
     const FALLBACK_BANNER = "https://images.squarespace-cdn.com/content/690b8c21384b3f1201c2650c/967ea61f-a88a-4497-81c2-5c67d3d06d9e/Gemini_Generated_Image_c82gwyc82gwyc82g.png?content-type=image%2Fpng";
     const TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
     const ASSOCIATED_TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
-    const RPC_ENDPOINTS = ["https://api.mainnet-beta.solana.com","https://rpc.ankr.com/solana","https://solana-api.projectserum.com"];
+    // STRICT RPC POLICY: Use public mainnet for frontend interactions
+    const RPC_ENDPOINTS = ["https://api.mainnet.solana.com"];
 
     let currentSort = 'kscore'; 
     let searchQuery = '';
