@@ -1,6 +1,6 @@
 const { PublicKey } = require('@solana/web3.js');
 const { getSolanaConnection, retryRPC } = require('../../services/solana'); 
-const { getDB } = require('../../services/database');
+const { getDB, aggregateAndSaveToken } = require('../../services/database');
 const { getClient } = require('../../services/redis');
 const logger = require('../../services/logger');
 
@@ -31,7 +31,7 @@ async function updateSolPrice(db) {
         if (pool && pool.price_usd > 0) solPriceCache = pool.price_usd;
     } catch(e) {}
 
-    if (solPriceCache === 0) solPriceCache = 150; 
+    if (solPriceCache === 0) solPriceCache = 200; // Safe default
 }
 
 async function fetchMintDecimals(connection, mints) {
@@ -52,8 +52,8 @@ async function fetchMintDecimals(connection, mints) {
             
             infos.forEach((info, idx) => {
                 const mint = missing[i + idx];
-                if (info && info.data.length === 82) {
-                    decimalCache.set(mint, info.data[44]);
+                if (info && info.data.length === 82) { // SPL Token Mint size
+                    decimalCache.set(mint, info.data[44]); // Decimals at offset 44
                 }
             });
         }
@@ -66,19 +66,17 @@ async function processPoolBatch(db, connection, pools, redis) {
     const keysToFetch = [];
     const poolMap = new Map();
     const uniqueMints = new Set();
+    const affectedMints = new Set();
     const timestamp = Math.floor(Date.now() / 60000) * 60000;
 
     pools.forEach(p => {
         try {
             if (p.mint) uniqueMints.add(p.mint);
             
-            // PumpFun uses bonding curve as reserve
             if (p.dex === 'pumpfun' && p.reserve_a) {
                  keysToFetch.push(new PublicKey(p.reserve_a));
                  poolMap.set(p.address, { type: 'pumpfun', idx: keysToFetch.length - 1 });
-            } 
-            // Standard Pools (Raydium, Orca) use SPL Vaults
-            else if (p.reserve_a && p.reserve_b) {
+            } else if (p.reserve_a && p.reserve_b) {
                  keysToFetch.push(new PublicKey(p.reserve_a));
                  keysToFetch.push(new PublicKey(p.reserve_b));
                  poolMap.set(p.address, { type: 'standard', idxA: keysToFetch.length - 2, idxB: keysToFetch.length - 1 });
@@ -111,12 +109,10 @@ async function processPoolBatch(db, connection, pools, redis) {
         let volumeUsd = 0;
 
         try {
-            // --- PUMPFUN LOGIC ---
             if (task.type === 'pumpfun') {
                 const acc = accounts[task.idx];
                 if (!acc) continue;
                 const data = acc.data;
-                // Bonding curve layout check
                 if (data.length < 40) continue; 
 
                 const virtualToken = Number(data.readBigUInt64LE(8));
@@ -124,7 +120,6 @@ async function processPoolBatch(db, connection, pools, redis) {
                 const realSol = Number(data.readBigUInt64LE(32));
 
                 if (virtualToken > 0 && virtualSol > 0) {
-                    // Price = Virtual Sol / Virtual Token * SOL Price
                     const priceInSol = (virtualSol / 1e9) / (virtualToken / 1e6);
                     priceUsd = priceInSol * solPriceCache;
                 }
@@ -133,13 +128,11 @@ async function processPoolBatch(db, connection, pools, redis) {
                 quoteAmount = virtualSol / 1e9;
                 success = true;
 
-            // --- STANDARD LOGIC (Raydium / Orca) ---
             } else {
                 const accA = accounts[task.idxA];
                 const accB = accounts[task.idxB];
                 if (!accA || !accB) continue;
                 
-                // SPL Token Account Amount is at offset 64 (u64)
                 const rawA = Number(accA.data.readBigUInt64LE(64));
                 const rawB = Number(accB.data.readBigUInt64LE(64));
                 
@@ -157,10 +150,7 @@ async function processPoolBatch(db, connection, pools, redis) {
                     quoteIsA = false;
                     quoteDecimals = QUOTE_TOKENS[p.token_b].decimals;
                     quotePrice = p.token_b.startsWith('So11') ? solPriceCache : 1.0;
-                } else { 
-                    // Unknown quote, skip calculation
-                    continue; 
-                }
+                } else { continue; }
 
                 const quoteRaw = quoteIsA ? rawA : rawB;
                 const baseRaw = quoteIsA ? rawB : rawA;
@@ -179,6 +169,8 @@ async function processPoolBatch(db, connection, pools, redis) {
 
         if (!success) continue;
 
+        affectedMints.add(p.mint);
+
         // Volume Calc
         const cacheKey = `pool_state:${p.address}`;
         try {
@@ -190,7 +182,6 @@ async function processPoolBatch(db, connection, pools, redis) {
 
             if (lastState) {
                 const delta = Math.abs(quoteAmount - lastState.quoteAmount);
-                // Filter noise
                 if (delta > 0.000001) { 
                     const quotePrice = p.dex === 'pumpfun' ? solPriceCache : 1; 
                     volumeUsd = delta * quotePrice;
@@ -202,7 +193,6 @@ async function processPoolBatch(db, connection, pools, redis) {
         } catch(e){}
 
         if (priceUsd > 0) {
-            // PG Syntax: $1, $2
             updates.push(db.run(`UPDATE pools SET price_usd = $1, liquidity_usd = $2 WHERE address = $3`, [priceUsd, liquidityUsd, p.address]));
             updates.push(db.run(`
                 INSERT INTO candles_1m (pool_address, timestamp, open, high, low, close, volume) 
@@ -218,6 +208,13 @@ async function processPoolBatch(db, connection, pools, redis) {
     }
     
     await Promise.allSettled(updates);
+
+    // CRITICAL: ROLL UP TOKENS
+    if (affectedMints.size > 0) {
+        for (const mint of affectedMints) {
+            await aggregateAndSaveToken(db, mint);
+        }
+    }
 }
 
 async function runSnapshotCycle() {
@@ -254,9 +251,11 @@ async function snapshotPools(poolAddresses) {
     const redis = getClient();
     const connection = getSolanaConnection();
     await updateSolPrice(db);
-    // PG Syntax: array join for string replacement
+    
+    // Postgres array placeholder syntax
     const placeholders = poolAddresses.map((_, i) => `$${i+1}`).join(',');
     const pools = await db.all(`SELECT * FROM pools WHERE address IN (${placeholders})`, poolAddresses);
+    
     await processPoolBatch(db, connection, pools, redis);
 }
 

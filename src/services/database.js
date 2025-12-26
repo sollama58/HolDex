@@ -41,13 +41,18 @@ const dbWrapper = {
 };
 
 const initDB = async () => {
-    // This function assumes schema is created via reset script.
-    logger.info('Database Service Initialized');
+    try {
+        // AUTO-MIGRATION: Ensure reserve columns exist
+        await pool.query(`ALTER TABLE pools ADD COLUMN IF NOT EXISTS reserve_a TEXT;`);
+        await pool.query(`ALTER TABLE pools ADD COLUMN IF NOT EXISTS reserve_b TEXT;`);
+        logger.info('✅ Database Schema Verified (Reserves Columns Present)');
+    } catch (e) {
+        logger.warn('Schema check warning: ' + e.message);
+    }
 };
 
 // --- AGGREGATION LOGIC ---
 
-// 1. Enable Indexing for a specific pool (Upsert Pool Data)
 const enableIndexing = async (db, mint, pair) => {
     if (!pair || !pair.pairAddress) return;
     
@@ -55,7 +60,7 @@ const enableIndexing = async (db, mint, pair) => {
     const vol = Number(pair.volume?.h24 || 0);
     const price = Number(pair.priceUsd || 0);
 
-    // Update the POOL record with RESERVES
+    // Update the POOL record
     await db.run(`
         INSERT INTO pools (
             address, mint, dex, 
@@ -76,13 +81,12 @@ const enableIndexing = async (db, mint, pair) => {
         pair.dexId, 
         pair.baseToken.address, 
         pair.quoteToken.address, 
-        pair.reserve_a || null, // NEW: Critical for snapshotter
-        pair.reserve_b || null, // NEW: Critical for snapshotter
+        pair.reserve_a || null, 
+        pair.reserve_b || null, 
         Date.now(),
         liq, vol, price
     ]);
     
-    // Enable Active Tracking for Snapshotter
     await db.run(`
         INSERT INTO active_trackers (pool_address, last_check) 
         VALUES ($1, $2) 
@@ -90,64 +94,65 @@ const enableIndexing = async (db, mint, pair) => {
     `, [pair.pairAddress, Date.now()]);
 };
 
-// 2. Aggregate Stats across ALL pools for a Mint
-const aggregateAndSaveToken = async (db, mint, baseData) => {
-    const pools = await db.all(`SELECT * FROM pools WHERE mint = $1`, [mint]);
-    
-    if (!pools || pools.length === 0) {
-        await saveTokenData(db, mint, baseData, Date.now());
-        return;
-    }
+// CRITICAL FIX: Update the parent TOKEN record based on child POOLS
+const aggregateAndSaveToken = async (db, mint) => {
+    try {
+        // 1. Get all pools for this mint
+        const pools = await db.all(`SELECT * FROM pools WHERE mint = $1`, [mint]);
+        if (!pools || pools.length === 0) return;
 
-    let totalVolume = 0;
-    let maxLiq = -1;
-    let bestPool = null;
+        let totalVolume = 0;
+        let totalLiquidity = 0;
+        let maxLiq = -1;
+        let bestPrice = 0;
 
-    for (const pool of pools) {
-        totalVolume += (pool.volume_24h || 0);
-        if ((pool.liquidity_usd || 0) > maxLiq) {
-            maxLiq = pool.liquidity_usd;
-            bestPool = pool;
+        for (const pool of pools) {
+            const pLiq = Number(pool.liquidity_usd || 0);
+            const pVol = Number(pool.volume_24h || 0);
+            const pPrice = Number(pool.price_usd || 0);
+
+            totalVolume += pVol;
+            totalLiquidity += pLiq;
+
+            // Use price from the most liquid pool
+            if (pLiq > maxLiq && pPrice > 0) {
+                maxLiq = pLiq;
+                bestPrice = pPrice;
+            }
         }
+
+        // If no liquid pool found, keep existing price or 0
+        if (bestPrice === 0 && pools.length > 0) {
+             // Fallback to any pool with price
+             const anyPrice = pools.find(p => p.price_usd > 0);
+             if (anyPrice) bestPrice = Number(anyPrice.price_usd);
+        }
+
+        // 2. Fetch current token info to calc Market Cap
+        const token = await db.get(`SELECT supply, decimals FROM tokens WHERE mint = $1`, [mint]);
+        let marketCap = 0;
+        
+        if (token && bestPrice > 0) {
+            const supply = token.supply ? (Number(token.supply) / Math.pow(10, token.decimals || 9)) : 0;
+            if (supply > 0) marketCap = supply * bestPrice;
+        }
+
+        // 3. Update Token Stats
+        await db.run(`
+            UPDATE tokens SET 
+                liquidity = $1, 
+                volume24h = $2, 
+                priceUsd = $3, 
+                marketCap = $4,
+                timestamp = $5
+            WHERE mint = $6
+        `, [totalLiquidity, totalVolume, bestPrice, marketCap, Date.now(), mint]);
+
+        // logger.info(`📊 Aggregated ${mint}: $${bestPrice} | Liq: $${totalLiquidity}`);
+
+    } catch (err) {
+        logger.error(`Aggregation Failed for ${mint}: ${err.message}`);
     }
-
-    const finalPrice = bestPool ? (bestPool.price_usd || baseData.priceUsd) : baseData.priceUsd;
-    
-    const finalData = {
-        ...baseData,
-        volume24h: totalVolume,
-        priceUsd: finalPrice,
-    };
-
-    await saveTokenData(db, mint, finalData, Date.now());
-};
-
-// 3. Raw Save (Low Level)
-const saveTokenData = async (db, mint, data, timestamp) => {
-    const cols = [
-        'name', 'symbol', 'image', 'marketCap', 'volume24h', 
-        'priceUsd', 'change1h', 'change24h', 'change5m', 'timestamp'
-    ];
-    const vals = [
-        data.name, data.ticker, data.image, data.marketCap, data.volume24h,
-        data.priceUsd, data.change1h, data.change24h, data.change5m, timestamp
-    ];
-    
-    await db.query(`
-      INSERT INTO tokens (mint, ${cols.join(',')})
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-      ON CONFLICT(mint) DO UPDATE SET
-          name = EXCLUDED.name,
-          symbol = EXCLUDED.symbol,
-          image = COALESCE(EXCLUDED.image, tokens.image),
-          marketCap = EXCLUDED.marketCap,
-          volume24h = EXCLUDED.volume_24h,
-          priceUsd = EXCLUDED.priceUsd,
-          change1h = EXCLUDED.change1h,
-          change24h = EXCLUDED.change24h,
-          change5m = EXCLUDED.change5m,
-          timestamp = GREATEST(tokens.timestamp, EXCLUDED.timestamp)
-    `, [mint, ...vals]);
 };
 
 module.exports = {

@@ -1,7 +1,7 @@
 const express = require('express');
 const { PublicKey } = require('@solana/web3.js');
 const { isValidPubkey } = require('../utils/solana');
-const { smartCache, enableIndexing } = require('../services/database'); 
+const { smartCache, enableIndexing, aggregateAndSaveToken } = require('../services/database'); 
 const { findPoolsOnChain } = require('../services/pool_finder');
 const { fetchTokenMetadata } = require('../utils/metaplex');
 const { getSolanaConnection } = require('../services/solana'); 
@@ -57,8 +57,8 @@ function init(deps) {
                 priceUsd: pool.priceUsd || 0,
                 baseToken: pool.baseToken,
                 quoteToken: pool.quoteToken,
-                reserve_a: pool.reserve_a, // Pass through
-                reserve_b: pool.reserve_b  // Pass through
+                reserve_a: pool.reserve_a, 
+                reserve_b: pool.reserve_b
             });
         }
 
@@ -68,6 +68,7 @@ function init(deps) {
             image: meta?.image || null,
         };
 
+        // Insert Base Record
         await db.run(`
             INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, timestamp)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -84,18 +85,21 @@ function init(deps) {
             baseData.image, 
             supply, 
             decimals, 
-            0, // priceUsd
-            0, // liquidity
-            0, // marketCap
-            0, // volume
-            0, // change
+            0, 
+            0, 
+            0, 
+            0, 
+            0, 
             Date.now()
         ]);
 
         await enqueueTokenUpdate(mint);
 
         if (poolAddresses.length > 0) {
-            snapshotPools(poolAddresses).catch(e => console.error("Immediate snapshot error:", e.message));
+            // Wait for initial snapshot to get price immediately
+            await snapshotPools(poolAddresses).catch(e => console.error("Immediate snapshot error:", e.message));
+            // Force aggregation to update token stats
+            await aggregateAndSaveToken(db, mint);
         }
 
         return { ...baseData, pairs: pools };
@@ -200,20 +204,11 @@ function init(deps) {
             
             if (!token) {
                 try {
+                    // Start indexing
                     const indexed = await indexTokenOnChain(mint);
-                    token = { ...indexed, mint };
+                    token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]); // Refetch after aggregation
                     pairs = indexed.pairs || [];
                 } catch (e) {}
-            }
-            
-            if (token && (!token.priceUsd || token.priceUsd === 0) && pairs.length > 0) {
-                 const bestPool = pairs[0];
-                 if (bestPool.price_usd > 0) {
-                     token.priceUsd = bestPool.price_usd;
-                     token.liquidity = bestPool.liquidity_usd;
-                     const supply = token.supply ? (token.supply / Math.pow(10, token.decimals)) : 1000000000;
-                     token.marketCap = bestPool.price_usd * supply;
-                 }
             }
             
             let tokenData = token || { mint, name: 'Unknown', ticker: 'Unknown' };
@@ -289,6 +284,7 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, tokens: [], error: e.message }); }
     });
 
+    // Admin routes reused from previous context
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         const { type } = req.query;
         let sql = `SELECT u.*, t.name, t.symbol as ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`;
