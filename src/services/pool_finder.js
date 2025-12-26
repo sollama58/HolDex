@@ -1,5 +1,6 @@
-const { PublicKey, Connection } = require('@solana/web3.js');
-const { retryRPC, getSolanaConnection } = require('./solana');
+const axios = require('axios');
+const { PublicKey } = require('@solana/web3.js');
+const { retryRPC, getSolanaConnection, getRpcUrl } = require('./solana');
 const logger = require('./logger');
 
 // --- PROGRAM IDS ---
@@ -17,65 +18,49 @@ const SLICE_OFF_QUOTE_VAULT = 32;
 const SLICE_OFF_BASE_MINT = 80;   
 const SLICE_OFF_QUOTE_MINT = 112; 
 
-// --- SINGLETON CONNECTION ---
-let _cachedConnection = null;
-
 /**
- * Robust Connection Getter (Singleton)
- * Checks if the service connection is valid. If not, instantiates a fallback ONCE.
+ * DIRECT RPC HELPER
+ * Bypasses web3.js Connection object issues by using raw Axios HTTP calls.
  */
-function getValidConnection() {
-    // 1. Return cached if available
-    if (_cachedConnection) return _cachedConnection;
+async function fetchTokenAccountsRaw(mintAddress) {
+    const rpcUrl = getRpcUrl();
+    const payload = {
+        jsonrpc: "2.0",
+        id: "holdex-finder",
+        method: "getTokenAccountsByMint",
+        params: [
+            mintAddress,
+            { programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" },
+            { encoding: "jsonParsed" }
+        ]
+    };
 
-    let conn = null;
     try {
-        conn = getSolanaConnection();
-    } catch (e) {
-        // Ignore initial fetch error
-    }
-
-    // 2. Validate the imported connection
-    // It must have the method we need: getTokenAccountsByMint
-    // Note: Some newer web3.js versions or specific RPC configs might exclude this.
-    if (conn && typeof conn.getTokenAccountsByMint === 'function') {
-        _cachedConnection = conn;
-        return conn;
-    }
-
-    if (conn) {
-        logger.warn(`[WARN] ⚠️ getSolanaConnection() returned invalid object. Missing getTokenAccountsByMint.`);
-    }
-
-    // 3. Create Fallback (Only happens once)
-    logger.warn('⚠️ Initializing dedicated fallback connection for Pool Finder.');
-    
-    try {
-        const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
-        _cachedConnection = new Connection(rpcUrl, 'confirmed');
-        
-        // Final sanity check on fallback
-        if (typeof _cachedConnection.getTokenAccountsByMint !== 'function') {
-            logger.error("❌ Fallback Connection also missing getTokenAccountsByMint. Strategy 3 will be disabled.");
+        const response = await axios.post(rpcUrl, payload, { timeout: 10000 });
+        if (response.data && response.data.result) {
+            return response.data.result.value || []; // Raw array of accounts
+        } else if (response.data && response.data.error) {
+            logger.warn(`RPC Error for ${mintAddress}: ${JSON.stringify(response.data.error)}`);
+            return [];
         }
-    } catch (err) {
-        logger.error(`❌ Failed to create fallback connection: ${err.message}`);
+    } catch (e) {
+        logger.warn(`Raw RPC Fetch Failed: ${e.message}`);
     }
-    
-    return _cachedConnection;
+    return [];
 }
 
 /**
  * Strategy 1: Direct GPA Scan (Raydium V4)
+ * Reliable for standard Raydium pools.
  */
 async function findRaydiumV4Pools(mintB58, results) {
     try {
         const filtersBase = [{ dataSize: 752 }, { memcmp: { offset: 400, bytes: mintB58 } }];
         const filtersQuote = [{ dataSize: 752 }, { memcmp: { offset: 432, bytes: mintB58 } }];
 
-        const connection = getValidConnection();
-        if (!connection) return;
-
+        // We use the standard retryRPC for this as GPA usually works fine
+        const connection = getSolanaConnection(); 
+        
         const [baseAccts, quoteAccts] = await Promise.all([
             retryRPC(() => connection.getProgramAccounts(PROG_ID_RAYDIUM_V4, { filters: filtersBase, dataSlice: RAY_SLICE })),
             retryRPC(() => connection.getProgramAccounts(PROG_ID_RAYDIUM_V4, { filters: filtersQuote, dataSlice: RAY_SLICE }))
@@ -106,12 +91,13 @@ async function findRaydiumV4Pools(mintB58, results) {
         if(quoteAccts) quoteAccts.forEach(process);
         
     } catch (err) {
-        logger.warn(`Raydium V4 Scan Error: ${err.message}`);
+        // logger.warn(`Raydium V4 Scan Error: ${err.message}`);
     }
 }
 
 /**
  * Strategy 2: Pump.fun Bonding Curve
+ * Deterministic address derivation.
  */
 async function findPumpFunCurve(mintAddress, results) {
     try {
@@ -125,9 +111,7 @@ async function findPumpFunCurve(mintAddress, results) {
             PROG_ID_PUMPFUN
         );
 
-        const connection = getValidConnection();
-        if (!connection) return;
-
+        const connection = getSolanaConnection();
         const info = await retryRPC(() => connection.getAccountInfo(bondingCurve));
         
         if (info) {
@@ -150,51 +134,45 @@ async function findPumpFunCurve(mintAddress, results) {
 }
 
 /**
- * Strategy 3: Token Account Trace (Robust Fallback)
- * Handles PumpSwap, Raydium CPMM, Meteora, Orca
+ * Strategy 3: Token Account Trace (Robust Raw RPC)
+ * Finds generic pools (PumpSwap, Raydium CPMM, Meteora, Orca) by seeing who owns the token accounts.
  */
 async function findPoolsByTokenOwnership(mintAddress, results) {
     try {
-        const connection = getValidConnection();
-        if (!connection) {
-            logger.warn("Strategy 3 Skipped: No Valid Connection");
-            return;
-        }
+        // Use RAW RPC Fetch to avoid web3.js "missing function" errors
+        const tokenAccounts = await fetchTokenAccountsRaw(mintAddress);
+        
+        if (!tokenAccounts || tokenAccounts.length === 0) return;
 
-        // CRITICAL FIX: Check if method exists before calling
-        if (typeof connection.getTokenAccountsByMint !== 'function') {
-            logger.debug(`Strategy 3 Skipped: getTokenAccountsByMint not available on connection object.`);
-            return;
-        }
+        const connection = getSolanaConnection();
 
-        const mint = new PublicKey(mintAddress);
-        const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+        for (const accountObj of tokenAccounts) {
+            const pubkey = accountObj.pubkey;
+            const accountData = accountObj.account.data.parsed.info;
+            const ownerStr = accountData.owner;
+            const tokenAccountAddr = pubkey;
 
-        const tokenAccounts = await retryRPC(() => connection.getTokenAccountsByMint(mint, { programId: TOKEN_PROGRAM_ID }));
-
-        for (const { pubkey, account } of tokenAccounts.value) {
-            if (account.data.length < 64) continue;
-            
-            const owner = new PublicKey(account.data.subarray(32, 64));
-            const tokenAccountAddr = pubkey.toBase58();
-            
             try {
-                const ownerInfo = await retryRPC(() => connection.getAccountInfo(owner));
+                // We need to check who the OWNER is (the Program ID)
+                // accountData.owner is the Address of the Pool/Vault
+                const ownerPubkey = new PublicKey(ownerStr);
+                
+                const ownerInfo = await retryRPC(() => connection.getAccountInfo(ownerPubkey));
                 if (!ownerInfo) continue;
                 
                 const programOwner = ownerInfo.owner.toBase58();
 
                 if (programOwner === PROG_ID_PUMPSWAP.toBase58()) {
-                    await parseGenericAnchorPool(connection, owner, 'pumpswap', 'pumpswap', mintAddress, tokenAccountAddr, results);
+                    await parseGenericAnchorPool(connection, ownerPubkey, 'pumpswap', 'pumpswap', mintAddress, tokenAccountAddr, results);
                 }
                 else if (programOwner === PROG_ID_RAYDIUM_CPMM.toBase58()) {
-                    await parseGenericAnchorPool(connection, owner, 'raydium', 'cpmm', mintAddress, tokenAccountAddr, results);
+                    await parseGenericAnchorPool(connection, ownerPubkey, 'raydium', 'cpmm', mintAddress, tokenAccountAddr, results);
                 }
                 else if (programOwner === PROG_ID_METEORA_DLMM.toBase58()) {
-                     await parseGenericAnchorPool(connection, owner, 'meteora', 'dlmm', mintAddress, tokenAccountAddr, results);
+                     await parseGenericAnchorPool(connection, ownerPubkey, 'meteora', 'dlmm', mintAddress, tokenAccountAddr, results);
                 }
                 else if (programOwner === PROG_ID_ORCA_WHIRLPOOL.toBase58()) {
-                     await parseGenericAnchorPool(connection, owner, 'orca', 'whirlpool', mintAddress, tokenAccountAddr, results);
+                     await parseGenericAnchorPool(connection, ownerPubkey, 'orca', 'whirlpool', mintAddress, tokenAccountAddr, results);
                 }
 
             } catch (innerErr) {
@@ -208,6 +186,7 @@ async function findPoolsByTokenOwnership(mintAddress, results) {
 }
 
 async function parseGenericAnchorPool(connection, poolAddress, dexId, type, myMint, myVault, results) {
+    // Avoid Duplicates
     if (results.find(r => r.pairAddress === poolAddress.toBase58())) return;
 
     try {
@@ -219,6 +198,7 @@ async function parseGenericAnchorPool(connection, poolAddress, dexId, type, myMi
         let matchedOffset = -1;
         
         // Scan for my mint in the pool state
+        // Most Anchor pools store the mints in the first 200 bytes
         for (let i = 8; i < 200; i++) {
             if (data.subarray(i, i + 32).equals(myMintBuffer)) {
                 matchedOffset = i;
@@ -232,10 +212,12 @@ async function parseGenericAnchorPool(connection, poolAddress, dexId, type, myMi
         let pairedMint = null;
         
         if (dexId === 'raydium' && type === 'cpmm') {
+            // Raydium CPMM Layout
             mintA = new PublicKey(data.subarray(168, 200)).toBase58();
             mintB = new PublicKey(data.subarray(200, 232)).toBase58();
         } else {
-             // Generic Heuristic
+             // Generic Heuristic for Unknown Layouts
+             // We look for OTHER public keys in the data that are valid mints
              const candidates = [];
              for(let i=8; i<200; i+=32) {
                  try {
@@ -267,7 +249,7 @@ async function parseGenericAnchorPool(connection, poolAddress, dexId, type, myMi
         }
 
     } catch (e) {
-        logger.warn(`Generic Parser Error for ${dexId}: ${e.message}`);
+        // logger.warn(`Generic Parser Error for ${dexId}: ${e.message}`);
     }
 }
 

@@ -33,6 +33,10 @@ function getSolanaConnection() {
     return connectionInstance;
 }
 
+function getRpcUrl() {
+    return RPC_ENDPOINTS[currentEndpointIndex];
+}
+
 function rotateConnection() {
     currentEndpointIndex = (currentEndpointIndex + 1) % RPC_ENDPOINTS.length;
     const newUrl = RPC_ENDPOINTS[currentEndpointIndex];
@@ -44,10 +48,8 @@ function rotateConnection() {
 
 async function retryRPC(fn, retries = 3, delay = 1000) {
     try {
-        // Ensure we pass a connection object
         const conn = getSolanaConnection();
-        if (!conn) throw new Error("Failed to acquire Solana Connection");
-        
+        if (!conn) throw new Error("Connection initialization failed");
         return await fn(conn);
     } catch (err) {
         const msg = err.message ? err.message.toLowerCase() : '';
@@ -58,7 +60,6 @@ async function retryRPC(fn, retries = 3, delay = 1000) {
         }
 
         if (retries <= 0) {
-            // logger.error(`RPC Final Failure: ${err.message}`);
             throw err;
         }
 
@@ -70,6 +71,7 @@ async function retryRPC(fn, retries = 3, delay = 1000) {
 
 module.exports = { 
     getSolanaConnection,
+    getRpcUrl,
     rotateConnection,
     retryRPC
 };
