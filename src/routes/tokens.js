@@ -194,6 +194,8 @@ function init(deps) {
                 success: true,
                 page: 1, 
                 limit: 100,
+                // FIX: Added missing fields (change stats and hasCommunityUpdate) 
+                // DB returns lowercase keys, so we check both camelCase (from memory push) and lowercase (from DB)
                 tokens: rows.map(r => ({
                     mint: r.mint, 
                     name: r.name, 
@@ -202,6 +204,10 @@ function init(deps) {
                     marketCap: r.marketcap || r.marketCap || 0,
                     volume24h: r.volume24h || 0,
                     priceUsd: r.priceusd || r.priceUsd || 0,
+                    change24h: r.change24h || 0,
+                    change1h: r.change1h || 0,
+                    change5m: r.change5m || 0,
+                    hasCommunityUpdate: r.hasCommunityUpdate || r.hascommunityupdate || false,
                     timestamp: parseInt(r.timestamp),
                     kScore: r.k_score || 0
                 }))

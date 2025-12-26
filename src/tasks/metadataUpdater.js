@@ -75,11 +75,12 @@ async function syncTokenData(deps, mint, pairs) {
     const change1h = Number(bestPair.priceChange?.h1 || 0);
     const change24h = Number(bestPair.priceChange?.h24 || 0);
 
+    // FIX: Changed 'lastUpdated' (which doesn't exist) to 'timestamp'
     const query = `
         UPDATE tokens SET 
         volume24h = $1, marketCap = $2, priceUsd = $3, 
         change5m = $4, change1h = $5, change24h = $6, 
-        lastUpdated = $7 
+        timestamp = $7 
         WHERE mint = $8
     `;
 
