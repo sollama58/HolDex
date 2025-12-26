@@ -1,18 +1,16 @@
 const express = require('express');
-const axios = require('axios'); // Only for internal use / metaplex json
+const axios = require('axios'); 
 const { Connection, PublicKey } = require('@solana/web3.js');
 const { isValidPubkey } = require('../utils/solana');
-const { smartCache, enableIndexing, aggregateAndSaveToken, saveTokenData } = require('../services/database');
+const { smartCache, enableIndexing, aggregateAndSaveToken } = require('../services/database');
 const { findPoolsOnChain } = require('../services/pool_finder');
 const { fetchTokenMetadata } = require('../utils/metaplex');
-const { getClient } = require('../services/redis'); 
 const config = require('../config/env');
 const kScoreUpdater = require('../tasks/kScoreUpdater'); 
 
 const router = express.Router();
 const solanaConnection = new Connection(config.SOLANA_RPC_URL, 'confirmed');
 
-// --- MIDDLEWARE ---
 const requireAdmin = (req, res, next) => {
     const authHeader = req.headers['x-admin-auth'];
     if (!authHeader || authHeader !== config.ADMIN_PASSWORD) {
@@ -21,12 +19,9 @@ const requireAdmin = (req, res, next) => {
     next();
 };
 
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
 function init(deps) {
     const { db } = deps;
 
-    // --- PAYMENT VERIFICATION ---
     async function verifyPayment(signature, payerPubkey) {
         if (!signature) throw new Error("Payment signature required");
         const existing = await db.get('SELECT id FROM token_updates WHERE signature = $1', [signature]);
@@ -34,21 +29,26 @@ function init(deps) {
         return true; 
     }
 
-    // --- HELPER: On-Chain Indexing (Replaces DexScreener) ---
     async function indexTokenOnChain(mint) {
-        // 1. Fetch Metadata (Metaplex)
+        // 1. Fetch Metadata (Robust Helius/Metaplex)
         const meta = await fetchTokenMetadata(mint);
         
-        // 2. Find Pools (On-Chain)
+        // 2. Fetch Supply (Critical for Market Cap)
+        let supply = '0';
+        try {
+            const supplyInfo = await solanaConnection.getTokenSupply(new PublicKey(mint));
+            supply = supplyInfo.value.amount; // Raw amount (integer string)
+        } catch (e) { console.warn(`Failed to fetch supply for ${mint}`); }
+
+        // 3. Find Pools
         const pools = await findPoolsOnChain(mint);
         
-        // 3. Save Pools
+        // 4. Save Pools
         for (const pool of pools) {
-            // Map our internal pool object to DB schema
             await enableIndexing(db, mint, {
                 pairAddress: pool.pairAddress,
                 dexId: pool.dexId,
-                liquidity: { usd: 0 }, // Will be filled by snapshotter
+                liquidity: pool.liquidity || { usd: 0 },
                 volume: { h24: 0 },
                 priceUsd: 0,
                 baseToken: { address: mint },
@@ -56,25 +56,36 @@ function init(deps) {
             });
         }
 
-        // 4. Save Token Data
+        // 5. Save Token Data
         const baseData = {
             name: meta?.name || 'Unknown',
             ticker: meta?.symbol || 'UNKNOWN',
             image: meta?.image || null,
-            marketCap: 0, // Will be calc by snapshotter
+            marketCap: 0, 
             volume24h: 0,
             priceUsd: 0,
             change1h: 0,
             change24h: 0,
-            change5m: 0
+            change5m: 0,
+            description: meta?.description || ''
         };
 
-        await aggregateAndSaveToken(db, mint, baseData);
+        // We explicitly pass the fetched supply here so it can be stored
+        await db.run(`
+            INSERT INTO tokens (mint, name, symbol, image, supply, timestamp)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT(mint) DO UPDATE SET
+            name = EXCLUDED.name,
+            symbol = EXCLUDED.symbol,
+            image = EXCLUDED.image,
+            supply = EXCLUDED.supply
+        `, [mint, baseData.name, baseData.ticker, baseData.image, supply, Date.now()]);
+
         return { ...baseData, pairs: pools };
     }
 
     // --- ENDPOINTS ---
-
+    
     router.get('/config/fees', (req, res) => {
         res.json({ success: true, solFee: config.FEE_SOL, tokenFee: config.FEE_TOKEN_AMOUNT, tokenMint: config.FEE_TOKEN_MINT, treasury: config.TREASURY_WALLET });
     });
@@ -97,13 +108,11 @@ function init(deps) {
         try {
             const { mint, twitter, website, telegram, banner, description, signature, userPublicKey } = req.body;
             if (!mint || mint.length < 30) return res.status(400).json({ success: false, error: "Invalid Mint" });
-            let safeDesc = description ? description.substring(0, 250).replace(/<[^>]*>?/gm, '') : null; 
             
             try { await verifyPayment(signature, userPublicKey); } catch (payErr) { return res.status(402).json({ success: false, error: payErr.message }); }
             
-            await db.run(`INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)`, [mint, twitter, website, telegram, banner, safeDesc, Date.now(), signature, userPublicKey]);
+            await db.run(`INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)`, [mint, twitter, website, telegram, banner, description, Date.now(), signature, userPublicKey]);
             
-            // Auto-Index On-Chain
             try { await indexTokenOnChain(mint); } catch (err) { console.error("Auto-Index failed:", err.message); }
 
             res.json({ success: true, message: "Update queued. Indexing started." });
@@ -114,21 +123,16 @@ function init(deps) {
         const { mint } = req.params;
         const { resolution = '60', from, to } = req.query; 
         
-        // FIX: Handle Unit Mismatch
-        // Frontend sends Seconds (UNIX), DB stores Milliseconds
         const fromMs = parseInt(from) * 1000 || (Date.now() - 24 * 60 * 60 * 1000);
         const toMs = parseInt(to) * 1000 || Date.now();
 
-        // Round to nearest minute for cache key
         const cacheKey = `chart:${mint}:${resolution}:${Math.floor(toMs / 60000)}`; 
 
         try {
             const result = await smartCache(cacheKey, 60, async () => {
-                // Find best pool for this mint (by liquidity)
                 let pool = await db.get(`SELECT address FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC LIMIT 1`, [mint]);
                 if (!pool) return { success: false, error: "Token not indexed yet" };
 
-                // Fetch Time-Filtered Candles
                 const rows = await db.all(`
                     SELECT timestamp, open, high, low, close, volume 
                     FROM candles_1m 
@@ -138,13 +142,9 @@ function init(deps) {
                     ORDER BY timestamp ASC
                 `, [pool.address, fromMs, toMs]);
                 
-                // Map back to Seconds for Lightweight Charts
                 const candles = rows.map(r => ({
                     time: Math.floor(parseInt(r.timestamp) / 1000),
-                    open: r.open, 
-                    high: r.high, 
-                    low: r.low, 
-                    close: r.close
+                    open: r.open, high: r.high, low: r.low, close: r.close
                 }));
                 
                 return { success: true, candles };
@@ -154,16 +154,12 @@ function init(deps) {
     });
 
     router.get('/tokens', async (req, res) => {
-        const { sort = 'newest', limit = 100, page = 1, search = '', filter = '' } = req.query;
-        // ... (Limit/Offset logic same) ...
-        const limitVal = 100; 
-        const offsetVal = (page - 1) * 100;
+        const { search = '' } = req.query;
 
         try {
             const isAddressSearch = isValidPubkey(search);
             let rows = [];
 
-            // 1. Local Search
             if (search.length > 0) {
                 if (isAddressSearch) {
                     rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
@@ -171,35 +167,23 @@ function init(deps) {
                     rows = await db.all(`SELECT * FROM tokens WHERE (ticker ILIKE $1 OR name ILIKE $1) LIMIT 50`, [`%${search}%`]);
                 }
             } else {
+                // Return latest tokens
                 rows = await db.all(`SELECT * FROM tokens ORDER BY timestamp DESC LIMIT 100`);
             }
 
-            // 2. On-Chain Discovery (If address search & not found)
             if (isAddressSearch && rows.length === 0) {
-                console.log(`🔎 Searching On-Chain for ${search}...`);
                 const newData = await indexTokenOnChain(search);
                 if (newData.name !== 'Unknown') {
-                    rows.push({
-                        ...newData,
-                        mint: search,
-                        hasCommunityUpdate: false,
-                        kScore: 0,
-                        timestamp: Date.now()
-                    });
+                    rows.push({ ...newData, mint: search, hasCommunityUpdate: false, kScore: 0, timestamp: Date.now() });
                 }
             }
 
-            // Return Result
             return res.json({
                 success: true,
-                page: 1, 
-                limit: 100,
-                // FIX: Added missing fields (change stats and hasCommunityUpdate) 
-                // DB returns lowercase keys, so we check both camelCase (from memory push) and lowercase (from DB)
                 tokens: rows.map(r => ({
                     mint: r.mint, 
                     name: r.name, 
-                    ticker: r.symbol, // Important mapping
+                    ticker: r.symbol, 
                     image: r.image,
                     marketCap: r.marketcap || r.marketCap || 0,
                     volume24h: r.volume24h || 0,
@@ -218,33 +202,26 @@ function init(deps) {
 
     router.get('/token/:mint', async (req, res) => {
         const { mint } = req.params;
-        const result = await smartCache(`api:token:${mint}`, 30, async () => {
-            let token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
-            let pairs = await db.all('SELECT * FROM pools WHERE mint = $1', [mint]);
-            
-            // Auto-Index if missing
-            if (!token) {
-                try {
-                    const indexed = await indexTokenOnChain(mint);
-                    if (indexed.name !== 'Unknown') {
-                        token = { ...indexed, mint };
-                        pairs = indexed.pairs || [];
-                    }
-                } catch (e) {}
-            }
-            
-            let tokenData = token || { mint, name: 'Unknown', ticker: 'Unknown' };
-            // Map symbol to ticker for frontend
-            if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
+        let token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+        let pairs = await db.all('SELECT * FROM pools WHERE mint = $1', [mint]);
+        
+        if (!token) {
+            try {
+                const indexed = await indexTokenOnChain(mint);
+                if (indexed.name !== 'Unknown') {
+                    token = { ...indexed, mint };
+                    pairs = indexed.pairs || [];
+                }
+            } catch (e) {}
+        }
+        
+        let tokenData = token || { mint, name: 'Unknown', ticker: 'Unknown' };
+        if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
 
-            return { success: true, token: { ...tokenData, pairs } };
-        });
-        res.json(result);
+        res.json({ success: true, token: { ...tokenData, pairs } });
     });
 
     // --- ADMIN ROUTES ---
-
-    // 1. List Updates
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         const { type } = req.query;
         let sql = `SELECT u.*, t.name, t.symbol as ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`;
@@ -252,91 +229,53 @@ function init(deps) {
         res.json({ success: true, updates: await db.all(sql) });
     });
 
-    // 2. Approve Update
     router.post('/admin/approve-update', requireAdmin, async (req, res) => {
         const { id } = req.body;
         const update = await db.get('SELECT * FROM token_updates WHERE id = $1', [id]);
         if (!update) return res.status(404).json({error:'Not found'});
-        
         const token = await db.get('SELECT metadata FROM tokens WHERE mint = $1', [update.mint]);
         let currentMeta = token?.metadata || {};
-        if (typeof currentMeta === 'string') currentMeta = JSON.parse(currentMeta); // Parse if string
-
+        if (typeof currentMeta === 'string') currentMeta = JSON.parse(currentMeta);
         const newMeta = { ...currentMeta, ...update }; 
-
-        await db.run(
-            `UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE WHERE mint = $2`, 
-            [JSON.stringify(newMeta), update.mint]
-        );
+        await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE WHERE mint = $2`, [JSON.stringify(newMeta), update.mint]);
         await db.run("UPDATE token_updates SET status = 'approved' WHERE id = $1", [id]);
         res.json({success: true});
     });
 
-    // 3. Reject Update
     router.post('/admin/reject-update', requireAdmin, async (req, res) => {
         await db.run("UPDATE token_updates SET status = 'rejected' WHERE id = $1", [req.body.id]); 
         res.json({ success: true }); 
     });
-    
-    // 4. Get Token Details (For Editing)
+
     router.get('/admin/token/:mint', requireAdmin, async (req, res) => {
         const { mint } = req.params;
         const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
         if (!token) return res.json({ success: false, error: 'Token not found' });
-        
         let meta = {};
-        if (token.metadata) {
-            meta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata;
-        }
-        
-        res.json({
-            success: true,
-            token: {
-                mint: token.mint,
-                ticker: token.symbol,
-                twitter: meta.twitter,
-                website: meta.website,
-                telegram: meta.telegram,
-                banner: meta.banner,
-                description: meta.description
-            }
-        });
+        if (token.metadata) meta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata;
+        res.json({ success: true, token: { mint: token.mint, ticker: token.symbol, twitter: meta.twitter, website: meta.website, telegram: meta.telegram, banner: meta.banner, description: meta.description } });
     });
 
-    // 5. Update Token Directly
     router.post('/admin/update-token', requireAdmin, async (req, res) => {
         const { mint, twitter, website, telegram, banner, description } = req.body;
-        
         const token = await db.get('SELECT metadata FROM tokens WHERE mint = $1', [mint]);
         if (!token) return res.status(404).json({success:false, error:'Token not found'});
-
         let currentMeta = token.metadata || {};
         if (typeof currentMeta === 'string') currentMeta = JSON.parse(currentMeta);
-        
-        const newMeta = {
-            ...currentMeta,
-            twitter, website, telegram, banner, description
-        };
-        
+        const newMeta = { ...currentMeta, twitter, website, telegram, banner, description };
         await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE WHERE mint = $2`, [JSON.stringify(newMeta), mint]);
         res.json({ success: true });
     });
 
-    // 6. Delete Token
     router.post('/admin/delete-token', requireAdmin, async (req, res) => {
         const { mint } = req.body;
-        // Delete from all tables to avoid orphans (Manual Cascade)
         await db.run('DELETE FROM k_scores WHERE mint = $1', [mint]);
         await db.run('DELETE FROM token_updates WHERE mint = $1', [mint]);
-        // Note: Pools are tricky as they might be shared, but in this architecture 1 Pool belongs to 1 main Token usually for display.
-        // We delete pools associated with this mint.
         await db.run('DELETE FROM pools WHERE mint = $1', [mint]); 
         await db.run('DELETE FROM tokens WHERE mint = $1', [mint]);
-        
         res.json({ success: true });
     });
 
-    // 7. Refresh K-Score
     router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => {
         const { mint } = req.body;
         const score = await kScoreUpdater.updateSingleToken({ db }, mint);
