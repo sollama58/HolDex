@@ -10,25 +10,22 @@ async function initDB() {
     if (pool) return dbWrapper;
 
     try {
-        // SSL is often required for cloud Postgres (like Render), but not for local
         const isLocal = config.DATABASE_URL.includes('localhost') || config.DATABASE_URL.includes('127.0.0.1');
         
         pool = new Pool({
             connectionString: config.DATABASE_URL,
             ssl: isLocal ? false : { rejectUnauthorized: false },
-            max: 20, // Connection pool limit
+            max: 20, 
             idleTimeoutMillis: 30000,
             connectionTimeoutMillis: 2000,
         });
 
         logger.info(`📦 Database: Connecting to PostgreSQL...`);
-        
-        // Test connection
         const client = await pool.connect();
         client.release();
         logger.info(`📦 Database: Connection Successful.`);
 
-        // --- SCHEMA DEFINITIONS (PostgreSQL Dialect) ---
+        // --- SCHEMA ---
         await pool.query(`
             CREATE TABLE IF NOT EXISTS tokens (
                 mint TEXT PRIMARY KEY,
@@ -109,28 +106,12 @@ async function initDB() {
             CREATE INDEX IF NOT EXISTS idx_candles_pool_time ON candles_1m(pool_address, timestamp);
         `);
 
-        // --- COMPATIBILITY LAYER ---
-        // Maps the previous SQLite-style API (get, all, run) to PostgreSQL
+        // --- WRAPPER (SQLite Compatibility Layer) ---
         dbWrapper = {
             query: (text, params) => pool.query(text, params),
-            
-            // SQLite 'get' returns the first row or undefined
-            get: async (text, params) => {
-                const res = await pool.query(text, params);
-                return res.rows[0];
-            },
-
-            // SQLite 'all' returns all rows
-            all: async (text, params) => {
-                const res = await pool.query(text, params);
-                return res.rows;
-            },
-
-            // SQLite 'run' returns an object with lastID/changes (simplified here)
-            run: async (text, params) => {
-                const res = await pool.query(text, params);
-                return { rowCount: res.rowCount };
-            }
+            get: async (text, params) => { const res = await pool.query(text, params); return res.rows[0]; },
+            all: async (text, params) => { const res = await pool.query(text, params); return res.rows; },
+            run: async (text, params) => { const res = await pool.query(text, params); return { rowCount: res.rowCount }; }
         };
 
         return dbWrapper;
@@ -153,26 +134,29 @@ async function smartCache(key, ttlSeconds, fetchFn) {
         try {
             const cached = await redis.get(key);
             if (cached) return JSON.parse(cached);
-        } catch (e) { logger.warn(`Redis Get Error: ${e.message}`); }
+        } catch (e) {}
     }
-
     const data = await fetchFn();
-
     if (redis && data) {
-        try {
-            await redis.set(key, JSON.stringify(data), 'EX', ttlSeconds);
-        } catch (e) { logger.warn(`Redis Set Error: ${e.message}`); }
+        try { await redis.set(key, JSON.stringify(data), 'EX', ttlSeconds); } catch (e) {}
     }
     return data;
 }
 
-// --- HELPER: Indexing Enabler ---
+// --- HELPER: Indexing Enabler (FIXED) ---
 async function enableIndexing(db, mint, poolData) {
     if (!poolData || !poolData.pairAddress) return;
 
-    // FIX: Explicitly extract token addresses to prevent NOT NULL violation
-    const tokenA = poolData.baseToken?.address || poolData.baseToken || mint;
-    const tokenB = poolData.quoteToken?.address || poolData.quoteToken || 'So11111111111111111111111111111111111111112';
+    // ROBUST RESOLVER: Handles string, object {address: ...}, or null
+    const resolveToken = (val, fallback) => {
+        if (!val) return fallback;
+        if (typeof val === 'string') return val;
+        if (typeof val === 'object' && val.address) return val.address;
+        return fallback; // If object but no address, return fallback
+    };
+
+    const tokenA = resolveToken(poolData.baseToken, mint); // Fallback to Mint
+    const tokenB = resolveToken(poolData.quoteToken, 'So11111111111111111111111111111111111111112'); // Fallback to SOL
 
     try {
         await db.run(`
@@ -222,7 +206,6 @@ async function aggregateAndSaveToken(db, mint) {
         let totalLiq = 0;
         let totalVol = 0;
         let maxPrice = 0;
-        
         let mainPool = pools[0];
         
         for (const p of pools) {

@@ -1,77 +1,120 @@
-/**
- * Background Worker Process
- * Handles all data ingestion, listeners, and heavy calculation tasks.
- * Decoupled from the main API server to ensure responsiveness.
- */
 require('dotenv').config();
-const { initDB, getDB } = require('./services/database');
-const { initRedis } = require('./services/redis');
-const metadataUpdater = require('./tasks/metadataUpdater');
-const newTokenListener = require('./tasks/newTokenListener');
-const kScoreUpdater = require('./tasks/kScoreUpdater');
-const { startSnapshotter } = require('./indexer/tasks/snapshotter'); 
+const { initDB, getDB, enableIndexing, aggregateAndSaveToken } = require('./services/database');
+const { getClient, connectRedis } = require('./services/redis');
+const { findPoolsOnChain } = require('./services/pool_finder');
+const { fetchTokenMetadata } = require('./utils/metaplex');
+const { getSolanaConnection } = require('./services/solana');
+const { PublicKey } = require('@solana/web3.js');
 const logger = require('./services/logger');
 
-const globalState = {
-    lastBackendUpdate: Date.now()
-};
+const QUEUE_KEY = 'token_queue';
+const PROCESSING_INTERVAL = 1000;
 
-async function startWorker() {
-    logger.info('⚙️ Starting HolDex Background Worker...');
-    
+async function processToken(mint) {
+    const db = getDB();
+    const connection = getSolanaConnection();
+
+    logger.info(`⚙️ Worker: Processing ${mint}...`);
+
     try {
-        // 1. Initialize Database (WAIT for it to complete)
-        // If this fails, the worker cannot function.
-        await initDB();
-        logger.info('✅ Database Initialized');
-
-        // 2. Initialize Redis (Optional but recommended)
-        const redis = initRedis ? initRedis() : null;
-        if (redis) logger.info('✅ Redis Initialized');
-
-        const deps = { db: getDB(), redis, globalState };
-
-        // --- START TASKS ---
-        logger.info('🚀 Launching Background Tasks...');
+        // 1. Fetch Metadata
+        const meta = await fetchTokenMetadata(mint);
         
-        // 3. Start Tasks (Wrap in try-catch blocks individually if they are async)
-        
-        // Task A: New Token Listener
-        if (newTokenListener && typeof newTokenListener.start === 'function') {
-            newTokenListener.start(deps);
+        // 2. Fetch Supply
+        let supply = '1000000000';
+        let decimals = 9;
+        try {
+            const supplyInfo = await connection.getTokenSupply(new PublicKey(mint));
+            supply = supplyInfo.value.amount;
+            decimals = supplyInfo.value.decimals;
+        } catch (e) {
+            logger.warn(`Failed to fetch supply for ${mint}: ${e.message}`);
         }
 
-        // Task B: Metadata Updater
-        if (metadataUpdater && typeof metadataUpdater.start === 'function') {
-             metadataUpdater.start(deps);
+        // 3. Find Pools
+        const pools = await findPoolsOnChain(mint);
+
+        // 4. Index Pools (This calls enableIndexing which we fixed)
+        for (const pool of pools) {
+            await enableIndexing(db, mint, {
+                pairAddress: pool.pairAddress,
+                dexId: pool.dexId,
+                liquidity: pool.liquidity || { usd: 0 },
+                volume: pool.volume || { h24: 0 },
+                priceUsd: pool.priceUsd || 0,
+                baseToken: pool.baseToken, // Object or String
+                quoteToken: pool.quoteToken, // Object or String
+                reserve_a: pool.reserve_a,
+                reserve_b: pool.reserve_b
+            });
         }
 
-        // Task C: K-Score Updater
-        if (kScoreUpdater && typeof kScoreUpdater.start === 'function') {
-            kScoreUpdater.start(deps);
-        }
+        // 5. Update Token Record
+        const baseData = {
+            name: meta?.name || 'Unknown',
+            ticker: meta?.symbol || 'UNKNOWN',
+            image: meta?.image || null,
+        };
 
-        // Task D: Snapshotter (Price Engine)
-        logger.info('📸 Starting Price Snapshotter Engine...');
-        startSnapshotter(); // This sets up its own intervals, so it's safe to call synchronously
+        await db.run(`
+            INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, timestamp)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            ON CONFLICT(mint) DO UPDATE SET
+            name = EXCLUDED.name,
+            symbol = EXCLUDED.symbol,
+            image = EXCLUDED.image,
+            decimals = EXCLUDED.decimals
+        `, [
+            mint, 
+            baseData.name, 
+            baseData.ticker, 
+            baseData.image, 
+            supply, 
+            decimals, 
+            0, 0, 0, 0, 0, 
+            Date.now()
+        ]);
 
-        logger.info('✅ Master Worker fully operational.');
+        await aggregateAndSaveToken(db, mint);
+        logger.info(`✅ Worker: Finished ${mint}`);
 
-    } catch (err) {
-        logger.error(`❌ CRITICAL WORKER FAILURE: ${err.message}`, { stack: err.stack });
-        process.exit(1);
+    } catch (e) {
+        logger.error(`❌ Worker Error [${mint}]: ${e.message}`);
+        // Consider re-queueing if transient
     }
 }
 
-// Global Error Handlers
-process.on('uncaughtException', (err) => {
-    logger.error(`❌ Worker Uncaught Exception: ${err.message}`, { stack: err.stack });
-    process.exit(1); 
-});
+async function startWorker() {
+    try {
+        logger.info("🛠️ Worker: Starting...");
+        await initDB();
+        await connectRedis();
+        const redis = getClient();
 
-process.on('unhandledRejection', (reason, promise) => {
-    // Log the full reason (error object) to see the stack trace
-    logger.error('❌ Worker Unhandled Rejection:', reason);
-});
+        logger.info("🛠️ Worker: Connected to services. Waiting for jobs...");
+
+        // Loop forever
+        while (true) {
+            try {
+                // BLPOP blocks until an item is available or timeout (0 = infinite, but we use 2s to allow heartbeat)
+                // Redis client might not support blocking promise elegantly depending on version, so we poll
+                const item = await redis.rpop(QUEUE_KEY);
+                
+                if (item) {
+                    await processToken(item);
+                } else {
+                    await new Promise(r => setTimeout(r, 2000));
+                }
+            } catch (err) {
+                logger.error(`Worker Loop Error: ${err.message}`);
+                await new Promise(r => setTimeout(r, 5000));
+            }
+        }
+
+    } catch (e) {
+        logger.error(`Worker Fatal Error: ${e.message}`);
+        process.exit(1);
+    }
+}
 
 startWorker();
