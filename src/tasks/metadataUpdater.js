@@ -13,7 +13,7 @@ async function fetchGeckoTerminalData(mintAddress) {
     } catch (e) {
         if (e.response && e.response.status === 429) {
             logger.warn("⚠️ GeckoTerminal Rate Limit! Slowing down...");
-            await new Promise(r => setTimeout(r, 10000)); 
+            await new Promise(r => setTimeout(r, 15000)); // Increased backoff to 15s
         }
         return null;
     }
@@ -26,7 +26,14 @@ async function updateMetadata(deps) {
     const now = Date.now();
 
     try {
-        const tokens = await db.all(`SELECT mint, supply, decimals FROM tokens ORDER BY updated_at ASC LIMIT 50`);
+        // Prioritize tokens with no price history or no liquidity
+        const tokens = await db.all(`
+            SELECT mint, supply, decimals 
+            FROM tokens 
+            ORDER BY liquidity DESC, updated_at ASC 
+            LIMIT 50
+        `);
+        
         if (tokens.length > 0) {
             logger.info(`🔄 Metadata: Syncing ${tokens.length} tokens via GeckoTerminal...`);
         }
@@ -36,7 +43,6 @@ async function updateMetadata(deps) {
                 const poolsData = await fetchGeckoTerminalData(t.mint);
 
                 if (!poolsData || poolsData.length === 0) {
-                    // Touch updated_at so we don't loop the same failed tokens immediately
                     await db.run(`UPDATE tokens SET updated_at = CURRENT_TIMESTAMP WHERE mint = $1`, [t.mint]);
                     continue; 
                 }
@@ -44,7 +50,7 @@ async function updateMetadata(deps) {
                 let totalVolume24h = 0;
                 let totalLiquidity = 0;
                 let bestPrice = 0;
-                let bestChange24h = 0;
+                let bestChange24h = null; // Changed to null initial to detect existence
                 let maxLiquidity = -1;
 
                 for (const poolData of poolsData) {
@@ -63,6 +69,7 @@ async function updateMetadata(deps) {
                     if (liqUsd > maxLiquidity) {
                         maxLiquidity = liqUsd;
                         bestPrice = price;
+                        // Capture the change from the most liquid pool
                         bestChange24h = parseFloat(attr.price_change_percentage?.h24 || 0);
                     }
 
@@ -76,14 +83,10 @@ async function updateMetadata(deps) {
                             volume_24h = EXCLUDED.volume_24h
                     `, [address, t.mint, dexId, price, liqUsd, vol24h, now]);
                 }
-
-                // --- CRITICAL FIX: Ensure Decimals are saved if possible ---
-                // Does Gecko provide decimals? Not directly in pools list usually.
-                // But we calculate Mcap here.
                 
                 let marketCap = 0;
                 if (bestPrice > 0) {
-                    const decimals = t.decimals || 9; // Default to 9 if DB is 0/null
+                    const decimals = t.decimals || 9; 
                     let rawSupply = parseFloat(t.supply || '0');
                     if (rawSupply === 0) rawSupply = 1000000000 * Math.pow(10, decimals); 
 
@@ -92,13 +95,27 @@ async function updateMetadata(deps) {
                     marketCap = supply * bestPrice;
                 }
 
-                await db.run(`
+                // --- CRITICAL FIX FOR 0% CHANGE ---
+                // We only update change24h if we found a valid pool with data.
+                // We do NOT overwrite it if bestChange24h is technically 0 but maybe valid? 
+                // Gecko usually returns valid float or null.
+                
+                const params = [totalVolume24h, marketCap, bestPrice, totalLiquidity, now, t.mint];
+                let query = `
                     UPDATE tokens 
                     SET volume24h = $1, marketCap = $2, priceUsd = $3, 
-                        liquidity = $4, change24h = $5, timestamp = $6,
+                        liquidity = $4, timestamp = $5,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE mint = $7
-                `, [totalVolume24h, marketCap, bestPrice, totalLiquidity, bestChange24h, now, t.mint]);
+                `;
+
+                if (bestChange24h !== null) {
+                    query += `, change24h = $${params.length + 1}`;
+                    params.push(bestChange24h);
+                }
+
+                query += ` WHERE mint = $${params.length === 6 ? 6 : 7}`; // Adjust index based on whether we pushed change24h
+
+                await db.run(query, params);
 
             } catch (err) {
                 logger.error(`Token Update Failed [${t.mint}]: ${err.message}`);

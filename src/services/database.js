@@ -45,7 +45,7 @@ async function initDB() {
                     symbol TEXT,
                     image TEXT,
                     supply TEXT,
-                    decimals INTEGER,
+                    decimals INTEGER DEFAULT 9,
                     priceUsd DOUBLE PRECISION,
                     liquidity DOUBLE PRECISION,
                     marketCap DOUBLE PRECISION,
@@ -218,6 +218,7 @@ async function aggregateAndSaveToken(db, mint) {
         let totalVol = 0;
         let mainPool = pools[0]; 
         
+        // Find the most liquid pool to use as the price source
         for (const p of pools) {
             const liq = parseFloat(p.liquidity_usd || 0);
             const vol = parseFloat(p.volume_24h || 0);
@@ -255,10 +256,11 @@ async function aggregateAndSaveToken(db, mint) {
                 getPriceAt(time5m)
             ]);
 
-            // Only calculate if we found a historical candle
-            if (p24h) change24h = ((price - p24h) / p24h) * 100;
-            if (p1h) change1h = ((price - p1h) / p1h) * 100;
-            if (p5m) change5m = ((price - p5m) / p5m) * 100;
+            // Only calculate if we found a historical candle.
+            // Explicitly cast to prevent math errors.
+            if (p24h !== null && p24h > 0) change24h = ((price - p24h) / p24h) * 100;
+            if (p1h !== null && p1h > 0) change1h = ((price - p1h) / p1h) * 100;
+            if (p5m !== null && p5m > 0) change5m = ((price - p5m) / p5m) * 100;
         }
 
         // --- SAFE UPDATE ---
@@ -269,8 +271,9 @@ async function aggregateAndSaveToken(db, mint) {
         const params = [totalLiq, totalVol, price, mint];
         let query = `UPDATE tokens SET liquidity = $1, volume24h = $2, priceUsd = $3`;
         
-        // Always calculate Mcap based on new price
-        query += `, marketCap = ($3 * CAST(supply AS DOUBLE PRECISION) / POWER(10, decimals))`;
+        // Always calculate Mcap based on new price.
+        // COALESCE(decimals, 9) ensures we don't divide by null if decimals missing.
+        query += `, marketCap = ($3 * CAST(supply AS DOUBLE PRECISION) / POWER(10, COALESCE(decimals, 9)))`;
 
         let pIdx = 5;
 
