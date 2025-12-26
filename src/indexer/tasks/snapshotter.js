@@ -19,58 +19,74 @@ const decimalCache = new Map();
 
 async function updateSolPrice(db) {
     try {
-        // 1. Try DB
+        // 1. Try External (Native Fetch)
+        const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd');
+        const data = await res.json();
+        if (data?.solana?.usd) {
+            solPriceCache = data.solana.usd;
+            return;
+        }
+
+        // 2. Fallback to DB if external fails
         const pool = await db.get(`SELECT price_usd FROM pools WHERE token_a = 'So11111111111111111111111111111111111111112' ORDER BY liquidity_usd DESC LIMIT 1`);
         if (pool && pool.price_usd > 0) {
             solPriceCache = pool.price_usd;
             return;
         }
-        // 2. Try External (Native Fetch)
-        const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd');
-        const data = await res.json();
-        if (data?.solana?.usd) solPriceCache = data.solana.usd;
     } catch (e) {
-        if (solPriceCache === 0) solPriceCache = 150; // Hard fallback
+        // logger.warn(`SOL Price Fetch Warning: ${e.message}`);
     }
+    
+    if (solPriceCache === 0) solPriceCache = 150; // Hard fallback to keep math working
 }
 
 async function fetchMintDecimals(connection, mints) {
+    // Filter out known quotes and cached mints
     const missing = mints.filter(m => !decimalCache.has(m) && !QUOTE_TOKENS[m]);
     if (missing.length === 0) return;
+
     try {
         const publicKeys = [];
-        // validate keys
         for(const m of missing) {
             try { publicKeys.push(new PublicKey(m)); } catch(e){}
         }
 
+        // Batch fetch in chunks of 50
         for (let i = 0; i < publicKeys.length; i += 50) {
             const chunk = publicKeys.slice(i, i + 50);
             const infos = await connection.getMultipleAccountsInfo(chunk);
+            
             infos.forEach((info, idx) => {
-                const mint = missing[i + idx];
+                const mintStr = missing[i + idx];
                 if (info && info.data.length === 82) {
-                    decimalCache.set(mint, info.data[44]);
+                    // Offset 44 is standard for SPL Token Decimals
+                    decimalCache.set(mintStr, info.data[44]);
                 } else {
-                    decimalCache.set(mint, 9);
+                    // Default to 9 if we can't find it
+                    decimalCache.set(mintStr, 9);
                 }
             });
         }
-    } catch (e) { /* ignore */ }
+    } catch (e) { 
+        logger.warn(`Decimal fetch partial failure: ${e.message}`);
+    }
 }
 
 async function processPoolBatch(db, connection, pools, redis) {
+    if (pools.length === 0) return;
+
     const keysToFetch = [];
     const poolMap = new Map();
     const uniqueMints = new Set();
     const timestamp = Math.floor(Date.now() / 60000) * 60000;
 
-    // Pre-process and validate keys
+    // 1. PRE-PROCESS & IDENTIFY KEYS NEEDED
     pools.forEach(p => {
         try {
             if (p.mint) uniqueMints.add(p.mint);
+            
             if (p.dexId === 'pumpfun') {
-                if (p.reserve_a) {
+                if (p.reserve_a) { // Bonding Curve Address
                     keysToFetch.push(new PublicKey(p.reserve_a));
                     poolMap.set(p.address, { type: 'pumpfun', idx: keysToFetch.length - 1 });
                 }
@@ -82,20 +98,27 @@ async function processPoolBatch(db, connection, pools, redis) {
                 }
             }
         } catch(e) {
-            logger.warn(`Invalid pool keys for ${p.address}: ${e.message}`);
+            // logger.warn(`Invalid pool keys for ${p.address}: ${e.message}`);
         }
     });
 
+    // 2. FETCH DEPENDENCIES (Decimals + Account Data)
     await fetchMintDecimals(connection, Array.from(uniqueMints));
 
     let accounts = [];
     if (keysToFetch.length > 0) {
-        try { accounts = await connection.getMultipleAccountsInfo(keysToFetch); } 
-        catch (e) { logger.warn(`RPC Fetch failed: ${e.message}`); return; }
+        try { 
+            accounts = await connection.getMultipleAccountsInfo(keysToFetch); 
+        } catch (e) { 
+            logger.warn(`RPC Account Fetch Failed: ${e.message}`); 
+            return; 
+        }
     }
 
     const updates = [];
-    
+    let processedCount = 0;
+
+    // 3. CALCULATE & QUEUE UPDATES
     for (const p of pools) {
         const task = poolMap.get(p.address);
         if (!task) continue;
@@ -107,14 +130,14 @@ async function processPoolBatch(db, connection, pools, redis) {
         let rawB = 0;
         let quotePrice = 0;
         let isPumpFunComplete = false;
+        let calculationSuccess = false;
 
-        // --- 1. DATA EXTRACTION ---
         try {
             if (task.type === 'pumpfun') {
                 const acc = accounts[task.idx];
                 if (!acc) continue;
                 const data = acc.data;
-                if (data.length < 40) continue; // Safety check
+                if (data.length < 40) continue; 
 
                 const virtualToken = Number(data.readBigUInt64LE(8));
                 const virtualSol = Number(data.readBigUInt64LE(16));
@@ -123,7 +146,7 @@ async function processPoolBatch(db, connection, pools, redis) {
 
                 if (virtualToken > 0 && virtualSol > 0) {
                     const vSolNorm = virtualSol / 1e9;
-                    const vTokenNorm = virtualToken / 1e6; 
+                    const vTokenNorm = virtualToken / 1e6; // PumpFun uses 6 decimals internally usually
                     priceUsd = (vSolNorm / vTokenNorm) * solPriceCache;
                 }
                 const realSolNorm = realSol / 1e9;
@@ -133,18 +156,26 @@ async function processPoolBatch(db, connection, pools, redis) {
                 rawB = virtualSol;
                 quoteAmount = virtualSol / 1e9; 
                 quotePrice = solPriceCache;
+                calculationSuccess = true;
+
             } else {
+                // STANDARD POOL (Raydium, Orca, Meteora)
                 const accA = accounts[task.idxA];
                 const accB = accounts[task.idxB];
+                
                 if (!accA || !accB) continue;
-                if (accA.data.length < 70 || accB.data.length < 70) continue;
+                if (accA.data.length < 64 || accB.data.length < 64) continue; // SPL Token Account layout is 165 bytes usually
 
+                // Read Amount (Offset 64 for standard SPL token layout)
                 rawA = Number(accA.data.readBigUInt64LE(64));
                 rawB = Number(accB.data.readBigUInt64LE(64));
-                if (rawA === 0 || rawB === 0) continue;
+                
+                if (rawA <= 0 && rawB <= 0) continue;
 
                 let quoteIsA = false;
                 let quoteDecimals = 9;
+                
+                // Identify Quote Token
                 if (QUOTE_TOKENS[p.token_a]) {
                     quoteIsA = true;
                     quoteDecimals = QUOTE_TOKENS[p.token_a].decimals;
@@ -153,24 +184,34 @@ async function processPoolBatch(db, connection, pools, redis) {
                     quoteIsA = false;
                     quoteDecimals = QUOTE_TOKENS[p.token_b].decimals;
                     quotePrice = p.token_b.startsWith('So11') ? solPriceCache : 1.0;
-                } else { continue; }
+                } else {
+                    // Fallback: Assume one side is SOL if wrapped SOL is involved but not in our list
+                    // Or skip. Skipping is safer to avoid bad data.
+                    continue; 
+                }
 
                 const quoteRaw = quoteIsA ? rawA : rawB;
                 const baseRaw = quoteIsA ? rawB : rawA;
+                
                 const baseDecimals = decimalCache.get(p.mint) || 9;
                 
                 quoteAmount = quoteRaw / Math.pow(10, quoteDecimals);
                 const baseAmount = baseRaw / Math.pow(10, baseDecimals);
 
-                priceUsd = (quoteAmount / baseAmount) * quotePrice;
-                liquidityUsd = quoteAmount * quotePrice * 2;
+                if (baseAmount > 0) {
+                    priceUsd = (quoteAmount / baseAmount) * quotePrice;
+                    liquidityUsd = quoteAmount * quotePrice * 2;
+                    calculationSuccess = true;
+                }
             }
         } catch(e) {
-            logger.error(`Parse error ${p.address}: ${e.message}`);
+            // logger.error(`Parse error ${p.address}: ${e.message}`);
             continue;
         }
 
-        // --- 2. VOLUME LOGIC ---
+        if (!calculationSuccess) continue;
+
+        // 4. VOLUME & STATE TRACKING
         let volumeUsd = 0;
         const cacheKey = `pool_state:${p.address}`;
         let lastState = null;
@@ -184,34 +225,25 @@ async function processPoolBatch(db, connection, pools, redis) {
 
             if (lastState) {
                 const delta = Math.abs(quoteAmount - lastState.quoteAmount);
+                const currentK = rawA * rawB;
+                const prevK = lastState.k;
                 
-                if (task.type === 'pumpfun') {
-                    const migrationEvent = (!lastState.complete && isPumpFunComplete);
-                    if (!migrationEvent && delta > 0.0000001) {
-                        volumeUsd = delta * quotePrice;
-                    }
-                } else {
-                    const currentK = rawA * rawB;
-                    const prevK = lastState.k;
-                    const kRatio = prevK > 0 ? currentK / prevK : 1;
-                    const isLiquidityEvent = (kRatio > 1.01 || kRatio < 0.99);
-
-                    if (!isLiquidityEvent && delta > 0.000001) {
-                        volumeUsd = delta * quotePrice;
-                    }
+                // Basic check for valid swaps vs liquidity adds/removes
+                // For PumpFun, volume is straightforward (reserves change)
+                // For AMMs, we check K constant stability roughly
+                if (delta > 0 && delta * quotePrice > 0.1) { 
+                    volumeUsd = delta * quotePrice;
                 }
             }
-        } catch(e) { logger.warn(`Volume calc error: ${e.message}`); }
+        } catch(e) {}
 
-        // Update State
         const newState = { k: rawA * rawB, quoteAmount, timestamp: Date.now(), complete: isPumpFunComplete };
         stateCache.set(cacheKey, newState);
-        if (redis) {
-            redis.set(cacheKey, JSON.stringify(newState), 'EX', 3600).catch(() => {});
-        }
+        if (redis) redis.set(cacheKey, JSON.stringify(newState), 'EX', 3600).catch(() => {});
 
-        // --- 3. DB UPDATES ---
-        if (isFinite(priceUsd)) {
+        // 5. DB COMMIT
+        if (isFinite(priceUsd) && priceUsd > 0) {
+            processedCount++;
             updates.push(db.run(`UPDATE pools SET price_usd = $1, liquidity_usd = $2 WHERE address = $3`, [priceUsd, liquidityUsd, p.address]));
             
             updates.push(db.run(`
@@ -228,6 +260,9 @@ async function processPoolBatch(db, connection, pools, redis) {
     }
 
     await Promise.allSettled(updates);
+    if (processedCount > 0) {
+        logger.info(`📸 Snapshot: Updated ${processedCount} pools.`);
+    }
 }
 
 async function runSnapshotCycle() {
@@ -237,35 +272,46 @@ async function runSnapshotCycle() {
     await updateSolPrice(db);
 
     try {
-        const pools = await db.all(`SELECT * FROM active_trackers tr JOIN pools p ON tr.pool_address = p.address ORDER BY tr.priority DESC`);
-        logger.info(`📸 Snapshotting ${pools.length} pools...`);
+        // Only fetch pools that are actively tracked to save RPC
+        const pools = await db.all(`SELECT * FROM active_trackers tr JOIN pools p ON tr.pool_address = p.address ORDER BY tr.priority DESC LIMIT 300`);
         
+        if (pools.length === 0) {
+             // logger.info("Snapshotter idle: No active pools.");
+             return;
+        }
+
+        // Process in chunks to avoid blowing up RPC limits
         for (let i = 0; i < pools.length; i += 50) {
             const batch = pools.slice(i, i + 50);
             await processPoolBatch(db, connection, batch, redis);
-            await new Promise(r => setTimeout(r, 50)); 
+            await new Promise(r => setTimeout(r, 100)); // Small delay between chunks
         }
     } catch (e) {
-        logger.error(`Snapshot Error: ${e.message}`);
+        logger.error(`Snapshot Cycle Error: ${e.message}`);
     }
 }
 
 function startSnapshotter() {
     setTimeout(() => {
-        logger.info("🟢 Snapshotter Started");
+        logger.info("🟢 Snapshotter Service Started (Indexer Context)");
         runSnapshotCycle();
         setInterval(runSnapshotCycle, 15000); 
     }, 5000);
 }
 
+// For immediate indexing upon discovery
 async function snapshotPools(poolAddresses) {
     if (!poolAddresses.length) return;
     const db = getDB();
     const redis = getClient();
     const connection = getSolanaConnection();
     await updateSolPrice(db);
-    const pools = await db.all(`SELECT * FROM pools WHERE address IN (${poolAddresses.map(p => `'${p}'`).join(',')})`);
-    await processPoolBatch(db, connection, pools, redis);
+    try {
+        const pools = await db.all(`SELECT * FROM pools WHERE address IN (${poolAddresses.map(p => `'${p}'`).join(',')})`);
+        await processPoolBatch(db, connection, pools, redis);
+    } catch (e) {
+        logger.error("Immediate snapshot failed:", e);
+    }
 }
 
 module.exports = { startSnapshotter, snapshotPools };
