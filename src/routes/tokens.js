@@ -113,23 +113,40 @@ function init(deps) {
     router.get('/token/:mint/candles', async (req, res) => {
         const { mint } = req.params;
         const { resolution = '60', from, to } = req.query; 
-        const nowMin = Math.floor(Date.now() / 60000);
-        const cacheKey = `chart:${mint}:${resolution}:${nowMin}`; 
+        
+        // FIX: Handle Unit Mismatch
+        // Frontend sends Seconds (UNIX), DB stores Milliseconds
+        const fromMs = parseInt(from) * 1000 || (Date.now() - 24 * 60 * 60 * 1000);
+        const toMs = parseInt(to) * 1000 || Date.now();
+
+        // Round to nearest minute for cache key
+        const cacheKey = `chart:${mint}:${resolution}:${Math.floor(toMs / 60000)}`; 
 
         try {
             const result = await smartCache(cacheKey, 60, async () => {
+                // Find best pool for this mint (by liquidity)
                 let pool = await db.get(`SELECT address FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC LIMIT 1`, [mint]);
                 if (!pool) return { success: false, error: "Token not indexed yet" };
 
-                // ... (Candle Logic same as before, simplified for brevity) ...
-                // Note: Ensure your candle query handles the time buckets correctly
-                const bucketSize = 60 * 1000; // Simplified
-                const rows = await db.all(`SELECT timestamp, open, high, low, close, volume FROM candles_1m WHERE pool_address = $1 ORDER BY timestamp ASC`, [pool.address]);
+                // Fetch Time-Filtered Candles
+                const rows = await db.all(`
+                    SELECT timestamp, open, high, low, close, volume 
+                    FROM candles_1m 
+                    WHERE pool_address = $1 
+                    AND timestamp >= $2 
+                    AND timestamp <= $3 
+                    ORDER BY timestamp ASC
+                `, [pool.address, fromMs, toMs]);
                 
+                // Map back to Seconds for Lightweight Charts
                 const candles = rows.map(r => ({
                     time: Math.floor(parseInt(r.timestamp) / 1000),
-                    open: r.open, high: r.high, low: r.low, close: r.close, value: r.volume
+                    open: r.open, 
+                    high: r.high, 
+                    low: r.low, 
+                    close: r.close
                 }));
+                
                 return { success: true, candles };
             });
             res.json(result);
