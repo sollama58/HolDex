@@ -20,45 +20,62 @@ const SLICE_OFF_QUOTE_MINT = 112;
 
 /**
  * DIRECT RPC HELPER
+ * Uses the SINGLE configured Helius RPC.
  * Bypasses web3.js Connection object issues by using raw Axios HTTP calls.
  */
 async function fetchTokenAccountsRaw(mintAddress) {
     const rpcUrl = getRpcUrl();
-    const payload = {
-        jsonrpc: "2.0",
-        id: "holdex-finder",
-        method: "getTokenAccountsByMint",
-        params: [
-            mintAddress,
-            { programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" },
-            { encoding: "jsonParsed" }
-        ]
-    };
+    let retries = 3;
+    
+    // Simple retry loop on the SAME endpoint
+    while (retries > 0) {
+        const payload = {
+            jsonrpc: "2.0",
+            id: "holdex-finder",
+            method: "getTokenAccountsByMint",
+            params: [
+                mintAddress,
+                { programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" },
+                { encoding: "jsonParsed" }
+            ]
+        };
 
-    try {
-        const response = await axios.post(rpcUrl, payload, { timeout: 10000 });
-        if (response.data && response.data.result) {
-            return response.data.result.value || []; // Raw array of accounts
-        } else if (response.data && response.data.error) {
-            logger.warn(`RPC Error for ${mintAddress}: ${JSON.stringify(response.data.error)}`);
-            return [];
+        try {
+            const response = await axios.post(rpcUrl, payload, { timeout: 10000 });
+            
+            if (response.data && response.data.result) {
+                return response.data.result.value || []; 
+            } else if (response.data && response.data.error) {
+                logger.warn(`RPC Logic Error: ${JSON.stringify(response.data.error)}`);
+                // If it's a logic error (not network), breaking might be better than retrying immediately
+                // But we'll retry just in case of transient issues
+            }
+            
+            // If we didn't get a result, throw to trigger retry
+            throw new Error("No Result");
+
+        } catch (e) {
+            retries--;
+            if (retries === 0) {
+                // Only log error on final failure
+                logger.warn(`Raw RPC Failed for ${mintAddress} after 3 attempts.`);
+                return [];
+            }
+            // Wait 1s before retrying
+            await new Promise(r => setTimeout(r, 1000));
         }
-    } catch (e) {
-        logger.warn(`Raw RPC Fetch Failed: ${e.message}`);
     }
     return [];
 }
 
 /**
  * Strategy 1: Direct GPA Scan (Raydium V4)
- * Reliable for standard Raydium pools.
  */
 async function findRaydiumV4Pools(mintB58, results) {
     try {
         const filtersBase = [{ dataSize: 752 }, { memcmp: { offset: 400, bytes: mintB58 } }];
         const filtersQuote = [{ dataSize: 752 }, { memcmp: { offset: 432, bytes: mintB58 } }];
 
-        // We use the standard retryRPC for this as GPA usually works fine
         const connection = getSolanaConnection(); 
         
         const [baseAccts, quoteAccts] = await Promise.all([
@@ -97,7 +114,6 @@ async function findRaydiumV4Pools(mintB58, results) {
 
 /**
  * Strategy 2: Pump.fun Bonding Curve
- * Deterministic address derivation.
  */
 async function findPumpFunCurve(mintAddress, results) {
     try {
@@ -135,11 +151,9 @@ async function findPumpFunCurve(mintAddress, results) {
 
 /**
  * Strategy 3: Token Account Trace (Robust Raw RPC)
- * Finds generic pools (PumpSwap, Raydium CPMM, Meteora, Orca) by seeing who owns the token accounts.
  */
 async function findPoolsByTokenOwnership(mintAddress, results) {
     try {
-        // Use RAW RPC Fetch to avoid web3.js "missing function" errors
         const tokenAccounts = await fetchTokenAccountsRaw(mintAddress);
         
         if (!tokenAccounts || tokenAccounts.length === 0) return;
@@ -153,8 +167,6 @@ async function findPoolsByTokenOwnership(mintAddress, results) {
             const tokenAccountAddr = pubkey;
 
             try {
-                // We need to check who the OWNER is (the Program ID)
-                // accountData.owner is the Address of the Pool/Vault
                 const ownerPubkey = new PublicKey(ownerStr);
                 
                 const ownerInfo = await retryRPC(() => connection.getAccountInfo(ownerPubkey));
@@ -186,7 +198,6 @@ async function findPoolsByTokenOwnership(mintAddress, results) {
 }
 
 async function parseGenericAnchorPool(connection, poolAddress, dexId, type, myMint, myVault, results) {
-    // Avoid Duplicates
     if (results.find(r => r.pairAddress === poolAddress.toBase58())) return;
 
     try {
@@ -197,8 +208,6 @@ async function parseGenericAnchorPool(connection, poolAddress, dexId, type, myMi
         const myMintBuffer = new PublicKey(myMint).toBuffer();
         let matchedOffset = -1;
         
-        // Scan for my mint in the pool state
-        // Most Anchor pools store the mints in the first 200 bytes
         for (let i = 8; i < 200; i++) {
             if (data.subarray(i, i + 32).equals(myMintBuffer)) {
                 matchedOffset = i;
@@ -212,12 +221,9 @@ async function parseGenericAnchorPool(connection, poolAddress, dexId, type, myMi
         let pairedMint = null;
         
         if (dexId === 'raydium' && type === 'cpmm') {
-            // Raydium CPMM Layout
             mintA = new PublicKey(data.subarray(168, 200)).toBase58();
             mintB = new PublicKey(data.subarray(200, 232)).toBase58();
         } else {
-             // Generic Heuristic for Unknown Layouts
-             // We look for OTHER public keys in the data that are valid mints
              const candidates = [];
              for(let i=8; i<200; i+=32) {
                  try {
@@ -249,7 +255,7 @@ async function parseGenericAnchorPool(connection, poolAddress, dexId, type, myMi
         }
 
     } catch (e) {
-        // logger.warn(`Generic Parser Error for ${dexId}: ${e.message}`);
+        // logger.warn(`Generic Parser Error: ${e.message}`);
     }
 }
 
