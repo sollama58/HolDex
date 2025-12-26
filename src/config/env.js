@@ -3,7 +3,6 @@ require('dotenv').config();
 // Helper to parse comma-separated lists
 const parseCors = (val) => {
     // Default allowed origins (Production Frontend & Dev)
-    // We explicitly add your domain here to ensure it works by default
     const defaults = [
         'https://www.alonisthe.dev', 
         'https://alonisthe.dev',
@@ -16,10 +15,11 @@ const parseCors = (val) => {
     if (val === '*') return '*';
     
     // If no specific env var is set, use defaults
-    if (!val) return defaults;
+    if (!val || val.trim() === '') return defaults;
 
     // Parse env var and merge with defaults
-    const envOrigins = val.split(',').map(origin => origin.trim());
+    // Handles spaces after commas gracefully
+    const envOrigins = val.split(',').map(origin => origin.trim()).filter(o => o.length > 0);
     const combined = [...defaults];
     
     envOrigins.forEach(origin => {
@@ -32,16 +32,13 @@ const parseCors = (val) => {
 };
 
 // --- AUTO-DETECT RPC CONFIGURATION ---
-// Prioritize Helius API Key if available and no specific RPC URL is overridden
 let rpcUrl = process.env.SOLANA_RPC_URL;
 const heliusKey = process.env.HELIUS_API_KEY;
 
 if (!rpcUrl && heliusKey) {
-    // Standard Helius RPC Endpoint
     rpcUrl = `https://mainnet.helius-rpc.com/?api-key=${heliusKey}`;
 }
 
-// Fallback to Public RPC if neither is set
 if (!rpcUrl) {
     rpcUrl = 'https://api.mainnet-beta.solana.com';
 }
@@ -50,8 +47,6 @@ module.exports = {
     PORT: process.env.PORT || 3000,
     DATABASE_URL: process.env.DATABASE_URL || 'postgresql://user:password@localhost:5432/holdex',
     REDIS_URL: process.env.REDIS_URL || 'redis://redis:6379',
-    
-    // The resolved RPC URL (Helius > Custom > Public)
     SOLANA_RPC_URL: rpcUrl,
     
     // CORS Configuration

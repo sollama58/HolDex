@@ -8,8 +8,8 @@ const logger = require('./services/logger');
 const { initDB, getDB } = require('./services/database');
 const { connectRedis } = require('./services/redis');
 const { startSnapshotter } = require('./indexer/tasks/snapshotter'); 
-const { startWorker } = require('./worker'); // Import Worker
-const { startNewTokenListener } = require('./tasks/newTokenListener'); // Import Listener
+const { startWorker } = require('./worker'); 
+const { startNewTokenListener } = require('./tasks/newTokenListener'); 
 const tokensRoutes = require('./routes/tokens');
 
 const app = express();
@@ -25,8 +25,20 @@ const allowedOrigins = config.CORS_ORIGINS;
 
 const corsOptions = {
     origin: function (origin, callback) {
+        // 1. Allow requests with no origin (mobile apps, curl, server-to-server)
         if (!origin) return callback(null, true);
-        if (allowedOrigins === '*' || (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin))) {
+
+        // 2. Check against config list
+        const isConfigAllowed = allowedOrigins === '*' || (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin));
+        
+        // 3. HARDCODED FALLBACK: Always allow your domain, regardless of config
+        // This prevents env var parsing errors from breaking production
+        const isDomainAllowed = 
+            origin === 'https://www.alonisthe.dev' || 
+            origin === 'https://alonisthe.dev' ||
+            origin.includes('localhost'); // Allow local dev always
+
+        if (isConfigAllowed || isDomainAllowed) {
             return callback(null, true);
         } else {
             logger.warn(`⚠️ CORS Blocked Origin: ${origin}`);
@@ -60,8 +72,11 @@ app.get('/health', (req, res) => {
 async function startServer() {
     try {
         logger.info('🚀 System: Initializing HolDEX API...');
+        
+        // Debug: Print allowed origins to logs
         const originLog = Array.isArray(allowedOrigins) ? allowedOrigins.join(', ') : allowedOrigins;
         logger.info(`🛡️  CORS Configured for: ${originLog}`);
+        logger.info(`🛡️  CORS Fallback Active for: alonisthe.dev`);
 
         // 1. Initialize Database
         await initDB();
@@ -70,14 +85,8 @@ async function startServer() {
         await connectRedis();
 
         // 3. Start Background Services
-        // Snapshotter: Updates prices for tracked tokens
         startSnapshotter();
-        
-        // Worker: Processes metadata/heavy tasks from queue
-        // Note: We run this in the same process for simplicity in this environment
         startWorker().catch(e => logger.error(`Worker Start Error: ${e.message}`));
-
-        // Listener: Listens for new Raydium/PumpFun pools on-chain
         startNewTokenListener().catch(e => logger.error(`Listener Start Error: ${e.message}`));
 
         // 4. Initialize Routes
