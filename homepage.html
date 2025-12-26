@@ -73,7 +73,6 @@
         .view-section.active { display: block; animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         
-        /* CHART STYLES UPDATED */
         .chart-wrapper { width: 100%; height: 600px; background: #1a0a05; border-radius: 16px; overflow: hidden; border: 2px solid #7c2d12; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
         .chart-header { padding: 12px 16px; background: #2a1005; border-bottom: 1px solid #7c2d12; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
         
@@ -93,6 +92,9 @@
         .stat-card { background: rgba(69, 26, 3, 0.8); border: 2px solid #7c2d12; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 4px; box-shadow: 4px 4px 0 rgba(0,0,0,0.2); }
         .stat-label { font-size: 11px; color: #fb923c; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
         .stat-value { font-size: 18px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+        .stat-card.clickable { cursor: pointer; transition: transform 0.2s, border-color 0.2s; }
+        .stat-card.clickable:hover { transform: translateY(-2px); border-color: #ea580c; }
+        
         .modal-overlay { position: fixed; inset: 0; background: rgba(15, 5, 2, 0.95); backdrop-filter: blur(5px); z-index: 100; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
         .modal-overlay.open { opacity: 1; pointer-events: auto; }
         .action-btn { background: #451a03; border: 2px solid #ea580c; color: #fb923c; padding: 12px 20px; border-radius: 12px; font-weight: 700; text-transform: uppercase; font-size: 13px; transition: all 0.2s; box-shadow: 4px 4px 0 #7c2d12; }
@@ -125,16 +127,13 @@
         .wallet-btn:hover { border-color: #ea580c; background: #451a03; transform: translateX(5px); }
         .wallet-icon { width: 32px; height: 32px; border-radius: 8px; }
         
-        /* Large social buttons for detail view */
         .social-btn-lg { display: flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 14px; border: 2px solid #7c2d12; background: #451a03; color: #ea580c; transition: all 0.2s; }
         .social-btn-lg:hover { border-color: #ea580c; color: #fff; background: #582206; transform: translateY(-2px); }
 
-        /* API Code Block Styles */
         .code-block { background: #0f0502; border: 1px solid #7c2d12; padding: 16px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #fb923c; overflow-x: auto; position: relative; }
         .code-copy-btn { position: absolute; top: 8px; right: 8px; background: #451a03; border: 1px solid #7c2d12; color: #9a3412; padding: 4px 8px; border-radius: 4px; font-size: 10px; cursor: pointer; transition: all 0.2s; }
         .code-copy-btn:hover { border-color: #ea580c; color: #fff; }
         
-        /* Footer Styles */
         footer { box-shadow: 0 -4px 10px rgba(0,0,0,0.5); }
         .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
         .status-dot.online { background: #22c55e; box-shadow: 0 0 5px #22c55e; animation: pulse 2s infinite; }
@@ -142,6 +141,8 @@
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
         .footer-wallet-btn { background: #451a03; border: 1px solid #7c2d12; padding: 4px 12px; border-radius: 6px; color: #fb923c; font-weight: bold; font-size: 11px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px; }
         .footer-wallet-btn:hover { border-color: #ea580c; color: #fff; }
+        
+        .live-indicator { width: 6px; height: 6px; background: #22c55e; border-radius: 50%; display: inline-block; margin-right: 4px; animation: pulse 1s infinite; }
     </style>
 </head>
 <body>
@@ -229,7 +230,7 @@
         </div>
     </div>
 
-    <!-- ABOUT VIEW -->
+    <!-- ABOUT VIEW (UPDATED) -->
     <div id="view-about" class="view-section px-4 md:px-0">
         <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 md:p-12 shadow-2xl max-w-5xl mx-auto space-y-12">
             <div class="flex items-center gap-6 border-b-2 border-[#7c2d12] pb-8">
@@ -245,17 +246,17 @@
                 <div>
                     <h3 class="text-2xl font-bold text-white mb-4">Core Philosophy</h3>
                     <p class="text-[#ffedd5] leading-relaxed mb-4">
-                        HolDex is built for traders who demand raw speed and absolute truth. In an ecosystem flooded with noise, we provide a <strong>terminal-grade interface</strong> that cuts through the clutter.
+                        HolDex is built for traders who demand raw speed and absolute truth. We provide a <strong>terminal-grade interface</strong> that cuts through the clutter, now enhanced with <strong>Daily Holder Tracking</strong> and deep historical analysis.
                     </p>
                     <p class="text-[#ffedd5] leading-relaxed">
-                        We prioritize <strong>community verification</strong> and <strong>on-chain data integrity</strong>. Our proprietary indexing engine snapshots liquidity pools directly from the Solana RPC, ensuring you see price action as it happens, not minutes later.
+                        We prioritize <strong>community verification</strong> and <strong>on-chain data integrity</strong>. Our proprietary indexing engine snapshots liquidity pools directly from the Solana RPC, ensuring you see price action as it happens.
                     </p>
                 </div>
                 <div class="bg-[#451a03] p-6 rounded-xl border border-[#7c2d12] flex flex-col justify-center shadow-inner">
                     <div class="flex items-center gap-3 mb-2"><i data-lucide="server" width="20" class="text-[#22c55e]"></i><span class="font-bold text-white">Direct RPC Sync</span></div>
                     <p class="text-sm text-[#9a3412] mb-4">No third-party delays. We index Raydium and Pump.fun directly.</p>
-                    <div class="flex items-center gap-3 mb-2"><i data-lucide="shield-check" width="20" class="text-[#ea580c]"></i><span class="font-bold text-white">Bot Filtering</span></div>
-                    <p class="text-sm text-[#9a3412]">Algorithms that separate organic volume from wash trading.</p>
+                    <div class="flex items-center gap-3 mb-2"><i data-lucide="bar-chart" width="20" class="text-[#3b82f6]"></i><span class="font-bold text-white">Holder Analytics</span></div>
+                    <p class="text-sm text-[#9a3412]">Track wallet growth over time with our daily snapshot engine.</p>
                 </div>
             </div>
             <div class="grid md:grid-cols-3 gap-6">
@@ -269,7 +270,7 @@
                 <p class="text-[#9a3412] mb-6 max-w-2xl">HolDex exposes a robust public API. Build trading bots, analytics dashboards, or integrate our data into your dApp freely.</p>
                 <button onclick="toggleApiModal()" class="action-btn flex items-center gap-2"><i data-lucide="terminal" width="16"></i> View API Documentation</button>
             </div>
-             <div class="border-t border-[#7c2d12] pt-8 flex justify-between items-center text-xs text-[#9a3412]"><div>&copy; 2025 HolDex Protocol. All rights reserved.</div><div class="font-mono">v2.4.0 (Stable)</div></div>
+             <div class="border-t border-[#7c2d12] pt-8 flex justify-between items-center text-xs text-[#9a3412]"><div>&copy; 2025 HolDex Protocol. All rights reserved.</div><div class="font-mono">v2.5.0 (Stable)</div></div>
         </div>
     </div>
 
@@ -340,10 +341,15 @@
             </div>
             
             <div class="grid grid-cols-2 lg:grid-cols-6 gap-3 md:gap-4 mb-6">
+                <!-- NEW: K-Score Logic -->
                 <div class="stat-card border-[#ea580c] relative overflow-hidden"><span class="stat-label text-[#ea580c]">K-Score</span><span id="stat-kscore" class="stat-value text-[#fb923c] text-2xl font-bold font-mono">🔒</span></div>
-                <div class="stat-card"><span class="stat-label">Price</span><span id="stat-price" class="stat-value text-[#ffedd5]">-</span></div>
+                
+                <div class="stat-card"><span class="stat-label flex items-center gap-1">Price <span class="live-indicator ml-1"></span></span><span id="stat-price" class="stat-value text-[#ffedd5]">-</span></div>
                 <div class="stat-card"><span class="stat-label">MCap</span><span id="stat-mcap" class="stat-value text-[#ea580c]">-</span></div>
-                <div class="stat-card col-span-2 md:col-span-1"><span class="stat-label">24h Vol</span><span id="stat-vol" class="stat-value text-[#22c55e]">-</span></div>
+                
+                <!-- NEW: Holders Stat with Click Action -->
+                <div class="stat-card clickable hover:bg-[#582206]" onclick="openHolderHistory()"><span class="stat-label flex items-center gap-1">Holders <i data-lucide="bar-chart" width="12"></i></span><span id="stat-holders" class="stat-value text-[#3b82f6]">-</span></div>
+                
                 <div class="stat-card"><span class="stat-label">1H</span><span id="stat-chg1h" class="stat-value">-</span></div>
                 <div class="stat-card"><span class="stat-label">24H</span><span id="stat-chg24h" class="stat-value">-</span></div>
             </div>
@@ -370,9 +376,7 @@
                             <button onclick="toggleScale()" class="tool-btn" id="btn-scale">
                                 <i data-lucide="scaling" width="12"></i> <span id="scale-text">Linear</span>
                             </button>
-                            <button onclick="toggleMA()" class="tool-btn" id="btn-ma">
-                                <i data-lucide="activity" width="12"></i> Indicators
-                            </button>
+                            <!-- REMOVED INDICATORS TOGGLE -->
                         </div>
                      </div>
                      
@@ -416,7 +420,7 @@
     </div>
 </footer>
 
-<!-- API DOCUMENTATION MODAL -->
+<!-- API DOCUMENTATION MODAL (UPDATED) -->
 <div id="api-docs-modal" class="modal-overlay" onclick="toggleApiModal()">
     <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto relative shadow-2xl" onclick="event.stopPropagation()">
         <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleApiModal()"><i data-lucide="x" width="24"></i></button>
@@ -432,23 +436,23 @@
             <!-- ENDPOINT 1 -->
             <div>
                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold">/api/tokens</span></div>
-                <p class="text-sm text-[#ffedd5] mb-2">Fetch a paginated list of tokens indexed by the protocol.</p>
+                <p class="text-sm text-[#ffedd5] mb-2">Fetch a paginated list of tokens indexed by the protocol. Now includes <strong>holder counts</strong>.</p>
                 <div class="code-block">
-<span class="text-[#9a3412]">// Example Request</span>
-fetch('<span class="text-white">https://asdev-backend.onrender.com/api/tokens?sort=kscore&page=1</span>');
-
-<span class="text-[#9a3412]">// Query Parameters</span>
-?sort   -> 'kscore', 'newest', 'volume', 'mcap', '24h' (default: kscore)
-?page   -> Integer (default: 1)
-?limit  -> Integer (default: 100)
-?search -> String (Ticker, Name, or Mint Address)
+<span class="text-[#9a3412]">// Example Response Object</span>
+{
+  "mint": "So111...",
+  "ticker": "SOL",
+  "holders": 5420,
+  "kScore": 85.5,
+  ...
+}
                 </div>
             </div>
 
             <!-- ENDPOINT 2 -->
             <div>
                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold">/api/token/:mint</span></div>
-                <p class="text-sm text-[#ffedd5] mb-2">Get detailed metadata, price stats, and pool information for a specific token.</p>
+                <p class="text-sm text-[#ffedd5] mb-2">Get detailed metadata, price stats, pool information, and <strong>daily holder history snapshots</strong>.</p>
                 <div class="code-block">
 <span class="text-[#9a3412]">// Example Request</span>
 fetch('<span class="text-white">https://asdev-backend.onrender.com/api/token/So111...11112</span>');
@@ -462,11 +466,6 @@ fetch('<span class="text-white">https://asdev-backend.onrender.com/api/token/So1
                 <div class="code-block">
 <span class="text-[#9a3412]">// Example Request</span>
 fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1700000000&to=1700086400</span>');
-
-<span class="text-[#9a3412]">// Query Parameters</span>
-?resolution -> '5', '15', '60', '240', 'D' (Minutes, default: 5)
-?from       -> Unix Timestamp (Seconds)
-?to         -> Unix Timestamp (Seconds)
                 </div>
             </div>
         </div>
@@ -541,6 +540,16 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     </div>
 </div>
 
+<!-- NEW: HOLDER HISTORY MODAL -->
+<div id="holder-modal" class="modal-overlay">
+    <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-6 w-full max-w-2xl max-h-[80vh] relative shadow-2xl" onclick="event.stopPropagation()">
+        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="closeHolderHistory()"><i data-lucide="x" width="24"></i></button>
+        <h3 class="text-xl font-bold text-white mb-2 font-sans">Holder Growth</h3>
+        <p class="text-xs text-[#9a3412] mb-6 font-mono">Daily snapshots</p>
+        <div id="holder-chart-container" class="w-full h-64 bg-[#1a0a05] rounded-xl border border-[#7c2d12] overflow-hidden"></div>
+    </div>
+</div>
+
 <script>
     const API_URL = 'https://asdev-backend.onrender.com';
     const FALLBACK_BANNER = "https://images.squarespace-cdn.com/content/690b8c21384b3f1201c2650c/967ea61f-a88a-4497-81c2-5c67d3d06d9e/Gemini_Generated_Image_c82gwyc82gwyc82g.png?content-type=image%2Fpng";
@@ -552,6 +561,7 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     let currentSort = 'kscore'; 
     let searchQuery = '';
     let pollingInterval;
+    let detailPollingInterval; 
     let isConnected = true;
     let isInfoModalOpen = false;
     let isApiModalOpen = false;
@@ -579,6 +589,11 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     
     let isLogScale = false;
     let showMA = false;
+
+    // HOLDER CHART STATE
+    let currentHolderHistory = [];
+    let holderChart = null;
+    let holderAreaSeries = null;
 
     window.onload = async () => { handleRoute(); await fetchFees(); lucide.createIcons(); const descInput = document.getElementById('update-description'); const charCount = document.getElementById('char-count'); if(descInput && charCount) { descInput.addEventListener('input', () => { charCount.innerText = descInput.value.length; }); } };
     window.addEventListener('hashchange', handleRoute);
@@ -645,14 +660,7 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         }
     }
     
-    function toggleMA() {
-        showMA = !showMA;
-        const btn = document.getElementById('btn-ma');
-        if (showMA) btn.classList.add('active'); else btn.classList.remove('active');
-        
-        // Refresh data to show/hide
-        if (currentMint) fetchCandles(currentMint, currentPoolAddress);
-    }
+    // Removed toggleMA function
 
     function calculateSMA(data, count) {
         const avg = (series) => {
@@ -687,14 +695,14 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         try {
             const now = Math.floor(Date.now() / 1000);
             
-            // INCREASED LOOKBACK LOGIC
-            // To allow scrolling back, we fetch significantly more data than just the view width
-            let lookback = 24 * 60 * 60; // Default 1 day
-            if (currentResolution === '5') lookback = 24 * 60 * 60; // 1 Day
-            if (currentResolution === '15') lookback = 3 * 24 * 60 * 60; // 3 Days
-            if (currentResolution === '60') lookback = 14 * 24 * 60 * 60; // 2 Weeks
-            if (currentResolution === '240') lookback = 60 * 24 * 60 * 60; // 2 Months
-            if (currentResolution === 'D') lookback = 365 * 24 * 60 * 60; // 1 Year
+            // INCREASED DEFAULT LOOKBACK (Fetch Deep History)
+            let lookback = 30 * 24 * 60 * 60; // Base: 30 days
+            
+            if (currentResolution === '5') lookback = 3 * 24 * 60 * 60; // 3 Days for 5m
+            if (currentResolution === '15') lookback = 7 * 24 * 60 * 60; // 7 Days for 15m
+            if (currentResolution === '60') lookback = 30 * 24 * 60 * 60; // 30 Days for 1H
+            if (currentResolution === '240') lookback = 90 * 24 * 60 * 60; // 90 Days for 4H
+            if (currentResolution === 'D') lookback = 365 * 24 * 60 * 60; // 1 Year for 1D
             
             let from = now - lookback;
 
@@ -722,7 +730,6 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
                     return { time: c.time, open, high, low, close };
                 });
 
-                // Update formatting based on mode
                 chartInstance.applyOptions({
                     rightPriceScale: {
                         autoScale: true,
@@ -736,36 +743,67 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
 
                 candleSeries.setData(cleanData);
                 
-                // Indicators Logic
-                if (showMA && cleanData.length > 0) {
-                    const sma20 = calculateSMA(cleanData, 20);
-                    const sma50 = calculateSMA(cleanData, 50);
-                    if(maSeries20) maSeries20.setData(sma20);
-                    if(maSeries50) maSeries50.setData(sma50);
-                } else {
-                    if(maSeries20) maSeries20.setData([]);
-                    if(maSeries50) maSeries50.setData([]);
-                }
-
+                // Always fit content on load
                 if (cleanData.length > 0) {
-                     // Fit content only if it's the first load or drastic change
-                     // Usually chartInstance keeps position, but 'fitContent' resets zoom
-                     // We fit content to the last portion to keep it readable
-                     // chartInstance.timeScale().fitContent(); 
-                     
-                     // Instead of fitting all 2 weeks, let's zoom to the last 10% or reasonable amount
-                     // But Lightweight Charts handles auto-scaling of right axis well for visible range.
-                     // A hard fitContent() will squish everything if we fetched 2 weeks of 1h candles.
-                     // Better to just set visible range?
-                     // chartInstance.timeScale().setVisibleRange({ from: now - (lookback / 5), to: now });
-                     
-                     // Simple fit for now, user can scroll back
                      chartInstance.timeScale().fitContent();
                 }
             } else if (candleSeries) {
                 candleSeries.setData([]);
             }
         } catch (e) { console.error("Chart Fetch Failed", e); }
+    }
+
+    // --- HOLDER CHART LOGIC ---
+    function openHolderHistory() {
+        document.getElementById('holder-modal').classList.add('open');
+        initHolderChart();
+    }
+    
+    function closeHolderHistory() {
+        document.getElementById('holder-modal').classList.remove('open');
+    }
+
+    function initHolderChart() {
+        const container = document.getElementById('holder-chart-container');
+        if(!container || holderChart) return;
+        
+        const rect = container.getBoundingClientRect();
+        holderChart = LightweightCharts.createChart(container, {
+            width: rect.width,
+            height: rect.height,
+            layout: { background: { type: 'solid', color: '#1a0a05' }, textColor: '#9a3412' },
+            grid: { vertLines: { color: '#2a1005' }, horzLines: { color: '#2a1005' } },
+            rightPriceScale: { borderVisible: false },
+            timeScale: { borderVisible: false, timeVisible: true }
+        });
+        
+        holderAreaSeries = holderChart.addAreaSeries({ 
+            lineColor: '#3b82f6', 
+            topColor: 'rgba(59, 130, 246, 0.4)', 
+            bottomColor: 'rgba(59, 130, 246, 0.0)',
+            lineWidth: 2
+        });
+        
+        if (currentHolderHistory.length > 0) {
+            const data = currentHolderHistory.map(h => ({
+                time: h.timestamp / 1000,
+                value: h.count
+            }));
+            // Sort by time
+            data.sort((a,b) => a.time - b.time);
+            
+            // De-duplicate time
+            const uniqueData = [];
+            let lastTime = 0;
+            for(const p of data) {
+                 if (p.time > lastTime) {
+                     uniqueData.push(p);
+                     lastTime = p.time;
+                 }
+            }
+            holderAreaSeries.setData(uniqueData);
+            holderChart.timeScale().fitContent();
+        }
     }
 
     // ... (Standard Helpers) ...
@@ -782,32 +820,22 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         const connDiv = document.getElementById('wallet-connected'); 
         const submitBtn = document.getElementById('submit-btn'); 
         const displayAddr = document.getElementById('display-address');
-        
-        // Footer Elements
         const footerBtn = document.getElementById('footer-connect-btn');
         const footerDisp = document.getElementById('footer-wallet-display');
         
         if (connected) { 
             const shortAddr = walletAddress.slice(0,4) + '...' + walletAddress.slice(-4); 
-            
-            // Update View
             if (discDiv) discDiv.classList.add('hidden'); 
             if (connDiv) connDiv.classList.remove('hidden'); 
             if (displayAddr) displayAddr.innerText = shortAddr; 
             if (submitBtn) submitBtn.disabled = false;
-            
-            // Update Footer
             if (footerBtn) footerBtn.classList.add('hidden');
             if (footerDisp) footerDisp.classList.remove('hidden');
             if (footerDisp) footerDisp.classList.add('flex');
-            
         } else { 
-            // Update View
             if (discDiv) discDiv.classList.remove('hidden'); 
             if (connDiv) connDiv.classList.add('hidden'); 
             if (submitBtn) submitBtn.disabled = true; 
-            
-            // Update Footer
             if (footerBtn) footerBtn.classList.remove('hidden');
             if (footerDisp) footerDisp.classList.add('hidden');
             if (footerDisp) footerDisp.classList.remove('flex');
@@ -817,7 +845,6 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     
     async function refreshBalances() { if (!walletAddress) return; const icon = document.getElementById('refresh-icon'); if (icon) icon.classList.add('animate-spin'); try { const tokenMint = feeConfig.tokenMint; const res = await fetch(`${API_URL}/api/proxy/balance/${walletAddress}?tokenMint=${tokenMint}`); const data = await res.json(); const solEl = document.getElementById('balance-sol'); const tokEl = document.getElementById('balance-token'); if (data.success) { if(solEl) solEl.innerText = (data.sol || 0).toFixed(4); if(tokEl) tokEl.innerText = (data.tokens || 0).toLocaleString(); } else { if(solEl) solEl.innerText = "Err"; if(tokEl) tokEl.innerText = "Err"; } } catch (e) { console.error("Balance Refresh Failed", e); } finally { if (icon) setTimeout(() => icon.classList.remove('animate-spin'), 500); } }
 
-    // ... (Submit Update function remains same) ...
     async function submitUpdate(e) { 
         e.preventDefault(); 
         if (!walletAddress || !walletProvider) { alert("Please connect wallet first"); return; } 
@@ -880,24 +907,16 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             statusDiv.innerText = "Please Sign in Wallet..."; 
             
             const signedTx = await walletProvider.signTransaction(transaction); 
-            
             const serialized = signedTx.serialize();
             const base64Tx = window.Buffer.from(serialized).toString('base64');
             
             statusDiv.innerText = "Broadcasting (Premium RPC)...";
-            
-            const sendRes = await fetch(`${API_URL}/api/proxy/send-tx`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ signedTx: base64Tx })
-            });
+            const sendRes = await fetch(`${API_URL}/api/proxy/send-tx`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signedTx: base64Tx }) });
             const sendData = await sendRes.json();
-            
             if(!sendData.success) throw new Error(sendData.error || "Transaction Failed");
             const signature = sendData.signature;
 
             statusDiv.innerText = "Verifying Payment..."; 
-            
             const payload = { mint, twitter, website, telegram, banner, description, signature, userPublicKey: walletAddress }; 
             const res = await fetch(`${API_URL}/api/request-update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); 
             const dataRes = await res.json(); 
@@ -928,7 +947,35 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     const timeAgo = (ts) => { if (!ts) return ''; const seconds = Math.floor((Date.now() - ts) / 1000); return seconds < 60 ? `${seconds}s ago` : (seconds < 3600 ? `${Math.floor(seconds/60)}m ago` : `${Math.floor(seconds/3600)}h ago`); };
     function renderTokenMedia(url, className, fallbackText = '?') { const fallback = `https://placehold.co/80x80/2a1005/7c2d12?text=${fallbackText}`; const safeUrl = url || fallback; const isVideo = safeUrl.match(/\.(mp4|webm|mov)$/i); if (isVideo) { return `<video src="${safeUrl}" class="${className}" autoplay loop muted playsinline poster="${fallback}"></video>`; } return `<img src="${safeUrl}" class="${className}" loading="lazy" onerror="this.onerror=null;this.src='${fallback}'">`; }
     function navigateTo(path) { window.location.hash = path; }
-    function handleRoute() { const hash = window.location.hash; document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active')); document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active')); const tableControls = document.getElementById('table-controls'); const detailControls = document.getElementById('detail-controls'); if (tableControls) tableControls.classList.add('hidden'); if (detailControls) detailControls.classList.add('hidden'); if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; } if (hash === '' || hash === '#') { document.getElementById('view-dashboard').classList.add('active'); document.querySelector('button[onclick="navigateTo(\'\')"]').classList.add('active'); if(tableControls) tableControls.classList.remove('hidden'); fetchList(); pollingInterval = setInterval(fetchList, 5000); } else if (hash === '#about') { document.getElementById('view-about').classList.add('active'); document.querySelector('button[onclick="navigateTo(\'about\')"]').classList.add('active'); } else if (hash === '#update') { document.getElementById('view-update').classList.add('active'); document.querySelector('button[onclick="navigateTo(\'update\')"]').classList.add('active'); updateWalletUI(walletAddress !== null); } else if (hash.startsWith('#token/')) { showDetailView(hash.split('/')[1]); } }
+    function handleRoute() { 
+        const hash = window.location.hash; 
+        document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active')); 
+        document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active')); 
+        const tableControls = document.getElementById('table-controls'); 
+        const detailControls = document.getElementById('detail-controls'); 
+        if (tableControls) tableControls.classList.add('hidden'); 
+        if (detailControls) detailControls.classList.add('hidden'); 
+        
+        if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; } 
+        if (detailPollingInterval) { clearInterval(detailPollingInterval); detailPollingInterval = null; }
+
+        if (hash === '' || hash === '#') { 
+            document.getElementById('view-dashboard').classList.add('active'); 
+            document.querySelector('button[onclick="navigateTo(\'\')"]').classList.add('active'); 
+            if(tableControls) tableControls.classList.remove('hidden'); 
+            fetchList(); 
+            pollingInterval = setInterval(fetchList, 5000); 
+        } else if (hash === '#about') { 
+            document.getElementById('view-about').classList.add('active'); 
+            document.querySelector('button[onclick="navigateTo(\'about\')"]').classList.add('active'); 
+        } else if (hash === '#update') { 
+            document.getElementById('view-update').classList.add('active'); 
+            document.querySelector('button[onclick="navigateTo(\'update\')"]').classList.add('active'); 
+            updateWalletUI(walletAddress !== null); 
+        } else if (hash.startsWith('#token/')) { 
+            showDetailView(hash.split('/')[1]); 
+        } 
+    }
 
     async function fetchTokenForUpdate(mint) { if (!mint || mint.length < 30) return; const spinner = document.getElementById('mint-check-spinner'); const infoBox = document.getElementById('token-preview-info'); if(spinner) spinner.classList.remove('hidden'); if(infoBox) infoBox.classList.add('hidden'); try { const res = await fetch(`${API_URL}/api/tokens?search=${mint}&limit=1`); const data = await res.json(); if (data.success && data.tokens.length > 0) { const token = data.tokens[0]; if (token.mint === mint) { currentUpdateTokenData = token; const img = document.getElementById('update-token-img'); const name = document.getElementById('update-token-name'); const tick = document.getElementById('update-token-ticker'); if(img) img.src = token.image || 'https://placehold.co/50'; if(name) name.innerText = token.name; if(tick) tick.innerText = token.ticker; if(infoBox) infoBox.classList.remove('hidden'); } } } catch (e) { console.error("Fetch failed", e); } finally { if(spinner) spinner.classList.add('hidden'); } }
     function openPreview() { if (!currentUpdateTokenData) { alert("Please enter a valid Mint Address first."); return; } const banner = document.getElementById('update-banner').value; const twitter = document.getElementById('update-twitter').value; const website = document.getElementById('update-website').value; const telegram = document.getElementById('update-telegram').value; const t = { ...currentUpdateTokenData, banner, twitter, website, telegram, hasCommunityUpdate: true }; const container = document.getElementById('preview-container'); let html = ''; if (t.banner) { html += `<div class="w-full h-48 md:h-64 rounded-xl border-2 border-[#7c2d12] shadow-lg relative overflow-hidden bg-black mb-6"><img src="${t.banner}" class="w-full h-full object-cover object-center" onerror="this.src='${FALLBACK_BANNER}'"><div class="absolute inset-0 bg-gradient-to-t from-[#2a1005] to-transparent opacity-80 pointer-events-none"></div></div>`; } let linksHtml = ''; if (t.twitter) linksHtml += `<a href="#" class="social-btn"><i data-lucide="twitter" width="20"></i></a>`; if (t.website) linksHtml += `<a href="#" class="social-btn"><i data-lucide="globe" width="20"></i></a>`; if (t.telegram) linksHtml += `<a href="#" class="social-btn"><i data-lucide="send" width="20"></i></a>`; const mediaHtml = renderTokenMedia(t.image, "w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black"); html += `<div class="flex flex-col md:flex-row gap-6 mb-8 items-start"><div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl">${mediaHtml}<div class="flex-1 min-w-0"><div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mb-1"><h2 class="text-3xl font-bold text-white tracking-tight font-mono">${t.ticker}</h2><span class="text-[#fb923c] text-sm bg-[#2a1005] px-3 py-1 rounded-lg border border-[#7c2d12]">${t.name}</span></div><div class="text-xs text-[#9a3412] font-mono">${t.mint}</div></div></div><div class="flex-1"></div><div class="flex flex-wrap gap-3">${linksHtml}</div></div><div class="text-center text-[#9a3412] font-mono text-xs mt-10">-- End of Preview --</div>`; if(container) container.innerHTML = html; lucide.createIcons(); document.getElementById('preview-modal').classList.add('open'); }
@@ -936,15 +983,19 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     function toggleInfoModal() { const modal = document.getElementById('info-modal'); isInfoModalOpen = !isInfoModalOpen; if (isInfoModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
     function toggleVerifiedFilter() { isVerifiedFilter = !isVerifiedFilter; const btn = document.getElementById('filter-verified'); if(btn) { if (isVerifiedFilter) btn.classList.add('active'); else btn.classList.remove('active'); } currentPage = 1; fetchList(); }
     function toggleZeroVolFilter() { isZeroVolHidden = !isZeroVolHidden; const btn = document.getElementById('filter-zerovol'); if(btn) { if (isZeroVolHidden) btn.classList.add('active'); else btn.classList.remove('active'); } currentPage = 1; fetchList(); }
-    
-    // UPDATED FETCH LIST WITH FOOTER UPDATE
+    window.handleSearch = (e) => { searchQuery = e.target.value; const clearBtn = document.getElementById('clear-search-btn'); if (searchQuery.length > 0) { clearBtn.style.display = 'block'; } else { clearBtn.style.display = 'none'; } currentPage = 1; clearTimeout(window.searchTimeout); window.searchTimeout = setTimeout(fetchList, 1000); };
+    window.clearSearch = () => { const input = document.getElementById('search'); input.value = ''; searchQuery = ''; document.getElementById('clear-search-btn').style.display = 'none'; currentPage = 1; fetchList(); };
+    window.copyMint = () => { const el = document.getElementById('detail-mint'); if(el) navigator.clipboard.writeText(el.innerText); };
+    window.handleManualRefresh = () => { fetchList(); };
+    window.toggleApiModal = () => { const modal = document.getElementById('api-docs-modal'); isApiModalOpen = !isApiModalOpen; if (isApiModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
+    window.toggleLpModal = () => { const modal = document.getElementById('lp-modal'); isLpModalOpen = !isLpModalOpen; if (isLpModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
+
+    // FETCH LIST
     async function fetchList() { 
         try { 
             const pDisplay = document.getElementById('page-display'); 
             const prev = document.getElementById('btn-prev'); 
             const next = document.getElementById('btn-next'); 
-            
-            // Footer Elements
             const dot = document.getElementById('footer-status-dot');
             const txt = document.getElementById('footer-status-text');
             const time = document.getElementById('footer-last-update');
@@ -961,8 +1012,6 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             if (data.success) { 
                 renderTable(data.tokens); 
                 if(next) next.disabled = data.tokens.length < 100; 
-
-                // Update Footer Status
                 if(dot) { dot.classList.remove('offline'); dot.classList.add('online'); }
                 if(txt) txt.innerText = "System Online";
                 if(time) time.innerText = new Date().toLocaleTimeString();
@@ -981,21 +1030,13 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
 
     function changePage(delta) { currentPage += delta; if (currentPage < 1) currentPage = 1; if (pollingInterval) clearInterval(pollingInterval); const tbody = document.getElementById('table-body'); if(tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-orange-700 font-mono animate-pulse">Loading Page ${currentPage}...</td></tr>`; fetchList().then(() => { if (currentPage === 1) { pollingInterval = setInterval(fetchList, 5000); } }); }
     
-    // UPDATED RENDER TABLE WITH CLIENT SIDE VERIFIED FILTER
     function renderTable(tokens) { 
         const tbody = document.getElementById('table-body'); 
         if(!tbody) return; 
         
         let displayTokens = tokens; 
-        
-        // Client-side filtering as fallback/enforcer
-        if (isVerifiedFilter) {
-            displayTokens = displayTokens.filter(t => t.hasCommunityUpdate || t.hascommunityupdate);
-        }
-
-        if (isZeroVolHidden) { 
-            displayTokens = displayTokens.filter(t => (t.volume24h || 0) > 0); 
-        } 
+        if (isVerifiedFilter) { displayTokens = displayTokens.filter(t => t.hasCommunityUpdate || t.hascommunityupdate); }
+        if (isZeroVolHidden) { displayTokens = displayTokens.filter(t => (t.volume24h || 0) > 0); } 
         
         if (displayTokens.length === 0) { 
             tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-[#9a3412] font-mono">${searchQuery ? `Searching global network for "${searchQuery}"...` : 'No tokens found.'}</td></tr>`; 
@@ -1025,16 +1066,9 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         lucide.createIcons(); 
     }
 
-    window.handleSearch = (e) => { searchQuery = e.target.value; const clearBtn = document.getElementById('clear-search-btn'); if (searchQuery.length > 0) { clearBtn.style.display = 'block'; } else { clearBtn.style.display = 'none'; } currentPage = 1; clearTimeout(window.searchTimeout); window.searchTimeout = setTimeout(fetchList, 1000); };
-    window.clearSearch = () => { const input = document.getElementById('search'); input.value = ''; searchQuery = ''; document.getElementById('clear-search-btn').style.display = 'none'; currentPage = 1; fetchList(); };
-    window.copyMint = () => { const el = document.getElementById('detail-mint'); if(el) navigator.clipboard.writeText(el.innerText); };
-    window.handleManualRefresh = () => { fetchList(); };
-    window.toggleApiModal = () => { const modal = document.getElementById('api-docs-modal'); isApiModalOpen = !isApiModalOpen; if (isApiModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
-    window.toggleLpModal = () => { const modal = document.getElementById('lp-modal'); isLpModalOpen = !isLpModalOpen; if (isLpModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
-
     // SHOW DETAIL VIEW
     async function showDetailView(mint) {
-        clearInterval(pollingInterval); pollingInterval = null;
+        if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
         document.getElementById('view-dashboard').classList.remove('active');
         document.getElementById('view-about').classList.remove('active');
         document.getElementById('view-update').classList.remove('active');
@@ -1050,128 +1084,112 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
 
         cleanupChart();
 
-        try {
-            const res = await fetch(`${API_URL}/api/token/${mint}`);
-            const data = await res.json();
-            if (data.success) {
-                const t = data.token;
-                document.getElementById('detail-ticker').innerText = t.ticker;
-                document.getElementById('detail-name').innerText = t.name;
-                document.getElementById('detail-mint').innerText = t.mint;
-                
-                // Set normalized supply for Mcap Chart Mode
-                const rawSupply = parseFloat(t.supply || '0');
-                const decimals = t.decimals || 9;
-                currentNormalizedSupply = rawSupply / Math.pow(10, decimals);
-                if (currentNormalizedSupply === 0) currentNormalizedSupply = 1000000000; // Fallback
-
-                const mediaContainer = document.getElementById('detail-media-container');
-                if (mediaContainer) mediaContainer.innerHTML = renderTokenMedia(t.image, "w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black shadow-lg");
-
-                const isVerified = t.hasCommunityUpdate || t.hascommunityupdate;
-                const descEl = document.getElementById('detail-desc');
-                
-                // --- DESCRIPTION DISPLAY ---
-                if (t.description && descEl) { 
-                    descEl.innerHTML = sanitizeInput(t.description); 
-                    descEl.classList.remove('hidden'); 
-                } else if (descEl) { 
-                    descEl.classList.add('hidden'); 
-                }
-                
-                // --- BANNER DISPLAY ---
-                if (t.banner && bannerContainer) {
-                    bannerContainer.innerHTML = `<div class="w-full h-48 md:h-64 rounded-xl border-2 border-[#7c2d12] shadow-lg relative overflow-hidden bg-black"><img src="${t.banner}" class="w-full h-full object-cover object-center" onerror="this.src='${FALLBACK_BANNER}'"><div class="absolute inset-0 bg-gradient-to-t from-[#2a1005] to-transparent opacity-80 pointer-events-none"></div></div>`;
-                    bannerContainer.classList.remove('hidden');
-                }
-
-                // --- SOCIAL LINKS & ACTIONS ---
-                const actionsDiv = document.getElementById('detail-actions'); 
-                if(actionsDiv) {
-                    let linksHtml = `<a href="https://jup.ag/swap?sell=So11111111111111111111111111111111111111112&buy=${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow bg-[#191e29] border-[#c7f284] text-[#c7f284] hover:bg-[#c7f284] hover:text-[#000]">Jupiter Swap</a>`;
-                    linksHtml += `<a href="https://solscan.io/token/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><i data-lucide="search" width="16"></i> Solscan</a>`;
+        const updateDetailUI = async (isInitialLoad = false) => {
+            try {
+                const res = await fetch(`${API_URL}/api/token/${mint}`);
+                const data = await res.json();
+                if (data.success) {
+                    const t = data.token;
                     
-                    if (isVerified) {
-                         linksHtml += `<div class="flex items-center px-4 py-2 bg-green-900/30 border border-green-500 text-green-500 rounded-xl font-bold uppercase text-xs tracking-wider h-14"><i data-lucide="shield-check" width="18" class="mr-2"></i> VERIFIED</div>`;
+                    if (isInitialLoad) {
+                        document.getElementById('detail-ticker').innerText = t.ticker;
+                        document.getElementById('detail-name').innerText = t.name;
+                        document.getElementById('detail-mint').innerText = t.mint;
+                        
+                        const rawSupply = parseFloat(t.supply || '0');
+                        const decimals = t.decimals || 9;
+                        currentNormalizedSupply = rawSupply / Math.pow(10, decimals);
+                        if (currentNormalizedSupply === 0) currentNormalizedSupply = 1000000000;
+
+                        const mediaContainer = document.getElementById('detail-media-container');
+                        if (mediaContainer) mediaContainer.innerHTML = renderTokenMedia(t.image, "w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black shadow-lg");
+
+                        const isVerified = t.hasCommunityUpdate || t.hascommunityupdate;
+                        const descEl = document.getElementById('detail-desc');
+                        
+                        if (t.description && descEl) { descEl.innerHTML = sanitizeInput(t.description); descEl.classList.remove('hidden'); } else if (descEl) { descEl.classList.add('hidden'); }
+                        
+                        if (t.banner && bannerContainer) {
+                            bannerContainer.innerHTML = `<div class="w-full h-48 md:h-64 rounded-xl border-2 border-[#7c2d12] shadow-lg relative overflow-hidden bg-black"><img src="${t.banner}" class="w-full h-full object-cover object-center" onerror="this.src='${FALLBACK_BANNER}'"><div class="absolute inset-0 bg-gradient-to-t from-[#2a1005] to-transparent opacity-80 pointer-events-none"></div></div>`;
+                            bannerContainer.classList.remove('hidden');
+                        }
+
+                        const actionsDiv = document.getElementById('detail-actions'); 
+                        if(actionsDiv) {
+                            let linksHtml = `<a href="https://jup.ag/swap?sell=So11111111111111111111111111111111111111112&buy=${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow bg-[#191e29] border-[#c7f284] text-[#c7f284] hover:bg-[#c7f284] hover:text-[#000]">Jupiter Swap</a>`;
+                            linksHtml += `<a href="https://solscan.io/token/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><i data-lucide="search" width="16"></i> Solscan</a>`;
+                            if (isVerified) { linksHtml += `<div class="flex items-center px-4 py-2 bg-green-900/30 border border-green-500 text-green-500 rounded-xl font-bold uppercase text-xs tracking-wider h-14"><i data-lucide="shield-check" width="18" class="mr-2"></i> VERIFIED</div>`; }
+                            if (t.twitter) linksHtml += `<a href="${t.twitter}" target="_blank" class="social-btn-lg"><i data-lucide="twitter" width="24"></i></a>`;
+                            if (t.website) linksHtml += `<a href="${t.website}" target="_blank" class="social-btn-lg"><i data-lucide="globe" width="24"></i></a>`;
+                            if (t.telegram) linksHtml += `<a href="${t.telegram}" target="_blank" class="social-btn-lg"><i data-lucide="send" width="24"></i></a>`;
+                            actionsDiv.innerHTML = linksHtml; lucide.createIcons();
+                        }
                     }
+
+                    const mcap = Number(t.marketCap || t.marketcap || 0);
+                    const price = Number(t.priceUsd || t.priceusd || 0);
+                    const vol = Number(t.volume24h || 0);
+
+                    document.getElementById('stat-price').innerText = formatMoney(price);
+                    document.getElementById('stat-mcap').innerText = formatCompact(mcap);
+                    document.getElementById('stat-vol').innerText = formatCompact(vol);
+                    document.getElementById('stat-chg1h').innerHTML = formatPct(t.change1h);
+                    document.getElementById('stat-chg24h').innerHTML = formatPct(t.change24h);
                     
-                    if (t.twitter) linksHtml += `<a href="${t.twitter}" target="_blank" class="social-btn-lg"><i data-lucide="twitter" width="24"></i></a>`;
-                    if (t.website) linksHtml += `<a href="${t.website}" target="_blank" class="social-btn-lg"><i data-lucide="globe" width="24"></i></a>`;
-                    if (t.telegram) linksHtml += `<a href="${t.telegram}" target="_blank" class="social-btn-lg"><i data-lucide="send" width="24"></i></a>`;
+                    // NEW: HOLDERS
+                    const holders = t.holders || 0;
+                    document.getElementById('stat-holders').innerText = holders.toLocaleString();
+                    if(t.holderHistory) currentHolderHistory = t.holderHistory;
 
-                    actionsDiv.innerHTML = linksHtml; lucide.createIcons();
-                }
-
-                const mcap = Number(t.marketCap || t.marketcap || 0);
-                const price = Number(t.priceUsd || t.priceusd || 0);
-                const vol = Number(t.volume24h || 0);
-                const score = t.kScore || t.k_score || 0;
-
-                document.getElementById('stat-price').innerText = formatMoney(price);
-                document.getElementById('stat-mcap').innerText = formatCompact(mcap);
-                document.getElementById('stat-vol').innerText = formatCompact(vol);
-                
-                // Use the backend-calculated changes (from largest pool logic)
-                document.getElementById('stat-chg1h').innerHTML = formatPct(t.change1h);
-                document.getElementById('stat-chg24h').innerHTML = formatPct(t.change24h);
-                
-                const kEl = document.getElementById('stat-kscore');
-                if(kEl) {
+                    // UPDATED: K-Score Logic
+                    const score = t.kScore || t.k_score || 0;
+                    const kEl = document.getElementById('stat-kscore');
+                    const isVerified = t.hasCommunityUpdate || t.hascommunityupdate;
+                    
                     if (isVerified) {
                         if (score > 0) { kEl.innerText = score; kEl.classList.remove('text-gray-500'); kEl.classList.add('text-[#fb923c]'); kEl.title = "Conviction Score"; } 
-                        else { kEl.innerText = '🕒'; kEl.classList.remove('text-gray-500', 'text-[#fb923c]'); kEl.classList.add('text-[#fb923c]', 'animate-pulse'); kEl.title = "Calculating Score..."; }
-                    } else { kEl.innerText = '🔒'; kEl.classList.remove('text-[#fb923c]', 'animate-pulse'); kEl.classList.add('text-gray-500'); kEl.title = "Requires Community Update"; }
-                }
-
-                // POOL LOGIC & MODAL POPULATION
-                currentTokenPairs = t.pairs || [];
-                const lpBody = document.getElementById('lp-list-body');
-                if(lpBody) {
-                    lpBody.innerHTML = '';
-                    if (currentTokenPairs.length > 0) {
-                        // Find Largest Pool for Chart
-                        let largestPool = currentTokenPairs[0];
-                        currentTokenPairs.forEach(p => {
-                            if((p.liquidity_usd || 0) > (largestPool.liquidity_usd || 0)) largestPool = p;
-                        });
-
-                        // Set Chart Label
-                        const dexName = String(largestPool.dex || largestPool.dexId || "Unknown").toUpperCase();
-                        const label = document.getElementById('chart-pool-name');
-                        if(label) label.innerText = `— ${dexName} (Largest Pool)`;
-                        
-                        // Populate Modal
-                        currentTokenPairs.forEach(pair => {
-                            const pDex = String(pair.dex || pair.dexId || "Unknown").toUpperCase();
-                            const pPrice = formatMoney(pair.price_usd || pair.priceUsd || 0);
-                            const pLiq = formatCompact(pair.liquidity_usd || pair.liquidity || 0);
-                            const pVol = formatCompact(pair.volume_24h || pair.volume?.h24 || 0);
-                            const isMain = pair.address === largestPool.address;
-                            
-                            const row = document.createElement('tr');
-                            row.className = "hover:bg-[#451a03] transition border-b border-[#7c2d12] last:border-0";
-                            row.innerHTML = `
-                                <td class="px-4 py-3 font-mono font-bold text-[#fb923c]">${pDex} ${isMain ? '<span class="text-[10px] bg-[#ea580c] text-white px-1 rounded ml-1">MAIN</span>' : ''}</td>
-                                <td class="px-4 py-3 text-right font-mono">${pPrice}</td>
-                                <td class="px-4 py-3 text-right font-mono text-[#22c55e]">${pLiq}</td>
-                                <td class="px-4 py-3 text-right font-mono">${pVol}</td>
-                                <td class="px-4 py-3 text-right"><a href="https://solscan.io/account/${pair.address || pair.pairAddress}" target="_blank" class="text-[#9a3412] hover:text-[#fb923c]"><i data-lucide="external-link" width="14"></i></a></td>
-                            `;
-                            lpBody.appendChild(row);
-                        });
-                        lucide.createIcons();
-                        
-                        // Wait slightly for UI to settle then fetch candles
-                        setTimeout(async () => { await fetchCandles(mint); }, 100);
-                    } else {
-                        lpBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-[#9a3412]">No pools found.</td></tr>`;
+                        else { kEl.innerText = '0'; kEl.classList.remove('text-gray-500'); kEl.classList.add('text-[#fb923c]'); kEl.title = "Score Pending"; }
+                    } else { 
+                        kEl.innerText = '🔒'; kEl.classList.remove('text-[#fb923c]'); kEl.classList.add('text-gray-500'); kEl.title = "Requires Community Update"; 
                     }
+
+                    // UPDATE POOL LIST
+                    currentTokenPairs = t.pairs || [];
+                    const lpBody = document.getElementById('lp-list-body');
+                    if(lpBody) {
+                        lpBody.innerHTML = '';
+                        if (currentTokenPairs.length > 0) {
+                            let largestPool = currentTokenPairs[0];
+                            currentTokenPairs.forEach(p => { if((p.liquidity_usd || 0) > (largestPool.liquidity_usd || 0)) largestPool = p; });
+
+                            if (isInitialLoad) {
+                                const dexName = String(largestPool.dex || largestPool.dexId || "Unknown").toUpperCase();
+                                const label = document.getElementById('chart-pool-name');
+                                if(label) label.innerText = `— ${dexName} (Largest Pool)`;
+                            }
+
+                            currentTokenPairs.forEach(pair => {
+                                const pDex = String(pair.dex || pair.dexId || "Unknown").toUpperCase();
+                                const pPrice = formatMoney(pair.price_usd || pair.priceUsd || 0);
+                                const pLiq = formatCompact(pair.liquidity_usd || pair.liquidity || 0);
+                                const pVol = formatCompact(pair.volume_24h || pair.volume?.h24 || 0);
+                                const isMain = pair.address === largestPool.address;
+                                const row = document.createElement('tr');
+                                row.className = "hover:bg-[#451a03] transition border-b border-[#7c2d12] last:border-0";
+                                row.innerHTML = `<td class="px-4 py-3 font-mono font-bold text-[#fb923c]">${pDex} ${isMain ? '<span class="text-[10px] bg-[#ea580c] text-white px-1 rounded ml-1">MAIN</span>' : ''}</td><td class="px-4 py-3 text-right font-mono">${pPrice}</td><td class="px-4 py-3 text-right font-mono text-[#22c55e]">${pLiq}</td><td class="px-4 py-3 text-right font-mono">${pVol}</td><td class="px-4 py-3 text-right"><a href="https://solscan.io/account/${pair.address || pair.pairAddress}" target="_blank" class="text-[#9a3412] hover:text-[#fb923c]"><i data-lucide="external-link" width="14"></i></a></td>`;
+                                lpBody.appendChild(row);
+                            });
+                            lucide.createIcons();
+                            if (isInitialLoad) setTimeout(async () => { await fetchCandles(mint); }, 100);
+                        } else { lpBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-[#9a3412]">No pools found.</td></tr>`; }
+                    }
+
+                    if (isInitialLoad) { if(loadingDiv) loadingDiv.style.display = 'none'; if(contentDiv) contentDiv.style.display = 'block'; }
                 }
-                
-                if(loadingDiv) loadingDiv.style.display = 'none'; 
-                if(contentDiv) contentDiv.style.display = 'block';
-            }
-        } catch (e) { console.error(e); if(loadingDiv) loadingDiv.innerText = "Error Loading Token Data"; }
+            } catch (e) { console.error(e); if(isInitialLoad && loadingDiv) loadingDiv.innerText = "Error Loading Token Data"; }
+        };
+        await updateDetailUI(true);
+        detailPollingInterval = setInterval(() => updateDetailUI(false), 5000);
     }
 </script>
 </body>

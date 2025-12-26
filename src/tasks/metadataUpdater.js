@@ -19,6 +19,16 @@ async function fetchGeckoTerminalData(mintAddress) {
     }
 }
 
+// NEW: Fetch detailed token info (often has holder count)
+async function fetchTokenDetails(mintAddress) {
+    try {
+        const url = `https://api.geckoterminal.com/api/v2/networks/solana/tokens/${mintAddress}`;
+        const response = await axios.get(url, { timeout: 5000 });
+        if (!response.data || !response.data.data) return null;
+        return response.data.data;
+    } catch (e) { return null; }
+}
+
 async function updateMetadata(deps) {
     if (isRunning) return;
     isRunning = true;
@@ -39,7 +49,20 @@ async function updateMetadata(deps) {
         
         for (const t of tokens) {
             try {
+                // 1. Fetch Pools Data
                 const poolsData = await fetchGeckoTerminalData(t.mint);
+
+                // 2. Fetch Token Details (for Holders)
+                const tokenDetails = await fetchTokenDetails(t.mint);
+                let holderCount = 0;
+                if (tokenDetails && tokenDetails.attributes) {
+                    // Try to find holder count in attributes (not always available on public API, but good to have logic)
+                    // If unavailable, we default to 0. 
+                    // Note: GT Public API often hides this, but we implement the slot.
+                    if (tokenDetails.attributes.holder_count) {
+                        holderCount = parseInt(tokenDetails.attributes.holder_count);
+                    }
+                }
 
                 if (!poolsData || poolsData.length === 0) {
                     await db.run(`UPDATE tokens SET updated_at = CURRENT_TIMESTAMP WHERE mint = $1`, [t.mint]);
@@ -64,18 +87,14 @@ async function updateMetadata(deps) {
                     const liqUsd = parseFloat(attr.reserve_in_usd || 0);
                     const vol24h = parseFloat(attr.volume_usd?.h24 || 0);
                     
-                    // --- FIX: Extract Token Mints for Schema Compliance ---
-                    // The DB requires token_a and token_b to be NOT NULL.
                     let tokenA = rel?.base_token?.data?.id || null;
                     let tokenB = rel?.quote_token?.data?.id || null;
 
-                    // Clean "solana_" prefix (Gecko returns "solana_ADDRESS")
                     if (tokenA && tokenA.includes('solana_')) tokenA = tokenA.replace('solana_', '');
                     if (tokenB && tokenB.includes('solana_')) tokenB = tokenB.replace('solana_', '');
 
-                    // Safe Fallbacks if data is missing
                     if (!tokenA) tokenA = t.mint;
-                    if (!tokenB) tokenB = 'So11111111111111111111111111111111111111112'; // Default to SOL if unknown
+                    if (!tokenB) tokenB = 'So11111111111111111111111111111111111111112'; 
 
                     totalVolume24h += vol24h;
                     totalLiquidity += liqUsd;
@@ -90,7 +109,6 @@ async function updateMetadata(deps) {
                         bestChange5m = parseChange(attr.price_change_percentage?.m5);
                     }
 
-                    // UPDATED QUERY: Now includes token_a and token_b
                     await db.run(`
                         INSERT INTO pools (
                             address, mint, dex, price_usd, liquidity_usd, volume_24h, created_at, token_a, token_b
@@ -128,6 +146,21 @@ async function updateMetadata(deps) {
                 if (bestChange1h !== null) { updateParts.push(`change1h = $${idx++}`); finalParams.push(bestChange1h); }
                 if (bestChange5m !== null) { updateParts.push(`change5m = $${idx++}`); finalParams.push(bestChange5m); }
                 
+                // UPDATE HOLDERS IF FOUND
+                if (holderCount > 0) {
+                    updateParts.push(`holders = $${idx++}`);
+                    finalParams.push(holderCount);
+
+                    // Track History (Once per day)
+                    // Check if we have an entry for today
+                    const today = Math.floor(now / (24 * 60 * 60 * 1000)) * (24 * 60 * 60 * 1000);
+                    await db.run(`
+                        INSERT INTO holders_history (mint, count, timestamp)
+                        VALUES ($1, $2, $3)
+                        ON CONFLICT(mint, timestamp) DO NOTHING
+                    `, [t.mint, holderCount, today]);
+                }
+
                 const finalQuery = `UPDATE tokens SET ${updateParts.join(', ')} WHERE mint = $${idx}`;
                 finalParams.push(t.mint);
 

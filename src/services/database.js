@@ -5,16 +5,12 @@ const { getClient } = require('./redis');
 
 let pool = null;
 let dbWrapper = null;
-let initPromise = null; // Lock for concurrent calls
+let initPromise = null;
 
 async function initDB() {
-    // If already initialized, return immediately
     if (dbWrapper) return dbWrapper;
-    
-    // If initialization is in progress, return the pending promise
     if (initPromise) return initPromise;
 
-    // Start initialization and assign to lock
     initPromise = (async () => {
         try {
             const isLocal = config.DATABASE_URL.includes('localhost') || config.DATABASE_URL.includes('127.0.0.1');
@@ -24,10 +20,9 @@ async function initDB() {
                 ssl: isLocal ? false : { rejectUnauthorized: false },
                 max: 20, 
                 idleTimeoutMillis: 30000,
-                connectionTimeoutMillis: 5000, // Increased timeout
+                connectionTimeoutMillis: 5000,
             });
 
-            // Handle unexpected errors on idle clients
             pool.on('error', (err, client) => {
                 logger.error(`Unexpected error on idle DB client: ${err.message}`);
             });
@@ -37,7 +32,7 @@ async function initDB() {
             client.release();
             logger.info(`📦 Database: Connection Successful.`);
 
-            // Schema Creation (Idempotent)
+            // Schema Creation
             await pool.query(`
                 CREATE TABLE IF NOT EXISTS tokens (
                     mint TEXT PRIMARY KEY,
@@ -53,10 +48,18 @@ async function initDB() {
                     change24h DOUBLE PRECISION,
                     change1h DOUBLE PRECISION,
                     change5m DOUBLE PRECISION,
+                    holders INTEGER DEFAULT 0,  -- NEW: Holder Count
                     k_score DOUBLE PRECISION DEFAULT 0,
                     hasCommunityUpdate BOOLEAN DEFAULT FALSE,
                     metadata TEXT,
                     timestamp BIGINT
+                );
+
+                CREATE TABLE IF NOT EXISTS holders_history (
+                    mint TEXT,
+                    count INTEGER,
+                    timestamp BIGINT,
+                    PRIMARY KEY (mint, timestamp)
                 );
 
                 CREATE TABLE IF NOT EXISTS pools (
@@ -116,6 +119,7 @@ async function initDB() {
                 CREATE INDEX IF NOT EXISTS idx_tokens_timestamp ON tokens(timestamp DESC);
                 CREATE INDEX IF NOT EXISTS idx_pools_mint ON pools(mint);
                 CREATE INDEX IF NOT EXISTS idx_candles_pool_time ON candles_1m(pool_address, timestamp);
+                CREATE INDEX IF NOT EXISTS idx_holders_hist_mint ON holders_history(mint);
             `);
 
             dbWrapper = {
@@ -129,7 +133,7 @@ async function initDB() {
 
         } catch (error) {
             logger.error(`❌ Database Init Failed: ${error.message}`);
-            initPromise = null; // Reset lock on failure so we can retry
+            initPromise = null;
             throw error;
         }
     })();
@@ -201,11 +205,8 @@ async function enableIndexing(db, mint, poolData) {
             VALUES ($1, 10, 0)
             ON CONFLICT(pool_address) DO UPDATE SET priority = 10
         `, [poolData.pairAddress]);
-
-        logger.info(`✅ Indexed Pool: ${poolData.pairAddress} (${poolData.dexId})`);
     } catch (err) {
         logger.error(`Database Query Error [enableIndexing]: ${err.message}`);
-        throw err;
     }
 }
 
@@ -218,7 +219,6 @@ async function aggregateAndSaveToken(db, mint) {
         let totalVol = 0;
         let mainPool = pools[0]; 
         
-        // Find the most liquid pool to use as the price source
         for (const p of pools) {
             const liq = parseFloat(p.liquidity_usd || 0);
             const vol = parseFloat(p.volume_24h || 0);
@@ -231,7 +231,6 @@ async function aggregateAndSaveToken(db, mint) {
 
         const price = parseFloat(mainPool.price_usd || 0);
 
-        // --- INTELLIGENT CHANGE CALCULATION ---
         let change24h = null;
         let change1h = null;
         let change5m = null;
@@ -256,41 +255,21 @@ async function aggregateAndSaveToken(db, mint) {
                 getPriceAt(time5m)
             ]);
 
-            // Only calculate if we found a historical candle.
-            // Explicitly cast to prevent math errors.
             if (p24h !== null && p24h > 0) change24h = ((price - p24h) / p24h) * 100;
             if (p1h !== null && p1h > 0) change1h = ((price - p1h) / p1h) * 100;
             if (p5m !== null && p5m > 0) change5m = ((price - p5m) / p5m) * 100;
         }
 
-        // --- SAFE UPDATE ---
-        // If change24h is null (because we have no history), we DO NOT update that column.
-        // This prevents overwriting valid data fetched by the MetadataUpdater (GeckoTerminal) with '0'.
-        
         const updates = [];
         const params = [totalLiq, totalVol, price, mint];
         let query = `UPDATE tokens SET liquidity = $1, volume24h = $2, priceUsd = $3`;
-        
-        // Always calculate Mcap based on new price.
-        // COALESCE(decimals, 9) ensures we don't divide by null if decimals missing.
         query += `, marketCap = ($3 * CAST(supply AS DOUBLE PRECISION) / POWER(10, COALESCE(decimals, 9)))`;
 
         let pIdx = 5;
 
-        // CRITICAL UPDATE LOGIC FOR PERCENTAGES
-        // We now force an update even if value is 0, as long as it's not null.
-        if (change24h !== null) {
-            query += `, change24h = $${pIdx++}`;
-            params.push(change24h);
-        }
-        if (change1h !== null) {
-            query += `, change1h = $${pIdx++}`;
-            params.push(change1h);
-        }
-        if (change5m !== null) {
-            query += `, change5m = $${pIdx++}`;
-            params.push(change5m);
-        }
+        if (change24h !== null) { query += `, change24h = $${pIdx++}`; params.push(change24h); }
+        if (change1h !== null) { query += `, change1h = $${pIdx++}`; params.push(change1h); }
+        if (change5m !== null) { query += `, change5m = $${pIdx++}`; params.push(change5m); }
 
         query += ` WHERE mint = $4`;
 
@@ -301,10 +280,4 @@ async function aggregateAndSaveToken(db, mint) {
     }
 }
 
-module.exports = {
-    initDB,
-    getDB,
-    smartCache,
-    enableIndexing,
-    aggregateAndSaveToken
-};
+module.exports = { initDB, getDB, smartCache, enableIndexing, aggregateAndSaveToken };
