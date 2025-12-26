@@ -20,7 +20,6 @@ async function updateMetadata(deps) {
         for (const t of tokens) {
             try {
                 // 1. Fetch ALL pools for this mint
-                // We need all pools to sum volume correctly, but only the best pool for price.
                 const pools = await db.all(`
                     SELECT address, price_usd, liquidity_usd 
                     FROM pools 
@@ -30,70 +29,62 @@ async function updateMetadata(deps) {
                 if (!pools || pools.length === 0) continue;
 
                 // 2. Determine Best Pool for Price (Highest Liquidity)
-                // sort descending by liquidity
                 pools.sort((a, b) => (b.liquidity_usd || 0) - (a.liquidity_usd || 0));
                 const bestPool = pools[0];
-                
                 const currentPrice = bestPool.price_usd || 0;
-                let volume24h = 0;
-                let change24h = 0;
-                let change1h = 0;
-                let change5m = 0;
 
-                // 3. Aggregate Volume across ALL pools
-                // Fix: Previous version only checked bestPool, ignoring volume in other pairs
+                // 3. Aggregate Volume (Sum of volume from all pools in last 24h)
+                let volume24h = 0;
                 const poolAddresses = pools.map(p => p.address);
+                
                 if (poolAddresses.length > 0) {
-                    // Construct dynamic IN clause parameters ($2, $3, $4...)
                     const placeholders = poolAddresses.map((_, i) => `$${i + 2}`).join(',');
+                    // STRICTLY based on volume column in candles
                     const volQuery = `
-                        SELECT SUM(volume) as total_vol 
+                        SELECT COALESCE(SUM(volume), 0) as total_vol 
                         FROM candles_1m 
                         WHERE timestamp >= $1 
                         AND pool_address IN (${placeholders})
                     `;
                     
                     const volResult = await db.get(volQuery, [time24h, ...poolAddresses]);
-                    if (volResult && volResult.total_vol) {
-                        volume24h = parseFloat(volResult.total_vol);
-                    }
+                    volume24h = volResult ? parseFloat(volResult.total_vol) : 0;
                 }
 
-                // 4. Calculate Price Changes (Based on Best Pool History)
+                // 4. Calculate Price Changes (STRICTLY based on Price History)
+                let change24h = 0, change1h = 0, change5m = 0;
+                
                 if (currentPrice > 0) {
-                    // Helper to get historical price
+                    // Helper: Find price at specific time
                     const getPriceAt = async (targetTime) => {
-                        // Find closest candle BEFORE or AT target time
-                        let res = await db.get(`
-                            SELECT close 
-                            FROM candles_1m 
-                            WHERE pool_address = $1 
-                            AND timestamp <= $2 
-                            ORDER BY timestamp DESC 
-                            LIMIT 1
+                        // A. Try finding exact historical candle
+                        const res = await db.get(`
+                            SELECT close FROM candles_1m 
+                            WHERE pool_address = $1 AND timestamp <= $2 
+                            ORDER BY timestamp DESC LIMIT 1
                         `, [bestPool.address, targetTime]);
 
-                        // Fallback: If no history that far back (Cold Start), grab the Oldest candle
-                        // This ensures we display "Change since inception" instead of blank
+                        // B. Fallback: If we have NO history before targetTime, use the oldest known candle.
+                        // This allows "Change since inception" for new tokens.
                         if (!res) {
-                            res = await db.get(`
-                                SELECT open 
-                                FROM candles_1m 
+                            const oldest = await db.get(`
+                                SELECT open FROM candles_1m 
                                 WHERE pool_address = $1 
-                                ORDER BY timestamp ASC 
-                                LIMIT 1
+                                ORDER BY timestamp ASC LIMIT 1
                             `, [bestPool.address]);
+                            return oldest ? (oldest.open || oldest.close) : currentPrice; // Default to current if absolutely nothing found
                         }
-                        return res ? (res.close || res.open) : null;
+                        return res.close;
                     };
 
                     const price24h = await getPriceAt(time24h);
                     const price1h = await getPriceAt(time1h);
                     const price5m = await getPriceAt(time5m);
 
-                    if (price24h) change24h = ((currentPrice - price24h) / price24h) * 100;
-                    if (price1h) change1h = ((currentPrice - price1h) / price1h) * 100;
-                    if (price5m) change5m = ((currentPrice - price5m) / price5m) * 100;
+                    // Calculation: (New - Old) / Old
+                    if (price24h > 0) change24h = ((currentPrice - price24h) / price24h) * 100;
+                    if (price1h > 0) change1h = ((currentPrice - price1h) / price1h) * 100;
+                    if (price5m > 0) change5m = ((currentPrice - price5m) / price5m) * 100;
                 }
 
                 // 5. Calculate Market Cap
@@ -106,48 +97,38 @@ async function updateMetadata(deps) {
                 }
 
                 // 6. Save Updates
+                // We use COALESCE/OR logic to ensure we never save NULL/NaN
                 await db.run(`
                     UPDATE tokens 
-                    SET volume24h = $1, 
-                        marketCap = $2, 
-                        priceUsd = $3, 
-                        change1h = $4, 
-                        change24h = $5, 
-                        change5m = $6, 
+                    SET volume24h = $1, marketCap = $2, priceUsd = $3, 
+                        change1h = $4, change24h = $5, change5m = $6, 
                         timestamp = $7 
                     WHERE mint = $8
                 `, [
                     volume24h, 
                     marketCap, 
                     currentPrice, 
-                    change1h || 0, // Ensure we store 0 instead of NULL/NaN
+                    change1h || 0, 
                     change24h || 0, 
                     change5m || 0, 
                     now, 
                     t.mint
                 ]);
 
-                // Rate limiting protection
-                await new Promise(r => setTimeout(r, 20)); 
-
             } catch (err) {
-                logger.error(`Token meta update failed ${t.mint}: ${err.message}`);
+                logger.error(`Meta Update Failed (${t.mint}): ${err.message}`);
             }
         }
     } catch (e) {
-        logger.error(`Metadata Update Cycle Error: ${e.message}`);
+        logger.error(`Metadata Cycle Error: ${e.message}`);
     } finally {
         isRunning = false;
     }
 }
 
 function start(deps) {
-    setInterval(() => updateMetadata(deps), 60000); // Run every minute
-    setTimeout(() => updateMetadata(deps), 5000);   // Initial run
+    setInterval(() => updateMetadata(deps), 30000);
+    setTimeout(() => updateMetadata(deps), 2000);
 }
 
-async function updateTokenStats(mint) {
-   // Placeholder for manual trigger
-}
-
-module.exports = { start, updateTokenStats };
+module.exports = { start };
