@@ -1,14 +1,14 @@
 /**
  * Token Routes
  * Platform: PostgreSQL
- * Optimization: Global Rate Limiting + Caching for External Search
+ * Optimization: Global Rate Limiting + Redis Caching for External Search
  */
 const express = require('express');
 const axios = require('axios');
 const { Connection, PublicKey } = require('@solana/web3.js');
 const { isValidPubkey } = require('../utils/solana');
 const { smartCache, saveTokenData } = require('../services/database');
-const { getClient } = require('../services/redis'); // Direct Redis Access
+const { getClient } = require('../services/redis'); 
 const config = require('../config/env');
 const kScoreUpdater = require('../tasks/kScoreUpdater'); 
 const { syncTokenData } = require('../tasks/metadataUpdater'); 
@@ -113,64 +113,58 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "Submission failed: " + e.message }); }
     });
 
-    // --- CANDLESTICK CHART DATA (NEW) ---
+    // --- CANDLESTICK CHART DATA (NEW & OPTIMIZED) ---
     router.get('/token/:mint/candles', async (req, res) => {
         const { mint } = req.params;
-        const { resolution = '60', from, to } = req.query; // resolution in minutes
-        
+        const { resolution = '60', from, to } = req.query; 
+
+        // Cache Key specific to resolution and time-range (rounded to minute to hit cache)
+        const nowMin = Math.floor(Date.now() / 60000);
+        const cacheKey = `chart:${mint}:${resolution}:${nowMin}`; // Cache for 1 minute
+
         try {
-            // 1. Find the active pool for this mint
-            // Prefer manually indexed pools first
-            let pool = await db.get(`SELECT address FROM pools WHERE mint = $1 LIMIT 1`, [mint]);
-            
-            if (!pool) {
-                return res.json({ success: false, error: "Token not indexed yet" });
-            }
+            const result = await smartCache(cacheKey, 60, async () => {
+                let pool = await db.get(`SELECT address FROM pools WHERE mint = $1 LIMIT 1`, [mint]);
+                if (!pool) return { success: false, error: "Token not indexed yet" };
 
-            // 2. Determine Time Bucket (in milliseconds)
-            let bucketSize = 60 * 1000; // Default 1m
-            if (resolution === '5') bucketSize = 5 * 60 * 1000;
-            if (resolution === '15') bucketSize = 15 * 60 * 1000;
-            if (resolution === '60') bucketSize = 60 * 60 * 1000;
-            if (resolution === '240') bucketSize = 4 * 60 * 60 * 1000;
-            if (resolution === 'D') bucketSize = 24 * 60 * 60 * 1000;
-            if (resolution === 'W') bucketSize = 7 * 24 * 60 * 60 * 1000;
+                let bucketSize = 60 * 1000;
+                if (resolution === '5') bucketSize = 5 * 60 * 1000;
+                if (resolution === '15') bucketSize = 15 * 60 * 1000;
+                if (resolution === '60') bucketSize = 60 * 60 * 1000;
+                if (resolution === '240') bucketSize = 4 * 60 * 60 * 1000;
+                if (resolution === 'D') bucketSize = 24 * 60 * 60 * 1000;
 
-            const fromTime = parseInt(from) * 1000 || (Date.now() - 24 * 60 * 60 * 1000); // Default last 24h
-            const toTime = parseInt(to) * 1000 || Date.now();
+                const fromTime = parseInt(from) * 1000 || (Date.now() - 24 * 60 * 60 * 1000);
+                const toTime = parseInt(to) * 1000 || Date.now();
 
-            // 3. Aggregate Data
-            // We use integer division to group by time buckets
-            // ARRAY_AGG trick gets the Open/Close correctly (First/Last in bucket)
-            const query = `
-                SELECT
-                    (timestamp / $1) * $1 as time_bucket,
-                    MIN(low) as low,
-                    MAX(high) as high,
-                    (ARRAY_AGG(open ORDER BY timestamp ASC))[1] as open,
-                    (ARRAY_AGG(close ORDER BY timestamp DESC))[1] as close,
-                    SUM(volume) as volume
-                FROM candles_1m
-                WHERE pool_address = $2 
-                  AND timestamp >= $3 
-                  AND timestamp <= $4
-                GROUP BY time_bucket
-                ORDER BY time_bucket ASC
-            `;
+                // Heavy Aggregation Query
+                const query = `
+                    SELECT
+                        (timestamp / $1) * $1 as time_bucket,
+                        MIN(low) as low,
+                        MAX(high) as high,
+                        (ARRAY_AGG(open ORDER BY timestamp ASC))[1] as open,
+                        (ARRAY_AGG(close ORDER BY timestamp DESC))[1] as close,
+                        SUM(volume) as volume
+                    FROM candles_1m
+                    WHERE pool_address = $2 
+                      AND timestamp >= $3 
+                      AND timestamp <= $4
+                    GROUP BY time_bucket
+                    ORDER BY time_bucket ASC
+                `;
 
-            const rows = await db.all(query, [bucketSize, pool.address, fromTime, toTime]);
+                const rows = await db.all(query, [bucketSize, pool.address, fromTime, toTime]);
 
-            // 4. Format for Lightweight Charts (time in seconds)
-            const candles = rows.map(r => ({
-                time: Math.floor(parseInt(r.time_bucket) / 1000),
-                open: r.open,
-                high: r.high,
-                low: r.low,
-                close: r.close,
-                value: r.volume // Volume often expects 'value' or separate series
-            }));
+                const candles = rows.map(r => ({
+                    time: Math.floor(parseInt(r.time_bucket) / 1000),
+                    open: r.open, high: r.high, low: r.low, close: r.close, value: r.volume
+                }));
 
-            res.json({ success: true, candles });
+                return { success: true, candles };
+            });
+
+            res.json(result);
         } catch (e) {
             console.error("Candle Fetch Error:", e);
             res.status(500).json({ success: false, error: e.message });
@@ -221,20 +215,20 @@ function init(deps) {
                 }
 
                 // 2. EXTERNAL SEARCH (OPTIMIZED)
-                // Conditions: Search must be 3+ chars, and we must pass Global Rate Limit check
                 const isTooShort = searchTerm.length < 3;
                 let shouldFetchExternal = searchTerm.length > 0 && !isTooShort;
 
                 if (shouldFetchExternal) {
                     const canCallExternal = await checkExternalRateLimit();
                     if (!canCallExternal) {
+                        console.warn(`⚠️ Global Rate Limit Exceeded. Skipping external search for '${searchTerm}'`);
                         shouldFetchExternal = false;
                     }
                 }
 
                 if (shouldFetchExternal) {
                     const extCacheKey = `ext_search:${searchTerm.toLowerCase()}`;
-                    const externalTokens = await smartCache(extCacheKey, 300, async () => { // Cache for 5 minutes
+                    const externalTokens = await smartCache(extCacheKey, 300, async () => { 
                         try {
                             let dexRes;
                             if (isAddressSearch) {
@@ -263,6 +257,7 @@ function init(deps) {
                             }
                             return [];
                         } catch (extErr) { 
+                            console.error("External search failed:", extErr.message);
                             return [];
                         }
                     });
@@ -334,6 +329,7 @@ function init(deps) {
         res.json(result);
     });
 
+    // --- ADMIN ROUTES (RESTORED) ---
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         const { type } = req.query;
         let sql = `SELECT u.*, t.name, t.ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`;

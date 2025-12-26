@@ -3,7 +3,16 @@ const { getConnection } = require('../services/helius');
 const { getDB } = require('../../services/database');
 const logger = require('../../services/logger');
 
+// RELIABILITY FIX: Execution Lock
+let isSnapshotRunning = false;
+
 async function runSnapshotCycle() {
+    if (isSnapshotRunning) {
+        logger.warn("📸 Snapshot Cycle Skipped: Previous cycle still running.");
+        return;
+    }
+    isSnapshotRunning = true;
+
     const db = getDB();
     const connection = getConnection();
     const BATCH_SIZE = 100;
@@ -17,10 +26,10 @@ async function runSnapshotCycle() {
     let processed = 0;
     let keepFetching = true;
 
-    while (keepFetching) {
-        try {
+    try {
+        while (keepFetching) {
             // 1. Fetch Batch using Pagination
-            // We order by priority first to ensure trending tokens get updated first in the cycle
+            // We order by priority first to ensure trending tokens get updated first
             const pools = await db.all(`
                 SELECT pool_address, mint, dex 
                 FROM active_trackers 
@@ -36,7 +45,6 @@ async function runSnapshotCycle() {
             const poolKeys = pools.map(p => new PublicKey(p.pool_address));
 
             // 2. RPC Call (Batch of 100 max)
-            // Note: Helius/Solana limits getMultipleAccounts to 100 keys
             const accounts = await connection.getMultipleAccountsInfo(poolKeys);
 
             // 3. Process Accounts
@@ -45,16 +53,13 @@ async function runSnapshotCycle() {
             for (let i = 0; i < pools.length; i++) {
                 const pool = pools[i];
                 const account = accounts[i];
-                
                 if (!account) continue;
 
                 let price = 0;
-
                 try {
                     if (pool.dex === 'pump') {
                         const data = account.data;
-                        // Pump.fun Curve Layout: 8 (disc) + 8 (vToken) + 8 (vSol)
-                        // Read BigUInt64LE
+                        // Pump.fun Curve Layout
                         const virtualTokenReserves = data.readBigUInt64LE(8);
                         const virtualSolReserves = data.readBigUInt64LE(16);
                         
@@ -64,9 +69,6 @@ async function runSnapshotCycle() {
                     }
 
                     if (price > 0) {
-                        // Optimistic Snapshot: 
-                        // We assume "close" is the current price. 
-                        // The aggregation logic (in routes) will determine Open/High/Low from these 1m snapshots.
                         updates.push(db.run(`
                             INSERT INTO candles_1m (pool_address, timestamp, open, high, low, close, volume)
                             VALUES ($1, $2, $3, $3, $3, $3, 0)
@@ -74,28 +76,23 @@ async function runSnapshotCycle() {
                             DO UPDATE SET close = $3, high = GREATEST(candles_1m.high, $3), low = LEAST(candles_1m.low, $3)
                         `, [pool.pool_address, timestamp, price]));
                     }
-                } catch (err) {
-                    // Fail silently for individual pool errors to not block batch
-                }
+                } catch (err) {}
             }
 
-            // Execute batch writes in parallel
             await Promise.all(updates);
             
             processed += pools.length;
             offset += BATCH_SIZE;
 
-            // Rate limit protection: Sleep 100ms between batches to be nice to RPC
+            // Rate limit protection
             await new Promise(r => setTimeout(r, 100));
-
-        } catch (err) {
-            logger.error(`Snapshot Batch Error (Offset ${offset}): ${err.message}`);
-            // Break loop on fatal DB/RPC error to prevent infinite loops, but allows retry next minute
-            keepFetching = false; 
         }
+    } catch (err) {
+        logger.error(`Snapshot Batch Fatal Error: ${err.message}`);
+    } finally {
+        isSnapshotRunning = false;
+        logger.info(`📸 Snapshot Cycle Complete. Processed ${processed} pools.`);
     }
-    
-    logger.info(`📸 Snapshot Cycle Complete. Processed ${processed} pools.`);
 }
 
 function startSnapshotter() {
