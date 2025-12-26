@@ -7,6 +7,9 @@ let pool = null;
 let dbWrapper = null;
 let initPromise = null;
 
+// Cache Stampede Protection: Store pending promises for keys
+const pendingRequests = new Map();
+
 async function initDB() {
     if (dbWrapper) return dbWrapper;
     if (initPromise) return initPromise;
@@ -18,7 +21,7 @@ async function initDB() {
             pool = new Pool({
                 connectionString: config.DATABASE_URL,
                 ssl: isLocal ? false : { rejectUnauthorized: false },
-                max: 20, 
+                max: 50, // INCREASED: Allow more concurrent connections
                 idleTimeoutMillis: 30000,
                 connectionTimeoutMillis: 5000,
             });
@@ -27,7 +30,7 @@ async function initDB() {
                 logger.error(`Unexpected error on idle DB client: ${err.message}`);
             });
 
-            logger.info(`📦 Database: Connecting to PostgreSQL...`);
+            logger.info(`📦 Database: Connecting to PostgreSQL (Pool: 50)...`);
             const client = await pool.connect();
             client.release();
             logger.info(`📦 Database: Connection Successful.`);
@@ -48,7 +51,7 @@ async function initDB() {
                     change24h DOUBLE PRECISION,
                     change1h DOUBLE PRECISION,
                     change5m DOUBLE PRECISION,
-                    holders INTEGER DEFAULT 0,  -- NEW: Holder Count
+                    holders INTEGER DEFAULT 0,
                     k_score DOUBLE PRECISION DEFAULT 0,
                     hasCommunityUpdate BOOLEAN DEFAULT FALSE,
                     metadata TEXT,
@@ -146,19 +149,44 @@ function getDB() {
     return dbWrapper;
 }
 
+// UPDATED: SmartCache with Stampede Protection
 async function smartCache(key, ttlSeconds, fetchFn) {
     const redis = getClient();
+    
+    // 1. Try Redis
     if (redis) {
         try {
             const cached = await redis.get(key);
             if (cached) return JSON.parse(cached);
-        } catch (e) {}
+        } catch (e) {
+            // Redis error, proceed to fetch
+        }
     }
-    const data = await fetchFn();
-    if (redis && data) {
-        try { await redis.set(key, JSON.stringify(data), 'EX', ttlSeconds); } catch (e) {}
+
+    // 2. Check if a fetch is already in progress for this key (Stampede Protection)
+    if (pendingRequests.has(key)) {
+        return pendingRequests.get(key);
     }
-    return data;
+
+    // 3. Create a new fetch promise and store it
+    const fetchPromise = (async () => {
+        try {
+            const data = await fetchFn();
+            
+            // 4. Update Redis if successful
+            if (redis && data) {
+                // Background update, don't await
+                redis.set(key, JSON.stringify(data), 'EX', ttlSeconds).catch(() => {}); 
+            }
+            return data;
+        } finally {
+            // 5. Cleanup: Remove from pending requests map regardless of success/failure
+            pendingRequests.delete(key);
+        }
+    })();
+
+    pendingRequests.set(key, fetchPromise);
+    return fetchPromise;
 }
 
 async function enableIndexing(db, mint, poolData) {

@@ -1085,6 +1085,9 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         cleanupChart();
 
         const updateDetailUI = async (isInitialLoad = false) => {
+            // STOP POLLING IF TAB HIDDEN (Optimization)
+            if (!isInitialLoad && document.hidden) return;
+
             try {
                 const res = await fetch(`${API_URL}/api/token/${mint}`);
                 const data = await res.json();
@@ -1092,9 +1095,13 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
                     const t = data.token;
                     
                     if (isInitialLoad) {
-                        document.getElementById('detail-ticker').innerText = t.ticker;
-                        document.getElementById('detail-name').innerText = t.name;
-                        document.getElementById('detail-mint').innerText = t.mint;
+                        const tick = document.getElementById('detail-ticker');
+                        const nam = document.getElementById('detail-name');
+                        const min = document.getElementById('detail-mint');
+                        
+                        if(tick) tick.innerText = t.ticker;
+                        if(nam) nam.innerText = t.name;
+                        if(min) min.innerText = t.mint;
                         
                         const rawSupply = parseFloat(t.supply || '0');
                         const decimals = t.decimals || 9;
@@ -1130,27 +1137,32 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
                     const price = Number(t.priceUsd || t.priceusd || 0);
                     const vol = Number(t.volume24h || 0);
 
-                    document.getElementById('stat-price').innerText = formatMoney(price);
-                    document.getElementById('stat-mcap').innerText = formatCompact(mcap);
-                    document.getElementById('stat-vol').innerText = formatCompact(vol);
-                    document.getElementById('stat-chg1h').innerHTML = formatPct(t.change1h);
-                    document.getElementById('stat-chg24h').innerHTML = formatPct(t.change24h);
+                    // --- SAFE DOM UPDATE ---
+                    const safeSetText = (id, txt) => { const el = document.getElementById(id); if(el) el.innerText = txt; };
+                    const safeSetHTML = (id, htm) => { const el = document.getElementById(id); if(el) el.innerHTML = htm; };
+
+                    safeSetText('stat-price', formatMoney(price));
+                    safeSetText('stat-mcap', formatCompact(mcap));
+                    safeSetText('stat-vol', formatCompact(vol));
+                    safeSetHTML('stat-chg1h', formatPct(t.change1h));
+                    safeSetHTML('stat-chg24h', formatPct(t.change24h));
                     
-                    // NEW: HOLDERS
                     const holders = t.holders || 0;
-                    document.getElementById('stat-holders').innerText = holders.toLocaleString();
+                    safeSetText('stat-holders', holders.toLocaleString());
+                    
                     if(t.holderHistory) currentHolderHistory = t.holderHistory;
 
-                    // UPDATED: K-Score Logic
                     const score = t.kScore || t.k_score || 0;
                     const kEl = document.getElementById('stat-kscore');
                     const isVerified = t.hasCommunityUpdate || t.hascommunityupdate;
                     
-                    if (isVerified) {
-                        if (score > 0) { kEl.innerText = score; kEl.classList.remove('text-gray-500'); kEl.classList.add('text-[#fb923c]'); kEl.title = "Conviction Score"; } 
-                        else { kEl.innerText = '0'; kEl.classList.remove('text-gray-500'); kEl.classList.add('text-[#fb923c]'); kEl.title = "Score Pending"; }
-                    } else { 
-                        kEl.innerText = '🔒'; kEl.classList.remove('text-[#fb923c]'); kEl.classList.add('text-gray-500'); kEl.title = "Requires Community Update"; 
+                    if (kEl) {
+                        if (isVerified) {
+                            if (score > 0) { kEl.innerText = score; kEl.classList.remove('text-gray-500'); kEl.classList.add('text-[#fb923c]'); kEl.title = "Conviction Score"; } 
+                            else { kEl.innerText = '0'; kEl.classList.remove('text-gray-500'); kEl.classList.add('text-[#fb923c]'); kEl.title = "Score Pending"; }
+                        } else { 
+                            kEl.innerText = '🔒'; kEl.classList.remove('text-[#fb923c]'); kEl.classList.add('text-gray-500'); kEl.title = "Requires Community Update"; 
+                        }
                     }
 
                     // UPDATE POOL LIST
