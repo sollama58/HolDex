@@ -1,68 +1,67 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const config = require('./config/env');
-const { initDB } = require('./services/database');
-const { initRedis } = require('./services/redis');
-const tokenRoutes = require('./routes/tokens');
+const logger = require('./services/logger');
+const { initDB, getDB } = require('./services/database');
 
-// NOTE: Background tasks (metadataUpdater, etc.) are NO LONGER imported here.
-// They run in the separate 'worker' service defined in docker-compose.
+// --- ROUTES ---
+const tokensRoutes = require('./routes/tokens');
+const { startSnapshotter } = require('./indexer/tasks/snapshotter');
+
+// Note: pumpfun listener removed to prevent auto-indexing of all new tokens.
+// const { startPumpListener } = require('./indexer/listeners/pumpfun'); 
 
 const app = express();
 
-app.set('trust proxy', 1);
-
-// --- SECURITY & MIDDLEWARE ---
+// 1. Security & Middleware
 app.use(helmet());
-app.use(cors({ origin: config.CORS_ORIGINS }));
+app.use(cors({ origin: '*' })); // Allow all for public API
 app.use(express.json());
 
-// --- RATE LIMITING ---
-
-// 1. Global Limiter: 3000 requests per 15 mins (Increased for scale)
-const globalLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, 
-    max: 3000, 
+// Global Rate Limiting
+const limiter = rateLimit({
+    windowMs: 1 * 60 * 1000, 
+    max: 500, 
     standardHeaders: true,
     legacyHeaders: false,
-    message: { success: false, error: "Too many requests, please try again later." }
 });
-app.use(globalLimiter);
+app.use(limiter);
 
-// 2. Strict Limiter: For Search & Updates
-const strictLimiter = rateLimit({
-    windowMs: 1 * 60 * 1000, 
-    max: 150, // Slight increase to handle bursts
-    message: { success: false, error: "Rate limit exceeded. Please slow down." }
+// 2. Health Check
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'ok', 
+        timestamp: Date.now(),
+        service: 'HolDEX API' 
+    });
 });
-
-// --- INITIALIZATION ---
 
 async function startServer() {
     try {
-        // 1. Init Data Layer
-        const db = await initDB();
-        const redis = await initRedis();
+        logger.info('🚀 System: Initializing HolDEX API...');
 
-        // 2. Dependencies
-        const deps = { db, redis };
+        // A. Initialize Database
+        await initDB();
         
-        // 3. Init Routes
-        // Search and Write operations get strict limits
-        app.use('/api/request-update', strictLimiter);
-        app.use('/api/tokens', strictLimiter); 
-        
-        app.use('/api', tokenRoutes.init(deps));
+        // B. Initialize Routes
+        app.use('/api', tokensRoutes.init({ db: getDB() }));
 
-        // 4. Start Listener
-        app.listen(config.PORT, () => {
-            console.log(`🔥 HolDex API Node Online on port ${config.PORT}`);
-            console.log(`🛡️  Mode: API Only (Workers decoupled)`);
+        // C. Start API Server
+        const PORT = process.env.PORT || 3000;
+        app.listen(PORT, () => {
+            logger.info(`✅ API: Listening on port ${PORT}`);
         });
-    } catch (err) {
-        console.error("Fatal Server Startup Error:", err);
+
+        // D. Start Background Services
+        // We only run the snapshotter now. New tokens are added via Search/Update only.
+        logger.info('🔄 System: Starting Background Snapshotter...');
+        startSnapshotter();
+
+    } catch (error) {
+        logger.error('❌ System Fatal Error:', error);
         process.exit(1);
     }
 }
