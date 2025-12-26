@@ -5,8 +5,6 @@ const logger = require('./logger');
 // --- PROGRAM IDs ---
 const RAYDIUM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
 const ORCA_PROGRAM_ID = new PublicKey('whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc');
-const METEORA_DLMM_PROGRAM = new PublicKey('LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo');
-const METEORA_AMM_PROGRAM = new PublicKey('Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB');
 const PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
 
 const connection = new Connection(config.SOLANA_RPC_URL, 'confirmed');
@@ -26,7 +24,6 @@ async function retryRPC(fn, retries = 3, delay = 1000) {
  * Strategy: Transaction Scan
  * Scans recent transactions of the Mint to find interactions with DEX programs.
  * This is often more reliable than getProgramAccounts for finding the specific pool.
- * Now includes support for Pump.fun (PumpSwap) interactions.
  */
 async function findPoolsFromTransactions(mint) {
     const pools = [];
@@ -55,9 +52,8 @@ async function findPoolsFromTransactions(mint) {
             const isRaydium = accountKeys.some(k => k.pubkey.equals(RAYDIUM_PROGRAM_ID));
             const isOrca = accountKeys.some(k => k.pubkey.equals(ORCA_PROGRAM_ID));
             const isPump = accountKeys.some(k => k.pubkey.equals(PUMP_PROGRAM_ID));
-            const isMeteora = accountKeys.some(k => k.pubkey.equals(METEORA_DLMM_PROGRAM) || k.pubkey.equals(METEORA_AMM_PROGRAM));
 
-            if (isRaydium || isOrca || isPump || isMeteora) {
+            if (isRaydium || isOrca || isPump) {
                 // Collect all writable accounts as candidates
                 accountKeys.forEach(k => {
                     if (k.writable && !k.signer) {
@@ -82,7 +78,7 @@ async function findPoolsFromTransactions(mint) {
 
                 // Check Raydium V4
                 if (info.owner.equals(RAYDIUM_PROGRAM_ID) && info.data.length === 752) {
-                    // FIX: Parse Base/Quote Mints immediately (Offsets 400 & 432)
+                    // Parse Base/Quote Mints immediately (Offsets 400 & 432)
                     const baseMint = new PublicKey(info.data.subarray(400, 432)).toBase58();
                     const quoteMint = new PublicKey(info.data.subarray(432, 464)).toBase58();
 
@@ -90,7 +86,6 @@ async function findPoolsFromTransactions(mint) {
                         pairAddress: batch[i].toString(),
                         dexId: 'raydium',
                         liquidity: { usd: 0 },
-                        volume: { h24: 0 },
                         baseToken: { address: baseMint },
                         quoteToken: { address: quoteMint } 
                     });
@@ -102,8 +97,7 @@ async function findPoolsFromTransactions(mint) {
                         pairAddress: batch[i].toString(),
                         dexId: 'orca',
                         liquidity: { usd: 0 },
-                        volume: { h24: 0 },
-                        baseToken: { address: 'Unknown' }, // Orca layout varies, let snapshotter handle it
+                        baseToken: { address: 'Unknown' }, // Orca layout varies, snapshotter handles discovery
                         quoteToken: { address: 'Unknown' }
                     });
                 }
@@ -115,7 +109,6 @@ async function findPoolsFromTransactions(mint) {
                         pairAddress: batch[i].toString(),
                         dexId: 'pump',
                         liquidity: { usd: 0 },
-                        volume: { h24: 0 },
                         baseToken: { address: mint.toBase58() }, // Pump pools are always Mint/SOL
                         quoteToken: { address: 'So11111111111111111111111111111111111111112' }
                     });
@@ -139,59 +132,41 @@ async function findPoolsOnChain(mintAddress) {
     try {
         const promises = [];
 
-        // --- STRATEGY 1: PUMP.FUN Direct Check (Deterministic) ---
-        // Fast and reliable for Pre-bond
-        try {
-            const [bondingCurve] = PublicKey.findProgramAddressSync(
-                [Buffer.from("bonding-curve"), mint.toBuffer()],
-                PUMP_PROGRAM_ID
-            );
-            
-            // Check existence
-            const info = await retryRPC(() => connection.getAccountInfo(bondingCurve), 3, 500);
-            if (info) {
-                pools.push({
-                    pairAddress: bondingCurve.toString(),
-                    dexId: 'pump',
-                    liquidity: { usd: 0 },
-                    volume: { h24: 0 },
-                    baseToken: { address: mintBase58 },
-                    quoteToken: { address: 'So11111111111111111111111111111111111111112' }
-                });
-                logger.info(`✅ Found Pump.fun Bonding Curve (Direct)`);
-            }
-        } catch (e) {}
-
-        // --- STRATEGY 2: TRANSACTION HISTORY SCAN (Activity Based) ---
-        // Finds pools via recent swaps/interactions. Catches Pump, Raydium, Orca, Meteora.
+        // --- STRATEGY 1: TRANSACTION HISTORY SCAN (Activity Based) ---
+        // Finds pools via recent swaps/interactions. Catches Pump, Raydium, Orca.
         promises.push(findPoolsFromTransactions(mint));
 
-        // --- STRATEGY 3: GLOBAL SCAN (Backup) ---
-        // Fallback for Raydium/Orca if Tx Scan doesn't find recent activity
+        // --- STRATEGY 2: GLOBAL SCAN (Backup) ---
+        // Fallback for Raydium if Tx Scan doesn't find recent activity
         
         // Raydium Base
         promises.push(
             retryRPC(() => connection.getProgramAccounts(RAYDIUM_PROGRAM_ID, {
                 filters: [{ dataSize: 752 }, { memcmp: { offset: 400, bytes: mintBase58 } }]
-            })).then(res => res.map(p => ({
-                pairAddress: p.pubkey.toString(), dexId: 'raydium', baseToken: { address: mintBase58 }
-            }))).catch(e => [])
+            })).then(res => res.map(p => {
+                const quote = new PublicKey(p.account.data.subarray(432, 464)).toBase58();
+                return {
+                    pairAddress: p.pubkey.toString(), 
+                    dexId: 'raydium', 
+                    baseToken: { address: mintBase58 },
+                    quoteToken: { address: quote }
+                };
+            })).catch(e => [])
         );
 
         // Raydium Quote
         promises.push(
             retryRPC(() => connection.getProgramAccounts(RAYDIUM_PROGRAM_ID, {
                 filters: [{ dataSize: 752 }, { memcmp: { offset: 432, bytes: mintBase58 } }]
-            })).then(res => res.map(p => ({
-                pairAddress: p.pubkey.toString(), dexId: 'raydium', quoteToken: { address: mintBase58 }
-            }))).catch(e => [])
-        );
-
-        // Orca
-        promises.push(
-            retryRPC(() => connection.getProgramAccounts(ORCA_PROGRAM_ID, {
-                filters: [{ dataSize: 653 }, { memcmp: { offset: 33, bytes: mintBase58 } }]
-            })).then(res => res.map(p => ({ pairAddress: p.pubkey.toString(), dexId: 'orca' }))).catch(e => [])
+            })).then(res => res.map(p => {
+                const base = new PublicKey(p.account.data.subarray(400, 432)).toBase58();
+                return {
+                    pairAddress: p.pubkey.toString(), 
+                    dexId: 'raydium', 
+                    baseToken: { address: base },
+                    quoteToken: { address: mintBase58 }
+                };
+            })).catch(e => [])
         );
 
         // --- EXECUTE ---
@@ -211,7 +186,6 @@ async function findPoolsOnChain(mintAddress) {
             if (!seen.has(p.pairAddress)) {
                 seen.add(p.pairAddress);
                 p.liquidity = p.liquidity || { usd: 0 };
-                p.volume = p.volume || { h24: 0 };
                 
                 // Defaults
                 if (!p.quoteToken) p.quoteToken = { address: 'So11111111111111111111111111111111111111112' }; 

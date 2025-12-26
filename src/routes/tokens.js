@@ -1,12 +1,12 @@
 const express = require('express');
 const { Connection, PublicKey } = require('@solana/web3.js');
 const { isValidPubkey } = require('../utils/solana');
-const { smartCache, enableIndexing, getDB } = require('../services/database'); // Added getDB import
+const { smartCache, enableIndexing, getDB } = require('../services/database'); 
 const { findPoolsOnChain } = require('../services/pool_finder');
 const { fetchTokenMetadata } = require('../utils/metaplex');
 const config = require('../config/env');
 const kScoreUpdater = require('../tasks/kScoreUpdater'); 
-const { getClient } = require('../services/redis'); // Import Redis
+const { getClient } = require('../services/redis'); 
 
 const { snapshotPools } = require('../indexer/tasks/snapshotter');
 const { fetchSolscanData } = require('../services/solscan');
@@ -33,46 +33,35 @@ function init(deps) {
     }
 
     async function indexTokenOnChain(mint) {
+        // 1. Fetch Metadata
         const meta = await fetchTokenMetadata(mint);
         
-        let supply = '0';
+        let supply = '1000000000'; // Default 1B
         let decimals = 9; 
         
         try {
             const supplyInfo = await solanaConnection.getTokenSupply(new PublicKey(mint));
             supply = supplyInfo.value.amount;
             decimals = supplyInfo.value.decimals;
-        } catch (e) { console.warn(`Failed to fetch supply for ${mint}`); }
-
-        // FETCH SOLSCAN IMMEDIATELY
-        const solscan = await fetchSolscanData(mint);
-        
-        // Defaults
-        let priceUsd = 0;
-        let marketCap = 0;
-        let volume24h = 0;
-        let change24h = 0;
-
-        if (solscan) {
-            priceUsd = solscan.priceUsd;
-            marketCap = solscan.marketCap;
-            volume24h = solscan.volume24h;
-            change24h = solscan.change24h;
+        } catch (e) {
+            // Supply fetch might fail for some accounts, default is acceptable
         }
 
+        // 2. Find Pools
         const pools = await findPoolsOnChain(mint);
         const poolAddresses = [];
 
+        // 3. Register Pools for Indexing
         for (const pool of pools) {
             poolAddresses.push(pool.pairAddress);
             await enableIndexing(db, mint, {
                 pairAddress: pool.pairAddress,
                 dexId: pool.dexId,
-                liquidity: pool.liquidity || { usd: 0 },
+                liquidity: { usd: 0 },
                 volume: { h24: 0 },
                 priceUsd: 0,
-                baseToken: { address: mint },
-                quoteToken: { address: 'So11111111111111111111111111111111111111112' }
+                baseToken: pool.baseToken,
+                quoteToken: pool.quoteToken
             });
         }
 
@@ -82,7 +71,8 @@ function init(deps) {
             image: meta?.image || null,
         };
 
-        // Insert with ALL Initial Data
+        // 4. Upsert Token Record
+        // We initialize with 0, but the snapshotter below will fix it immediately.
         await db.run(`
             INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, marketCap, volume24h, change24h, timestamp)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -90,27 +80,19 @@ function init(deps) {
             name = EXCLUDED.name,
             symbol = EXCLUDED.symbol,
             image = EXCLUDED.image,
-            supply = EXCLUDED.supply,
-            decimals = EXCLUDED.decimals,
-            priceUsd = EXCLUDED.priceUsd,
-            marketCap = EXCLUDED.marketCap,
-            volume24h = EXCLUDED.volume24h,
-            change24h = EXCLUDED.change24h
-        `, [mint, baseData.name, baseData.ticker, baseData.image, supply, decimals, priceUsd, marketCap, volume24h, change24h, Date.now()]);
+            timestamp = $11
+        `, [mint, baseData.name, baseData.ticker, baseData.image, supply, decimals, 0, 0, 0, 0, Date.now()]);
 
+        // 5. Trigger Immediate Snapshot to populate Price/Liq
         if (poolAddresses.length > 0) {
             await snapshotPools(poolAddresses);
         }
 
-        return { 
-            ...baseData, 
-            priceUsd, marketCap, volume24h, change24h,
-            pairs: pools 
-        };
+        return { ...baseData, pairs: pools };
     }
 
-    // --- ENDPOINTS ---
-    
+    // --- ROUTES ---
+
     router.get('/config/fees', (req, res) => {
         res.json({ success: true, solFee: config.FEE_SOL, tokenFee: config.FEE_TOKEN_AMOUNT, tokenMint: config.FEE_TOKEN_MINT, treasury: config.TREASURY_WALLET });
     });
@@ -128,7 +110,7 @@ function init(deps) {
             res.json({ success: true, sol: solBalance / 1e9, tokens: tokenAccounts.value.length > 0 ? tokenAccounts.value[0].account.data.parsed.info.tokenAmount.uiAmount : 0 });
         } catch (e) { res.status(500).json({ success: false, error: "Failed to fetch balance" }); }
     });
-    
+
     router.post('/request-update', async (req, res) => {
         try {
             const { mint, twitter, website, telegram, banner, description, signature, userPublicKey } = req.body;
@@ -150,8 +132,7 @@ function init(deps) {
         const fromMs = parseInt(from) * 1000 || (Date.now() - 24 * 60 * 60 * 1000);
         const toMs = parseInt(to) * 1000 || Date.now();
 
-        // SCALABILITY FIX: Cache candle responses. 
-        // 1-minute resolution updates every minute, so we can cache for ~30s safely.
+        // Cache candle responses for 30s
         const cacheKey = `chart:${mint}:${resolution}:${Math.floor(Date.now() / 30000)}`; 
 
         try {
@@ -216,12 +197,50 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
+    router.get('/token/:mint', async (req, res) => {
+        const { mint } = req.params;
+        
+        // Short cache (5s) for real-time feel
+        const cacheKey = `token:detail:${mint}`;
+        const result = await smartCache(cacheKey, 5, async () => {
+            let token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+            let pairs = await db.all('SELECT * FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC', [mint]);
+            
+            // If token missing, try to auto-index
+            if (!token) {
+                try {
+                    const indexed = await indexTokenOnChain(mint);
+                    token = { ...indexed, mint };
+                    pairs = indexed.pairs || [];
+                } catch (e) {}
+            }
+            
+            // Fallback: If token price is 0 but we have pool data, use pool data
+            if (token && (!token.priceUsd || token.priceUsd === 0) && pairs.length > 0) {
+                 const bestPool = pairs[0];
+                 if (bestPool.price_usd > 0) {
+                     token.priceUsd = bestPool.price_usd;
+                     token.liquidity = bestPool.liquidity_usd;
+                     // Estimate marketcap
+                     const supply = token.supply ? (token.supply / Math.pow(10, token.decimals)) : 1000000000;
+                     token.marketCap = bestPool.price_usd * supply;
+                 }
+            }
+            
+            let tokenData = token || { mint, name: 'Unknown', ticker: 'Unknown' };
+            if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
+
+            return { success: true, token: { ...tokenData, pairs } };
+        });
+
+        res.json(result);
+    });
+
     router.get('/tokens', async (req, res) => {
         const { search = '', sort = 'kscore', page = 1 } = req.query;
 
         try {
-            // SCALABILITY FIX: Global Response Caching
-            // If it's a generic dashboard view (no search), cache heavily
+            // Global Response Caching
             const isGenericView = !search;
             const cacheKey = `api:tokens:list:${sort}:${page}:${isGenericView ? 'generic' : search}`;
             const redis = getClient();
@@ -240,36 +259,27 @@ function init(deps) {
             if (search.length > 0) {
                 if (isAddressSearch) {
                     rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
+                    // Auto-index if not found
+                    if (rows.length === 0) {
+                         await indexTokenOnChain(search);
+                         rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
+                    }
                 } else {
-                    rows = await db.all(`SELECT * FROM tokens WHERE (ticker ILIKE $1 OR name ILIKE $1) LIMIT 50`, [`%${search}%`]);
+                    rows = await db.all(`SELECT * FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) LIMIT 50`, [`%${search}%`]);
                 }
             } else {
-                // Sorting Logic
                 let orderBy = 'k_score DESC';
                 if (sort === 'newest') orderBy = 'timestamp DESC';
                 else if (sort === 'mcap') orderBy = 'marketCap DESC';
                 else if (sort === 'volume') orderBy = 'volume24h DESC';
                 else if (sort === '24h') orderBy = 'change24h DESC';
-                else if (sort === '5m') orderBy = 'change5m DESC'; // Fixed: Actually sort by 5m
 
                 const offset = (page - 1) * 100;
                 rows = await db.all(`SELECT * FROM tokens ORDER BY ${orderBy} LIMIT 100 OFFSET ${offset}`);
             }
 
-            if (isAddressSearch && rows.length === 0) {
-                // Rate Limit Indexing Triggers?
-                // For now, allow it, but in production, queue this instead of blocking
-                const newData = await indexTokenOnChain(search);
-                if (newData.name !== 'Unknown') {
-                    rows.push({ 
-                        ...newData, 
-                        mint: search, 
-                        hasCommunityUpdate: false, 
-                        kScore: 0, 
-                        timestamp: Date.now() 
-                    });
-                }
-            }
+            // NOTE: We rely on the snapshotter to keep the 'tokens' table updated.
+            // If rows have 0 price but exist in pools, the next snapshot cycle will fix them.
 
             const responsePayload = {
                 success: true,
@@ -291,7 +301,6 @@ function init(deps) {
                 }))
             };
 
-            // Cache for 3 seconds if generic
             if (isGenericView && redis) {
                 await redis.set(cacheKey, JSON.stringify(responsePayload), 'EX', 3);
             }
@@ -302,33 +311,7 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, tokens: [], error: e.message }); }
     });
 
-    router.get('/token/:mint', async (req, res) => {
-        const { mint } = req.params;
-        
-        // Minor cache for token details (10s)
-        const cacheKey = `token:detail:${mint}`;
-        const result = await smartCache(cacheKey, 10, async () => {
-            let token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
-            let pairs = await db.all('SELECT * FROM pools WHERE mint = $1', [mint]);
-            
-            if (!token) {
-                try {
-                    const indexed = await indexTokenOnChain(mint);
-                    if (indexed.name !== 'Unknown') {
-                        token = { ...indexed, mint };
-                        pairs = indexed.pairs || [];
-                    }
-                } catch (e) {}
-            }
-            
-            let tokenData = token || { mint, name: 'Unknown', ticker: 'Unknown' };
-            if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
-
-            return { success: true, token: { ...tokenData, pairs } };
-        });
-
-        res.json(result);
-    });
+    // --- ADMIN ROUTES ---
 
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         const { type } = req.query;
