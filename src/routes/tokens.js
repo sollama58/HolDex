@@ -242,7 +242,9 @@ function init(deps) {
         res.json(result);
     });
 
-    // ... Admin Routes (Unchanged) ...
+    // --- ADMIN ROUTES ---
+
+    // 1. List Updates
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         const { type } = req.query;
         let sql = `SELECT u.*, t.name, t.symbol as ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`;
@@ -250,6 +252,7 @@ function init(deps) {
         res.json({ success: true, updates: await db.all(sql) });
     });
 
+    // 2. Approve Update
     router.post('/admin/approve-update', requireAdmin, async (req, res) => {
         const { id } = req.body;
         const update = await db.get('SELECT * FROM token_updates WHERE id = $1', [id]);
@@ -257,7 +260,9 @@ function init(deps) {
         
         const token = await db.get('SELECT metadata FROM tokens WHERE mint = $1', [update.mint]);
         let currentMeta = token?.metadata || {};
-        const newMeta = { ...currentMeta, ...update }; // Simplified merge
+        if (typeof currentMeta === 'string') currentMeta = JSON.parse(currentMeta); // Parse if string
+
+        const newMeta = { ...currentMeta, ...update }; 
 
         await db.run(
             `UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE WHERE mint = $2`, 
@@ -267,9 +272,75 @@ function init(deps) {
         res.json({success: true});
     });
 
+    // 3. Reject Update
     router.post('/admin/reject-update', requireAdmin, async (req, res) => {
         await db.run("UPDATE token_updates SET status = 'rejected' WHERE id = $1", [req.body.id]); 
         res.json({ success: true }); 
+    });
+    
+    // 4. Get Token Details (For Editing)
+    router.get('/admin/token/:mint', requireAdmin, async (req, res) => {
+        const { mint } = req.params;
+        const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+        if (!token) return res.json({ success: false, error: 'Token not found' });
+        
+        let meta = {};
+        if (token.metadata) {
+            meta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata;
+        }
+        
+        res.json({
+            success: true,
+            token: {
+                mint: token.mint,
+                ticker: token.symbol,
+                twitter: meta.twitter,
+                website: meta.website,
+                telegram: meta.telegram,
+                banner: meta.banner,
+                description: meta.description
+            }
+        });
+    });
+
+    // 5. Update Token Directly
+    router.post('/admin/update-token', requireAdmin, async (req, res) => {
+        const { mint, twitter, website, telegram, banner, description } = req.body;
+        
+        const token = await db.get('SELECT metadata FROM tokens WHERE mint = $1', [mint]);
+        if (!token) return res.status(404).json({success:false, error:'Token not found'});
+
+        let currentMeta = token.metadata || {};
+        if (typeof currentMeta === 'string') currentMeta = JSON.parse(currentMeta);
+        
+        const newMeta = {
+            ...currentMeta,
+            twitter, website, telegram, banner, description
+        };
+        
+        await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE WHERE mint = $2`, [JSON.stringify(newMeta), mint]);
+        res.json({ success: true });
+    });
+
+    // 6. Delete Token
+    router.post('/admin/delete-token', requireAdmin, async (req, res) => {
+        const { mint } = req.body;
+        // Delete from all tables to avoid orphans (Manual Cascade)
+        await db.run('DELETE FROM k_scores WHERE mint = $1', [mint]);
+        await db.run('DELETE FROM token_updates WHERE mint = $1', [mint]);
+        // Note: Pools are tricky as they might be shared, but in this architecture 1 Pool belongs to 1 main Token usually for display.
+        // We delete pools associated with this mint.
+        await db.run('DELETE FROM pools WHERE mint = $1', [mint]); 
+        await db.run('DELETE FROM tokens WHERE mint = $1', [mint]);
+        
+        res.json({ success: true });
+    });
+
+    // 7. Refresh K-Score
+    router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => {
+        const { mint } = req.body;
+        const score = await kScoreUpdater.updateSingleToken({ db }, mint);
+        res.json({ success: true, message: `K-Score recalculated: ${score}` });
     });
 
     return router;

@@ -29,6 +29,7 @@
         .link-preview { font-size: 11px; color: #3b82f6; text-decoration: underline; word-break: break-all; }
         .desc-preview { font-size: 11px; color: #fb923c; font-family: 'JetBrains Mono'; max-width: 200px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
         .hash-link { font-family: 'JetBrains Mono'; font-size: 10px; color: #fb923c; text-decoration: underline; }
+        .img-token { width: 40px; height: 40px; border-radius: 8px; border: 2px solid #7c2d12; object-fit: cover; background: #000; }
     </style>
 </head>
 <body class="p-8">
@@ -129,6 +130,18 @@
         } 
     }
 
+    // --- HELPER: RENDER TOKEN MEDIA (Video/Gif Support) ---
+    function renderTokenMedia(url, className, fallbackText = '?') {
+        const fallback = `https://placehold.co/80x80/2a1005/7c2d12?text=${fallbackText}`;
+        const safeUrl = url || fallback;
+        const isVideo = safeUrl.match(/\.(mp4|webm|mov)$/i);
+        
+        if (isVideo) {
+            return `<video src="${safeUrl}" class="${className}" autoplay loop muted playsinline poster="${fallback}"></video>`;
+        }
+        return `<img src="${safeUrl}" class="${className}" loading="lazy" onerror="this.onerror=null;this.src='${fallback}'">`;
+    }
+
     // --- FETCH PENDING ---
     async function fetchUpdates() { 
         try { 
@@ -177,6 +190,7 @@
         html += updates.map(u => {
             const txLink = u.signature ? `<a href="https://solscan.io/tx/${u.signature}" target="_blank" class="hash-link">Tx: ${u.signature.substring(0,8)}...</a>` : '<span class="text-xs text-gray-500">No Tx</span>';
             const payer = u.payer ? `<div class="text-[10px] text-[#9a3412]">By: ${u.payer.substring(0,6)}...</div>` : '';
+            const mediaHtml = renderTokenMedia(u.image, "img-token");
             
             let actionCol = '';
             if (isPending) {
@@ -194,7 +208,7 @@
             <tr>
                 <td>
                     <div class="flex items-center gap-3">
-                        <img src="${u.image || 'https://placehold.co/40'}" class="w-10 h-10 rounded border border-[#7c2d12]">
+                        ${mediaHtml}
                         <div>
                             <div class="font-bold text-white">${u.ticker}</div>
                             <div class="text-xs text-[#9a3412] font-mono">${u.mint.substring(0,8)}...</div>
