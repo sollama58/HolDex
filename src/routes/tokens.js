@@ -4,7 +4,7 @@ const { isValidPubkey } = require('../utils/solana');
 const { smartCache, enableIndexing } = require('../services/database'); 
 const { findPoolsOnChain } = require('../services/pool_finder');
 const { fetchTokenMetadata } = require('../utils/metaplex');
-const { getSolanaConnection } = require('../services/solana'); 
+const { getSolanaConnection } = require('../services/solana'); // Singleton
 const config = require('../config/env');
 const kScoreUpdater = require('../tasks/kScoreUpdater'); 
 const { getClient } = require('../services/redis'); 
@@ -14,6 +14,14 @@ const { fetchSolscanData } = require('../services/solscan');
 
 const router = express.Router();
 const solanaConnection = getSolanaConnection();
+
+const requireAdmin = (req, res, next) => {
+    const authHeader = req.headers['x-admin-auth'];
+    if (!authHeader || authHeader !== config.ADMIN_PASSWORD) {
+        return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+    next();
+};
 
 function init(deps) {
     const { db } = deps;
@@ -58,15 +66,29 @@ function init(deps) {
             image: meta?.image || null,
         };
 
+        // FIXED: Added 'liquidity' to INSERT statement
         await db.run(`
-            INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, marketCap, volume24h, change24h, timestamp)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, timestamp)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ON CONFLICT(mint) DO UPDATE SET
             name = EXCLUDED.name,
             symbol = EXCLUDED.symbol,
             image = EXCLUDED.image,
-            timestamp = $11
-        `, [mint, baseData.name, baseData.ticker, baseData.image, supply, decimals, 0, 0, 0, 0, Date.now()]);
+            timestamp = $12
+        `, [
+            mint, 
+            baseData.name, 
+            baseData.ticker, 
+            baseData.image, 
+            supply, 
+            decimals, 
+            0, // priceUsd
+            0, // liquidity (NEW)
+            0, // marketCap
+            0, // volume
+            0, // change
+            Date.now()
+        ]);
 
         await enqueueTokenUpdate(mint);
 
@@ -265,7 +287,7 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, tokens: [], error: e.message }); }
     });
 
-    // Admin routes reused from previous context
+    // --- ADMIN ROUTES ---
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         const { type } = req.query;
         let sql = `SELECT u.*, t.name, t.symbol as ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`;
