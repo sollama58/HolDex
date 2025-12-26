@@ -1,157 +1,225 @@
-const { Pool } = require('pg');
+const sqlite3 = require('sqlite3').verbose();
+const { open } = require('sqlite');
+const path = require('path');
 const config = require('../config/env');
 const logger = require('./logger');
-const { getClient } = require('./redis'); 
+const { getClient } = require('./redis');
 
-const pool = new Pool({
-  connectionString: config.DATABASE_URL,
-  ssl: config.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  max: 20, 
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
-});
+let dbInstance = null;
 
+async function initDB() {
+    if (dbInstance) return dbInstance;
+
+    try {
+        const dbPath = path.resolve(__dirname, '../../holdex.db');
+        dbInstance = await open({
+            filename: dbPath,
+            driver: sqlite3.Database
+        });
+
+        logger.info(`📦 Database: Connected to ${dbPath}`);
+
+        // --- SCHEMA DEFINITIONS ---
+        await dbInstance.exec(`
+            CREATE TABLE IF NOT EXISTS tokens (
+                mint TEXT PRIMARY KEY,
+                name TEXT,
+                symbol TEXT,
+                image TEXT,
+                supply TEXT,
+                decimals INTEGER,
+                priceUsd REAL,
+                liquidity REAL,
+                marketCap REAL,
+                volume24h REAL,
+                change24h REAL,
+                change1h REAL,
+                change5m REAL,
+                k_score REAL DEFAULT 0,
+                hasCommunityUpdate BOOLEAN DEFAULT FALSE,
+                metadata TEXT,
+                timestamp INTEGER
+            );
+
+            CREATE TABLE IF NOT EXISTS pools (
+                address TEXT PRIMARY KEY,
+                mint TEXT,
+                dex TEXT,
+                token_a TEXT NOT NULL,
+                token_b TEXT NOT NULL,
+                reserve_a TEXT,
+                reserve_b TEXT,
+                price_usd REAL DEFAULT 0,
+                liquidity_usd REAL DEFAULT 0,
+                volume_24h REAL DEFAULT 0,
+                created_at INTEGER,
+                FOREIGN KEY(mint) REFERENCES tokens(mint)
+            );
+
+            CREATE TABLE IF NOT EXISTS candles_1m (
+                pool_address TEXT,
+                timestamp INTEGER,
+                open REAL,
+                high REAL,
+                low REAL,
+                close REAL,
+                volume REAL,
+                PRIMARY KEY (pool_address, timestamp)
+            );
+
+            CREATE TABLE IF NOT EXISTS active_trackers (
+                pool_address TEXT PRIMARY KEY,
+                priority INTEGER DEFAULT 1,
+                last_check INTEGER DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS token_updates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mint TEXT,
+                twitter TEXT,
+                website TEXT,
+                telegram TEXT,
+                banner TEXT,
+                description TEXT,
+                submittedAt INTEGER,
+                status TEXT DEFAULT 'pending', 
+                signature TEXT,
+                payer TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS k_scores (
+                mint TEXT PRIMARY KEY,
+                score REAL,
+                components TEXT, 
+                updatedAt INTEGER
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score DESC);
+            CREATE INDEX IF NOT EXISTS idx_tokens_timestamp ON tokens(timestamp DESC);
+            CREATE INDEX IF NOT EXISTS idx_pools_mint ON pools(mint);
+            CREATE INDEX IF NOT EXISTS idx_candles_pool_time ON candles_1m(pool_address, timestamp);
+        `);
+
+        return dbInstance;
+    } catch (error) {
+        logger.error(`❌ Database Init Failed: ${error.message}`);
+        throw error;
+    }
+}
+
+function getDB() {
+    if (!dbInstance) throw new Error("Database not initialized. Call initDB() first.");
+    return dbInstance;
+}
+
+// --- HELPER: Smart Caching ---
 async function smartCache(key, ttlSeconds, fetchFn) {
     const redis = getClient();
-    if (redis && redis.status === 'ready') {
+    if (redis) {
         try {
             const cached = await redis.get(key);
             if (cached) return JSON.parse(cached);
-        } catch (e) { logger.warn(`Redis Cache Get Error: ${e.message}`); }
+        } catch (e) { logger.warn(`Redis Get Error: ${e.message}`); }
     }
-    const value = await fetchFn();
-    if (value && redis && redis.status === 'ready') {
+
+    const data = await fetchFn();
+
+    if (redis && data) {
         try {
-            await redis.set(key, JSON.stringify(value), 'EX', ttlSeconds);
-        } catch (e) { logger.warn(`Redis Cache Set Error: ${e.message}`); }
+            await redis.set(key, JSON.stringify(data), 'EX', ttlSeconds);
+        } catch (e) { logger.warn(`Redis Set Error: ${e.message}`); }
     }
-    return value;
+    return data;
 }
 
-const dbWrapper = {
-  pool, 
-  async query(text, params) {
-    try { return await pool.query(text, params); } 
-    catch (error) { logger.error('Database query error', { text, error: error.message }); throw error; }
-  },
-  async get(text, params) { const res = await this.query(text, params); return res.rows[0]; },
-  async all(text, params) { const res = await this.query(text, params); return res.rows; },
-  async run(text, params) { const res = await this.query(text, params); return { rowCount: res.rowCount }; },
-  async exec(text) { return this.query(text); }
-};
+// --- HELPER: Indexing Enabler ---
+async function enableIndexing(db, mint, poolData) {
+    if (!poolData || !poolData.pairAddress) return;
 
-const initDB = async () => {
+    // FIX: Explicitly extract token addresses. 
+    // Handle both object structure { address: '...' } and raw strings.
+    const tokenA = poolData.baseToken?.address || poolData.baseToken || mint;
+    // Default to SOL if missing (common quote token)
+    const tokenB = poolData.quoteToken?.address || poolData.quoteToken || 'So11111111111111111111111111111111111111112';
+
     try {
-        await pool.query(`ALTER TABLE pools ADD COLUMN IF NOT EXISTS reserve_a TEXT;`);
-        await pool.query(`ALTER TABLE pools ADD COLUMN IF NOT EXISTS reserve_b TEXT;`);
-        logger.info('✅ Database Schema Verified (Reserves Columns Present)');
-    } catch (e) {
-        logger.warn('Schema check warning: ' + e.message);
+        await db.run(`
+            INSERT INTO pools (
+                address, mint, dex, price_usd, liquidity_usd, volume_24h, created_at,
+                token_a, token_b, reserve_a, reserve_b
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT(address) DO UPDATE SET
+                price_usd = EXCLUDED.price_usd,
+                liquidity_usd = EXCLUDED.liquidity_usd,
+                volume_24h = EXCLUDED.volume_24h,
+                reserve_a = EXCLUDED.reserve_a,
+                reserve_b = EXCLUDED.reserve_b
+        `, [
+            poolData.pairAddress,
+            mint,
+            poolData.dexId,
+            poolData.priceUsd || 0,
+            poolData.liquidity?.usd || 0,
+            poolData.volume?.h24 || 0,
+            Date.now(),
+            tokenA,
+            tokenB,
+            poolData.reserve_a || null,
+            poolData.reserve_b || null
+        ]);
+
+        await db.run(`
+            INSERT INTO active_trackers (pool_address, priority, last_check)
+            VALUES ($1, 10, 0)
+            ON CONFLICT(pool_address) DO UPDATE SET priority = 10
+        `, [poolData.pairAddress]);
+
+        logger.info(`✅ Indexed Pool: ${poolData.pairAddress} (${poolData.dexId})`);
+    } catch (err) {
+        logger.error(`Database Query Error [enableIndexing]: ${err.message}`);
+        // Rethrow to ensure caller knows it failed
+        throw err; 
     }
-};
+}
 
-const enableIndexing = async (db, mint, pair) => {
-    if (!pair || !pair.pairAddress) return;
-    
-    const liq = Number(pair.liquidity?.usd || 0);
-    const vol = Number(pair.volume?.h24 || 0);
-    const price = Number(pair.priceUsd || 0);
-
-    await db.run(`
-        INSERT INTO pools (
-            address, mint, dex, 
-            token_a, token_b, 
-            reserve_a, reserve_b,
-            created_at, liquidity_usd, volume_24h, price_usd
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        ON CONFLICT(address) DO UPDATE SET
-            reserve_a = EXCLUDED.reserve_a,
-            reserve_b = EXCLUDED.reserve_b,
-            liquidity_usd = EXCLUDED.liquidity_usd,
-            volume_24h = EXCLUDED.volume_24h,
-            price_usd = EXCLUDED.price_usd
-    `, [
-        pair.pairAddress, 
-        mint, 
-        pair.dexId, 
-        pair.baseToken.address, 
-        pair.quoteToken.address, 
-        pair.reserve_a || null, 
-        pair.reserve_b || null, 
-        Date.now(),
-        liq, vol, price
-    ]);
-    
-    await db.run(`
-        INSERT INTO active_trackers (pool_address, last_check) 
-        VALUES ($1, $2) 
-        ON CONFLICT (pool_address) DO NOTHING
-    `, [pair.pairAddress, Date.now()]);
-};
-
-// CRITICAL LOGIC: Aggregation from Child Pools to Parent Token
-const aggregateAndSaveToken = async (db, mint) => {
+// --- HELPER: Aggregation ---
+async function aggregateAndSaveToken(db, mint) {
     try {
-        // 1. Get all pools for this mint
         const pools = await db.all(`SELECT * FROM pools WHERE mint = $1`, [mint]);
-        if (!pools || pools.length === 0) return;
+        if (pools.length === 0) return;
 
-        let totalVolume = 0;
-        let totalLiquidity = 0;
-        let maxLiq = -1;
-        let bestPrice = 0;
-
-        for (const pool of pools) {
-            const pLiq = Number(pool.liquidity_usd || 0);
-            const pVol = Number(pool.volume_24h || 0);
-            const pPrice = Number(pool.price_usd || 0);
-
-            totalVolume += pVol;
-            totalLiquidity += pLiq;
-
-            // Strict Logic: Price comes from the pool with Highest Liquidity
-            if (pLiq > maxLiq) {
-                maxLiq = pLiq;
-                if (pPrice > 0) bestPrice = pPrice;
+        // Simple aggregation logic
+        let totalLiq = 0;
+        let totalVol = 0;
+        let maxPrice = 0;
+        
+        // Find pool with highest liquidity for price reference
+        let mainPool = pools[0];
+        
+        for (const p of pools) {
+            totalLiq += p.liquidity_usd || 0;
+            totalVol += p.volume_24h || 0;
+            if ((p.liquidity_usd || 0) > (mainPool.liquidity_usd || 0)) {
+                mainPool = p;
             }
         }
+        maxPrice = mainPool.price_usd || 0;
 
-        // Fallback: If main pool had no price (weird), but others did
-        if (bestPrice === 0 && pools.length > 0) {
-             const anyPrice = pools.find(p => Number(p.price_usd) > 0);
-             if (anyPrice) bestPrice = Number(anyPrice.price_usd);
-        }
-
-        // 2. Fetch current token info to calc Market Cap
-        const token = await db.get(`SELECT supply, decimals FROM tokens WHERE mint = $1`, [mint]);
-        let marketCap = 0;
-        
-        if (token && bestPrice > 0) {
-            const supply = token.supply ? (Number(token.supply) / Math.pow(10, token.decimals || 9)) : 0;
-            if (supply > 0) marketCap = supply * bestPrice;
-        }
-
-        // 3. Update Token Stats
         await db.run(`
-            UPDATE tokens SET 
-                liquidity = $1, 
-                volume24h = $2, 
-                priceUsd = $3, 
-                marketCap = $4,
-                timestamp = $5
-            WHERE mint = $6
-        `, [totalLiquidity, totalVolume, bestPrice, marketCap, Date.now(), mint]);
-
+            UPDATE tokens 
+            SET liquidity = $1, volume24h = $2, priceUsd = $3, marketCap = ($3 * supply / POWER(10, decimals))
+            WHERE mint = $4
+        `, [totalLiq, totalVol, maxPrice, mint]);
+        
     } catch (err) {
-        logger.error(`Aggregation Failed for ${mint}: ${err.message}`);
+        logger.error(`Aggregation Error ${mint}: ${err.message}`);
     }
-};
+}
 
 module.exports = {
-  getDB: () => dbWrapper,
-  initDB,
-  smartCache,
-  enableIndexing,
-  aggregateAndSaveToken
+    initDB,
+    getDB,
+    smartCache,
+    enableIndexing,
+    aggregateAndSaveToken
 };
