@@ -30,7 +30,6 @@ async function findPoolsViaGeckoTerminal(mintAddress) {
                 pairAddress: attr.address,
                 dexId: rel?.dex?.data?.id || 'unknown',
                 type: 'standard', 
-                // Return object format, Database service will handle resolution
                 baseToken: { address: rel?.base_token?.data?.id?.replace('solana_', '') || mintAddress },
                 quoteToken: { address: rel?.quote_token?.data?.id?.replace('solana_', '') || 'So11111111111111111111111111111111111111112' },
                 liquidity: { usd: parseFloat(attr.reserve_in_usd || 0) },
@@ -49,16 +48,18 @@ async function findPoolsViaGeckoTerminal(mintAddress) {
     }
 }
 
+// Exported for use in Snapshotter (Self-Healing)
 async function enrichPoolsWithReserves(pools) {
     if (pools.length === 0) return;
     const targets = pools.filter(p => p.dexId !== 'pumpfun' && !p.reserve_a);
     if (targets.length === 0) return;
 
     const connection = getSolanaConnection();
-    // Batch in 100s to avoid RPC limit if many pools
-    for (let i = 0; i < targets.length; i += 100) {
-        const batch = targets.slice(i, i + 100);
-        const pubkeys = batch.map(p => new PublicKey(p.pairAddress));
+    
+    // Process in batches
+    for (let i = 0; i < targets.length; i += 50) {
+        const batch = targets.slice(i, i + 50);
+        const pubkeys = batch.map(p => new PublicKey(p.pairAddress || p.address)); // Handle both property names
 
         try {
             const accounts = await retryRPC(() => connection.getMultipleAccountsInfo(pubkeys));
@@ -75,6 +76,7 @@ async function enrichPoolsWithReserves(pools) {
                         const reserveB = new PublicKey(acc.data.subarray(layout.offB, layout.offB + 32));
                         pool.reserve_a = reserveA.toBase58();
                         pool.reserve_b = reserveB.toBase58();
+                        // logger.info(`✅ Enriched ${layout.name} Reserves: ${pool.address}`);
                     } catch (parseErr) {}
                 } else if (pool.dexId === 'whirlpool' || owner === 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc') {
                     try {
@@ -130,4 +132,4 @@ async function findPoolsOnChain(mintAddress) {
     return pools;
 }
 
-module.exports = { findPoolsOnChain };
+module.exports = { findPoolsOnChain, enrichPoolsWithReserves };

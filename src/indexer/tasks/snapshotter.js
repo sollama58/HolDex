@@ -4,6 +4,7 @@ const { getDB, aggregateAndSaveToken } = require('../../services/database');
 const { getClient } = require('../../services/redis');
 const logger = require('../../services/logger');
 const { getRealVolume } = require('../services/volume_tracker');
+const { enrichPoolsWithReserves } = require('../../services/pool_finder');
 
 const stateCache = new Map();
 const QUOTE_TOKENS = {
@@ -14,7 +15,6 @@ const QUOTE_TOKENS = {
 
 let solPriceCache = 200; 
 
-// Update SOL Price every minute (simple cache)
 async function updateSolPrice(db) {
     try {
         const pool = await db.get(`SELECT price_usd FROM pools WHERE token_a = 'So11111111111111111111111111111111111111112' AND liquidity_usd > 10000 ORDER BY liquidity_usd DESC LIMIT 1`);
@@ -23,13 +23,29 @@ async function updateSolPrice(db) {
 }
 
 async function processPoolBatch(db, connection, pools, redis) {
+    const timestamp = Math.floor(Date.now() / 60000) * 60000;
+    const now = Date.now();
+    
+    // --- SELF-HEAL: Check for missing reserves ---
+    const poolsNeedingReserves = pools.filter(p => p.dex !== 'pumpfun' && (!p.reserve_a || !p.reserve_b));
+    if (poolsNeedingReserves.length > 0) {
+        // logger.info(`🩹 Self-Healing: Fetching reserves for ${poolsNeedingReserves.length} pools...`);
+        await enrichPoolsWithReserves(poolsNeedingReserves);
+        
+        // Save enriched reserves to DB so next time is faster
+        const fixPromises = poolsNeedingReserves.map(p => {
+            if (p.reserve_a && p.reserve_b) {
+                return db.query(`UPDATE pools SET reserve_a = $1, reserve_b = $2 WHERE address = $3`, [p.reserve_a, p.reserve_b, p.address]);
+            }
+        });
+        await Promise.allSettled(fixPromises);
+    }
+    // ---------------------------------------------
+
     const keysToFetch = [];
     const poolMap = new Map();
     const affectedMints = new Set();
-    const timestamp = Math.floor(Date.now() / 60000) * 60000;
-    const now = Date.now();
 
-    // 1. Prepare Batch Request for Reserves
     pools.forEach(p => {
         try {
             if (p.dex === 'pumpfun' && p.reserve_a) {
@@ -45,7 +61,7 @@ async function processPoolBatch(db, connection, pools, redis) {
     });
 
     if (keysToFetch.length === 0) {
-        // Even if no keys to fetch, mark these pools as checked so we don't get stuck
+        // Mark checked to allow rotation even if broken
         for (const p of pools) {
             await db.query(`UPDATE active_trackers SET last_check = $1 WHERE pool_address = $2`, [now, p.address]);
         }
@@ -56,19 +72,15 @@ async function processPoolBatch(db, connection, pools, redis) {
     try { 
         accounts = await retryRPC((conn) => conn.getMultipleAccountsInfo(keysToFetch));
     } catch (e) {
-        // If RPC fails, return but do NOT mark as checked so we retry quickly? 
-        // Or mark as checked to allow rotation? Let's mark as checked to prevent blockage.
-        logger.warn(`Batch RPC Failed: ${e.message}`);
-        // Fallthrough to update trackers
+        // Failed RPC, skip but don't crash
+        return;
     }
 
     const updates = [];
     const trackerUpdates = [];
     
-    // 2. Process Price & Liquidity
     for (const p of pools) {
-        // ALWAYS update last_check to ensure we rotate to other pools in the next cycle
-        // This fixes the "stuck on broken pools" issue
+        // Always rotate
         trackerUpdates.push(db.query(`UPDATE active_trackers SET last_check = $1 WHERE pool_address = $2`, [now, p.address]));
 
         const task = poolMap.get(p.address);
@@ -108,6 +120,7 @@ async function processPoolBatch(db, connection, pools, redis) {
                     
                     if (isBQuote) {
                         decB = isBQuote.decimals;
+                        // Use default 6 for unknown token base
                         decA = 6; 
                     } else if (isAQuote) {
                         decA = isAQuote.decimals;
@@ -138,7 +151,7 @@ async function processPoolBatch(db, connection, pools, redis) {
             } catch (err) {}
         }
 
-        // Async Volume Check
+        // Volume Check (Async)
         const volKey = `vol_last_check:${p.address}`;
         const lastCheck = stateCache.get(volKey) || 0;
         if (now - lastCheck > 120000) { 
@@ -179,7 +192,7 @@ async function runSnapshotCycle() {
         const connection = getSolanaConnection(); 
         await updateSolPrice(db);
         
-        // Fetch pools. Sort by last_check to prioritize those not checked recently.
+        // Fetch pools, prioritizing those not recently checked
         const res = await db.query(`
             SELECT tr.pool_address, tr.last_check, p.* FROM active_trackers tr 
             JOIN pools p ON tr.pool_address = p.address 
@@ -187,10 +200,6 @@ async function runSnapshotCycle() {
             LIMIT 200
         `);
         const pools = res.rows;
-
-        if (pools.length > 0) {
-            logger.info(`⏱️ Snapshotter: Updating ${pools.length} pools...`);
-        }
 
         for (let i = 0; i < pools.length; i += 50) {
             await processPoolBatch(db, connection, pools.slice(i, i + 50), null);

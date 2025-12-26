@@ -26,7 +26,6 @@ const requireAdmin = (req, res, next) => {
 function init(deps) {
     const { db } = deps;
 
-    // ... (helper functions like verifyPayment, indexTokenOnChain remain similar) ...
     async function verifyPayment(signature, payerPubkey) {
         if (!signature) throw new Error("Payment signature required");
         const existing = await db.get('SELECT id FROM token_updates WHERE signature = $1', [signature]);
@@ -89,7 +88,6 @@ function init(deps) {
         return { ...baseData, pairs: pools };
     }
 
-    // --- CANDLES ENDPOINT (ROBUST) ---
     router.get('/token/:mint/candles', async (req, res) => {
         const { mint } = req.params;
         const { resolution = '5', from, to, poolAddress } = req.query; 
@@ -100,20 +98,17 @@ function init(deps) {
             const fromMs = parseInt(from) * 1000 || (Date.now() - 24 * 60 * 60 * 1000);
             const toMs = parseInt(to) * 1000 || Date.now();
             
-            // Generate cache key
             const cacheKey = `chart:${mint}:${poolAddress || 'best'}:${resolution}:${Math.floor(Date.now() / 30000)}`; 
 
             const result = await smartCache(cacheKey, 30, async () => {
                 let targetPoolAddress = poolAddress;
 
-                // 1. If no specific pool, find best
                 if (!targetPoolAddress) {
                     const bestPool = await db.get(`SELECT address FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC LIMIT 1`, [mint]);
                     if (!bestPool) return { success: false, error: "Token not indexed" };
                     targetPoolAddress = bestPool.address;
                 }
 
-                // 2. Fetch Rows (Postgres returns BIGINT as strings, handled below)
                 const rows = await db.all(`
                     SELECT timestamp, open, high, low, close, volume 
                     FROM candles_1m 
@@ -125,7 +120,6 @@ function init(deps) {
                 
                 if (!rows || rows.length === 0) return { success: true, candles: [] };
 
-                // 3. Helper to parse time safely
                 const parseTime = (t) => parseInt(String(t)); 
 
                 if (resMinutes === 1) {
@@ -135,7 +129,6 @@ function init(deps) {
                     }))};
                 }
 
-                // 4. Aggregation
                 const candles = [];
                 let currentCandle = null;
 
@@ -227,7 +220,6 @@ function init(deps) {
                 let tokenData = { ...token };
                 if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
                 
-                // Unwrap Metadata
                 if (tokenData.metadata) {
                     try {
                         const meta = typeof tokenData.metadata === 'string' ? JSON.parse(tokenData.metadata) : tokenData.metadata;
@@ -239,7 +231,6 @@ function init(deps) {
                     } catch (e) {}
                 }
 
-                // Dynamic Price Calculation
                 if (pairs.length > 0) {
                     const mainPool = pairs[0];
                     if (mainPool.price_usd > 0) tokenData.priceUsd = mainPool.price_usd;
@@ -248,14 +239,24 @@ function init(deps) {
                     const oneHourAgo = now - (60 * 60 * 1000);
                     const twentyFourHoursAgo = now - (24 * 60 * 60 * 1000);
 
-                    // Note: Use safe helper to avoid crash if table empty
+                    // Robust query with fallback
                     const [c1h, c24h] = await Promise.all([
                         db.get(`SELECT close FROM candles_1m WHERE pool_address = $1 AND timestamp <= $2 ORDER BY timestamp DESC LIMIT 1`, [mainPool.address, oneHourAgo]),
                         db.get(`SELECT close FROM candles_1m WHERE pool_address = $1 AND timestamp <= $2 ORDER BY timestamp DESC LIMIT 1`, [mainPool.address, twentyFourHoursAgo])
                     ]);
 
-                    if (c1h && c1h.close > 0) tokenData.change1h = ((tokenData.priceUsd - c1h.close) / c1h.close) * 100;
-                    if (c24h && c24h.close > 0) tokenData.change24h = ((tokenData.priceUsd - c24h.close) / c24h.close) * 100;
+                    // Calculate changes, ensuring floats
+                    if (c1h && c1h.close > 0) {
+                        tokenData.change1h = ((tokenData.priceUsd - c1h.close) / c1h.close) * 100;
+                    } else {
+                        tokenData.change1h = 0; // Or keep existing if desired
+                    }
+                    
+                    if (c24h && c24h.close > 0) {
+                        tokenData.change24h = ((tokenData.priceUsd - c24h.close) / c24h.close) * 100;
+                    } else {
+                        tokenData.change24h = 0;
+                    }
                 }
 
                 return { success: true, token: { ...tokenData, pairs } };
@@ -271,7 +272,7 @@ function init(deps) {
         try {
             const isGenericView = !search;
             const cacheKey = `api:tokens:list:${sort}:${page}:${search}`;
-            const redis = getClient(); // safe if null
+            const redis = getClient(); 
 
             if (isGenericView && redis) {
                 try {
@@ -332,8 +333,6 @@ function init(deps) {
 
         } catch (e) { res.status(500).json({ success: false, tokens: [], error: e.message }); }
     });
-
-    // ... (Admin routes omitted for brevity but should follow same pattern) ...
     
     return router;
 }
