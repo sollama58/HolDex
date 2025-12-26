@@ -17,28 +17,38 @@ const SLICE_OFF_QUOTE_VAULT = 32;
 const SLICE_OFF_BASE_MINT = 80;   
 const SLICE_OFF_QUOTE_MINT = 112; 
 
+// --- SINGLETON CONNECTION ---
+let _cachedConnection = null;
+
 /**
- * Robust Connection Getter
- * Ensures we have a valid web3.Connection object with required methods.
+ * Robust Connection Getter (Singleton)
+ * Checks if the service connection is valid. If not, instantiates a fallback ONCE.
  */
 function getValidConnection() {
+    // 1. Return cached if available
+    if (_cachedConnection) return _cachedConnection;
+
     let conn = null;
     try {
         conn = getSolanaConnection();
     } catch (e) {
-        logger.warn('getSolanaConnection failed, falling back to new instance');
+        // Ignore initial fetch error
     }
 
-    // Check if the returned object is a valid Connection (has key methods)
+    // 2. Validate the imported connection
+    // It must have the method we need: getTokenAccountsByMint
     if (conn && typeof conn.getTokenAccountsByMint === 'function') {
+        _cachedConnection = conn;
         return conn;
     }
 
-    logger.warn('⚠️ getSolanaConnection() returned invalid object. Instantiating fallback Connection.');
+    // 3. Create Fallback (Only happens once)
+    logger.warn('⚠️ Service Connection lacks required methods. Initializing dedicated fallback connection.');
     
-    // Fallback: Create a standard connection
     const rpcUrl = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
-    return new Connection(rpcUrl, 'confirmed');
+    _cachedConnection = new Connection(rpcUrl, 'confirmed');
+    
+    return _cachedConnection;
 }
 
 /**
@@ -131,11 +141,6 @@ async function findPoolsByTokenOwnership(mintAddress, results) {
         const connection = getValidConnection();
         const mint = new PublicKey(mintAddress);
         const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-
-        // Check if connection is valid before call
-        if (typeof connection.getTokenAccountsByMint !== 'function') {
-            throw new Error("Connection object missing getTokenAccountsByMint");
-        }
 
         const tokenAccounts = await retryRPC(() => connection.getTokenAccountsByMint(mint, { programId: TOKEN_PROGRAM_ID }));
 
