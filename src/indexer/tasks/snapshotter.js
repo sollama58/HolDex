@@ -146,7 +146,13 @@ async function processPoolBatch(db, connection, pools, redis) {
                         liquidityUsd = rawA * quotePrice * 2;
                     }
 
-                    if (priceUsd > 0) success = true;
+                    if (priceUsd > 0) {
+                        success = true;
+                        // Log significant updates occasionally to verify liveness
+                        if (Math.random() < 0.05) { 
+                            logger.info(`💧 Price Update: ${p.mint} -> $${priceUsd.toFixed(6)}`);
+                        }
+                    }
                 }
             } catch (err) {}
         }

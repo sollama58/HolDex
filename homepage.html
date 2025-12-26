@@ -251,7 +251,7 @@
             </div>
             <div class="grid md:grid-cols-3 gap-6">
                 <div class="feature-box"><div class="text-[#fb923c] mb-2"><i data-lucide="lock" width="24"></i></div><h4 class="font-bold text-white text-lg">K-Score Protocol</h4><p class="text-sm text-[#9a3412]">Our "Conviction Score" analyzes holder distribution and token velocity to rate asset health.</p></div>
-                <div class="feature-box"><div class="text-[#22c55e] mb-2"><i data-lucide="users" width="24"></i></div><h4 class="font-bold text-white text-lg">Community Verified</h4><p class="text-sm text-[#9a3412]">Projects can verify their identity on-chain, earning the green badge and higher trust.</p></div>
+                <div class="feature-box"><div class="text-[#22c55e] mb-2"><i data-lucide="users" width="24"></i></div><h4 class="font-bold text-white text-lg">Community Verified</h4><p class="text-sm text-[#9a3412]">Projects can verify their identity on-chain, earning the green badge and higher visibility.</p></div>
                 <div class="feature-box"><div class="text-[#a855f7] mb-2"><i data-lucide="zap" width="24"></i></div><h4 class="font-bold text-white text-lg">Zero Bloat</h4><p class="text-sm text-[#9a3412]">No ads. No trackers. Just data. Built for maximum performance on any device.</p></div>
             </div>
             <div class="bg-[#0f0502] border border-[#7c2d12] rounded-xl p-8 relative overflow-hidden group hover:border-[#ea580c] transition-colors">
@@ -354,10 +354,9 @@
                      </div>
                      
                      <div class="flex items-center gap-1 bg-[#0f0502] p-1 rounded-lg border border-[#7c2d12]">
-                         <button onclick="setResolution('1')" class="res-btn" id="res-1">1m</button>
-                         <button onclick="setResolution('5')" class="res-btn" id="res-5">5m</button>
+                         <button onclick="setResolution('5')" class="res-btn active" id="res-5">5m</button>
                          <button onclick="setResolution('15')" class="res-btn" id="res-15">15m</button>
-                         <button onclick="setResolution('60')" class="res-btn active" id="res-60">1H</button>
+                         <button onclick="setResolution('60')" class="res-btn" id="res-60">1H</button>
                          <button onclick="setResolution('240')" class="res-btn" id="res-240">4H</button>
                          <button onclick="setResolution('D')" class="res-btn" id="res-D">1D</button>
                      </div>
@@ -416,7 +415,7 @@ fetch('<span class="text-white">https://asdev-backend.onrender.com/api/token/So1
 fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1700000000&to=1700086400</span>');
 
 <span class="text-[#9a3412]">// Query Parameters</span>
-?resolution -> '1', '5', '15', '60', '240', 'D' (Minutes, default: 5)
+?resolution -> '5', '15', '60', '240', 'D' (Minutes, default: 5)
 ?from       -> Unix Timestamp (Seconds)
 ?to         -> Unix Timestamp (Seconds)
                 </div>

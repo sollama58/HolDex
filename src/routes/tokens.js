@@ -123,6 +123,7 @@ function init(deps) {
                 const parseTime = (t) => parseInt(String(t)); 
 
                 if (resMinutes === 1) {
+                    // Logic retained for backward compatibility if user manually requests 1m
                     return { success: true, candles: rows.map(r => ({
                         time: Math.floor(parseTime(r.timestamp) / 1000),
                         open: r.open, high: r.high, low: r.low, close: r.close
@@ -239,21 +240,29 @@ function init(deps) {
                     const oneHourAgo = now - (60 * 60 * 1000);
                     const twentyFourHoursAgo = now - (24 * 60 * 60 * 1000);
 
-                    // Robust query with fallback
-                    const [c1h, c24h] = await Promise.all([
+                    const [c1h, c24h, oldest] = await Promise.all([
                         db.get(`SELECT close FROM candles_1m WHERE pool_address = $1 AND timestamp <= $2 ORDER BY timestamp DESC LIMIT 1`, [mainPool.address, oneHourAgo]),
-                        db.get(`SELECT close FROM candles_1m WHERE pool_address = $1 AND timestamp <= $2 ORDER BY timestamp DESC LIMIT 1`, [mainPool.address, twentyFourHoursAgo])
+                        db.get(`SELECT close FROM candles_1m WHERE pool_address = $1 AND timestamp <= $2 ORDER BY timestamp DESC LIMIT 1`, [mainPool.address, twentyFourHoursAgo]),
+                        db.get(`SELECT close, timestamp FROM candles_1m WHERE pool_address = $1 ORDER BY timestamp ASC LIMIT 1`, [mainPool.address])
                     ]);
 
-                    // Calculate changes, ensuring floats
+                    // Smart Percentage Change:
+                    // If no candle exists exactly 1 hour ago, try using the oldest available candle
+                    // This handles newly launched tokens gracefully.
                     if (c1h && c1h.close > 0) {
                         tokenData.change1h = ((tokenData.priceUsd - c1h.close) / c1h.close) * 100;
+                    } else if (oldest && oldest.close > 0 && oldest.timestamp < (now - 60000)) {
+                        // Fallback: If oldest candle is at least 1 min old, calculate change since then
+                        tokenData.change1h = ((tokenData.priceUsd - oldest.close) / oldest.close) * 100;
                     } else {
-                        tokenData.change1h = 0; // Or keep existing if desired
+                        tokenData.change1h = 0;
                     }
                     
                     if (c24h && c24h.close > 0) {
                         tokenData.change24h = ((tokenData.priceUsd - c24h.close) / c24h.close) * 100;
+                    } else if (oldest && oldest.close > 0 && oldest.timestamp < (now - 300000)) {
+                         // Fallback: Use oldest for 24h too if token is < 24h old
+                        tokenData.change24h = ((tokenData.priceUsd - oldest.close) / oldest.close) * 100;
                     } else {
                         tokenData.change24h = 0;
                     }
