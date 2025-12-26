@@ -90,7 +90,7 @@
         .res-btn { background: transparent; border: 1px solid transparent; color: #9a3412; padding: 4px 8px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 11px; font-weight: bold; cursor: pointer; transition: all 0.1s; }
         .res-btn:hover { color: #fb923c; border-color: #451a03; }
         .res-btn.active { background: #451a03; color: #ea580c; border-color: #7c2d12; }
-        #tv-chart { flex: 1; position: relative; }
+        #tv-chart { flex: 1; position: relative; width: 100%; height: 100%; }
 
         .stat-card { background: rgba(69, 26, 3, 0.8); border: 2px solid #7c2d12; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 4px; box-shadow: 4px 4px 0 rgba(0,0,0,0.2); }
         .stat-label { font-size: 11px; color: #fb923c; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
@@ -449,7 +449,7 @@
     <!-- DETAIL VIEW -->
     <div id="view-detail" class="view-section px-4 md:px-0">
         <div id="detail-loading" class="text-center py-20 text-[#ea580c] font-mono animate-pulse hidden">Fetching Chain Data...</div>
-        <div id="detail-content">
+        <div id="detail-content" style="display: none;">
             <div id="detail-banner-container" class="hidden mb-6"></div>
 
             <div class="flex flex-col md:flex-row gap-6 mb-8 items-start">
@@ -680,22 +680,13 @@
     const FALLBACK_BANNER = "https://images.squarespace-cdn.com/content/690b8c21384b3f1201c2650c/967ea61f-a88a-4497-81c2-5c67d3d06d9e/Gemini_Generated_Image_c82gwyc82gwyc82g.png?content-type=image%2Fpng";
     const TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
     const ASSOCIATED_TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
-
-    // SECURITY FIX: Removed Hardcoded Key.
-    // Ideally this should be fetched from a proxy backend or handled via standard RPC endpoints.
-    const HELIUS_API_KEY = ""; 
-
-    // Robust list of public RPCs to rotate through
-    let RPC_ENDPOINTS = [
+    
+    // UPDATED: Standard Public RPC Endpoints (No API Keys required)
+    const RPC_ENDPOINTS = [
         "https://api.mainnet-beta.solana.com", 
         "https://solana-api.projectserum.com", 
         "https://rpc.ankr.com/solana"
     ];
-    
-    if (HELIUS_API_KEY && HELIUS_API_KEY.length > 5) {
-        RPC_ENDPOINTS.unshift(`https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`);
-        console.log("Helius RPC enabled");
-    }
 
     // --- State ---
     let currentSort = 'kscore'; // Default to K-Score
@@ -738,10 +729,29 @@
 
     // --- Chart Functions ---
     function initChart() {
-        if (chartInstance) return; // Already exists
+        if (chartInstance) {
+            // Force resize if already exists but was hidden
+            const container = document.getElementById('tv-chart');
+            if (container) {
+                const rect = container.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                    chartInstance.applyOptions({ width: rect.width, height: rect.height });
+                }
+            }
+            return;
+        }
 
         const container = document.getElementById('tv-chart');
+        if (!container) return;
+
+        // Ensure container has dimensions
+        const rect = container.getBoundingClientRect();
+        const width = rect.width > 0 ? rect.width : container.clientWidth;
+        const height = rect.height > 0 ? rect.height : container.clientHeight;
+
         chartInstance = LightweightCharts.createChart(container, {
+            width: width,
+            height: height,
             layout: { background: { type: 'solid', color: '#1a0a05' }, textColor: '#9a3412' },
             grid: { vertLines: { color: '#2a1005' }, horzLines: { color: '#2a1005' } },
             crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
@@ -757,7 +767,9 @@
         new ResizeObserver(entries => {
             if (entries.length === 0 || entries[0].target !== container) return;
             const newRect = entries[0].contentRect;
-            chartInstance.applyOptions({ width: newRect.width, height: newRect.height });
+            if (newRect.width > 0 && newRect.height > 0) {
+                 chartInstance.applyOptions({ width: newRect.width, height: newRect.height });
+            }
         }).observe(container);
     }
 
@@ -775,7 +787,7 @@
         currentMint = mint;
         
         // Ensure chart is initialized
-        if (!chartInstance) initChart();
+        initChart();
 
         try {
             // Determine 'from' based on resolution to get a decent initial view
@@ -784,14 +796,25 @@
             if (currentResolution === '1') from = now - (4 * 60 * 60); // 4h for 1m
             if (currentResolution === 'D') from = now - (30 * 24 * 60 * 60); // 30d for Daily
 
-            const res = await fetch(`${API_URL}/api/token/${mint}/candles?resolution=${currentResolution}&from=${from}&to=${now}`);
+            // Add Cache Busting
+            const endpoint = `${API_URL}/api/token/${mint}/candles?resolution=${currentResolution}&from=${from}&to=${now}&_=${Date.now()}`;
+            
+            const res = await fetch(endpoint);
             const data = await res.json();
             
-            if (data.success && data.candles.length > 0) {
-                candleSeries.setData(data.candles);
-                chartInstance.timeScale().fitContent();
+            if (data.success && Array.isArray(data.candles)) {
+                 // Map data to ensure strict format if needed
+                const cleanData = data.candles.map(c => ({
+                    time: c.time,
+                    open: parseFloat(c.open),
+                    high: parseFloat(c.high),
+                    low: parseFloat(c.low),
+                    close: parseFloat(c.close)
+                }));
+
+                candleSeries.setData(cleanData);
+                if (cleanData.length > 0) chartInstance.timeScale().fitContent();
             } else {
-                console.warn("No candle data available yet.");
                 candleSeries.setData([]); // Clear
             }
         } catch (e) { console.error("Chart Fetch Failed", e); }
@@ -1411,11 +1434,14 @@
                     }
                 }
                 
-                // --- NEW: Load Internal Chart ---
-                await fetchCandles(mint);
-
                 if(loadingDiv) loadingDiv.style.display = 'none'; 
                 if(contentDiv) contentDiv.style.display = 'block';
+
+                // --- CRITICAL FIX: Load Chart AFTER View is Visible ---
+                setTimeout(async () => {
+                     await fetchCandles(mint);
+                }, 100);
+
             }
         } catch (e) { console.error(e); if(loadingDiv) loadingDiv.innerText = "Error Loading Token Data"; }
     }
