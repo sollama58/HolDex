@@ -8,7 +8,6 @@ const { PublicKey } = require('@solana/web3.js');
 const logger = require('./services/logger');
 
 const QUEUE_KEY = 'token_queue';
-const PROCESSING_INTERVAL = 1000;
 
 async function processToken(mint) {
     const db = getDB();
@@ -17,10 +16,10 @@ async function processToken(mint) {
     logger.info(`⚙️ Worker: Processing ${mint}...`);
 
     try {
-        // 1. Fetch Metadata
+        // 1. Fetch Metadata (Off-chain)
         const meta = await fetchTokenMetadata(mint);
         
-        // 2. Fetch Supply
+        // 2. Fetch Supply (On-chain)
         let supply = '1000000000';
         let decimals = 9;
         try {
@@ -31,19 +30,20 @@ async function processToken(mint) {
             logger.warn(`Failed to fetch supply for ${mint}: ${e.message}`);
         }
 
-        // 3. Find Pools
+        // 3. Find Pools (On-chain & API)
         const pools = await findPoolsOnChain(mint);
 
-        // 4. Index Pools (This calls enableIndexing which we fixed)
+        // 4. Index Pools
         for (const pool of pools) {
+            // enableIndexing now handles token extraction robustly (object vs string)
             await enableIndexing(db, mint, {
                 pairAddress: pool.pairAddress,
                 dexId: pool.dexId,
                 liquidity: pool.liquidity || { usd: 0 },
                 volume: pool.volume || { h24: 0 },
                 priceUsd: pool.priceUsd || 0,
-                baseToken: pool.baseToken, // Object or String
-                quoteToken: pool.quoteToken, // Object or String
+                baseToken: pool.baseToken, 
+                quoteToken: pool.quoteToken, 
                 reserve_a: pool.reserve_a,
                 reserve_b: pool.reserve_b
             });
@@ -55,6 +55,10 @@ async function processToken(mint) {
             ticker: meta?.symbol || 'UNKNOWN',
             image: meta?.image || null,
         };
+
+        // Fallback checks for critical fields
+        const finalSupply = supply || '0';
+        const finalDecimals = decimals || 9;
 
         await db.run(`
             INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, timestamp)
@@ -69,40 +73,46 @@ async function processToken(mint) {
             baseData.name, 
             baseData.ticker, 
             baseData.image, 
-            supply, 
-            decimals, 
+            finalSupply, 
+            finalDecimals, 
             0, 0, 0, 0, 0, 
             Date.now()
         ]);
 
+        // 6. Aggregate Stats
         await aggregateAndSaveToken(db, mint);
         logger.info(`✅ Worker: Finished ${mint}`);
 
     } catch (e) {
         logger.error(`❌ Worker Error [${mint}]: ${e.message}`);
-        // Consider re-queueing if transient
     }
 }
 
 async function startWorker() {
     try {
         logger.info("🛠️ Worker: Starting...");
+        
+        // Initialize services
         await initDB();
         await connectRedis();
+        
         const redis = getClient();
+        if (!redis) {
+            throw new Error("Redis client failed to initialize.");
+        }
 
-        logger.info("🛠️ Worker: Connected to services. Waiting for jobs...");
+        logger.info("🛠️ Worker: Services Ready. Waiting for jobs...");
 
-        // Loop forever
+        // Job Loop
         while (true) {
             try {
-                // BLPOP blocks until an item is available or timeout (0 = infinite, but we use 2s to allow heartbeat)
-                // Redis client might not support blocking promise elegantly depending on version, so we poll
+                // RPOP is non-blocking in ioredis, so we poll
                 const item = await redis.rpop(QUEUE_KEY);
                 
                 if (item) {
                     await processToken(item);
                 } else {
+                    // Sleep 2 seconds if queue empty
                     await new Promise(r => setTimeout(r, 2000));
                 }
             } catch (err) {
