@@ -6,6 +6,9 @@ const logger = require('../../services/logger');
 let isSnapshotRunning = false;
 let solPriceCache = 200; 
 
+// Memory Cache for Reserve Deltas (To calculate Volume)
+const reserveCache = new Map(); // poolAddress -> { quoteReserve: number }
+
 const RAY_COIN_VAULT_OFFSET = 432; 
 const RAY_PC_VAULT_OFFSET = 464;
 const ORCA_VAULT_A_OFFSET = 101;
@@ -46,7 +49,6 @@ async function snapshotPools(poolAddresses) {
     // Reuse the main logic logic by refactoring or duplicating slightly for safety
     // For brevity and safety in this hot-fix, we use a simplified version of the logic loop
     
-    // (Logic identical to runSnapshotCycle but targeted)
     const keysToFetch = [];
     const poolMap = new Map();
 
@@ -77,6 +79,7 @@ async function snapshotPools(poolAddresses) {
             if (!task) continue;
 
             let nativePrice = 0, liquidityUsd = 0, quoteIsSol = false;
+            let currentQuoteReserve = 0;
             
             if (task.type === 'pump') {
                 const data = accounts[task.index]?.data;
@@ -88,6 +91,7 @@ async function snapshotPools(poolAddresses) {
                          nativePrice = Number(vSol) / Number(vToken);
                          liquidityUsd = (Number(realSol) / 1e9) * solPriceCache;
                          quoteIsSol = true;
+                         currentQuoteReserve = Number(realSol) / 1e9;
                      }
                 }
             } else if (task.type === 'direct') {
@@ -102,18 +106,36 @@ async function snapshotPools(poolAddresses) {
                          if (balB > 0) nativePrice = balA/balB;
                          liquidityUsd = (balA/1e9) * solPriceCache;
                          quoteIsSol = true;
+                         currentQuoteReserve = balA/1e9;
                      } else {
                          if (balA > 0) nativePrice = balB/balA;
                          liquidityUsd = (balB/1e9) * solPriceCache; // assume B is SOL
                          quoteIsSol = true;
+                         currentQuoteReserve = balB/1e9;
                      }
                 }
             }
 
             if (nativePrice > 0) {
                 const finalPrice = quoteIsSol ? nativePrice * solPriceCache : nativePrice;
+                
+                // --- VOLUME CALCULATION ---
+                let approxVolume = 0;
+                // Only calculate volume if we have a previous state in cache
+                if (reserveCache.has(p.pool_address)) {
+                    const prev = reserveCache.get(p.pool_address);
+                    const delta = Math.abs(currentQuoteReserve - prev.quoteReserve);
+                    // Filter noise/small dust
+                    if (delta > 0.0001) {
+                         approxVolume = delta; // Volume in Native Quote Units (SOL)
+                    }
+                }
+                // Update Cache
+                reserveCache.set(p.pool_address, { quoteReserve: currentQuoteReserve });
+
                 await db.run(`UPDATE pools SET price_usd = $1, liquidity_usd = $2 WHERE address = $3`, [finalPrice, liquidityUsd, p.pool_address]);
-                await db.run(`INSERT INTO candles_1m (pool_address, timestamp, open, high, low, close, volume) VALUES ($1, $2, $3, $3, $3, $3, 0) ON CONFLICT(pool_address, timestamp) DO UPDATE SET close = $3`, [p.pool_address, timestamp, finalPrice]);
+                // Insert Approx Volume
+                await db.run(`INSERT INTO candles_1m (pool_address, timestamp, open, high, low, close, volume) VALUES ($1, $2, $3, $3, $3, $3, $4) ON CONFLICT(pool_address, timestamp) DO UPDATE SET close = $3, volume = candles_1m.volume + $4`, [p.pool_address, timestamp, finalPrice, approxVolume]);
             }
         }
     } catch (e) { logger.error(`Immediate Snapshot failed: ${e.message}`); }
@@ -125,14 +147,7 @@ async function runSnapshotCycle() {
     const db = getDB();
     const connection = getConnection();
     await updateSolPrice(db);
-    // ... (Keep existing cycle logic identical to previous file, just condensed here for brevity)
-    // Please ensure the previous logic for runSnapshotCycle is preserved!
-    // I am only showing the NEW export above.
-    
-    // ... Rest of original runSnapshotCycle code ... 
-    // To ensure file integrity, I will paste the FULL original logic + the new function below.
-    
-    // START ORIGINAL LOGIC RESTORATION
+
     const BATCH_SIZE = 100;
     const timestamp = Math.floor(Date.now() / 60000) * 60000;
     let offset = 0;
@@ -168,6 +183,8 @@ async function runSnapshotCycle() {
                 const task = poolMap.get(p.pool_address);
                 if (!task) continue;
                 let nativePrice = 0, liquidityUsd = 0, quoteIsSol = false;
+                let currentQuoteReserve = 0;
+
                 try {
                     if (task.type === 'pump') {
                         const data = accounts[task.index]?.data;
@@ -179,6 +196,7 @@ async function runSnapshotCycle() {
                                 nativePrice = Number(vSol) / Number(vToken);
                                 liquidityUsd = (Number(realSol) / 1e9) * solPriceCache;
                                 quoteIsSol = true;
+                                currentQuoteReserve = Number(realSol) / 1e9;
                             }
                         }
                     } else if (task.type === 'discovery') {
@@ -206,10 +224,12 @@ async function runSnapshotCycle() {
                                 if (balB > 0) nativePrice = balA / balB; 
                                 liquidityUsd = (balA / (p.token_a.includes('So11') ? 1e9 : 1e6)) * (p.token_a.includes('So11') ? solPriceCache : 1);
                                 if (p.token_a.includes('So11')) quoteIsSol = true;
+                                currentQuoteReserve = balA / (p.token_a.includes('So11') ? 1e9 : 1e6);
                             } else if (isBQuote && !isAQuote) {
                                 if (balA > 0) nativePrice = balB / balA;
                                 liquidityUsd = (balB / (p.token_b.includes('So11') ? 1e9 : 1e6)) * (p.token_b.includes('So11') ? solPriceCache : 1);
                                 if (p.token_b.includes('So11')) quoteIsSol = true;
+                                currentQuoteReserve = balB / (p.token_b.includes('So11') ? 1e9 : 1e6);
                             } else {
                                 if (balA > 0) nativePrice = balB / balA;
                             }
@@ -217,7 +237,20 @@ async function runSnapshotCycle() {
                     }
                     if (nativePrice > 0) {
                         const finalPriceUsd = quoteIsSol ? (nativePrice * solPriceCache) : nativePrice;
-                        updates.push(db.run(`INSERT INTO candles_1m (pool_address, timestamp, open, high, low, close, volume) VALUES ($1, $2, $3, $3, $3, $3, 0) ON CONFLICT(pool_address, timestamp) DO UPDATE SET close = $3`, [p.pool_address, timestamp, finalPriceUsd]));
+                        
+                        // --- VOLUME LOGIC START ---
+                        let approxVolume = 0;
+                        if (reserveCache.has(p.pool_address)) {
+                            const prev = reserveCache.get(p.pool_address);
+                            const delta = Math.abs(currentQuoteReserve - prev.quoteReserve);
+                            if (delta > 0.000001) {
+                                approxVolume = delta;
+                            }
+                        }
+                        reserveCache.set(p.pool_address, { quoteReserve: currentQuoteReserve });
+                        // --- VOLUME LOGIC END ---
+
+                        updates.push(db.run(`INSERT INTO candles_1m (pool_address, timestamp, open, high, low, close, volume) VALUES ($1, $2, $3, $3, $3, $3, $4) ON CONFLICT(pool_address, timestamp) DO UPDATE SET close = $3, volume = candles_1m.volume + $4`, [p.pool_address, timestamp, finalPriceUsd, approxVolume]));
                         updates.push(db.run(`UPDATE pools SET price_usd = $1, liquidity_usd = $2 WHERE address = $3`, [finalPriceUsd, liquidityUsd, p.pool_address]));
                     }
                 } catch (e) {}

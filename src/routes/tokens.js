@@ -37,9 +37,12 @@ function init(deps) {
         const meta = await fetchTokenMetadata(mint);
         
         let supply = '0';
+        let decimals = 9; // Default to 9 for SOL standard
+        
         try {
             const supplyInfo = await solanaConnection.getTokenSupply(new PublicKey(mint));
-            supply = supplyInfo.value.amount; 
+            supply = supplyInfo.value.amount;
+            decimals = supplyInfo.value.decimals; // Capture decimals
         } catch (e) { console.warn(`Failed to fetch supply for ${mint}`); }
 
         const pools = await findPoolsOnChain(mint);
@@ -66,15 +69,17 @@ function init(deps) {
             description: meta?.description || ''
         };
 
+        // FIXED: Insert Decimals
         await db.run(`
-            INSERT INTO tokens (mint, name, symbol, image, supply, timestamp)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO tokens (mint, name, symbol, image, supply, decimals, timestamp)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT(mint) DO UPDATE SET
             name = EXCLUDED.name,
             symbol = EXCLUDED.symbol,
             image = EXCLUDED.image,
-            supply = EXCLUDED.supply
-        `, [mint, baseData.name, baseData.ticker, baseData.image, supply, Date.now()]);
+            supply = EXCLUDED.supply,
+            decimals = EXCLUDED.decimals
+        `, [mint, baseData.name, baseData.ticker, baseData.image, supply, decimals, Date.now()]);
 
         if (poolAddresses.length > 0) {
             await snapshotPools(poolAddresses);
