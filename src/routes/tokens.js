@@ -4,16 +4,15 @@ const { isValidPubkey } = require('../utils/solana');
 const { smartCache, enableIndexing } = require('../services/database'); 
 const { findPoolsOnChain } = require('../services/pool_finder');
 const { fetchTokenMetadata } = require('../utils/metaplex');
-const { getSolanaConnection } = require('../services/solana'); // Singleton
+const { getSolanaConnection } = require('../services/solana'); 
 const config = require('../config/env');
 const kScoreUpdater = require('../tasks/kScoreUpdater'); 
 const { getClient } = require('../services/redis'); 
-const { enqueueTokenUpdate } = require('../services/queue'); // Queue
-const { snapshotPools } = require('../indexer/tasks/snapshotter'); // Keep fallback
+const { enqueueTokenUpdate } = require('../services/queue'); 
+const { snapshotPools } = require('../indexer/tasks/snapshotter'); 
 const { fetchSolscanData } = require('../services/solscan');
 
 const router = express.Router();
-// Use Singleton Connection
 const solanaConnection = getSolanaConnection();
 
 function init(deps) {
@@ -69,14 +68,9 @@ function init(deps) {
             timestamp = $11
         `, [mint, baseData.name, baseData.ticker, baseData.image, supply, decimals, 0, 0, 0, 0, Date.now()]);
 
-        // SCALABILITY UPGRADE:
-        // 1. Push to Queue for background processing (Sustainability)
         await enqueueTokenUpdate(mint);
 
-        // 2. Perform one immediate snapshot for UX (Response Time)
-        // We only snapshot found pools, we don't do the heavy discovery here again.
         if (poolAddresses.length > 0) {
-            // Fire and forget (don't await) to speed up HTTP response
             snapshotPools(poolAddresses).catch(e => console.error("Immediate snapshot error:", e.message));
         }
 

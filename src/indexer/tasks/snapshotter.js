@@ -1,8 +1,8 @@
 const { PublicKey } = require('@solana/web3.js');
-const { getSolanaConnection } = require('../../services/solana'); // Use Singleton
+const { getSolanaConnection } = require('../../services/solana'); 
 const { getDB } = require('../../services/database');
 const { getClient } = require('../../services/redis');
-const { dequeueBatch } = require('../../services/queue'); // Use Queue
+const { dequeueBatch } = require('../../services/queue');
 const logger = require('../../services/logger');
 
 // Distributed Lock Configuration
@@ -18,10 +18,12 @@ const POOL_OFFSETS = {
 };
 
 const QUOTE_MINTS = new Set([
-    'So11111111111111111111111111111111111111112',
-    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+    'So11111111111111111111111111111111111111112', // SOL
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
 ]);
+
+const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 
 let solPriceCache = 200;
 
@@ -39,9 +41,6 @@ async function syncTokenPrice(db, mint, priceUsd, liquidityUsd, marketCap) {
     } catch (e) {}
 }
 
-/**
- * Process a specific list of pools (Batch Logic)
- */
 async function processPoolBatch(db, connection, pools, redis) {
     const keysToFetch = [];
     const poolMap = new Map();
@@ -52,24 +51,24 @@ async function processPoolBatch(db, connection, pools, redis) {
             if (p.dex === 'pump') {
                 keysToFetch.push(new PublicKey(p.address));
                 poolMap.set(p.address, { type: 'pump', index: keysToFetch.length - 1 });
-            } else if (['raydium', 'orca', 'meteora'].includes(p.dex)) {
-                if (p.reserve_a && p.reserve_b) {
-                    keysToFetch.push(new PublicKey(p.reserve_a));
-                    keysToFetch.push(new PublicKey(p.reserve_b));
-                    poolMap.set(p.address, { type: 'direct', idxA: keysToFetch.length - 2, idxB: keysToFetch.length - 1 });
-                } else {
-                    keysToFetch.push(new PublicKey(p.address));
-                    poolMap.set(p.address, { type: 'discovery', dex: p.dex, index: keysToFetch.length - 1 });
-                }
+            } else if (p.reserve_a && p.reserve_b) {
+                // We know both reserves (Ideal)
+                keysToFetch.push(new PublicKey(p.reserve_a));
+                keysToFetch.push(new PublicKey(p.reserve_b));
+                poolMap.set(p.address, { type: 'direct', idxA: keysToFetch.length - 2, idxB: keysToFetch.length - 1 });
+            } else {
+                // Discovery Needed: We have pool address, maybe reserve_a, but need reserve_b
+                keysToFetch.push(new PublicKey(p.address));
+                poolMap.set(p.address, { type: 'discovery', dex: p.dex, index: keysToFetch.length - 1 });
             }
-        } catch(e) { /* Invalid PK, skip */ }
+        } catch(e) { }
     });
 
     if (keysToFetch.length === 0) return;
 
     try {
         const accounts = await connection.getMultipleAccountsInfo(keysToFetch);
-        const updates = []; // Store promises for parallel execution
+        const updates = []; 
 
         for (const p of pools) {
             const task = poolMap.get(p.address);
@@ -80,35 +79,68 @@ async function processPoolBatch(db, connection, pools, redis) {
             const tokenSupply = 1000000000;
 
             try {
+                // --- PUMP ---
                 if (task.type === 'pump') {
                     const data = accounts[task.index]?.data;
                     if (data && data.length >= 40) {
                         const vToken = data.readBigUInt64LE(8);
                         const vSol = data.readBigUInt64LE(16);
                         const realSol = data.readBigUInt64LE(32);
-                        if (Number(vToken) > 0) {
+                        const complete = data.length >= 49 ? (data[48] === 1) : false;
+
+                        // If NOT complete, it's active. Calculate price.
+                        // If complete, liquidity is usually 0 here (migrated), so we ignore OR 
+                        // if users just added it, we might display 0 price until the Migrated pool is found.
+                        if (!complete && Number(vToken) > 0) {
                             nativePrice = Number(vSol) / Number(vToken);
                             liquidityUsd = (Number(realSol) / 1e9) * solPriceCache * 2;
                             quoteIsSol = true;
                             currentQuoteReserve = Number(realSol) / 1e9;
                         }
                     }
-                } else if (task.type === 'discovery') {
+                } 
+                // --- DISCOVERY (Includes Supply Hog results) ---
+                else if (task.type === 'discovery') {
                     const data = accounts[task.index]?.data;
-                    if (data) {
-                        let vaultA, vaultB;
-                        if (task.dex === 'raydium' && data.length >= 500) {
-                            vaultA = new PublicKey(data.subarray(POOL_OFFSETS.RAY_COIN, POOL_OFFSETS.RAY_COIN + 32));
-                            vaultB = new PublicKey(data.subarray(POOL_OFFSETS.RAY_PC, POOL_OFFSETS.RAY_PC + 32));
-                        }
-                        if (vaultA && vaultB) {
-                            updates.push(db.run(`UPDATE pools SET reserve_a = $1, reserve_b = $2 WHERE address = $3`, [vaultA.toString(), vaultB.toString(), p.address]));
+                    const poolAddr = new PublicKey(p.address);
+                    
+                    let vaultA, vaultB;
+
+                    // A. Raydium V4 Standard
+                    if (data && p.dex === 'raydium' && data.length === 752) {
+                        vaultA = new PublicKey(data.subarray(POOL_OFFSETS.RAY_COIN, POOL_OFFSETS.RAY_COIN + 32));
+                        vaultB = new PublicKey(data.subarray(POOL_OFFSETS.RAY_PC, POOL_OFFSETS.RAY_PC + 32));
+                    } 
+                    // B. GENERIC / PUMPSWAP / NEW RAYDIUM (Supply Hog Fallback)
+                    // If we don't have reserves, we scan the Pool Address for Token Accounts.
+                    // The Pool Address "owns" the vaults.
+                    else {
+                        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(poolAddr, { programId: TOKEN_PROGRAM_ID });
+                        // We need at least 2 token accounts (Base + Quote)
+                        if (tokenAccounts.value.length >= 2) {
+                            // Sort by size to identify main reserves
+                            const sorted = tokenAccounts.value.sort((a, b) => 
+                                b.account.data.parsed.info.tokenAmount.uiAmount - a.account.data.parsed.info.tokenAmount.uiAmount
+                            );
+                            
+                            // Heuristic: The two largest accounts are the reserves
+                            const resA = sorted[0].pubkey.toString();
+                            const resB = sorted[1].pubkey.toString();
+                            vaultA = new PublicKey(resA);
+                            vaultB = new PublicKey(resB);
                         }
                     }
-                } else if (task.type === 'direct') {
+
+                    if (vaultA && vaultB) {
+                        updates.push(db.run(`UPDATE pools SET reserve_a = $1, reserve_b = $2 WHERE address = $3`, [vaultA.toString(), vaultB.toString(), p.address]));
+                        // We found them, but we don't have balances yet. Next cycle will pick them up as 'direct'.
+                    }
+                } 
+                // --- DIRECT BALANCE ---
+                else if (task.type === 'direct') {
                     const accA = accounts[task.idxA];
                     const accB = accounts[task.idxB];
-                    if (accA && accB && accA.data.length >= 8) {
+                    if (accA && accB && accA.data.length >= 64) { // 64 minimum for SPL token
                         const balA = Number(accA.data.readBigUInt64LE(64));
                         const balB = Number(accB.data.readBigUInt64LE(64));
                         const isAQuote = QUOTE_MINTS.has(p.token_a);
@@ -156,12 +188,10 @@ async function processPoolBatch(db, connection, pools, redis) {
 
 async function runSnapshotCycle() {
     const redis = getClient();
-    // 1. Distributed Lock Check
     if (redis) {
         const acquired = await redis.set(LOCK_KEY, '1', 'NX', 'EX', LOCK_TTL);
-        if (!acquired) return; // Lock exists, another worker is running
+        if (!acquired) return; 
     } else {
-        // Fallback for no-redis local dev
         if (global.isSnapshotRunning) return;
         global.isSnapshotRunning = true;
     }
@@ -171,28 +201,20 @@ async function runSnapshotCycle() {
     await updateSolPrice(db);
 
     try {
-        // 2. High Priority: Process New Tokens from Queue
-        // This ensures new adds get data FAST before we scan the generic list
         const queuedMints = await dequeueBatch(20);
         if (queuedMints.length > 0) {
-            logger.info(`⚡ Processing ${queuedMints.length} priority tokens from queue`);
             const poolRes = await db.all(`SELECT p.address, p.mint, p.dex, p.reserve_a, p.reserve_b, p.token_a, p.token_b FROM pools p WHERE p.mint IN (${queuedMints.map(m => `'${m}'`).join(',')})`);
             if (poolRes.length > 0) await processPoolBatch(db, connection, poolRes, redis);
         }
 
-        // 3. Standard Cycle
         const BATCH_SIZE = 100;
         let offset = 0;
         let keepFetching = true;
 
         while (keepFetching) {
-            // Only active trackers
             const pools = await db.all(`SELECT p.address, p.mint, p.dex, p.reserve_a, p.reserve_b, p.token_a, p.token_b FROM active_trackers t JOIN pools p ON t.pool_address = p.address ORDER BY t.priority DESC, t.pool_address ASC LIMIT ${BATCH_SIZE} OFFSET ${offset}`);
-            
             if (pools.length === 0) break;
-            
             await processPoolBatch(db, connection, pools, redis);
-            
             if (pools.length < BATCH_SIZE) keepFetching = false;
             offset += BATCH_SIZE;
         }
@@ -200,7 +222,6 @@ async function runSnapshotCycle() {
         logger.error(`Snapshot Cycle Error: ${err.message}`); 
     } finally {
         if (!redis) global.isSnapshotRunning = false;
-        // Lock expires automatically via TTL, but we can delete to be nice
         if (redis) await redis.del(LOCK_KEY);
     }
 }
@@ -212,7 +233,6 @@ function startSnapshotter() {
     }, 5000);
 }
 
-// Fallback for direct immediate calls (if needed by other services)
 async function snapshotPools(poolAddresses) {
     if (!poolAddresses.length) return;
     const db = getDB();
