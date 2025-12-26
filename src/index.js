@@ -12,8 +12,10 @@ const tokensRoutes = require('./routes/tokens');
 const app = express();
 
 // SECURITY HEADERS
+// IMPORTANT: We must relax specific policies to allow Public API access from other domains
 app.use(helmet({
-    crossOriginResourcePolicy: false, // Essential for API access
+    crossOriginResourcePolicy: { policy: "cross-origin" }, // Allows images/data to be loaded by other sites
+    contentSecurityPolicy: false, // Disable default CSP which can block API calls
 }));
 
 // CORS CONFIGURATION
@@ -28,31 +30,35 @@ const corsOptions = {
         if (allowedOrigins === '*' || (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin))) {
             return callback(null, true);
         } else {
+            // Log the blocked origin for debugging
             logger.warn(`⚠️ CORS Blocked Origin: ${origin}`);
-            // We return an error to block it, but typically browsers just need the header missing to block it.
-            // Returning 'false' is sometimes safer than an Error object for production logs.
+            // Return an error to block the request
             return callback(new Error(`Not allowed by CORS (Origin: ${origin})`));
         }
     },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-auth', 'x-requested-with']
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-auth', 'x-requested-with', 'Accept']
 };
 
 // 1. Handle Pre-flight requests explicitly
+// This is critical. Browsers send an OPTIONS request before the actual POST/GET.
+// If this is not handled, the browser assumes CORS is failed.
 app.options('*', cors(corsOptions));
 
 // 2. Apply CORS to all requests
 app.use(cors(corsOptions));
 
-app.use(express.json());
+// Body Parser with increased limit
+app.use(express.json({ limit: '100kb' }));
 
 // RATE LIMITING
+// Trust proxy is required if you are behind a load balancer (like Render, Heroku, AWS)
 app.set('trust proxy', 1);
 
 const limiter = rateLimit({
-    windowMs: 1 * 60 * 1000, 
-    max: 500, 
+    windowMs: 1 * 60 * 1000, // 1 minute
+    max: 500, // limit each IP to 500 requests per windowMs
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req, res) => {

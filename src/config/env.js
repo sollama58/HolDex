@@ -2,12 +2,15 @@ require('dotenv').config();
 
 // Helper to parse comma-separated lists
 const parseCors = (val) => {
-    // Default allowed origins (Production Frontend)
+    // Default allowed origins (Production Frontend & Dev)
+    // We explicitly add your domain here to ensure it works by default
     const defaults = [
         'https://www.alonisthe.dev', 
         'https://alonisthe.dev',
-        'http://localhost:3000', // Local development
-        'http://localhost:5173'  // Common Vite local port
+        'http://localhost:3000', 
+        'http://localhost:5173',
+        'http://127.0.0.1:3000',
+        'http://127.0.0.1:5173'
     ];
 
     if (val === '*') return '*';
@@ -51,6 +54,7 @@ module.exports = {
     // The resolved RPC URL (Helius > Custom > Public)
     SOLANA_RPC_URL: rpcUrl,
     
+    // CORS Configuration
     CORS_ORIGINS: parseCors(process.env.CORS_ORIGINS),
     
     METADATA_UPDATE_INTERVAL: parseInt(process.env.METADATA_UPDATE_INTERVAL) || 300000, 
