@@ -14,7 +14,6 @@ const pool = new Pool({
 
 async function smartCache(key, ttlSeconds, fetchFn) {
     const redis = getClient();
-    
     if (redis && redis.status === 'ready') {
         try {
             const cached = await redis.get(key);
@@ -29,7 +28,6 @@ async function smartCache(key, ttlSeconds, fetchFn) {
             await redis.set(key, JSON.stringify(value), 'EX', ttlSeconds);
         } catch (e) { logger.warn(`Redis Cache Set Error: ${e.message}`); }
     }
-
     return value;
 }
 
@@ -57,6 +55,7 @@ const initDB = async () => {
         mint TEXT PRIMARY KEY,
         symbol TEXT,
         name TEXT,
+        image TEXT, -- Added explicitly
         decimals INTEGER,
         supply TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -74,6 +73,11 @@ const initDB = async () => {
         timestamp BIGINT DEFAULT 0
       );
     `);
+
+    // SELF-HEALING: Ensure 'image' column exists if table was created previously
+    await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS image TEXT;`);
+    await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS k_score INTEGER DEFAULT 0;`);
+    await pool.query(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS marketCap DOUBLE PRECISION DEFAULT 0;`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS k_scores (
@@ -113,6 +117,10 @@ const initDB = async () => {
       );
     `);
 
+    // SELF-HEALING: Ensure 'mint' exists in pools
+    await pool.query(`ALTER TABLE pools ADD COLUMN IF NOT EXISTS mint TEXT;`);
+    await pool.query(`ALTER TABLE pools ADD COLUMN IF NOT EXISTS dex TEXT;`);
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS candles_1m (
           pool_address TEXT NOT NULL,
@@ -141,7 +149,7 @@ const initDB = async () => {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_timestamp ON tokens(timestamp DESC);`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_candles_pool_time ON candles_1m(pool_address, timestamp DESC);`);
 
-    logger.info('Database initialized successfully with Optimized Schema');
+    logger.info('Database initialized successfully with Optimized Schema (Self-Healed)');
   } catch (error) {
     logger.error('Database initialization failed', error);
     process.exit(1);
@@ -176,11 +184,10 @@ const saveTokenData = async (db, mint, data, timestamp) => {
     `, [mint, ...vals]);
 };
 
-// Helper: Enable Indexing (Pool + Tracker)
+// Helper: Enable Indexing
 const enableIndexing = async (db, mint, pair) => {
     if (!pair || !pair.pairAddress) return;
     
-    // 1. Insert Pool
     await db.run(`
         INSERT INTO pools (address, mint, dex, token_a, token_b, created_at)
         VALUES ($1, $2, $3, $4, $5, $6)
@@ -194,14 +201,13 @@ const enableIndexing = async (db, mint, pair) => {
         Date.now()
     ]);
     
-    // 2. Enable Tracking (Snapshotter will pick this up)
     await db.run(`
         INSERT INTO active_trackers (pool_address, last_check) 
         VALUES ($1, $2) 
         ON CONFLICT (pool_address) DO NOTHING
     `, [pair.pairAddress, Date.now()]);
     
-    logger.info(`✅ Indexing enabled for ${mint} (Pool: ${pair.pairAddress})`);
+    logger.info(`✅ Indexing enabled for ${mint}`);
 };
 
 module.exports = {
