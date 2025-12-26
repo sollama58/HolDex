@@ -4,7 +4,8 @@ const logger = require('./logger');
 
 let client = null;
 
-function getClient() {
+// Helper to initialize the client (previously getClient)
+function initRedis() {
     if (client) return client;
 
     try {
@@ -49,4 +50,7 @@ function getClient() {
     }
 }
 
-module.exports = { getClient };
+// Alias getClient to initRedis for backward compatibility
+const getClient = initRedis;
+
+module.exports = { initRedis, getClient };
