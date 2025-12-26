@@ -12,16 +12,118 @@ const FLUXBEAM_PROGRAM_ID = new PublicKey('FLUXubRmkEi2q6K3Y9kBPg9248gga8U928ay3
 
 const connection = new Connection(config.SOLANA_RPC_URL, 'confirmed');
 
-// Helper: Retry RPC calls that are prone to timeouts (like getProgramAccounts)
+// Helper: Retry RPC calls
 async function retryRPC(fn, retries = 3, delay = 1000) {
     try {
         return await fn();
     } catch (err) {
         if (retries <= 0) throw err;
-        // logger.warn(`⚠️ RPC Warning: Retrying op... (${retries} left) - ${err.message}`);
         await new Promise(r => setTimeout(r, delay));
         return retryRPC(fn, retries - 1, delay * 2);
     }
+}
+
+/**
+ * Strategy: Transaction Scan
+ * Scans recent transactions of the Mint to find interactions with DEX programs.
+ * This is often more reliable than getProgramAccounts for finding the specific pool.
+ * Now includes support for Pump.fun (PumpSwap) interactions.
+ */
+async function findPoolsFromTransactions(mint) {
+    const pools = [];
+    try {
+        // 1. Get recent signatures for the mint
+        const signatures = await retryRPC(() => connection.getSignaturesForAddress(mint, { limit: 25 }));
+        
+        if (signatures.length === 0) return [];
+
+        const sigList = signatures.map(s => s.signature);
+        
+        // 2. Fetch parsed transactions to see involved accounts
+        const txs = await retryRPC(() => connection.getParsedTransactions(sigList, { 
+            maxSupportedTransactionVersion: 0,
+            commitment: 'confirmed'
+        }));
+
+        const candidateAccounts = new Set();
+
+        for (const tx of txs) {
+            if (!tx || !tx.transaction) continue;
+            
+            const accountKeys = tx.transaction.message.accountKeys;
+            
+            // Check for Program interactions
+            const isRaydium = accountKeys.some(k => k.pubkey.equals(RAYDIUM_PROGRAM_ID));
+            const isOrca = accountKeys.some(k => k.pubkey.equals(ORCA_PROGRAM_ID));
+            const isPump = accountKeys.some(k => k.pubkey.equals(PUMP_PROGRAM_ID));
+            const isMeteora = accountKeys.some(k => k.pubkey.equals(METEORA_DLMM_PROGRAM) || k.pubkey.equals(METEORA_AMM_PROGRAM));
+
+            if (isRaydium || isOrca || isPump || isMeteora) {
+                // Collect all writable accounts as candidates
+                accountKeys.forEach(k => {
+                    if (k.writable && !k.signer) {
+                        candidateAccounts.add(k.pubkey.toBase58());
+                    }
+                });
+            }
+        }
+
+        if (candidateAccounts.size === 0) return [];
+
+        // 3. Verify Candidates
+        const candidates = Array.from(candidateAccounts).map(s => new PublicKey(s));
+        
+        // Split into chunks to avoid hitting limits
+        while (candidates.length > 0) {
+            const batch = candidates.splice(0, 100);
+            const infos = await retryRPC(() => connection.getMultipleAccountsInfo(batch));
+
+            infos.forEach((info, i) => {
+                if (!info) return;
+
+                // Check Raydium V4
+                if (info.owner.equals(RAYDIUM_PROGRAM_ID) && info.data.length === 752) {
+                    pools.push({
+                        pairAddress: batch[i].toString(),
+                        dexId: 'raydium',
+                        liquidity: { usd: 0 },
+                        volume: { h24: 0 },
+                        baseToken: { address: 'Unknown' }, // Snapshotter resolves this
+                        quoteToken: { address: 'Unknown' } 
+                    });
+                }
+                
+                // Check Orca
+                if (info.owner.equals(ORCA_PROGRAM_ID) && info.data.length === 653) {
+                     pools.push({
+                        pairAddress: batch[i].toString(),
+                        dexId: 'orca',
+                        liquidity: { usd: 0 },
+                        volume: { h24: 0 },
+                        baseToken: { address: 'Unknown' },
+                        quoteToken: { address: 'Unknown' }
+                    });
+                }
+
+                // Check Pump.fun (PumpSwap)
+                // Pump Bonding Curves are owned by the Pump Program
+                if (info.owner.equals(PUMP_PROGRAM_ID) && info.data.length >= 40) {
+                    pools.push({
+                        pairAddress: batch[i].toString(),
+                        dexId: 'pump',
+                        liquidity: { usd: 0 },
+                        volume: { h24: 0 },
+                        baseToken: { address: mint.toBase58() }, // Pump pools are always Mint/SOL
+                        quoteToken: { address: 'So11111111111111111111111111111111111111112' }
+                    });
+                }
+            });
+        }
+
+    } catch (e) {
+        logger.warn(`Tx Scan failed for ${mint}: ${e.message}`);
+    }
+    return pools;
 }
 
 async function findPoolsOnChain(mintAddress) {
@@ -34,102 +136,62 @@ async function findPoolsOnChain(mintAddress) {
     try {
         const promises = [];
 
-        // --- 1. Check PUMP.FUN Bonding Curve (Direct Account Fetch - Fast) ---
-        // We always check this first as it doesn't require getProgramAccounts
+        // --- STRATEGY 1: PUMP.FUN Direct Check (Deterministic) ---
+        // Fast and reliable for Pre-bond
         try {
             const [bondingCurve] = PublicKey.findProgramAddressSync(
                 [Buffer.from("bonding-curve"), mint.toBuffer()],
                 PUMP_PROGRAM_ID
             );
             
+            // Check existence
             const info = await retryRPC(() => connection.getAccountInfo(bondingCurve), 3, 500);
-            
             if (info) {
                 pools.push({
                     pairAddress: bondingCurve.toString(),
                     dexId: 'pump',
-                    liquidity: { usd: 0 }, // Updated by snapshotter
+                    liquidity: { usd: 0 },
                     volume: { h24: 0 },
                     baseToken: { address: mintBase58 },
                     quoteToken: { address: 'So11111111111111111111111111111111111111112' }
                 });
-                logger.info(`✅ Found Pump.fun Bonding Curve`);
+                logger.info(`✅ Found Pump.fun Bonding Curve (Direct)`);
             }
-        } catch (e) {
-            logger.warn(`Pump check failed: ${e.message}`);
-        }
+        } catch (e) {}
 
-        // --- 2. RAYDIUM AMM v4 (Heavy - Needs Retry) ---
-        // Base Mint offset: 400, Quote Mint offset: 432
+        // --- STRATEGY 2: TRANSACTION HISTORY SCAN (Activity Based) ---
+        // Finds pools via recent swaps/interactions. Catches Pump, Raydium, Orca, Meteora.
+        promises.push(findPoolsFromTransactions(mint));
+
+        // --- STRATEGY 3: GLOBAL SCAN (Backup) ---
+        // Fallback for Raydium/Orca if Tx Scan doesn't find recent activity
         
-        // Check Mint as Coin (Base)
+        // Raydium Base
         promises.push(
             retryRPC(() => connection.getProgramAccounts(RAYDIUM_PROGRAM_ID, {
                 filters: [{ dataSize: 752 }, { memcmp: { offset: 400, bytes: mintBase58 } }]
-            }))
-            .then(res => res.map(p => ({
-                pairAddress: p.pubkey.toString(),
-                dexId: 'raydium',
-                liquidity: { usd: 0 },
-                volume: { h24: 0 },
-                baseToken: { address: mintBase58 },
-                quoteToken: { address: 'So11111111111111111111111111111111111111112' }
-            })))
-            .catch(e => { logger.error(`Raydium (Base) Scan Error: ${e.message}`); return []; })
+            })).then(res => res.map(p => ({
+                pairAddress: p.pubkey.toString(), dexId: 'raydium', baseToken: { address: mintBase58 }
+            }))).catch(e => [])
         );
 
-        // Check Mint as PC (Quote)
+        // Raydium Quote
         promises.push(
             retryRPC(() => connection.getProgramAccounts(RAYDIUM_PROGRAM_ID, {
                 filters: [{ dataSize: 752 }, { memcmp: { offset: 432, bytes: mintBase58 } }]
-            }))
-            .then(res => res.map(p => ({
-                pairAddress: p.pubkey.toString(),
-                dexId: 'raydium',
-                liquidity: { usd: 0 }, 
-                volume: { h24: 0 },
-                baseToken: { address: 'Unknown' }, // Snapshotter resolves this
-                quoteToken: { address: mintBase58 }
-            })))
-            .catch(e => { logger.error(`Raydium (Quote) Scan Error: ${e.message}`); return []; })
+            })).then(res => res.map(p => ({
+                pairAddress: p.pubkey.toString(), dexId: 'raydium', quoteToken: { address: mintBase58 }
+            }))).catch(e => [])
         );
 
-        // --- 3. ORCA WHIRLPOOLS ---
-        // Token Mint A: 33, Token Mint B: 65. Size: 653
+        // Orca
         promises.push(
             retryRPC(() => connection.getProgramAccounts(ORCA_PROGRAM_ID, {
                 filters: [{ dataSize: 653 }, { memcmp: { offset: 33, bytes: mintBase58 } }]
-            }))
-            .then(res => res.map(p => ({ pairAddress: p.pubkey.toString(), dexId: 'orca' })))
-            .catch(e => [])
+            })).then(res => res.map(p => ({ pairAddress: p.pubkey.toString(), dexId: 'orca' }))).catch(e => [])
         );
 
-        promises.push(
-            retryRPC(() => connection.getProgramAccounts(ORCA_PROGRAM_ID, {
-                filters: [{ dataSize: 653 }, { memcmp: { offset: 65, bytes: mintBase58 } }]
-            }))
-            .then(res => res.map(p => ({ pairAddress: p.pubkey.toString(), dexId: 'orca' })))
-            .catch(e => [])
-        );
-
-        // --- 4. METEORA DLMM ---
-        promises.push(
-            retryRPC(() => connection.getProgramAccounts(METEORA_DLMM_PROGRAM, {
-                filters: [{ memcmp: { offset: 40, bytes: mintBase58 } }]
-            }))
-            .then(res => res.map(p => ({ pairAddress: p.pubkey.toString(), dexId: 'meteora' })))
-            .catch(e => [])
-        );
-
-        promises.push(
-            retryRPC(() => connection.getProgramAccounts(METEORA_DLMM_PROGRAM, {
-                filters: [{ memcmp: { offset: 72, bytes: mintBase58 } }]
-            }))
-            .then(res => res.map(p => ({ pairAddress: p.pubkey.toString(), dexId: 'meteora' })))
-            .catch(e => [])
-        );
-
-        // --- Execute All ---
+        // --- EXECUTE ---
         const results = await Promise.allSettled(promises);
         
         results.forEach(res => {
@@ -138,7 +200,7 @@ async function findPoolsOnChain(mintAddress) {
             }
         });
 
-        // --- Deduplicate ---
+        // --- DEDUPLICATE & NORMALIZE ---
         const uniquePools = [];
         const seen = new Set();
         
@@ -147,7 +209,11 @@ async function findPoolsOnChain(mintAddress) {
                 seen.add(p.pairAddress);
                 p.liquidity = p.liquidity || { usd: 0 };
                 p.volume = p.volume || { h24: 0 };
-                p.priceUsd = 0;
+                
+                // Defaults
+                if (!p.quoteToken) p.quoteToken = { address: 'So11111111111111111111111111111111111111112' }; 
+                if (!p.baseToken) p.baseToken = { address: 'Unknown' }; 
+                
                 uniquePools.push(p);
             }
         }
@@ -157,7 +223,7 @@ async function findPoolsOnChain(mintAddress) {
 
     } catch (e) {
         logger.error(`On-Chain Pool Find Fatal Error: ${e.message}`);
-        return pools; // Return whatever we found (e.g. Pump curve)
+        return pools; 
     }
 }
 
