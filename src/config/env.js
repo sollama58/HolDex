@@ -2,8 +2,23 @@ require('dotenv').config();
 
 // Helper to parse comma-separated lists, defaulting to '*'
 const parseCors = (val) => {
-    if (!val || val === '*') return '*';
-    return val.split(',').map(origin => origin.trim());
+    // If explicitly set to '*', return '*'
+    if (val === '*') return '*';
+    
+    // If not set, default to '*' (Public API behavior)
+    if (!val) return '*';
+
+    // Parse the list
+    const origins = val.split(',').map(origin => origin.trim());
+    
+    // AUTO-FIX: Always ensure your production domains are allowed
+    // This prevents accidental lockouts if you set CORS_ORIGINS to just 'localhost'
+    const required = ['https://www.alonisthe.dev', 'https://alonisthe.dev'];
+    required.forEach(req => {
+        if (!origins.includes(req)) origins.push(req);
+    });
+    
+    return origins;
 };
 
 module.exports = {

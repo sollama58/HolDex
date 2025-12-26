@@ -12,7 +12,12 @@ const { startSnapshotter } = require('./indexer/tasks/snapshotter');
 
 const app = express();
 
-app.use(helmet());
+// SECURITY HEADERS
+// We disable Cross-Origin-Resource-Policy to allow your Squarespace frontend
+// to fetch data from this backend.
+app.use(helmet({
+    crossOriginResourcePolicy: false,
+}));
 
 // CORS CONFIGURATION
 // If CORS_ORIGINS is '*', allow all. Otherwise check against array.
@@ -20,14 +25,14 @@ const allowedOrigins = config.CORS_ORIGINS;
 
 app.use(cors({
     origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl requests)
+        // Allow requests with no origin (like mobile apps, curl requests, or server-to-server)
         if (!origin) return callback(null, true);
         
         if (allowedOrigins === '*' || allowedOrigins.indexOf(origin) !== -1) {
             callback(null, true);
         } else {
             logger.warn(`CORS Blocked Origin: ${origin}`);
-            callback(new Error('Not allowed by CORS'));
+            callback(new Error(`Not allowed by CORS (Origin: ${origin})`));
         }
     },
     credentials: true // Allow cookies/auth headers if needed
@@ -58,6 +63,9 @@ app.get('/health', (req, res) => {
 async function startServer() {
     try {
         logger.info('🚀 System: Initializing HolDEX API...');
+        
+        // Log CORS status for debugging
+        logger.info(`🛡️  CORS Configuration: ${Array.isArray(allowedOrigins) ? allowedOrigins.join(', ') : 'ALLOW ALL (*)'}`);
 
         // A. Initialize Database
         await initDB();
@@ -69,7 +77,6 @@ async function startServer() {
         const PORT = process.env.PORT || 3000;
         app.listen(PORT, () => {
             logger.info(`✅ API: Listening on port ${PORT}`);
-            logger.info(`🛡️  CORS Allowed: ${Array.isArray(allowedOrigins) ? allowedOrigins.join(', ') : allowedOrigins}`);
         });
 
         // D. Start Snapshotter (Background)
