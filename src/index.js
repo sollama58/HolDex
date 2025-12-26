@@ -13,25 +13,37 @@ const app = express();
 
 // SECURITY HEADERS
 app.use(helmet({
-    crossOriginResourcePolicy: false,
+    crossOriginResourcePolicy: false, // Essential for API access
 }));
 
 // CORS CONFIGURATION
 const allowedOrigins = config.CORS_ORIGINS;
 
-app.use(cors({
+const corsOptions = {
     origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps, curl, or server-to-server)
         if (!origin) return callback(null, true);
         
-        if (allowedOrigins === '*' || allowedOrigins.indexOf(origin) !== -1) {
-            callback(null, true);
+        // Check if origin is allowed
+        if (allowedOrigins === '*' || (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin))) {
+            return callback(null, true);
         } else {
-            logger.warn(`CORS Blocked Origin: ${origin}`);
-            callback(new Error(`Not allowed by CORS (Origin: ${origin})`));
+            logger.warn(`⚠️ CORS Blocked Origin: ${origin}`);
+            // We return an error to block it, but typically browsers just need the header missing to block it.
+            // Returning 'false' is sometimes safer than an Error object for production logs.
+            return callback(new Error(`Not allowed by CORS (Origin: ${origin})`));
         }
     },
-    credentials: true
-}));
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-auth', 'x-requested-with']
+};
+
+// 1. Handle Pre-flight requests explicitly
+app.options('*', cors(corsOptions));
+
+// 2. Apply CORS to all requests
+app.use(cors(corsOptions));
 
 app.use(express.json());
 
@@ -56,7 +68,9 @@ app.get('/health', (req, res) => {
 async function startServer() {
     try {
         logger.info('🚀 System: Initializing HolDEX API...');
-        logger.info(`🛡️  CORS Configuration: ${Array.isArray(allowedOrigins) ? allowedOrigins.join(', ') : 'ALLOW ALL (*)'}`);
+        
+        const originLog = Array.isArray(allowedOrigins) ? allowedOrigins.join(', ') : allowedOrigins;
+        logger.info(`🛡️  CORS Configured for: ${originLog}`);
 
         // A. Initialize Database
         await initDB();

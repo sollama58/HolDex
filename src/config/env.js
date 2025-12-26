@@ -2,14 +2,30 @@ require('dotenv').config();
 
 // Helper to parse comma-separated lists
 const parseCors = (val) => {
+    // Default allowed origins (Production Frontend)
+    const defaults = [
+        'https://www.alonisthe.dev', 
+        'https://alonisthe.dev',
+        'http://localhost:3000', // Local development
+        'http://localhost:5173'  // Common Vite local port
+    ];
+
     if (val === '*') return '*';
-    if (!val) return '*';
-    const origins = val.split(',').map(origin => origin.trim());
-    const required = ['https://www.alonisthe.dev', 'https://alonisthe.dev'];
-    required.forEach(req => {
-        if (!origins.includes(req)) origins.push(req);
+    
+    // If no specific env var is set, use defaults
+    if (!val) return defaults;
+
+    // Parse env var and merge with defaults
+    const envOrigins = val.split(',').map(origin => origin.trim());
+    const combined = [...defaults];
+    
+    envOrigins.forEach(origin => {
+        if (origin && !combined.includes(origin)) {
+            combined.push(origin);
+        }
     });
-    return origins;
+
+    return combined;
 };
 
 // --- AUTO-DETECT RPC CONFIGURATION ---
