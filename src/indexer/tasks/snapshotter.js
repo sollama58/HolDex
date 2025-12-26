@@ -9,8 +9,9 @@ let solPriceCache = 200;
 // Memory Cache for Reserve Deltas (To calculate Volume)
 const reserveCache = new Map(); // poolAddress -> { quoteReserve: number }
 
-const RAY_COIN_VAULT_OFFSET = 432; 
-const RAY_PC_VAULT_OFFSET = 464;
+// FIX: Correct Raydium V4 Offsets for VAULTS (not Mints)
+const RAY_COIN_VAULT_OFFSET = 320; 
+const RAY_PC_VAULT_OFFSET = 352;
 const ORCA_VAULT_A_OFFSET = 101;
 const ORCA_VAULT_B_OFFSET = 133;
 const PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
@@ -46,9 +47,6 @@ async function snapshotPools(poolAddresses) {
         FROM pools p WHERE p.address IN (${poolAddresses.map(p => `'${p}'`).join(',')})
     `);
 
-    // Reuse the main logic logic by refactoring or duplicating slightly for safety
-    // For brevity and safety in this hot-fix, we use a simplified version of the logic loop
-    
     const keysToFetch = [];
     const poolMap = new Map();
 
@@ -62,6 +60,7 @@ async function snapshotPools(poolAddresses) {
                 keysToFetch.push(new PublicKey(p.reserve_b));
                 poolMap.set(p.pool_address, { type: 'direct', idxA: keysToFetch.length - 2, idxB: keysToFetch.length - 1, pool: p });
             } else {
+                // DISCOVERY NEEDED
                 keysToFetch.push(new PublicKey(p.pool_address));
                 poolMap.set(p.pool_address, { type: 'discovery', dex: p.dex, index: keysToFetch.length - 1, pool: p });
             }
@@ -73,14 +72,16 @@ async function snapshotPools(poolAddresses) {
     try {
         const accounts = await connection.getMultipleAccountsInfo(keysToFetch);
         const timestamp = Date.now();
+        
+        // Secondary Fetch List (For newly discovered Vaults)
+        const secondaryKeys = [];
+        const secondaryMap = new Map(); // key -> { pool, type: 'A' or 'B' }
 
+        // Pass 1: Handle Pump & Discovery
         for (const p of pools) {
             const task = poolMap.get(p.pool_address);
             if (!task) continue;
 
-            let nativePrice = 0, liquidityUsd = 0, quoteIsSol = false;
-            let currentQuoteReserve = 0;
-            
             if (task.type === 'pump') {
                 const data = accounts[task.index]?.data;
                 if (data && data.length >= 40) {
@@ -88,57 +89,105 @@ async function snapshotPools(poolAddresses) {
                      const vSol = data.readBigUInt64LE(16);
                      const realSol = data.readBigUInt64LE(32);
                      if (Number(vToken) > 0) {
-                         nativePrice = Number(vSol) / Number(vToken);
-                         liquidityUsd = (Number(realSol) / 1e9) * solPriceCache;
-                         quoteIsSol = true;
-                         currentQuoteReserve = Number(realSol) / 1e9;
+                         const nativePrice = Number(vSol) / Number(vToken);
+                         const liquidityUsd = (Number(realSol) / 1e9) * solPriceCache;
+                         const finalPrice = nativePrice * solPriceCache;
+                         
+                         await db.run(`UPDATE pools SET price_usd = $1, liquidity_usd = $2 WHERE address = $3`, [finalPrice, liquidityUsd, p.pool_address]);
                      }
                 }
-            } else if (task.type === 'direct') {
-                const accA = accounts[task.idxA];
-                const accB = accounts[task.idxB];
-                if (accA && accB) {
-                     const balA = Number(accA.data.readBigUInt64LE(64));
-                     const balB = Number(accB.data.readBigUInt64LE(64));
-                     // Quick logic: Assume B is quote if unknown
-                     const isAQuote = QUOTE_MINTS.has(p.token_a);
-                     if (isAQuote) {
-                         if (balB > 0) nativePrice = balA/balB;
-                         liquidityUsd = (balA/1e9) * solPriceCache;
-                         quoteIsSol = true;
-                         currentQuoteReserve = balA/1e9;
-                     } else {
-                         if (balA > 0) nativePrice = balB/balA;
-                         liquidityUsd = (balB/1e9) * solPriceCache; // assume B is SOL
-                         quoteIsSol = true;
-                         currentQuoteReserve = balB/1e9;
-                     }
-                }
-            }
+            } else if (task.type === 'discovery') {
+                // FIX: DECODE VAULTS AND PREPARE SECONDARY FETCH
+                const data = accounts[task.index]?.data;
+                if (data) {
+                    let vaultA, vaultB;
+                    if (task.dex === 'raydium' && data.length >= 500) {
+                        vaultA = new PublicKey(data.subarray(RAY_COIN_VAULT_OFFSET, RAY_COIN_VAULT_OFFSET + 32));
+                        vaultB = new PublicKey(data.subarray(RAY_PC_VAULT_OFFSET, RAY_PC_VAULT_OFFSET + 32));
+                    } else if (task.dex === 'orca' && data.length >= 165) {
+                        vaultA = new PublicKey(data.subarray(ORCA_VAULT_A_OFFSET, ORCA_VAULT_A_OFFSET + 32));
+                        vaultB = new PublicKey(data.subarray(ORCA_VAULT_B_OFFSET, ORCA_VAULT_B_OFFSET + 32));
+                    }
 
-            if (nativePrice > 0) {
-                const finalPrice = quoteIsSol ? nativePrice * solPriceCache : nativePrice;
-                
-                // --- VOLUME CALCULATION ---
-                let approxVolume = 0;
-                // Only calculate volume if we have a previous state in cache
-                if (reserveCache.has(p.pool_address)) {
-                    const prev = reserveCache.get(p.pool_address);
-                    const delta = Math.abs(currentQuoteReserve - prev.quoteReserve);
-                    // Filter noise/small dust
-                    if (delta > 0.0001) {
-                         approxVolume = delta; // Volume in Native Quote Units (SOL)
+                    if (vaultA && vaultB) {
+                        // 1. Save to DB so next time it is 'direct'
+                        await db.run(`UPDATE pools SET reserve_a = $1, reserve_b = $2 WHERE address = $3`, [vaultA.toString(), vaultB.toString(), p.pool_address]);
+                        
+                        // 2. Queue for Immediate Balance Fetch
+                        secondaryKeys.push(vaultA);
+                        secondaryKeys.push(vaultB);
+                        secondaryMap.set(p.pool_address, { pool: p, idxA: secondaryKeys.length - 2, idxB: secondaryKeys.length - 1 });
                     }
                 }
-                // Update Cache
-                reserveCache.set(p.pool_address, { quoteReserve: currentQuoteReserve });
-
-                await db.run(`UPDATE pools SET price_usd = $1, liquidity_usd = $2 WHERE address = $3`, [finalPrice, liquidityUsd, p.pool_address]);
-                // Insert Approx Volume
-                await db.run(`INSERT INTO candles_1m (pool_address, timestamp, open, high, low, close, volume) VALUES ($1, $2, $3, $3, $3, $3, $4) ON CONFLICT(pool_address, timestamp) DO UPDATE SET close = $3, volume = candles_1m.volume + $4`, [p.pool_address, timestamp, finalPrice, approxVolume]);
             }
         }
+
+        // Pass 2: Fetch Newly Discovered Vaults & Process Direct
+        if (secondaryKeys.length > 0) {
+            const secondaryAccounts = await connection.getMultipleAccountsInfo(secondaryKeys);
+            
+            // Process secondary results
+            for (const [poolAddr, task] of secondaryMap.entries()) {
+                const accA = secondaryAccounts[task.idxA];
+                const accB = secondaryAccounts[task.idxB];
+                await processBalanceLogic(db, task.pool, accA, accB, timestamp);
+            }
+        }
+
+        // Process Direct (already had keys)
+        for (const p of pools) {
+            const task = poolMap.get(p.pool_address);
+            if (task && task.type === 'direct') {
+                const accA = accounts[task.idxA];
+                const accB = accounts[task.idxB];
+                await processBalanceLogic(db, p, accA, accB, timestamp);
+            }
+        }
+
     } catch (e) { logger.error(`Immediate Snapshot failed: ${e.message}`); }
+}
+
+async function processBalanceLogic(db, p, accA, accB, timestamp) {
+    if (accA && accB) {
+         const balA = Number(accA.data.readBigUInt64LE(64));
+         const balB = Number(accB.data.readBigUInt64LE(64));
+         let nativePrice = 0, liquidityUsd = 0, quoteIsSol = false;
+         let currentQuoteReserve = 0;
+
+         const isAQuote = QUOTE_MINTS.has(p.token_a);
+         const isBQuote = QUOTE_MINTS.has(p.token_b);
+
+         if (isAQuote && !isBQuote) {
+             if (balB > 0) nativePrice = balA/balB;
+             liquidityUsd = (balA/1e9) * solPriceCache; // Approx
+             if (p.token_a.includes('So11')) quoteIsSol = true;
+             currentQuoteReserve = balA;
+         } else if (isBQuote && !isAQuote) {
+             if (balA > 0) nativePrice = balB/balA;
+             liquidityUsd = (balB/1e9) * solPriceCache; 
+             if (p.token_b.includes('So11')) quoteIsSol = true;
+             currentQuoteReserve = balB;
+         } else {
+             // Fallback
+             if (balA > 0) nativePrice = balB/balA;
+         }
+
+         if (nativePrice > 0) {
+             const finalPrice = quoteIsSol ? nativePrice * solPriceCache : nativePrice;
+             // Cache Volume Logic
+             let approxVolume = 0;
+             if (reserveCache.has(p.pool_address)) {
+                const prev = reserveCache.get(p.pool_address);
+                const delta = Math.abs(currentQuoteReserve - prev.quoteReserve);
+                // Adjust threshold based on decimals (raw units here)
+                if (delta > 1000) approxVolume = delta / 1e9; 
+             }
+             reserveCache.set(p.pool_address, { quoteReserve: currentQuoteReserve });
+
+             await db.run(`UPDATE pools SET price_usd = $1, liquidity_usd = $2 WHERE address = $3`, [finalPrice, liquidityUsd, p.pool_address]);
+             await db.run(`INSERT INTO candles_1m (pool_address, timestamp, open, high, low, close, volume) VALUES ($1, $2, $3, $3, $3, $3, $4) ON CONFLICT(pool_address, timestamp) DO UPDATE SET close = $3, volume = candles_1m.volume + $4`, [p.pool_address, timestamp, finalPrice, approxVolume]);
+         }
+    }
 }
 
 async function runSnapshotCycle() {
@@ -204,6 +253,7 @@ async function runSnapshotCycle() {
                         if (data) {
                             let vaultA, vaultB;
                             if (task.dex === 'raydium' && data.length >= 500) {
+                                // FIX: Use Correct Offsets Here too
                                 vaultA = new PublicKey(data.subarray(RAY_COIN_VAULT_OFFSET, RAY_COIN_VAULT_OFFSET + 32));
                                 vaultB = new PublicKey(data.subarray(RAY_PC_VAULT_OFFSET, RAY_PC_VAULT_OFFSET + 32));
                             } else if (task.dex === 'orca' && data.length >= 165) {
@@ -220,6 +270,8 @@ async function runSnapshotCycle() {
                             const balB = Number(accB.data.readBigUInt64LE(64));
                             const isAQuote = QUOTE_MINTS.has(p.token_a);
                             const isBQuote = QUOTE_MINTS.has(p.token_b);
+                            
+                            // Simplified Balance Logic similar to immediate
                             if (isAQuote && !isBQuote) {
                                 if (balB > 0) nativePrice = balA / balB; 
                                 liquidityUsd = (balA / (p.token_a.includes('So11') ? 1e9 : 1e6)) * (p.token_a.includes('So11') ? solPriceCache : 1);

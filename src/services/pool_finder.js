@@ -8,7 +8,6 @@ const ORCA_PROGRAM_ID = new PublicKey('whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3ucty
 const METEORA_DLMM_PROGRAM = new PublicKey('LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo');
 const METEORA_AMM_PROGRAM = new PublicKey('Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB');
 const PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
-const FLUXBEAM_PROGRAM_ID = new PublicKey('FLUXubRmkEi2q6K3Y9kBPg9248gga8U928ay3ViUhVan');
 
 const connection = new Connection(config.SOLANA_RPC_URL, 'confirmed');
 
@@ -83,13 +82,17 @@ async function findPoolsFromTransactions(mint) {
 
                 // Check Raydium V4
                 if (info.owner.equals(RAYDIUM_PROGRAM_ID) && info.data.length === 752) {
+                    // FIX: Parse Base/Quote Mints immediately (Offsets 400 & 432)
+                    const baseMint = new PublicKey(info.data.subarray(400, 432)).toBase58();
+                    const quoteMint = new PublicKey(info.data.subarray(432, 464)).toBase58();
+
                     pools.push({
                         pairAddress: batch[i].toString(),
                         dexId: 'raydium',
                         liquidity: { usd: 0 },
                         volume: { h24: 0 },
-                        baseToken: { address: 'Unknown' }, // Snapshotter resolves this
-                        quoteToken: { address: 'Unknown' } 
+                        baseToken: { address: baseMint },
+                        quoteToken: { address: quoteMint } 
                     });
                 }
                 
@@ -100,7 +103,7 @@ async function findPoolsFromTransactions(mint) {
                         dexId: 'orca',
                         liquidity: { usd: 0 },
                         volume: { h24: 0 },
-                        baseToken: { address: 'Unknown' },
+                        baseToken: { address: 'Unknown' }, // Orca layout varies, let snapshotter handle it
                         quoteToken: { address: 'Unknown' }
                     });
                 }
