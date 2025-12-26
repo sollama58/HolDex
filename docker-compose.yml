@@ -1,51 +1,65 @@
 version: '3.8'
 
 services:
-  # 1. THE API SERVICE
-  # Handles HTTP requests from users. Scalable (can add more replicas).
   api:
     build: .
-    command: npm start
     ports:
       - "3000:3000"
     environment:
       - PORT=3000
-      - REDIS_URL=redis://redis:6379
-      - METADATA_UPDATE_INTERVAL=300000
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
-      - FEE_SOL=${FEE_SOL}
-      - FEE_TOKEN_AMOUNT=${FEE_TOKEN_AMOUNT}
-      - TREASURY_WALLET=${TREASURY_WALLET}
-    depends_on:
-      - redis
-    volumes:
-      - ./data:/usr/src/app/data
-    restart: always
-
-  # 2. THE WORKER SERVICE
-  # Handles background tasks (Price updates, Listener, K-Score).
-  # Decoupled from API to prevent blocking user requests.
-  worker:
-    build: .
-    command: node src/worker.js
-    environment:
-      - REDIS_URL=redis://redis:6379
-      - METADATA_UPDATE_INTERVAL=300000
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL}
       - HELIUS_API_KEY=${HELIUS_API_KEY}
     depends_on:
       - redis
-    volumes:
-      - ./data:/usr/src/app/data
+      - db
     restart: always
 
-  # 3. CACHE SERVICE
+  worker:
+    build: .
+    command: npm run start:worker
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL}
+      - HELIUS_API_KEY=${HELIUS_API_KEY}
+    depends_on:
+      - redis
+      - db
+    restart: always
+
+  indexer:
+    build: .
+    command: npm run start:indexer
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL}
+      - HELIUS_API_KEY=${HELIUS_API_KEY}
+    depends_on:
+      - redis
+      - db
+    restart: always
+
   redis:
-    image: "redis:alpine"
+    image: redis:alpine
     ports:
       - "6379:6379"
-    restart: always
     volumes:
-       - redis_data:/data
+      - redis_data:/data
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: holdex
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
 volumes:
   redis_data:
+  postgres_data:

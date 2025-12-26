@@ -17,24 +17,21 @@ const router = express.Router();
 const solanaConnection = new Connection(config.SOLANA_RPC_URL, 'confirmed');
 
 // --- HELPER: GLOBAL RATE LIMITER ---
-// Returns TRUE if we are allowed to call DexScreener
 async function checkExternalRateLimit() {
     try {
         const redis = getClient();
-        if (!redis || redis.status !== 'ready') return true; // Fail open if Redis down
+        if (!redis || redis.status !== 'ready') return true; 
 
         const key = 'ratelimit:dexscreener:global';
         const current = await redis.incr(key);
         
-        // If this is the first call, set expiry to 60 seconds
         if (current === 1) {
             await redis.expire(key, 60);
         }
 
-        // Limit: 250 requests per minute (DexScreener limit is ~300)
         return current <= 250;
     } catch (e) {
-        return true; // Fail open on error
+        return true; 
     }
 }
 
@@ -45,12 +42,6 @@ function getBestPairRoute(pairs, mint) {
     const candidates = validPairs.length > 0 ? validPairs : pairs;
     const sortedPairs = candidates.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
     return sortedPairs[0];
-}
-
-function getSocialLink(pair, type) {
-    if (!pair.info || !pair.info.socials) return null;
-    const social = pair.info.socials.find(s => s.type === type);
-    return social ? social.url : null;
 }
 
 const requireAdmin = (req, res, next) => {
@@ -122,6 +113,70 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "Submission failed: " + e.message }); }
     });
 
+    // --- CANDLESTICK CHART DATA (NEW) ---
+    router.get('/token/:mint/candles', async (req, res) => {
+        const { mint } = req.params;
+        const { resolution = '60', from, to } = req.query; // resolution in minutes
+        
+        try {
+            // 1. Find the active pool for this mint
+            // Prefer manually indexed pools first
+            let pool = await db.get(`SELECT address FROM pools WHERE mint = $1 LIMIT 1`, [mint]);
+            
+            if (!pool) {
+                return res.json({ success: false, error: "Token not indexed yet" });
+            }
+
+            // 2. Determine Time Bucket (in milliseconds)
+            let bucketSize = 60 * 1000; // Default 1m
+            if (resolution === '5') bucketSize = 5 * 60 * 1000;
+            if (resolution === '15') bucketSize = 15 * 60 * 1000;
+            if (resolution === '60') bucketSize = 60 * 60 * 1000;
+            if (resolution === '240') bucketSize = 4 * 60 * 60 * 1000;
+            if (resolution === 'D') bucketSize = 24 * 60 * 60 * 1000;
+            if (resolution === 'W') bucketSize = 7 * 24 * 60 * 60 * 1000;
+
+            const fromTime = parseInt(from) * 1000 || (Date.now() - 24 * 60 * 60 * 1000); // Default last 24h
+            const toTime = parseInt(to) * 1000 || Date.now();
+
+            // 3. Aggregate Data
+            // We use integer division to group by time buckets
+            // ARRAY_AGG trick gets the Open/Close correctly (First/Last in bucket)
+            const query = `
+                SELECT
+                    (timestamp / $1) * $1 as time_bucket,
+                    MIN(low) as low,
+                    MAX(high) as high,
+                    (ARRAY_AGG(open ORDER BY timestamp ASC))[1] as open,
+                    (ARRAY_AGG(close ORDER BY timestamp DESC))[1] as close,
+                    SUM(volume) as volume
+                FROM candles_1m
+                WHERE pool_address = $2 
+                  AND timestamp >= $3 
+                  AND timestamp <= $4
+                GROUP BY time_bucket
+                ORDER BY time_bucket ASC
+            `;
+
+            const rows = await db.all(query, [bucketSize, pool.address, fromTime, toTime]);
+
+            // 4. Format for Lightweight Charts (time in seconds)
+            const candles = rows.map(r => ({
+                time: Math.floor(parseInt(r.time_bucket) / 1000),
+                open: r.open,
+                high: r.high,
+                low: r.low,
+                close: r.close,
+                value: r.volume // Volume often expects 'value' or separate series
+            }));
+
+            res.json({ success: true, candles });
+        } catch (e) {
+            console.error("Candle Fetch Error:", e);
+            res.status(500).json({ success: false, error: e.message });
+        }
+    });
+
     // --- SEARCH / TOKENS LIST (OPTIMIZED) ---
     router.get('/tokens', async (req, res) => {
         const { sort = 'newest', limit = 100, page = 1, search = '', filter = '' } = req.query;
@@ -168,28 +223,17 @@ function init(deps) {
                 // 2. EXTERNAL SEARCH (OPTIMIZED)
                 // Conditions: Search must be 3+ chars, and we must pass Global Rate Limit check
                 const isTooShort = searchTerm.length < 3;
-                
                 let shouldFetchExternal = searchTerm.length > 0 && !isTooShort;
 
                 if (shouldFetchExternal) {
-                    // Check Global Rate Limit (Redis)
                     const canCallExternal = await checkExternalRateLimit();
-                    
                     if (!canCallExternal) {
-                        console.warn(`⚠️ Global Rate Limit Exceeded. Skipping external search for '${searchTerm}'`);
                         shouldFetchExternal = false;
-                    } else {
-                        // Check if we have this SPECIFIC search cached already (don't hit API if we just searched "pepe")
-                        // Note: smartCache handles the *result* of this function, but we want to cache the *external fetch* specifically
-                        // to reuse it across different page/sort views if possible.
-                        // For simplicity, we implement logic here.
                     }
                 }
 
                 if (shouldFetchExternal) {
-                    // Use a specific cache key for the external result to avoid hitting API for same term
                     const extCacheKey = `ext_search:${searchTerm.toLowerCase()}`;
-                    
                     const externalTokens = await smartCache(extCacheKey, 300, async () => { // Cache for 5 minutes
                         try {
                             let dexRes;
@@ -199,13 +243,11 @@ function init(deps) {
                                      dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/pairs/solana/${searchTerm}`, { timeout: 3500 });
                                 }
                             } else {
-                                // GENERIC TEXT SEARCH ENABLED
                                 dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(searchTerm)}`, { timeout: 4500 });
                             }
 
                             if (dexRes.data?.pairs) {
                                 const validPairs = dexRes.data.pairs.filter(p => p.chainId === 'solana');
-                                
                                 const foundTokens = validPairs.map(pair => ({
                                     mint: pair.baseToken.address, 
                                     name: pair.baseToken.name, 
@@ -215,29 +257,23 @@ function init(deps) {
                                     volume24h: Number(pair.volume?.h24 || 0), 
                                     priceUsd: Number(pair.priceUsd || 0), 
                                     timestamp: pair.pairCreatedAt || Date.now(),
-                                    isExternal: true // Marker
+                                    isExternal: true 
                                 }));
                                 return foundTokens;
                             }
                             return [];
                         } catch (extErr) { 
-                            console.error("External search failed:", extErr.message);
                             return [];
                         }
                     });
 
-                    // Merge and Deduplicate
                     if (externalTokens && externalTokens.length > 0) {
-                        // Save to DB (Fire & Forget)
                         externalTokens.forEach(t => saveTokenData(db, t.mint, t, t.timestamp).catch(console.error));
-
-                        // Merge into rows (Avoid duplicates)
                         const existingMints = new Set(rows.map(r => r.mint));
                         externalTokens.forEach(t => {
                             if (!existingMints.has(t.mint)) {
                                 rows.push({
                                     ...t,
-                                    // Normalize for response format
                                     timestamp: t.timestamp,
                                     hasCommunityUpdate: false,
                                     k_score: 0
@@ -249,7 +285,6 @@ function init(deps) {
 
                 // 3. Final Sort
                 if (searchTerm && rows.length > 0) {
-                     // Prefer exact matches (Address or Ticker)
                      rows.sort((a, b) => {
                          const aExact = a.mint === searchTerm || a.ticker.toLowerCase() === searchTerm.toLowerCase();
                          const bExact = b.mint === searchTerm || b.ticker.toLowerCase() === searchTerm.toLowerCase();
@@ -282,7 +317,6 @@ function init(deps) {
             let pairs = [];
             
             try {
-                // Individual token fetches are less strictly limited, but still cached
                 const dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, { timeout: 3000 });
                 if (dexRes.data?.pairs) {
                     pairs = dexRes.data.pairs.sort((a,b) => (b.liquidity?.usd||0) - (a.liquidity?.usd||0));

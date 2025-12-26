@@ -21,7 +21,10 @@
     <!-- 2. Solana Web3.js -->
     <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
 
-    <!-- 3. Styling & Icons -->
+    <!-- 3. Lightweight Charts (TradingView) - NEW Internal Chart Engine -->
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+
+    <!-- 4. Styling & Icons -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -80,8 +83,15 @@
         .view-section { display: none; }
         .view-section.active { display: block; animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-        .chart-container { width: 100%; height: 500px; background: #1a0a05; border-radius: 16px; overflow: hidden; border: 2px solid #7c2d12; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        .chart-container iframe { width: 100%; height: 100%; border: 0; }
+        
+        /* NEW CHART STYLES */
+        .chart-wrapper { width: 100%; height: 500px; background: #1a0a05; border-radius: 16px; overflow: hidden; border: 2px solid #7c2d12; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
+        .chart-header { padding: 8px 16px; background: #2a1005; border-bottom: 1px solid #7c2d12; display: flex; justify-content: space-between; align-items: center; }
+        .res-btn { background: transparent; border: 1px solid transparent; color: #9a3412; padding: 4px 8px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 11px; font-weight: bold; cursor: pointer; transition: all 0.1s; }
+        .res-btn:hover { color: #fb923c; border-color: #451a03; }
+        .res-btn.active { background: #451a03; color: #ea580c; border-color: #7c2d12; }
+        #tv-chart { flex: 1; position: relative; }
+
         .stat-card { background: rgba(69, 26, 3, 0.8); border: 2px solid #7c2d12; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 4px; box-shadow: 4px 4px 0 rgba(0,0,0,0.2); }
         .stat-label { font-size: 11px; color: #fb923c; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
         .stat-value { font-size: 18px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
@@ -477,7 +487,23 @@
             </div>
             
             <div id="pool-tabs-container" class="flex gap-4 border-b border-[#7c2d12] mb-4 overflow-x-auto"></div>
-            <div class="chart-container"><iframe id="detail-iframe" src="about:blank"></iframe></div>
+            
+            <!-- REPLACED: DexScreener iframe with Custom Chart -->
+            <div class="chart-wrapper">
+                <div class="chart-header">
+                     <div class="text-[#fb923c] font-bold font-mono text-sm flex items-center gap-2"><i data-lucide="activity" width="16"></i> INTERNAL FEED</div>
+                     <div class="flex items-center gap-1 bg-[#0f0502] p-1 rounded-lg border border-[#7c2d12]">
+                         <button onclick="setResolution('1')" class="res-btn" id="res-1">1m</button>
+                         <button onclick="setResolution('5')" class="res-btn" id="res-5">5m</button>
+                         <button onclick="setResolution('15')" class="res-btn" id="res-15">15m</button>
+                         <button onclick="setResolution('60')" class="res-btn active" id="res-60">1H</button>
+                         <button onclick="setResolution('240')" class="res-btn" id="res-240">4H</button>
+                         <button onclick="setResolution('D')" class="res-btn" id="res-D">1D</button>
+                     </div>
+                </div>
+                <div id="tv-chart" style="width: 100%; height: 100%;"></div>
+            </div>
+
         </div>
     </div>
 </main>
@@ -685,11 +711,18 @@
     let walletAddress = null;
     let walletProvider = null; 
     let feeConfig = { solFee: 0.1, tokenFee: 1000, tokenMint: '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump', treasury: 'H8sMJqC9X8rJ8W1a6VjFq7X5gZ5fX9x8x8x8x8x8x8' };
+    
+    // --- Chart State ---
+    let chartInstance = null;
+    let candleSeries = null;
+    let currentMint = null;
+    let currentResolution = '60';
 
     // --- Init ---
     window.onload = async () => {
         handleRoute();
         await fetchFees();
+        lucide.createIcons();
         
         // Character counter listener
         const descInput = document.getElementById('update-description');
@@ -701,6 +734,67 @@
         }
     };
     window.addEventListener('hashchange', handleRoute);
+
+    // --- Chart Functions ---
+    function initChart() {
+        if (chartInstance) return; // Already exists
+
+        const container = document.getElementById('tv-chart');
+        chartInstance = LightweightCharts.createChart(container, {
+            layout: { background: { type: 'solid', color: '#1a0a05' }, textColor: '#9a3412' },
+            grid: { vertLines: { color: '#2a1005' }, horzLines: { color: '#2a1005' } },
+            crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+            rightPriceScale: { borderColor: '#7c2d12' },
+            timeScale: { borderColor: '#7c2d12', timeVisible: true, secondsVisible: false }
+        });
+
+        candleSeries = chartInstance.addCandlestickSeries({
+            upColor: '#22c55e', downColor: '#ef4444', borderVisible: false, wickUpColor: '#22c55e', wickDownColor: '#ef4444'
+        });
+        
+        // Resize Handler
+        new ResizeObserver(entries => {
+            if (entries.length === 0 || entries[0].target !== container) return;
+            const newRect = entries[0].contentRect;
+            chartInstance.applyOptions({ width: newRect.width, height: newRect.height });
+        }).observe(container);
+    }
+
+    async function setResolution(res) {
+        currentResolution = res;
+        // Update Buttons
+        document.querySelectorAll('.res-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById(`res-${res}`).classList.add('active');
+        // Fetch
+        if (currentMint) await fetchCandles(currentMint);
+    }
+
+    async function fetchCandles(mint) {
+        if (!mint) return;
+        currentMint = mint;
+        
+        // Ensure chart is initialized
+        if (!chartInstance) initChart();
+
+        try {
+            // Determine 'from' based on resolution to get a decent initial view
+            const now = Math.floor(Date.now() / 1000);
+            let from = now - (24 * 60 * 60); // Default 24h
+            if (currentResolution === '1') from = now - (4 * 60 * 60); // 4h for 1m
+            if (currentResolution === 'D') from = now - (30 * 24 * 60 * 60); // 30d for Daily
+
+            const res = await fetch(`${API_URL}/api/token/${mint}/candles?resolution=${currentResolution}&from=${from}&to=${now}`);
+            const data = await res.json();
+            
+            if (data.success && data.candles.length > 0) {
+                candleSeries.setData(data.candles);
+                chartInstance.timeScale().fitContent();
+            } else {
+                console.warn("No candle data available yet.");
+                candleSeries.setData([]); // Clear
+            }
+        } catch (e) { console.error("Chart Fetch Failed", e); }
+    }
 
     // --- API Calls ---
     async function fetchFees() {
@@ -1190,7 +1284,9 @@
 
     window.switchPool = (pairAddress, dexId) => {
         document.querySelectorAll('.pool-tab').forEach(t => t.classList.remove('active')); const tab = document.getElementById(`tab-${pairAddress}`); if(tab) tab.classList.add('active');
-        const frame = document.getElementById('detail-iframe'); if(frame) frame.src = `https://dexscreener.com/solana/${pairAddress}?embed=1&theme=dark&info=0`;
+        // IFrame logic removed for internal chart
+        // You can add logic here if you want the internal chart to switch specific pools for the same token,
+        // but currently fetchCandles uses the mint to find the best pool automatically.
     };
 
     async function showDetailView(mint) {
@@ -1254,7 +1350,6 @@
                     let linksHtml = '';
                     
                     // 1. Jupiter Link (Replaces Pump.fun)
-                    // Updated to use ?sell=SOL_MINT&buy=TOKEN_MINT format
                     linksHtml += `<a href="https://jup.ag/swap?sell=So11111111111111111111111111111111111111112&buy=${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow bg-[#191e29] border-[#c7f284] text-[#c7f284] hover:bg-[#c7f284] hover:text-[#000]">Jupiter Swap</a>`;
                     
                     // 2. Solscan Link
@@ -1286,20 +1381,17 @@
                 
                 const kEl = document.getElementById('stat-kscore');
                 if(kEl) {
-                    // LOGIC FIX: Show Clock if Verified but Score is 0
                     if (isVerified) {
                         if (score > 0) {
                             kEl.innerText = score;
                             kEl.classList.remove('text-gray-500'); kEl.classList.add('text-[#fb923c]');
                             kEl.title = "Conviction Score";
                         } else {
-                            // Pending State
                             kEl.innerText = '🕒';
                             kEl.classList.remove('text-gray-500', 'text-[#fb923c]'); kEl.classList.add('text-[#fb923c]', 'animate-pulse');
                             kEl.title = "Calculating Score...";
                         }
                     } else {
-                        // Unverified State
                         kEl.innerText = '🔒';
                         kEl.classList.remove('text-[#fb923c]', 'animate-pulse'); kEl.classList.add('text-gray-500'); 
                         kEl.title = "Requires Community Update";
@@ -1315,14 +1407,12 @@
                             tab.id = `tab-${pair.pairAddress}`; tab.innerText = `${pair.dexId.toUpperCase()} ($${formatCompact(pair.liquidity)} Liq)`;
                             tab.onclick = () => switchPool(pair.pairAddress, pair.dexId); tabsContainer.appendChild(tab);
                         });
-                        const frame = document.getElementById('detail-iframe');
-                        if(frame) frame.src = `https://dexscreener.com/solana/${t.pairs[0].pairAddress}?embed=1&theme=dark&info=0`;
-                    } else { 
-                        const frame = document.getElementById('detail-iframe');
-                        if(frame) frame.src = `https://dexscreener.com/solana/${t.mint}?embed=1&theme=dark&info=0`; 
                     }
                 }
                 
+                // --- NEW: Load Internal Chart ---
+                await fetchCandles(mint);
+
                 if(loadingDiv) loadingDiv.style.display = 'none'; 
                 if(contentDiv) contentDiv.style.display = 'block';
             }
