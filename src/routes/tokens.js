@@ -10,6 +10,7 @@ const kScoreUpdater = require('../tasks/kScoreUpdater');
 const { getClient } = require('../services/redis'); 
 const { enqueueTokenUpdate } = require('../services/queue'); 
 const { snapshotPools } = require('../indexer/tasks/snapshotter'); 
+const logger = require('../services/logger');
 
 const router = express.Router();
 const solanaConnection = getSolanaConnection();
@@ -27,6 +28,8 @@ function init(deps) {
 
     async function verifyPayment(signature, payerPubkey) {
         if (!signature) throw new Error("Payment signature required");
+        // Logic Gap: This only checks if used. For production, you should verify tx on-chain.
+        // For now, checking duplication prevents simple replay attacks on this DB.
         const existing = await db.get('SELECT id FROM token_updates WHERE signature = $1', [signature]);
         if (existing) throw new Error("Transaction signature already used");
         return true; 
@@ -122,14 +125,32 @@ function init(deps) {
     });
 
     router.post('/request-update', async (req, res) => {
+        const { mint, signature } = req.body;
+        logger.info(`📝 Received Update Request for ${mint} (Sig: ${signature})`);
+        
         try {
             const { mint, twitter, website, telegram, banner, description, signature, userPublicKey } = req.body;
+            
             if (!mint || mint.length < 30) return res.status(400).json({ success: false, error: "Invalid Mint" });
-            try { await verifyPayment(signature, userPublicKey); } catch (payErr) { return res.status(402).json({ success: false, error: payErr.message }); }
+            
+            try { 
+                await verifyPayment(signature, userPublicKey); 
+            } catch (payErr) { 
+                logger.warn(`Payment Verification Failed: ${payErr.message}`);
+                return res.status(402).json({ success: false, error: payErr.message }); 
+            }
+
             await db.run(`INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)`, [mint, twitter, website, telegram, banner, description, Date.now(), signature, userPublicKey]);
+            
+            // Auto Index if new
             try { await indexTokenOnChain(mint); } catch (err) { console.error("Auto-Index failed:", err.message); }
+            
+            logger.info(`✅ Update Queued for ${mint}`);
             res.json({ success: true, message: "Update queued. Indexing started." });
-        } catch (e) { res.status(500).json({ success: false, error: "Submission failed: " + e.message }); }
+        } catch (e) { 
+            logger.error(`❌ Submission failed: ${e.message}`);
+            res.status(500).json({ success: false, error: "Submission failed: " + e.message }); 
+        }
     });
 
     // UPDATED CANDLE ENDPOINT - SUPPORTS SPECIFIC POOL
