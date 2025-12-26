@@ -14,6 +14,8 @@
 
     <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    <!-- NEW: Socket.IO Client -->
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -595,8 +597,64 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     let holderChart = null;
     let holderAreaSeries = null;
 
-    window.onload = async () => { handleRoute(); await fetchFees(); lucide.createIcons(); const descInput = document.getElementById('update-description'); const charCount = document.getElementById('char-count'); if(descInput && charCount) { descInput.addEventListener('input', () => { charCount.innerText = descInput.value.length; }); } };
+    // SOCKET.IO CLIENT
+    let socket = null;
+
+    window.onload = async () => { 
+        handleRoute(); 
+        await fetchFees(); 
+        lucide.createIcons(); 
+        
+        // Initialize Socket
+        socket = io(API_URL, { path: '/socket.io', transports: ['websocket'] });
+        socket.on('connect', () => {
+            const dot = document.getElementById('footer-status-dot');
+            const txt = document.getElementById('footer-status-text');
+            if(dot) { dot.classList.remove('offline'); dot.classList.add('online'); }
+            if(txt) txt.innerText = "System Online (Live)";
+        });
+        socket.on('disconnect', () => {
+            const dot = document.getElementById('footer-status-dot');
+            const txt = document.getElementById('footer-status-text');
+            if(dot) { dot.classList.add('offline'); dot.classList.remove('online'); }
+            if(txt) txt.innerText = "Disconnected";
+        });
+
+        // Handle Real-Time Updates
+        socket.on('update', (data) => {
+            if (currentMint && window.location.hash.startsWith(`#token/${currentMint}`)) {
+                // We are viewing this token, update stats safely
+                updateLiveStats(data);
+            }
+        });
+
+        const descInput = document.getElementById('update-description'); 
+        const charCount = document.getElementById('char-count'); 
+        if(descInput && charCount) { 
+            descInput.addEventListener('input', () => { charCount.innerText = descInput.value.length; }); 
+        } 
+    };
+    
     window.addEventListener('hashchange', handleRoute);
+
+    // --- LIVE UPDATES ---
+    function updateLiveStats(data) {
+        // Safe Update Function
+        const safeSetText = (id, txt) => { const el = document.getElementById(id); if(el) el.innerText = txt; };
+        const safeSetHTML = (id, htm) => { const el = document.getElementById(id); if(el) el.innerHTML = htm; };
+
+        // Update main stats
+        safeSetText('stat-price', formatMoney(data.priceUsd));
+        safeSetText('stat-mcap', formatCompact(data.marketCap));
+        safeSetText('stat-vol', formatCompact(data.volume24h));
+        safeSetHTML('stat-chg1h', formatPct(data.change1h));
+        safeSetHTML('stat-chg24h', formatPct(data.change24h));
+        safeSetText('stat-holders', (data.holders || 0).toLocaleString());
+
+        // Update footer time
+        const time = document.getElementById('footer-last-update');
+        if(time) time.innerText = new Date().toLocaleTimeString();
+    }
 
     // --- CHART LOGIC UPDATED ---
     function cleanupChart() {
@@ -956,14 +1014,19 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         if (tableControls) tableControls.classList.add('hidden'); 
         if (detailControls) detailControls.classList.add('hidden'); 
         
-        if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; } 
-        if (detailPollingInterval) { clearInterval(detailPollingInterval); detailPollingInterval = null; }
+        // --- SOCKET MANAGEMENT ---
+        if (socket) {
+            // Unsubscribe from previous token room if leaving detail view
+            if (currentMint) socket.emit('unsubscribe', currentMint);
+        }
 
         if (hash === '' || hash === '#') { 
             document.getElementById('view-dashboard').classList.add('active'); 
             document.querySelector('button[onclick="navigateTo(\'\')"]').classList.add('active'); 
             if(tableControls) tableControls.classList.remove('hidden'); 
             fetchList(); 
+            // Polling for List View (Socket not used for list yet to save bandwidth)
+            if (pollingInterval) clearInterval(pollingInterval);
             pollingInterval = setInterval(fetchList, 5000); 
         } else if (hash === '#about') { 
             document.getElementById('view-about').classList.add('active'); 
@@ -973,6 +1036,8 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             document.querySelector('button[onclick="navigateTo(\'update\')"]').classList.add('active'); 
             updateWalletUI(walletAddress !== null); 
         } else if (hash.startsWith('#token/')) { 
+            if (pollingInterval) clearInterval(pollingInterval); 
+            // Detail view uses socket, no polling interval needed
             showDetailView(hash.split('/')[1]); 
         } 
     }
@@ -1084,10 +1149,11 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
 
         cleanupChart();
 
-        const updateDetailUI = async (isInitialLoad = false) => {
-            // STOP POLLING IF TAB HIDDEN (Optimization)
-            if (!isInitialLoad && document.hidden) return;
+        // SUBSCRIBE TO SOCKET ROOM
+        if (socket) socket.emit('subscribe', mint);
 
+        const updateDetailUI = async (isInitialLoad = false) => {
+            // No need to check document.hidden here since we are socket-driven for updates
             try {
                 const res = await fetch(`${API_URL}/api/token/${mint}`);
                 const data = await res.json();
@@ -1133,22 +1199,8 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
                         }
                     }
 
-                    const mcap = Number(t.marketCap || t.marketcap || 0);
-                    const price = Number(t.priceUsd || t.priceusd || 0);
-                    const vol = Number(t.volume24h || 0);
-
-                    // --- SAFE DOM UPDATE ---
-                    const safeSetText = (id, txt) => { const el = document.getElementById(id); if(el) el.innerText = txt; };
-                    const safeSetHTML = (id, htm) => { const el = document.getElementById(id); if(el) el.innerHTML = htm; };
-
-                    safeSetText('stat-price', formatMoney(price));
-                    safeSetText('stat-mcap', formatCompact(mcap));
-                    safeSetText('stat-vol', formatCompact(vol));
-                    safeSetHTML('stat-chg1h', formatPct(t.change1h));
-                    safeSetHTML('stat-chg24h', formatPct(t.change24h));
-                    
-                    const holders = t.holders || 0;
-                    safeSetText('stat-holders', holders.toLocaleString());
+                    // Populate initial stats (live updates handle the rest)
+                    updateLiveStats(t);
                     
                     if(t.holderHistory) currentHolderHistory = t.holderHistory;
 
@@ -1200,8 +1252,9 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
                 }
             } catch (e) { console.error(e); if(isInitialLoad && loadingDiv) loadingDiv.innerText = "Error Loading Token Data"; }
         };
+        
         await updateDetailUI(true);
-        detailPollingInterval = setInterval(() => updateDetailUI(false), 5000);
+        // Polling removed in favor of sockets, but you can re-enable as a fallback if needed
     }
 </script>
 </body>

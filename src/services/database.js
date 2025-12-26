@@ -3,11 +3,11 @@ const config = require('../config/env');
 const logger = require('./logger');
 const { getClient } = require('./redis');
 
-let pool = null;
+let primaryPool = null;
+let readPool = null; // New Read Replica Pool
 let dbWrapper = null;
 let initPromise = null;
 
-// Cache Stampede Protection: Store pending promises for keys
 const pendingRequests = new Map();
 
 async function initDB() {
@@ -17,26 +17,45 @@ async function initDB() {
     initPromise = (async () => {
         try {
             const isLocal = config.DATABASE_URL.includes('localhost') || config.DATABASE_URL.includes('127.0.0.1');
-            
-            pool = new Pool({
+            const sslConfig = isLocal ? false : { rejectUnauthorized: false };
+
+            // 1. Primary Connection (Writes)
+            primaryPool = new Pool({
                 connectionString: config.DATABASE_URL,
-                ssl: isLocal ? false : { rejectUnauthorized: false },
-                max: 50, // INCREASED: Allow more concurrent connections
+                ssl: sslConfig,
+                max: 50, 
                 idleTimeoutMillis: 30000,
                 connectionTimeoutMillis: 5000,
             });
 
-            pool.on('error', (err, client) => {
-                logger.error(`Unexpected error on idle DB client: ${err.message}`);
-            });
+            primaryPool.on('error', (err) => logger.error(`Unexpected error on Primary DB: ${err.message}`));
 
-            logger.info(`📦 Database: Connecting to PostgreSQL (Pool: 50)...`);
-            const client = await pool.connect();
+            logger.info(`📦 Database: Connecting to Primary...`);
+            const client = await primaryPool.connect();
             client.release();
-            logger.info(`📦 Database: Connection Successful.`);
+            logger.info(`📦 Database: Primary Connection Successful.`);
 
-            // Schema Creation
-            await pool.query(`
+            // 2. Read Replica Connection (Optional)
+            if (process.env.READ_DATABASE_URL) {
+                readPool = new Pool({
+                    connectionString: process.env.READ_DATABASE_URL,
+                    ssl: sslConfig,
+                    max: 50, 
+                    idleTimeoutMillis: 30000,
+                    connectionTimeoutMillis: 5000,
+                });
+                readPool.on('error', (err) => logger.error(`Unexpected error on Read Replica: ${err.message}`));
+                
+                const readClient = await readPool.connect();
+                readClient.release();
+                logger.info(`📦 Database: Read Replica Connected.`);
+            } else {
+                readPool = primaryPool; // Fallback to primary if no replica
+                logger.info(`📦 Database: No Read Replica configured. Using Primary for reads.`);
+            }
+
+            // Schema Creation (Only on Primary)
+            await primaryPool.query(`
                 CREATE TABLE IF NOT EXISTS tokens (
                     mint TEXT PRIMARY KEY,
                     name TEXT,
@@ -126,10 +145,23 @@ async function initDB() {
             `);
 
             dbWrapper = {
-                query: (text, params) => pool.query(text, params),
-                get: async (text, params) => { const res = await pool.query(text, params); return res.rows[0]; },
-                all: async (text, params) => { const res = await pool.query(text, params); return res.rows; },
-                run: async (text, params) => { const res = await pool.query(text, params); return { rowCount: res.rowCount }; }
+                // Route SELECT to Read Pool, everything else to Primary
+                query: (text, params) => {
+                    const isSelect = text.trim().toUpperCase().startsWith('SELECT');
+                    return (isSelect ? readPool : primaryPool).query(text, params);
+                },
+                get: async (text, params) => { 
+                    const res = await readPool.query(text, params); // Always read
+                    return res.rows[0]; 
+                },
+                all: async (text, params) => { 
+                    const res = await readPool.query(text, params); // Always read
+                    return res.rows; 
+                },
+                run: async (text, params) => { 
+                    const res = await primaryPool.query(text, params); // Always write
+                    return { rowCount: res.rowCount }; 
+                }
             };
 
             return dbWrapper;
@@ -149,38 +181,26 @@ function getDB() {
     return dbWrapper;
 }
 
-// UPDATED: SmartCache with Stampede Protection
 async function smartCache(key, ttlSeconds, fetchFn) {
     const redis = getClient();
     
-    // 1. Try Redis
     if (redis) {
         try {
             const cached = await redis.get(key);
             if (cached) return JSON.parse(cached);
-        } catch (e) {
-            // Redis error, proceed to fetch
-        }
+        } catch (e) {}
     }
 
-    // 2. Check if a fetch is already in progress for this key (Stampede Protection)
-    if (pendingRequests.has(key)) {
-        return pendingRequests.get(key);
-    }
+    if (pendingRequests.has(key)) return pendingRequests.get(key);
 
-    // 3. Create a new fetch promise and store it
     const fetchPromise = (async () => {
         try {
             const data = await fetchFn();
-            
-            // 4. Update Redis if successful
             if (redis && data) {
-                // Background update, don't await
                 redis.set(key, JSON.stringify(data), 'EX', ttlSeconds).catch(() => {}); 
             }
             return data;
         } finally {
-            // 5. Cleanup: Remove from pending requests map regardless of success/failure
             pendingRequests.delete(key);
         }
     })();

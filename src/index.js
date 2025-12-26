@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const http = require('http'); // NEW: Required for Socket.io
 const rateLimit = require('express-rate-limit');
 const config = require('./config/env');
 const logger = require('./services/logger');
@@ -9,12 +10,11 @@ const { initDB, getDB } = require('./services/database');
 const { connectRedis } = require('./services/redis');
 const { startSnapshotter } = require('./indexer/tasks/snapshotter'); 
 const { startNewTokenListener } = require('./tasks/newTokenListener'); 
+const { initSocket } = require('./services/socket'); // NEW
 const tokensRoutes = require('./routes/tokens');
 
-// Note: startWorker is REMOVED from here. 
-// It must be run separately via `npm run start:worker`
-
 const app = express();
+const server = http.createServer(app); // Wrap Express
 
 // SECURITY HEADERS
 app.use(helmet({
@@ -27,17 +27,9 @@ const allowedOrigins = config.CORS_ORIGINS;
 
 const corsOptions = {
     origin: function (origin, callback) {
-        // 1. Allow requests with no origin (mobile apps, curl, server-to-server)
         if (!origin) return callback(null, true);
-
-        // 2. Check against config list
         const isConfigAllowed = allowedOrigins === '*' || (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin));
-        
-        // 3. HARDCODED FALLBACK: Always allow your domain, regardless of config
-        const isDomainAllowed = 
-            origin === 'https://www.alonisthe.dev' || 
-            origin === 'https://alonisthe.dev' ||
-            origin.includes('localhost'); // Allow local dev always
+        const isDomainAllowed = origin.includes('alonisthe.dev') || origin.includes('localhost'); 
 
         if (isConfigAllowed || isDomainAllowed) {
             return callback(null, true);
@@ -74,24 +66,17 @@ async function startServer() {
     try {
         logger.info('🚀 System: Initializing HolDEX API...');
         
-        const originLog = Array.isArray(allowedOrigins) ? allowedOrigins.join(', ') : allowedOrigins;
-        logger.info(`🛡️  CORS Configured for: ${originLog}`);
-
-        // 1. Initialize Database
         await initDB();
-        
-        // 2. Initialize Redis
         await connectRedis();
 
-        // 3. Start Background Services (Indexer only)
-        // Worker logic (Queues & Metadata) is now handled by the separate worker process
+        // Start WebSocket Server
+        initSocket(server, allowedOrigins);
+
         startSnapshotter();
         startNewTokenListener().catch(e => logger.error(`Listener Start Error: ${e.message}`));
 
-        // 4. Initialize Routes
         app.use('/api', tokensRoutes.init({ db: getDB() }));
 
-        // 5. Global Error Handler
         app.use((err, req, res, next) => {
             logger.error(`🔥 Unhandled Server Error: ${err.message}`);
             logger.error(err.stack);
@@ -101,8 +86,9 @@ async function startServer() {
         });
 
         const PORT = process.env.PORT || 3000;
-        app.listen(PORT, () => {
-            logger.info(`✅ API: Listening on port ${PORT}`);
+        // Use 'server.listen' instead of 'app.listen'
+        server.listen(PORT, () => {
+            logger.info(`✅ API & Socket: Listening on port ${PORT}`);
         });
 
     } catch (error) {

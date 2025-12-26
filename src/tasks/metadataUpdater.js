@@ -1,10 +1,10 @@
 const axios = require('axios');
 const logger = require('../services/logger');
+const { broadcastTokenUpdate } = require('../services/socket'); // NEW
 
 let isRunning = false;
-// UPDATED: Process batches faster
-const BATCH_SIZE = 5; // Process 5 tokens concurrently
-const BATCH_DELAY_MS = 2000; // Wait 2s between batches to respect rate limits (approx 150 requests/min max)
+const BATCH_SIZE = 5; 
+const BATCH_DELAY_MS = 2000; 
 
 async function fetchGeckoTerminalData(mintAddress) {
     try {
@@ -32,11 +32,9 @@ async function fetchTokenDetails(mintAddress) {
 
 async function processSingleToken(db, t, now) {
     try {
-        // 1. Fetch Pools Data
         const poolsData = await fetchGeckoTerminalData(t.mint);
-
-        // 2. Fetch Token Details (for Holders)
         const tokenDetails = await fetchTokenDetails(t.mint);
+        
         let holderCount = 0;
         if (tokenDetails && tokenDetails.attributes && tokenDetails.attributes.holder_count) {
             holderCount = parseInt(tokenDetails.attributes.holder_count);
@@ -141,6 +139,17 @@ async function processSingleToken(db, t, now) {
 
         await db.run(finalQuery, finalParams);
 
+        // NEW: Broadcast Real-Time Update
+        broadcastTokenUpdate(t.mint, {
+            priceUsd: bestPrice,
+            marketCap: marketCap,
+            volume24h: totalVolume24h,
+            change1h: bestChange1h,
+            change24h: bestChange24h,
+            holders: holderCount,
+            updatedAt: now
+        });
+
     } catch (err) {
         logger.error(`Token Update Failed [${t.mint}]: ${err.message}`);
     }
@@ -164,12 +173,10 @@ async function updateMetadata(deps) {
             logger.info(`🔄 Metadata: Syncing ${tokens.length} tokens via GeckoTerminal (Parallel Batches)...`);
         }
         
-        // PARALLEL BATCH PROCESSING
         for (let i = 0; i < tokens.length; i += BATCH_SIZE) {
             const batch = tokens.slice(i, i + BATCH_SIZE);
             await Promise.all(batch.map(t => processSingleToken(db, t, now)));
             
-            // Wait between batches to respect API limits
             if (i + BATCH_SIZE < tokens.length) {
                 await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
             }
