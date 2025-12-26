@@ -8,7 +8,6 @@ const logger = require('./services/logger');
 const { initDB, getDB } = require('./services/database');
 
 const tokensRoutes = require('./routes/tokens');
-// REMOVED: const { startSnapshotter } = require('./indexer/tasks/snapshotter'); 
 
 const app = express();
 
@@ -70,9 +69,6 @@ async function startServer() {
         app.listen(PORT, () => {
             logger.info(`✅ API: Listening on port ${PORT}`);
         });
-
-        // REMOVED: startSnapshotter(); 
-        // Snapshotter is now EXCLUSIVELY run by the 'indexer' service to prevent race conditions.
 
     } catch (error) {
         logger.error('❌ System Fatal Error:', error);

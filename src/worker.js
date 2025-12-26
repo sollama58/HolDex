@@ -9,7 +9,9 @@ const { initRedis } = require('./services/redis');
 const metadataUpdater = require('./tasks/metadataUpdater');
 const newTokenListener = require('./tasks/newTokenListener');
 const kScoreUpdater = require('./tasks/kScoreUpdater');
-const { logger } = require('./services');
+// CRITICAL: Import the snapshotter to ensure prices update
+const { startSnapshotter } = require('./indexer/tasks/snapshotter'); 
+const logger = require('./services/logger');
 
 const globalState = {
     lastBackendUpdate: Date.now()
@@ -27,25 +29,26 @@ async function startWorker() {
     // --- START TASKS ---
     logger.info('🚀 Launching Background Tasks...');
     
-    // 1. New Token Listener (DexScreener Feed)
-    // Runs continuously to find new pairs/migrations
+    // 1. New Token Listener (On-Demand + Discovery)
     newTokenListener.start(deps);  
     
     // 2. Metadata Updater (Price/Volume Refresh)
-    // Runs every 60s to update existing tokens
     metadataUpdater.start(deps);   
     
     // 3. K-Score Updater (Helius Analysis)
-    // Runs every 6h (rolling) to calculate conviction scores
     kScoreUpdater.start(deps);
 
-    logger.info('✅ Worker fully operational.');
+    // 4. Snapshotter (Price Engine)
+    // Runs regularly to fetch prices from On-Chain data
+    logger.info('📸 Starting Price Snapshotter Engine...');
+    startSnapshotter();
+
+    logger.info('✅ Master Worker fully operational.');
 }
 
 // Handle crashes
 process.on('uncaughtException', (err) => {
     logger.error('❌ Worker Uncaught Exception:', err);
-    // In production, use a process manager (PM2) to restart
     process.exit(1); 
 });
 
