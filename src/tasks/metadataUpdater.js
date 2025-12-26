@@ -1,7 +1,7 @@
 const axios = require('axios');
 const logger = require('../services/logger');
 const { broadcastTokenUpdate } = require('../services/socket'); 
-const { fetchSolscanData } = require('../services/solscan'); // Import Solscan for fallback
+const { fetchSolscanData } = require('../services/solscan'); 
 
 let isRunning = false;
 const BATCH_SIZE = 5; 
@@ -36,25 +36,33 @@ async function processSingleToken(db, t, now) {
         const poolsData = await fetchGeckoTerminalData(t.mint);
         const tokenDetails = await fetchTokenDetails(t.mint);
         
-        // --- HOLDER COUNT LOGIC (WITH FALLBACK) ---
+        // --- 1. HOLDER COUNT LOGIC ---
         let holderCount = 0;
         
-        // 1. Try GeckoTerminal
+        // Try GeckoTerminal first
         if (tokenDetails && tokenDetails.attributes && tokenDetails.attributes.holder_count) {
             holderCount = parseInt(tokenDetails.attributes.holder_count);
+        } else if (tokenDetails && tokenDetails.attributes && tokenDetails.attributes.holders_count) {
+             // Handle potential API property variations
+            holderCount = parseInt(tokenDetails.attributes.holders_count);
         }
 
-        // 2. Fallback to Solscan if Gecko fails or returns 0
+        // Fallback to Solscan
         if (!holderCount || holderCount === 0) {
             const solscanData = await fetchSolscanData(t.mint);
             if (solscanData && solscanData.holders > 0) {
                 holderCount = solscanData.holders;
-                // logger.info(`Using Solscan Holder Count for ${t.mint}: ${holderCount}`);
             }
         }
 
+        // If no pools, just update timestamp/holders and return
         if (!poolsData || poolsData.length === 0) {
-            await db.run(`UPDATE tokens SET updated_at = CURRENT_TIMESTAMP WHERE mint = $1`, [t.mint]);
+            // Still save holders if we found them
+            if (holderCount > 0) {
+                await db.run(`UPDATE tokens SET holders = $1, updated_at = CURRENT_TIMESTAMP WHERE mint = $2`, [holderCount, t.mint]);
+            } else {
+                await db.run(`UPDATE tokens SET updated_at = CURRENT_TIMESTAMP WHERE mint = $1`, [t.mint]);
+            }
             return;
         }
 
@@ -65,7 +73,7 @@ async function processSingleToken(db, t, now) {
         let bestChange1h = null;
         let bestChange5m = null;
         let maxLiquidity = -1;
-        let earliestPoolTime = null; // Track earliest pool creation time
+        let earliestPoolTime = null; 
 
         for (const poolData of poolsData) {
             const attr = poolData.attributes;
@@ -118,10 +126,25 @@ async function processSingleToken(db, t, now) {
             `, [address, t.mint, dexId, price, liqUsd, vol24h, now, tokenA, tokenB]);
         }
         
+        // --- 2. MARKET CAP LOGIC (IMPROVED) ---
         let marketCap = 0;
-        if (bestPrice > 0) {
+        
+        // A. Try direct FDV from Gecko (Most Accurate)
+        if (tokenDetails && tokenDetails.attributes) {
+            marketCap = parseFloat(tokenDetails.attributes.fdv_usd || tokenDetails.attributes.market_cap_usd || 0);
+        }
+
+        // B. Fallback: Manual Calculation
+        if (marketCap === 0 && bestPrice > 0) {
             const decimals = t.decimals || 9; 
             let rawSupply = parseFloat(t.supply || '0');
+            
+            // Try to heal missing supply from Gecko
+            if (rawSupply === 0 && tokenDetails?.attributes?.total_supply) {
+                rawSupply = parseFloat(tokenDetails.attributes.total_supply);
+            }
+
+            // Ultimate Fallback
             if (rawSupply === 0) rawSupply = 1000000000 * Math.pow(10, decimals); 
 
             const divisor = Math.pow(10, decimals);
@@ -142,8 +165,6 @@ async function processSingleToken(db, t, now) {
         let idx = 5;
         
         // --- AGE FIX ---
-        // Only update 'timestamp' if we found a valid pool creation date.
-        // We do NOT update timestamp to 'now', preserving the "Age".
         if (earliestPoolTime && earliestPoolTime > 0) {
             updateParts.push(`timestamp = $${idx++}`);
             finalParams.push(earliestPoolTime);

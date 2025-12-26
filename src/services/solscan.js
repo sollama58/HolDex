@@ -2,12 +2,11 @@ const axios = require('axios');
 const logger = require('./logger');
 
 /**
- * Fetches market data from Solscan's Public API.
- * Returns normalized object or null.
+ * Fetches data from Solscan's Public API.
+ * Uses the 'token/meta' endpoint which is often more reliable for holder counts than 'market/token'.
  */
 async function fetchSolscanData(mint) {
     try {
-        // Randomize User-Agent to avoid simple blocking
         const agents = [
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Safari/605.1.15',
@@ -15,7 +14,8 @@ async function fetchSolscanData(mint) {
         ];
         const ua = agents[Math.floor(Math.random() * agents.length)];
 
-        const url = `https://public-api.solscan.io/market/token/${mint}`;
+        // Primary: Token Meta Endpoint (Better for holders)
+        const url = `https://public-api.solscan.io/token/meta?tokenAddress=${mint}`;
         
         const res = await axios.get(url, { 
             timeout: 5000,
@@ -24,20 +24,28 @@ async function fetchSolscanData(mint) {
         
         if (res.data) {
             return {
-                priceUsd: parseFloat(res.data.priceUsd || 0),
-                volume24h: parseFloat(res.data.volumeUsd24h || 0),
-                // Prefer Fully Diluted, fall back to standard marketCap
-                marketCap: parseFloat(res.data.marketCapFD || res.data.marketCap || 0),
-                change24h: parseFloat(res.data.priceChange24h || 0),
-                // Parse holder count (supports 'holder' or 'holderCount' fields)
-                holders: parseInt(res.data.holder || res.data.holderCount || 0)
+                // Solscan 'token/meta' returns 'holder' as an integer
+                holders: parseInt(res.data.holder || 0),
+                marketCap: parseFloat(res.data.marketCap || res.data.fdv || 0),
+                supply: res.data.supply || '0'
             };
         }
     } catch (e) {
-        // 429 = Rate Limit, 403 = Blocked. 
-        // We fail silently so the system falls back to internal data.
-        if (e.response && (e.response.status === 429 || e.response.status === 403)) {
-            // logger.debug(`Solscan Rate Limit/Block for ${mint}`);
+        // Fallback: Market Endpoint
+        try {
+            if (e.response && e.response.status !== 404) {
+                const url2 = `https://public-api.solscan.io/market/token/${mint}`;
+                const res2 = await axios.get(url2, { timeout: 3000, headers: { 'User-Agent': ua } });
+                if (res2.data) {
+                    return {
+                        holders: parseInt(res2.data.holderCount || res2.data.holder || 0),
+                        marketCap: parseFloat(res2.data.marketCapFD || res2.data.marketCap || 0),
+                        priceUsd: parseFloat(res2.data.priceUsd || 0)
+                    };
+                }
+            }
+        } catch (err2) {
+            // logger.debug(`Solscan Metadata Fetch Failed for ${mint}`);
         }
     }
     return null;
