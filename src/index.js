@@ -8,9 +8,11 @@ const logger = require('./services/logger');
 const { initDB, getDB } = require('./services/database');
 const { connectRedis } = require('./services/redis');
 const { startSnapshotter } = require('./indexer/tasks/snapshotter'); 
-const { startWorker } = require('./worker'); 
 const { startNewTokenListener } = require('./tasks/newTokenListener'); 
 const tokensRoutes = require('./routes/tokens');
+
+// Note: startWorker is REMOVED from here. 
+// It must be run separately via `npm run start:worker`
 
 const app = express();
 
@@ -32,7 +34,6 @@ const corsOptions = {
         const isConfigAllowed = allowedOrigins === '*' || (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin));
         
         // 3. HARDCODED FALLBACK: Always allow your domain, regardless of config
-        // This prevents env var parsing errors from breaking production
         const isDomainAllowed = 
             origin === 'https://www.alonisthe.dev' || 
             origin === 'https://alonisthe.dev' ||
@@ -73,10 +74,8 @@ async function startServer() {
     try {
         logger.info('🚀 System: Initializing HolDEX API...');
         
-        // Debug: Print allowed origins to logs
         const originLog = Array.isArray(allowedOrigins) ? allowedOrigins.join(', ') : allowedOrigins;
         logger.info(`🛡️  CORS Configured for: ${originLog}`);
-        logger.info(`🛡️  CORS Fallback Active for: alonisthe.dev`);
 
         // 1. Initialize Database
         await initDB();
@@ -84,9 +83,9 @@ async function startServer() {
         // 2. Initialize Redis
         await connectRedis();
 
-        // 3. Start Background Services
+        // 3. Start Background Services (Indexer only)
+        // Worker logic (Queues & Metadata) is now handled by the separate worker process
         startSnapshotter();
-        startWorker().catch(e => logger.error(`Worker Start Error: ${e.message}`));
         startNewTokenListener().catch(e => logger.error(`Listener Start Error: ${e.message}`));
 
         // 4. Initialize Routes

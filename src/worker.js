@@ -6,6 +6,7 @@ const { fetchTokenMetadata } = require('./utils/metaplex');
 const { getSolanaConnection } = require('./services/solana');
 const { PublicKey } = require('@solana/web3.js');
 const logger = require('./services/logger');
+const metadataUpdater = require('./tasks/metadataUpdater'); // Import Metadata Updater
 
 const QUEUE_KEY = 'token_queue';
 let isRunning = false;
@@ -94,8 +95,18 @@ async function startWorker() {
             return;
         }
 
-        logger.info("🛠️ Worker: Listening for jobs...");
+        const db = getDB();
 
+        logger.info("🛠️ Worker: Starting Services...");
+
+        // 1. Start Metadata Updater (GeckoTerminal Sync)
+        // This runs in the background within the worker process
+        metadataUpdater.start({ db });
+        logger.info("🛠️ Worker: Metadata Updater Started.");
+
+        logger.info("🛠️ Worker: Listening for token queue jobs...");
+
+        // 2. Start Token Queue Processor
         const runLoop = async () => {
             if (!isRunning) return;
             try {
@@ -121,7 +132,6 @@ async function startWorker() {
 }
 
 // AUTO-START if run directly (node src/worker.js)
-// But do NOT auto-start if imported (require('./worker'))
 if (require.main === module) {
     startWorker();
 }

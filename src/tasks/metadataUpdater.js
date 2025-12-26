@@ -2,7 +2,8 @@ const axios = require('axios');
 const logger = require('../services/logger');
 
 let isRunning = false;
-const DELAY_BETWEEN_TOKENS_MS = 2000; 
+// UPDATED: Run faster (every 1s delay between items implies batch processing time)
+const DELAY_BETWEEN_TOKENS_MS = 1000; // Reduced from 2000ms to 1000ms to process batch faster
 
 async function fetchGeckoTerminalData(mintAddress) {
     try {
@@ -13,7 +14,7 @@ async function fetchGeckoTerminalData(mintAddress) {
     } catch (e) {
         if (e.response && e.response.status === 429) {
             logger.warn("⚠️ GeckoTerminal Rate Limit! Slowing down...");
-            await new Promise(r => setTimeout(r, 15000)); // Increased backoff to 15s
+            await new Promise(r => setTimeout(r, 30000)); // 30s penalty box
         }
         return null;
     }
@@ -26,12 +27,13 @@ async function updateMetadata(deps) {
     const now = Date.now();
 
     try {
-        // Prioritize tokens with no price history or no liquidity
+        // UPDATED: Increase batch size to 75 to cover more ground per minute
+        // Prioritize: 1. High Liquidity, 2. Oldest Update
         const tokens = await db.all(`
             SELECT mint, supply, decimals 
             FROM tokens 
             ORDER BY liquidity DESC, updated_at ASC 
-            LIMIT 50
+            LIMIT 75
         `);
         
         if (tokens.length > 0) {
@@ -43,6 +45,7 @@ async function updateMetadata(deps) {
                 const poolsData = await fetchGeckoTerminalData(t.mint);
 
                 if (!poolsData || poolsData.length === 0) {
+                    // Mark as updated even if no data found so we don't get stuck in a loop
                     await db.run(`UPDATE tokens SET updated_at = CURRENT_TIMESTAMP WHERE mint = $1`, [t.mint]);
                     continue; 
                 }
@@ -51,7 +54,7 @@ async function updateMetadata(deps) {
                 let totalLiquidity = 0;
                 let bestPrice = 0;
                 
-                // Track all timeframes. Initialize to null to avoid overwriting with 0.
+                // Track all timeframes. Initialize to null.
                 let bestChange24h = null;
                 let bestChange1h = null;
                 let bestChange5m = null;
@@ -75,11 +78,7 @@ async function updateMetadata(deps) {
                         maxLiquidity = liqUsd;
                         bestPrice = price;
                         
-                        // --- CRITICAL FIX: Safe Parsing ---
-                        // Only set if the value is defined and not null.
-                        // We do NOT use "|| 0" here, because 0 is a specific value we don't want to fake.
                         const parseChange = (val) => (val !== undefined && val !== null) ? parseFloat(val) : null;
-                        
                         bestChange24h = parseChange(attr.price_change_percentage?.h24);
                         bestChange1h = parseChange(attr.price_change_percentage?.h1);
                         bestChange5m = parseChange(attr.price_change_percentage?.m5);
@@ -107,35 +106,7 @@ async function updateMetadata(deps) {
                     marketCap = supply * bestPrice;
                 }
 
-                const params = [totalVolume24h, marketCap, bestPrice, totalLiquidity, now, t.mint];
-                let query = `
-                    UPDATE tokens 
-                    SET volume24h = $1, marketCap = $2, priceUsd = $3, 
-                        liquidity = $4, timestamp = $5,
-                        updated_at = CURRENT_TIMESTAMP
-                `;
-
-                // Only append update clauses if we actually found valid data
-                if (bestChange24h !== null) {
-                    query += `, change24h = $${params.length + 1}`;
-                    params.push(bestChange24h);
-                }
-                if (bestChange1h !== null) {
-                    query += `, change1h = $${params.length + 1}`;
-                    params.push(bestChange1h);
-                }
-                if (bestChange5m !== null) {
-                    query += `, change5m = $${params.length + 1}`;
-                    params.push(bestChange5m);
-                }
-
-                // Dynamically find the index for the WHERE clause
-                query += ` WHERE mint = $${params.length}`; 
-
-                // FIX: params.length includes t.mint which is the last one pushed before the optionals
-                // wait, the logic above for params.push order is tricky.
-                // Let's rewrite the query builder to be cleaner and safer.
-                
+                // DYNAMIC QUERY BUILDER
                 const finalParams = [totalVolume24h, marketCap, bestPrice, totalLiquidity, now];
                 let updateParts = [
                     "volume24h = $1", 
@@ -147,6 +118,7 @@ async function updateMetadata(deps) {
                 ];
                 
                 let idx = 6;
+                // Only update change columns if valid data exists
                 if (bestChange24h !== null) {
                     updateParts.push(`change24h = $${idx++}`);
                     finalParams.push(bestChange24h);
@@ -179,7 +151,8 @@ async function updateMetadata(deps) {
 }
 
 function start(deps) {
-    setInterval(() => updateMetadata(deps), 120 * 1000);
+    // UPDATED: Run every 60 seconds (1 minute)
+    setInterval(() => updateMetadata(deps), 60 * 1000);
     setTimeout(() => updateMetadata(deps), 5000);
 }
 
