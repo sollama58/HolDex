@@ -73,16 +73,20 @@
         .view-section.active { display: block; animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         
-        /* CHART STYLES */
-        .chart-wrapper { width: 100%; height: 500px; background: #1a0a05; border-radius: 16px; overflow: hidden; border: 2px solid #7c2d12; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
-        .chart-header { padding: 8px 16px; background: #2a1005; border-bottom: 1px solid #7c2d12; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-        .res-btn { background: transparent; border: 1px solid transparent; color: #9a3412; padding: 4px 8px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 11px; font-weight: bold; cursor: pointer; transition: all 0.1s; }
-        .res-btn:hover { color: #fb923c; border-color: #451a03; }
+        /* CHART STYLES UPDATED */
+        .chart-wrapper { width: 100%; height: 600px; background: #1a0a05; border-radius: 16px; overflow: hidden; border: 2px solid #7c2d12; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
+        .chart-header { padding: 12px 16px; background: #2a1005; border-bottom: 1px solid #7c2d12; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+        
+        .chart-controls-group { display: flex; align-items: center; gap: 4px; background: #0f0502; padding: 4px; border-radius: 8px; border: 1px solid #451a03; }
+        
+        .res-btn { background: transparent; border: 1px solid transparent; color: #9a3412; padding: 6px 10px; border-radius: 6px; font-family: 'JetBrains Mono'; font-size: 11px; font-weight: bold; cursor: pointer; transition: all 0.1s; }
+        .res-btn:hover { color: #fb923c; background: #2a1005; }
         .res-btn.active { background: #451a03; color: #ea580c; border-color: #7c2d12; }
         
-        .mode-btn { background: #2a1005; border: 1px solid #451a03; color: #9a3412; padding: 4px 8px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 11px; font-weight: bold; cursor: pointer; transition: all 0.1s; }
-        .mode-btn:hover { color: #fb923c; border-color: #7c2d12; }
-        .mode-btn.active { background: #451a03; color: #ea580c; border-color: #7c2d12; box-shadow: 0 0 5px rgba(234, 88, 12, 0.2); }
+        .tool-btn { background: transparent; border: 1px solid transparent; color: #9a3412; padding: 6px 10px; border-radius: 6px; font-family: 'JetBrains Mono'; font-size: 11px; font-weight: bold; cursor: pointer; transition: all 0.1s; display: flex; align-items: center; gap: 4px; }
+        .tool-btn:hover { color: #fb923c; background: #2a1005; }
+        .tool-btn.active { background: rgba(34, 197, 94, 0.1); color: #4ade80; border-color: rgba(34, 197, 94, 0.3); }
+        .tool-btn.active-orange { background: #451a03; color: #ea580c; border-color: #7c2d12; }
 
         #tv-chart { flex: 1; position: relative; width: 100%; height: 100%; }
 
@@ -356,12 +360,23 @@
             <div class="chart-wrapper">
                 <div class="chart-header">
                      <!-- CHART MODE TOGGLE -->
-                     <div class="flex items-center gap-1 bg-[#0f0502] p-1 rounded-lg border border-[#7c2d12] mr-auto">
-                         <button onclick="setChartMode('price')" class="mode-btn active" id="mode-price">Price</button>
-                         <button onclick="setChartMode('mcap')" class="mode-btn" id="mode-mcap">M.Cap</button>
+                     <div class="flex flex-wrap items-center gap-4 w-full md:w-auto">
+                        <div class="chart-controls-group">
+                            <button onclick="setChartMode('price')" class="tool-btn active-orange" id="mode-price">Price</button>
+                            <button onclick="setChartMode('mcap')" class="tool-btn" id="mode-mcap">M.Cap</button>
+                        </div>
+
+                        <div class="chart-controls-group">
+                            <button onclick="toggleScale()" class="tool-btn" id="btn-scale">
+                                <i data-lucide="scaling" width="12"></i> <span id="scale-text">Linear</span>
+                            </button>
+                            <button onclick="toggleMA()" class="tool-btn" id="btn-ma">
+                                <i data-lucide="activity" width="12"></i> Indicators
+                            </button>
+                        </div>
                      </div>
                      
-                     <div class="flex items-center gap-1 bg-[#0f0502] p-1 rounded-lg border border-[#7c2d12]">
+                     <div class="chart-controls-group ml-auto">
                          <button onclick="setResolution('5')" class="res-btn active" id="res-5">5m</button>
                          <button onclick="setResolution('15')" class="res-btn" id="res-15">15m</button>
                          <button onclick="setResolution('60')" class="res-btn" id="res-60">1H</button>
@@ -553,19 +568,24 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     // CHART STATE
     let chartInstance = null;
     let candleSeries = null;
+    let maSeries20 = null;
+    let maSeries50 = null;
     let currentMint = null;
     let currentPoolAddress = null;
     let currentResolution = '60';
     let currentChartMode = 'price'; // 'price' or 'mcap'
     let currentNormalizedSupply = 1;
     let currentTokenPairs = [];
+    
+    let isLogScale = false;
+    let showMA = false;
 
     window.onload = async () => { handleRoute(); await fetchFees(); lucide.createIcons(); const descInput = document.getElementById('update-description'); const charCount = document.getElementById('char-count'); if(descInput && charCount) { descInput.addEventListener('input', () => { charCount.innerText = descInput.value.length; }); } };
     window.addEventListener('hashchange', handleRoute);
 
     // --- CHART LOGIC UPDATED ---
     function cleanupChart() {
-        if (chartInstance) { chartInstance.remove(); chartInstance = null; candleSeries = null; }
+        if (chartInstance) { chartInstance.remove(); chartInstance = null; candleSeries = null; maSeries20 = null; maSeries50 = null; }
         document.getElementById('tv-chart').innerHTML = '';
     }
 
@@ -582,10 +602,16 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             layout: { background: { type: 'solid', color: '#1a0a05' }, textColor: '#9a3412' },
             grid: { vertLines: { color: '#2a1005' }, horzLines: { color: '#2a1005' } },
             crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-            rightPriceScale: { borderColor: '#7c2d12' },
+            rightPriceScale: { borderColor: '#7c2d12', mode: isLogScale ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal },
             timeScale: { borderColor: '#7c2d12', timeVisible: true, secondsVisible: false }
         });
+        
         candleSeries = chartInstance.addCandlestickSeries({ upColor: '#22c55e', downColor: '#ef4444', borderVisible: false, wickUpColor: '#22c55e', wickDownColor: '#ef4444' });
+        
+        // Add MA Series (Hidden by default until data populates)
+        maSeries20 = chartInstance.addLineSeries({ color: '#fb923c', lineWidth: 1, crosshairMarkerVisible: false }); // Orange
+        maSeries50 = chartInstance.addLineSeries({ color: '#3b82f6', lineWidth: 2, crosshairMarkerVisible: false }); // Blue
+
         new ResizeObserver(entries => {
             if (entries.length > 0 && chartInstance) {
                  const { width, height } = entries[0].contentRect;
@@ -600,12 +626,53 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         document.getElementById(`res-${res}`).classList.add('active');
         if (currentMint) await fetchCandles(currentMint, currentPoolAddress);
     }
+    
+    function toggleScale() {
+        if (!chartInstance) return;
+        isLogScale = !isLogScale;
+        
+        const btn = document.getElementById('btn-scale');
+        const txt = document.getElementById('scale-text');
+        
+        if (isLogScale) {
+            btn.classList.add('active');
+            txt.innerText = 'Log';
+            chartInstance.priceScale('right').applyOptions({ mode: LightweightCharts.PriceScaleMode.Logarithmic });
+        } else {
+            btn.classList.remove('active');
+            txt.innerText = 'Linear';
+            chartInstance.priceScale('right').applyOptions({ mode: LightweightCharts.PriceScaleMode.Normal });
+        }
+    }
+    
+    function toggleMA() {
+        showMA = !showMA;
+        const btn = document.getElementById('btn-ma');
+        if (showMA) btn.classList.add('active'); else btn.classList.remove('active');
+        
+        // Refresh data to show/hide
+        if (currentMint) fetchCandles(currentMint, currentPoolAddress);
+    }
+
+    function calculateSMA(data, count) {
+        const avg = (series) => {
+            let sum = 0;
+            for (let i = 0; i < series.length; i++) { sum += series[i].close; }
+            return sum / series.length;
+        };
+        const result = [];
+        for (let i = count - 1, len = data.length; i < len; i++) {
+            const val = avg(data.slice(i - count + 1, i + 1));
+            result.push({ time: data[i].time, value: val });
+        }
+        return result;
+    }
 
     async function setChartMode(mode) {
         if (currentChartMode === mode) return;
         currentChartMode = mode;
-        document.getElementById('mode-price').classList.toggle('active', mode === 'price');
-        document.getElementById('mode-mcap').classList.toggle('active', mode === 'mcap');
+        document.getElementById('mode-price').classList.toggle('active-orange', mode === 'price');
+        document.getElementById('mode-mcap').classList.toggle('active-orange', mode === 'mcap');
         if (currentMint) await fetchCandles(currentMint, currentPoolAddress);
     }
 
@@ -619,9 +686,17 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
 
         try {
             const now = Math.floor(Date.now() / 1000);
-            let from = now - (24 * 60 * 60);
-            if (currentResolution === '1') from = now - (4 * 60 * 60);
-            if (currentResolution === 'D') from = now - (30 * 24 * 60 * 60);
+            
+            // INCREASED LOOKBACK LOGIC
+            // To allow scrolling back, we fetch significantly more data than just the view width
+            let lookback = 24 * 60 * 60; // Default 1 day
+            if (currentResolution === '5') lookback = 24 * 60 * 60; // 1 Day
+            if (currentResolution === '15') lookback = 3 * 24 * 60 * 60; // 3 Days
+            if (currentResolution === '60') lookback = 14 * 24 * 60 * 60; // 2 Weeks
+            if (currentResolution === '240') lookback = 60 * 24 * 60 * 60; // 2 Months
+            if (currentResolution === 'D') lookback = 365 * 24 * 60 * 60; // 1 Year
+            
+            let from = now - lookback;
 
             let endpoint = `${API_URL}/api/token/${mint}/candles?resolution=${currentResolution}&from=${from}&to=${now}`;
             if (poolAddress) endpoint += `&poolAddress=${poolAddress}`;
@@ -630,7 +705,7 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             const res = await fetch(endpoint);
             const data = await res.json();
             
-            if (data.success && Array.isArray(data.candles) && candleSeries) {
+            if (data.success && Array.isArray(data.candles)) {
                 const cleanData = data.candles.map(c => {
                     let open = parseFloat(c.open);
                     let high = parseFloat(c.high);
@@ -660,7 +735,33 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
                 });
 
                 candleSeries.setData(cleanData);
-                if (cleanData.length > 0) chartInstance.timeScale().fitContent();
+                
+                // Indicators Logic
+                if (showMA && cleanData.length > 0) {
+                    const sma20 = calculateSMA(cleanData, 20);
+                    const sma50 = calculateSMA(cleanData, 50);
+                    if(maSeries20) maSeries20.setData(sma20);
+                    if(maSeries50) maSeries50.setData(sma50);
+                } else {
+                    if(maSeries20) maSeries20.setData([]);
+                    if(maSeries50) maSeries50.setData([]);
+                }
+
+                if (cleanData.length > 0) {
+                     // Fit content only if it's the first load or drastic change
+                     // Usually chartInstance keeps position, but 'fitContent' resets zoom
+                     // We fit content to the last portion to keep it readable
+                     // chartInstance.timeScale().fitContent(); 
+                     
+                     // Instead of fitting all 2 weeks, let's zoom to the last 10% or reasonable amount
+                     // But Lightweight Charts handles auto-scaling of right axis well for visible range.
+                     // A hard fitContent() will squish everything if we fetched 2 weeks of 1h candles.
+                     // Better to just set visible range?
+                     // chartInstance.timeScale().setVisibleRange({ from: now - (lookback / 5), to: now });
+                     
+                     // Simple fit for now, user can scroll back
+                     chartInstance.timeScale().fitContent();
+                }
             } else if (candleSeries) {
                 candleSeries.setData([]);
             }
