@@ -680,12 +680,12 @@
     const FALLBACK_BANNER = "https://images.squarespace-cdn.com/content/690b8c21384b3f1201c2650c/967ea61f-a88a-4497-81c2-5c67d3d06d9e/Gemini_Generated_Image_c82gwyc82gwyc82g.png?content-type=image%2Fpng";
     const TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
     const ASSOCIATED_TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
-    
-    // UPDATED: Standard Public RPC Endpoints (No API Keys required)
+
+    // SWITCH TO PUBLIC RPCs
     const RPC_ENDPOINTS = [
-        "https://api.mainnet-beta.solana.com", 
-        "https://solana-api.projectserum.com", 
-        "https://rpc.ankr.com/solana"
+        "https://api.mainnet-beta.solana.com",
+        "https://rpc.ankr.com/solana",
+        "https://solana-api.projectserum.com"
     ];
 
     // --- State ---
@@ -728,9 +728,19 @@
     window.addEventListener('hashchange', handleRoute);
 
     // --- Chart Functions ---
+    // FIXED: Cleanup Function
+    function cleanupChart() {
+        if (chartInstance) {
+            chartInstance.remove(); // Destroy old chart
+            chartInstance = null;
+            candleSeries = null;
+        }
+        document.getElementById('tv-chart').innerHTML = ''; // Clear container
+    }
+
     function initChart() {
         if (chartInstance) {
-            // Force resize if already exists but was hidden
+            // Force resize if already exists
             const container = document.getElementById('tv-chart');
             if (container) {
                 const rect = container.getBoundingClientRect();
@@ -748,6 +758,9 @@
         const rect = container.getBoundingClientRect();
         const width = rect.width > 0 ? rect.width : container.clientWidth;
         const height = rect.height > 0 ? rect.height : container.clientHeight;
+
+        // SAFEGUARD: Don't init if size is 0 (causes library issues)
+        if (width === 0 || height === 0) return;
 
         chartInstance = LightweightCharts.createChart(container, {
             width: width,
@@ -767,7 +780,7 @@
         new ResizeObserver(entries => {
             if (entries.length === 0 || entries[0].target !== container) return;
             const newRect = entries[0].contentRect;
-            if (newRect.width > 0 && newRect.height > 0) {
+            if (newRect.width > 0 && newRect.height > 0 && chartInstance) {
                  chartInstance.applyOptions({ width: newRect.width, height: newRect.height });
             }
         }).observe(container);
@@ -788,6 +801,9 @@
         
         // Ensure chart is initialized
         initChart();
+        
+        // SAFEGUARD: If initChart failed (e.g. 0 size), stop here
+        if (!chartInstance || !candleSeries) return;
 
         try {
             // Determine 'from' based on resolution to get a decent initial view
@@ -802,7 +818,8 @@
             const res = await fetch(endpoint);
             const data = await res.json();
             
-            if (data.success && Array.isArray(data.candles)) {
+            // SAFEGUARD: Check candleSeries again before writing
+            if (data.success && Array.isArray(data.candles) && candleSeries) {
                  // Map data to ensure strict format if needed
                 const cleanData = data.candles.map(c => ({
                     time: c.time,
@@ -814,7 +831,7 @@
 
                 candleSeries.setData(cleanData);
                 if (cleanData.length > 0) chartInstance.timeScale().fitContent();
-            } else {
+            } else if (candleSeries) {
                 candleSeries.setData([]); // Clear
             }
         } catch (e) { console.error("Chart Fetch Failed", e); }
@@ -988,7 +1005,7 @@
             let blockhash;
             let rpcError;
 
-            // Try Helius first (if configured), then others
+            // Try public RPCs
             for (const endpoint of RPC_ENDPOINTS) {
                 try {
                     const host = new URL(endpoint).hostname;
@@ -1337,6 +1354,9 @@
         if(contentDiv) contentDiv.style.display = 'none'; 
         if(bannerContainer) { bannerContainer.classList.add('hidden'); bannerContainer.innerHTML = ''; }
 
+        // --- NEW: Cleanup Chart ---
+        cleanupChart();
+
         try {
             const res = await fetch(`${API_URL}/api/token/${mint}`);
             const data = await res.json();
@@ -1428,7 +1448,9 @@
                     if (t.pairs && t.pairs.length > 0) {
                         t.pairs.forEach((pair, idx) => {
                             const tab = document.createElement('div'); tab.className = `pool-tab ${idx === 0 ? 'active' : ''}`;
-                            tab.id = `tab-${pair.pairAddress}`; tab.innerText = `${pair.dexId.toUpperCase()} ($${formatCompact(pair.liquidity)} Liq)`;
+                            // SAFEGUARD: pair.dexId might be undefined
+                            const dexName = (pair.dexId || 'Unknown').toUpperCase();
+                            tab.id = `tab-${pair.pairAddress}`; tab.innerText = `${dexName} ($${formatCompact(pair.liquidity)} Liq)`;
                             tab.onclick = () => switchPool(pair.pairAddress, pair.dexId); tabsContainer.appendChild(tab);
                         });
                     }
