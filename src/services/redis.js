@@ -4,54 +4,47 @@ const logger = require('./logger');
 
 let client = null;
 let subscriber = null;
+let initPromise = null;
 
 async function connectRedis() {
     if (client) return client;
+    if (initPromise) return initPromise;
 
-    try {
-        // Initialize Redis Client
-        client = new Redis(config.REDIS_URL, {
-            maxRetriesPerRequest: null,
-            enableReadyCheck: false,
-            retryStrategy: (times) => {
-                const delay = Math.min(times * 50, 2000);
-                return delay;
-            },
-            reconnectOnError: (err) => {
-                const targetError = 'READONLY';
-                if (err.message.slice(0, targetError.length) === targetError) {
-                    return true;
+    initPromise = (async () => {
+        try {
+            // Initialize Redis Client
+            // Force lazyConnect to ensure we catch connection errors in the Promise
+            const tempClient = new Redis(config.REDIS_URL, {
+                lazyConnect: true,
+                maxRetriesPerRequest: null,
+                retryStrategy: (times) => Math.min(times * 50, 2000),
+                reconnectOnError: (err) => {
+                    const targetError = 'READONLY';
+                    return err.message.slice(0, targetError.length) === targetError;
                 }
-                return false;
-            }
-        });
+            });
 
-        client.on('error', (err) => {
-            // Suppress connection refused logs during local dev to keep console clean
-            if (!err.message.includes('ECONNREFUSED')) {
-                logger.error(`Redis Error: ${err.message}`);
-            }
-        });
+            tempClient.on('error', (err) => {
+                if (!err.message.includes('ECONNREFUSED')) {
+                    logger.error(`Redis Error: ${err.message}`);
+                }
+            });
 
-        client.on('connect', () => {
+            await tempClient.connect();
             logger.info('✅ Redis Connected');
-        });
+            
+            client = tempClient;
+            subscriber = client.duplicate();
+            
+            return client;
+        } catch (e) {
+            logger.error(`Redis Connection Failed: ${e.message}`);
+            initPromise = null;
+            return null; // Return null so app can run in "degraded" mode without crashing
+        }
+    })();
 
-        // Initialize Subscriber (Optional, for future Pub/Sub use)
-        subscriber = client.duplicate();
-
-        // Wait for ready state
-        await new Promise((resolve) => {
-            client.once('ready', resolve);
-            // Fallback if ready event is delayed
-            setTimeout(resolve, 1000); 
-        });
-
-        return client;
-    } catch (e) {
-        logger.error(`Redis Connection Failed: ${e.message}`);
-        return null;
-    }
+    return initPromise;
 }
 
 function getClient() {

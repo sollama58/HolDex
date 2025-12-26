@@ -8,6 +8,7 @@ const { PublicKey } = require('@solana/web3.js');
 const logger = require('./services/logger');
 
 const QUEUE_KEY = 'token_queue';
+let isRunning = false;
 
 async function processToken(mint) {
     const db = getDB();
@@ -79,30 +80,31 @@ async function processToken(mint) {
 }
 
 async function startWorker() {
+    if (isRunning) return;
+    isRunning = true;
+
     try {
-        // initDB and connectRedis are handled by index.js if running in same process,
-        // but explicit init here is safe (idempotent)
         await initDB();
         await connectRedis();
         
         const redis = getClient();
         if (!redis) {
-            // If redis fails, worker just acts dead, preventing crash loop of main process if imported
             logger.warn("⚠️ Worker: Redis not available. Worker disabled.");
+            isRunning = false;
             return;
         }
 
         logger.info("🛠️ Worker: Listening for jobs...");
 
-        // Job Loop - Non-blocking
         const runLoop = async () => {
+            if (!isRunning) return;
             try {
                 const item = await redis.rpop(QUEUE_KEY);
                 if (item) {
                     await processToken(item);
-                    setTimeout(runLoop, 100); // Fast next job
+                    setTimeout(runLoop, 100); 
                 } else {
-                    setTimeout(runLoop, 2000); // Sleep if empty
+                    setTimeout(runLoop, 2000); 
                 }
             } catch (err) {
                 logger.error(`Worker Loop Error: ${err.message}`);
@@ -114,7 +116,14 @@ async function startWorker() {
 
     } catch (e) {
         logger.error(`Worker Fatal Error: ${e.message}`);
+        isRunning = false;
     }
+}
+
+// AUTO-START if run directly (node src/worker.js)
+// But do NOT auto-start if imported (require('./worker'))
+if (require.main === module) {
+    startWorker();
 }
 
 module.exports = { startWorker };

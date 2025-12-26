@@ -5,119 +5,135 @@ const { getClient } = require('./redis');
 
 let pool = null;
 let dbWrapper = null;
+let initPromise = null; // Lock for concurrent calls
 
 async function initDB() {
-    if (pool) return dbWrapper;
+    // If already initialized, return immediately
+    if (dbWrapper) return dbWrapper;
+    
+    // If initialization is in progress, return the pending promise
+    if (initPromise) return initPromise;
 
-    try {
-        const isLocal = config.DATABASE_URL.includes('localhost') || config.DATABASE_URL.includes('127.0.0.1');
-        
-        pool = new Pool({
-            connectionString: config.DATABASE_URL,
-            ssl: isLocal ? false : { rejectUnauthorized: false },
-            max: 20, 
-            idleTimeoutMillis: 30000,
-            connectionTimeoutMillis: 2000,
-        });
+    // Start initialization and assign to lock
+    initPromise = (async () => {
+        try {
+            const isLocal = config.DATABASE_URL.includes('localhost') || config.DATABASE_URL.includes('127.0.0.1');
+            
+            pool = new Pool({
+                connectionString: config.DATABASE_URL,
+                ssl: isLocal ? false : { rejectUnauthorized: false },
+                max: 20, 
+                idleTimeoutMillis: 30000,
+                connectionTimeoutMillis: 5000, // Increased timeout
+            });
 
-        logger.info(`📦 Database: Connecting to PostgreSQL...`);
-        const client = await pool.connect();
-        client.release();
-        logger.info(`📦 Database: Connection Successful.`);
+            // Handle unexpected errors on idle clients
+            pool.on('error', (err, client) => {
+                logger.error(`Unexpected error on idle DB client: ${err.message}`);
+            });
 
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS tokens (
-                mint TEXT PRIMARY KEY,
-                name TEXT,
-                symbol TEXT,
-                image TEXT,
-                supply TEXT,
-                decimals INTEGER,
-                priceUsd DOUBLE PRECISION,
-                liquidity DOUBLE PRECISION,
-                marketCap DOUBLE PRECISION,
-                volume24h DOUBLE PRECISION,
-                change24h DOUBLE PRECISION,
-                change1h DOUBLE PRECISION,
-                change5m DOUBLE PRECISION,
-                k_score DOUBLE PRECISION DEFAULT 0,
-                hasCommunityUpdate BOOLEAN DEFAULT FALSE,
-                metadata TEXT,
-                timestamp BIGINT
-            );
+            logger.info(`📦 Database: Connecting to PostgreSQL...`);
+            const client = await pool.connect();
+            client.release();
+            logger.info(`📦 Database: Connection Successful.`);
 
-            CREATE TABLE IF NOT EXISTS pools (
-                address TEXT PRIMARY KEY,
-                mint TEXT,
-                dex TEXT,
-                token_a TEXT NOT NULL,
-                token_b TEXT NOT NULL,
-                reserve_a TEXT,
-                reserve_b TEXT,
-                price_usd DOUBLE PRECISION DEFAULT 0,
-                liquidity_usd DOUBLE PRECISION DEFAULT 0,
-                volume_24h DOUBLE PRECISION DEFAULT 0,
-                created_at BIGINT,
-                FOREIGN KEY(mint) REFERENCES tokens(mint)
-            );
+            await pool.query(`
+                CREATE TABLE IF NOT EXISTS tokens (
+                    mint TEXT PRIMARY KEY,
+                    name TEXT,
+                    symbol TEXT,
+                    image TEXT,
+                    supply TEXT,
+                    decimals INTEGER,
+                    priceUsd DOUBLE PRECISION,
+                    liquidity DOUBLE PRECISION,
+                    marketCap DOUBLE PRECISION,
+                    volume24h DOUBLE PRECISION,
+                    change24h DOUBLE PRECISION,
+                    change1h DOUBLE PRECISION,
+                    change5m DOUBLE PRECISION,
+                    k_score DOUBLE PRECISION DEFAULT 0,
+                    hasCommunityUpdate BOOLEAN DEFAULT FALSE,
+                    metadata TEXT,
+                    timestamp BIGINT
+                );
 
-            CREATE TABLE IF NOT EXISTS candles_1m (
-                pool_address TEXT,
-                timestamp BIGINT,
-                open DOUBLE PRECISION,
-                high DOUBLE PRECISION,
-                low DOUBLE PRECISION,
-                close DOUBLE PRECISION,
-                volume DOUBLE PRECISION,
-                PRIMARY KEY (pool_address, timestamp)
-            );
+                CREATE TABLE IF NOT EXISTS pools (
+                    address TEXT PRIMARY KEY,
+                    mint TEXT,
+                    dex TEXT,
+                    token_a TEXT NOT NULL,
+                    token_b TEXT NOT NULL,
+                    reserve_a TEXT,
+                    reserve_b TEXT,
+                    price_usd DOUBLE PRECISION DEFAULT 0,
+                    liquidity_usd DOUBLE PRECISION DEFAULT 0,
+                    volume_24h DOUBLE PRECISION DEFAULT 0,
+                    created_at BIGINT,
+                    FOREIGN KEY(mint) REFERENCES tokens(mint)
+                );
 
-            CREATE TABLE IF NOT EXISTS active_trackers (
-                pool_address TEXT PRIMARY KEY,
-                priority INTEGER DEFAULT 1,
-                last_check BIGINT DEFAULT 0
-            );
+                CREATE TABLE IF NOT EXISTS candles_1m (
+                    pool_address TEXT,
+                    timestamp BIGINT,
+                    open DOUBLE PRECISION,
+                    high DOUBLE PRECISION,
+                    low DOUBLE PRECISION,
+                    close DOUBLE PRECISION,
+                    volume DOUBLE PRECISION,
+                    PRIMARY KEY (pool_address, timestamp)
+                );
 
-            CREATE TABLE IF NOT EXISTS token_updates (
-                id SERIAL PRIMARY KEY,
-                mint TEXT,
-                twitter TEXT,
-                website TEXT,
-                telegram TEXT,
-                banner TEXT,
-                description TEXT,
-                submittedAt BIGINT,
-                status TEXT DEFAULT 'pending', 
-                signature TEXT,
-                payer TEXT
-            );
+                CREATE TABLE IF NOT EXISTS active_trackers (
+                    pool_address TEXT PRIMARY KEY,
+                    priority INTEGER DEFAULT 1,
+                    last_check BIGINT DEFAULT 0
+                );
 
-            CREATE TABLE IF NOT EXISTS k_scores (
-                mint TEXT PRIMARY KEY,
-                score DOUBLE PRECISION,
-                components TEXT, 
-                updatedAt BIGINT
-            );
+                CREATE TABLE IF NOT EXISTS token_updates (
+                    id SERIAL PRIMARY KEY,
+                    mint TEXT,
+                    twitter TEXT,
+                    website TEXT,
+                    telegram TEXT,
+                    banner TEXT,
+                    description TEXT,
+                    submittedAt BIGINT,
+                    status TEXT DEFAULT 'pending', 
+                    signature TEXT,
+                    payer TEXT
+                );
 
-            CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score DESC);
-            CREATE INDEX IF NOT EXISTS idx_tokens_timestamp ON tokens(timestamp DESC);
-            CREATE INDEX IF NOT EXISTS idx_pools_mint ON pools(mint);
-            CREATE INDEX IF NOT EXISTS idx_candles_pool_time ON candles_1m(pool_address, timestamp);
-        `);
+                CREATE TABLE IF NOT EXISTS k_scores (
+                    mint TEXT PRIMARY KEY,
+                    score DOUBLE PRECISION,
+                    components TEXT, 
+                    updatedAt BIGINT
+                );
 
-        dbWrapper = {
-            query: (text, params) => pool.query(text, params),
-            get: async (text, params) => { const res = await pool.query(text, params); return res.rows[0]; },
-            all: async (text, params) => { const res = await pool.query(text, params); return res.rows; },
-            run: async (text, params) => { const res = await pool.query(text, params); return { rowCount: res.rowCount }; }
-        };
+                CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score DESC);
+                CREATE INDEX IF NOT EXISTS idx_tokens_timestamp ON tokens(timestamp DESC);
+                CREATE INDEX IF NOT EXISTS idx_pools_mint ON pools(mint);
+                CREATE INDEX IF NOT EXISTS idx_candles_pool_time ON candles_1m(pool_address, timestamp);
+            `);
 
-        return dbWrapper;
+            dbWrapper = {
+                query: (text, params) => pool.query(text, params),
+                get: async (text, params) => { const res = await pool.query(text, params); return res.rows[0]; },
+                all: async (text, params) => { const res = await pool.query(text, params); return res.rows; },
+                run: async (text, params) => { const res = await pool.query(text, params); return { rowCount: res.rowCount }; }
+            };
 
-    } catch (error) {
-        logger.error(`❌ Database Init Failed: ${error.message}`);
-        throw error;
-    }
+            return dbWrapper;
+
+        } catch (error) {
+            logger.error(`❌ Database Init Failed: ${error.message}`);
+            initPromise = null; // Reset lock on failure so we can retry
+            throw error;
+        }
+    })();
+
+    return initPromise;
 }
 
 function getDB() {
@@ -192,9 +208,6 @@ async function enableIndexing(db, mint, poolData) {
     }
 }
 
-// --- AGGREGATION LOGIC (UPDATED) ---
-// 1. Sum Liquidity/Volume from ALL pools.
-// 2. Take Price and % Changes from LARGEST pool only.
 async function aggregateAndSaveToken(db, mint) {
     try {
         const pools = await db.all(`SELECT * FROM pools WHERE mint = $1`, [mint]);
@@ -202,17 +215,13 @@ async function aggregateAndSaveToken(db, mint) {
 
         let totalLiq = 0;
         let totalVol = 0;
-        let mainPool = pools[0]; // Start with first as main
+        let mainPool = pools[0]; 
         
         for (const p of pools) {
             const liq = parseFloat(p.liquidity_usd || 0);
             const vol = parseFloat(p.volume_24h || 0);
-            
-            // Summation for Total Stats
             totalLiq += liq;
             totalVol += vol;
-
-            // Determine Largest Pool by Liquidity
             if (liq > parseFloat(mainPool.liquidity_usd || 0)) {
                 mainPool = p;
             }
@@ -220,7 +229,6 @@ async function aggregateAndSaveToken(db, mint) {
 
         const price = parseFloat(mainPool.price_usd || 0);
 
-        // --- Calculate % Changes using Main Pool Candles ---
         let change24h = 0;
         let change1h = 0;
         let change5m = 0;
@@ -231,7 +239,6 @@ async function aggregateAndSaveToken(db, mint) {
             const time1h = now - (60 * 60 * 1000);
             const time5m = now - (5 * 60 * 1000);
 
-            // Fetch closest candle close price for each timeframe
             const getPriceAt = async (ts) => {
                 const row = await db.get(
                     `SELECT close FROM candles_1m WHERE pool_address = $1 AND timestamp <= $2 ORDER BY timestamp DESC LIMIT 1`, 
@@ -246,14 +253,11 @@ async function aggregateAndSaveToken(db, mint) {
                 getPriceAt(time5m)
             ]);
 
-            // Calculate percentages
             if (p24h) change24h = ((price - p24h) / p24h) * 100;
             if (p1h) change1h = ((price - p1h) / p1h) * 100;
             if (p5m) change5m = ((price - p5m) / p5m) * 100;
         }
 
-        // --- Update Token Table ---
-        // This ensures the homepage (which queries 'tokens') has accurate % changes
         await db.run(`
             UPDATE tokens 
             SET liquidity = $1, volume24h = $2, priceUsd = $3, 
