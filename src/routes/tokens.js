@@ -1,14 +1,14 @@
 const express = require('express');
 const { Connection, PublicKey } = require('@solana/web3.js');
 const { isValidPubkey } = require('../utils/solana');
-const { smartCache, enableIndexing } = require('../services/database');
+const { smartCache, enableIndexing, getDB } = require('../services/database'); // Added getDB import
 const { findPoolsOnChain } = require('../services/pool_finder');
 const { fetchTokenMetadata } = require('../utils/metaplex');
 const config = require('../config/env');
 const kScoreUpdater = require('../tasks/kScoreUpdater'); 
+const { getClient } = require('../services/redis'); // Import Redis
 
 const { snapshotPools } = require('../indexer/tasks/snapshotter');
-const { updateTokenStats } = require('../tasks/metadataUpdater');
 const { fetchSolscanData } = require('../services/solscan');
 
 const router = express.Router();
@@ -150,10 +150,12 @@ function init(deps) {
         const fromMs = parseInt(from) * 1000 || (Date.now() - 24 * 60 * 60 * 1000);
         const toMs = parseInt(to) * 1000 || Date.now();
 
-        const cacheKey = `chart:${mint}:${resolution}:${Math.floor(toMs / 60000)}`; 
+        // SCALABILITY FIX: Cache candle responses. 
+        // 1-minute resolution updates every minute, so we can cache for ~30s safely.
+        const cacheKey = `chart:${mint}:${resolution}:${Math.floor(Date.now() / 30000)}`; 
 
         try {
-            const result = await smartCache(cacheKey, 60, async () => {
+            const result = await smartCache(cacheKey, 30, async () => {
                 let pool = await db.get(`SELECT address FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC LIMIT 1`, [mint]);
                 if (!pool) return { success: false, error: "Token not indexed yet" };
 
@@ -215,9 +217,23 @@ function init(deps) {
     });
 
     router.get('/tokens', async (req, res) => {
-        const { search = '' } = req.query;
+        const { search = '', sort = 'kscore', page = 1 } = req.query;
 
         try {
+            // SCALABILITY FIX: Global Response Caching
+            // If it's a generic dashboard view (no search), cache heavily
+            const isGenericView = !search;
+            const cacheKey = `api:tokens:list:${sort}:${page}:${isGenericView ? 'generic' : search}`;
+            const redis = getClient();
+            
+            if (isGenericView && redis) {
+                const cached = await redis.get(cacheKey);
+                if (cached) {
+                    res.setHeader('X-Cache', 'HIT');
+                    return res.json(JSON.parse(cached));
+                }
+            }
+
             const isAddressSearch = isValidPubkey(search);
             let rows = [];
 
@@ -228,10 +244,21 @@ function init(deps) {
                     rows = await db.all(`SELECT * FROM tokens WHERE (ticker ILIKE $1 OR name ILIKE $1) LIMIT 50`, [`%${search}%`]);
                 }
             } else {
-                rows = await db.all(`SELECT * FROM tokens ORDER BY timestamp DESC LIMIT 100`);
+                // Sorting Logic
+                let orderBy = 'k_score DESC';
+                if (sort === 'newest') orderBy = 'timestamp DESC';
+                else if (sort === 'mcap') orderBy = 'marketCap DESC';
+                else if (sort === 'volume') orderBy = 'volume24h DESC';
+                else if (sort === '24h') orderBy = 'change24h DESC';
+                else if (sort === '5m') orderBy = 'change5m DESC'; // Fixed: Actually sort by 5m
+
+                const offset = (page - 1) * 100;
+                rows = await db.all(`SELECT * FROM tokens ORDER BY ${orderBy} LIMIT 100 OFFSET ${offset}`);
             }
 
             if (isAddressSearch && rows.length === 0) {
+                // Rate Limit Indexing Triggers?
+                // For now, allow it, but in production, queue this instead of blocking
                 const newData = await indexTokenOnChain(search);
                 if (newData.name !== 'Unknown') {
                     rows.push({ 
@@ -244,8 +271,9 @@ function init(deps) {
                 }
             }
 
-            return res.json({
+            const responsePayload = {
                 success: true,
+                lastUpdate: Date.now(),
                 tokens: rows.map(r => ({
                     mint: r.mint, 
                     name: r.name, 
@@ -261,30 +289,45 @@ function init(deps) {
                     timestamp: parseInt(r.timestamp),
                     kScore: r.k_score || 0
                 }))
-            });
+            };
+
+            // Cache for 3 seconds if generic
+            if (isGenericView && redis) {
+                await redis.set(cacheKey, JSON.stringify(responsePayload), 'EX', 3);
+            }
+
+            res.setHeader('X-Cache', 'MISS');
+            return res.json(responsePayload);
 
         } catch (e) { res.status(500).json({ success: false, tokens: [], error: e.message }); }
     });
 
     router.get('/token/:mint', async (req, res) => {
         const { mint } = req.params;
-        let token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
-        let pairs = await db.all('SELECT * FROM pools WHERE mint = $1', [mint]);
         
-        if (!token) {
-            try {
-                const indexed = await indexTokenOnChain(mint);
-                if (indexed.name !== 'Unknown') {
-                    token = { ...indexed, mint };
-                    pairs = indexed.pairs || [];
-                }
-            } catch (e) {}
-        }
-        
-        let tokenData = token || { mint, name: 'Unknown', ticker: 'Unknown' };
-        if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
+        // Minor cache for token details (10s)
+        const cacheKey = `token:detail:${mint}`;
+        const result = await smartCache(cacheKey, 10, async () => {
+            let token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+            let pairs = await db.all('SELECT * FROM pools WHERE mint = $1', [mint]);
+            
+            if (!token) {
+                try {
+                    const indexed = await indexTokenOnChain(mint);
+                    if (indexed.name !== 'Unknown') {
+                        token = { ...indexed, mint };
+                        pairs = indexed.pairs || [];
+                    }
+                } catch (e) {}
+            }
+            
+            let tokenData = token || { mint, name: 'Unknown', ticker: 'Unknown' };
+            if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
 
-        res.json({ success: true, token: { ...tokenData, pairs } });
+            return { success: true, token: { ...tokenData, pairs } };
+        });
+
+        res.json(result);
     });
 
     router.get('/admin/updates', requireAdmin, async (req, res) => {
