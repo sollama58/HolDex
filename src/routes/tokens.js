@@ -8,6 +8,10 @@ const { fetchTokenMetadata } = require('../utils/metaplex');
 const config = require('../config/env');
 const kScoreUpdater = require('../tasks/kScoreUpdater'); 
 
+// NEW IMPORTS
+const { snapshotPools } = require('../indexer/tasks/snapshotter');
+const { updateTokenStats } = require('../tasks/metadataUpdater');
+
 const router = express.Router();
 const solanaConnection = new Connection(config.SOLANA_RPC_URL, 'confirmed');
 
@@ -30,21 +34,23 @@ function init(deps) {
     }
 
     async function indexTokenOnChain(mint) {
-        // 1. Fetch Metadata (Robust Helius/Metaplex)
+        // 1. Fetch Metadata (Robust: Helius -> Fallback Metaplex)
         const meta = await fetchTokenMetadata(mint);
         
-        // 2. Fetch Supply (Critical for Market Cap)
+        // 2. Fetch Supply 
         let supply = '0';
         try {
             const supplyInfo = await solanaConnection.getTokenSupply(new PublicKey(mint));
-            supply = supplyInfo.value.amount; // Raw amount (integer string)
+            supply = supplyInfo.value.amount; 
         } catch (e) { console.warn(`Failed to fetch supply for ${mint}`); }
 
-        // 3. Find Pools
+        // 3. Find Pools (Transaction Scan -> Global Scan)
         const pools = await findPoolsOnChain(mint);
-        
+        const poolAddresses = [];
+
         // 4. Save Pools
         for (const pool of pools) {
+            poolAddresses.push(pool.pairAddress);
             await enableIndexing(db, mint, {
                 pairAddress: pool.pairAddress,
                 dexId: pool.dexId,
@@ -56,21 +62,15 @@ function init(deps) {
             });
         }
 
-        // 5. Save Token Data
+        // 5. Save Token Data (Initial Insert)
         const baseData = {
             name: meta?.name || 'Unknown',
             ticker: meta?.symbol || 'UNKNOWN',
             image: meta?.image || null,
             marketCap: 0, 
-            volume24h: 0,
-            priceUsd: 0,
-            change1h: 0,
-            change24h: 0,
-            change5m: 0,
             description: meta?.description || ''
         };
 
-        // We explicitly pass the fetched supply here so it can be stored
         await db.run(`
             INSERT INTO tokens (mint, name, symbol, image, supply, timestamp)
             VALUES ($1, $2, $3, $4, $5, $6)
@@ -81,10 +81,27 @@ function init(deps) {
             supply = EXCLUDED.supply
         `, [mint, baseData.name, baseData.ticker, baseData.image, supply, Date.now()]);
 
-        return { ...baseData, pairs: pools };
+        // --- ⚡ CRITICAL FIX: IMMEDIATE DATA POPULATION ⚡ ---
+        if (poolAddresses.length > 0) {
+            // A. Force Snapshot (Get Price NOW)
+            await snapshotPools(poolAddresses);
+            
+            // B. Force Stats Calc (Get MarketCap NOW)
+            await updateTokenStats(mint);
+        }
+
+        // 6. Fetch Final Data to return to UI
+        const finalToken = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]);
+
+        return { 
+            ...baseData, 
+            priceUsd: finalToken?.priceUsd || 0,
+            marketCap: finalToken?.marketCap || 0,
+            pairs: pools 
+        };
     }
 
-    // --- ENDPOINTS ---
+    // --- ENDPOINTS --- (Unchanged except using indexTokenOnChain)
     
     router.get('/config/fees', (req, res) => {
         res.json({ success: true, solFee: config.FEE_SOL, tokenFee: config.FEE_TOKEN_AMOUNT, tokenMint: config.FEE_TOKEN_MINT, treasury: config.TREASURY_WALLET });
@@ -125,7 +142,6 @@ function init(deps) {
         
         const fromMs = parseInt(from) * 1000 || (Date.now() - 24 * 60 * 60 * 1000);
         const toMs = parseInt(to) * 1000 || Date.now();
-
         const cacheKey = `chart:${mint}:${resolution}:${Math.floor(toMs / 60000)}`; 
 
         try {
@@ -167,11 +183,11 @@ function init(deps) {
                     rows = await db.all(`SELECT * FROM tokens WHERE (ticker ILIKE $1 OR name ILIKE $1) LIMIT 50`, [`%${search}%`]);
                 }
             } else {
-                // Return latest tokens
                 rows = await db.all(`SELECT * FROM tokens ORDER BY timestamp DESC LIMIT 100`);
             }
 
             if (isAddressSearch && rows.length === 0) {
+                // AUTO-INDEX ON SEARCH
                 const newData = await indexTokenOnChain(search);
                 if (newData.name !== 'Unknown') {
                     rows.push({ ...newData, mint: search, hasCommunityUpdate: false, kScore: 0, timestamp: Date.now() });
