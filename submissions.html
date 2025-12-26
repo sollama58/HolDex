@@ -95,9 +95,16 @@
                                 <i data-lucide="zap" width="14"></i> Force K-Score Refresh
                             </button>
                         </div>
-                        <div class="flex justify-between mt-8 pt-4 border-t border-[#7c2d12]">
-                            <button onclick="deleteToken()" class="action-btn btn-red">Delete Token</button>
-                            <button onclick="saveToken()" class="action-btn btn-green">Save Changes</button>
+                        <div class="flex flex-col gap-2 mt-8 pt-4 border-t border-[#7c2d12]">
+                            <div class="flex justify-between">
+                                <button onclick="deleteToken()" class="action-btn btn-red flex items-center gap-2">
+                                    <i data-lucide="trash-2" width="16"></i> Delete Token & History
+                                </button>
+                                <button onclick="saveToken()" class="action-btn btn-green flex items-center gap-2">
+                                    <i data-lucide="save" width="16"></i> Save Changes
+                                </button>
+                            </div>
+                            <p class="text-xs text-red-400 text-center mt-2 opacity-75">Warning: Deletion is permanent and removes all candles, pools, and history.</p>
                         </div>
                     </div>
                 </div>
@@ -263,7 +270,7 @@
             const data = await res.json();
             if (data.success) {
                 document.getElementById('manage-form').classList.remove('hidden');
-                document.getElementById('edit-ticker').value = data.token.ticker;
+                document.getElementById('edit-ticker').value = data.token.ticker || 'N/A';
                 document.getElementById('edit-twitter').value = data.token.twitter || '';
                 document.getElementById('edit-website').value = data.token.website || '';
                 document.getElementById('edit-telegram').value = data.token.telegram || '';
@@ -292,9 +299,34 @@
     }
 
     async function deleteToken() {
-        if(!confirm("DANGER: Permanently delete?")) return;
+        if(!confirm("DANGER: This will delete the token and ALL associated data (Candles, Pools, History). This cannot be undone.")) return;
         const mint = document.getElementById('manage-mint').value;
-        try { await fetch(`${API_URL}/api/admin/delete-token`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-auth': adminKey }, body: JSON.stringify({ mint }) }); alert("Token Deleted"); document.getElementById('manage-form').classList.add('hidden'); } catch(e) { alert("Network Error"); }
+        const btn = event.currentTarget;
+        const ogText = btn.innerHTML;
+        btn.innerHTML = `<i data-lucide="loader-2" class="animate-spin" width="16"></i> Deleting...`;
+        btn.disabled = true;
+
+        try { 
+            const res = await fetch(`${API_URL}/api/admin/delete-token`, { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json', 'x-admin-auth': adminKey }, 
+                body: JSON.stringify({ mint }) 
+            }); 
+            const data = await res.json();
+            if(data.success) {
+                alert("Token and all history permanently deleted."); 
+                document.getElementById('manage-form').classList.add('hidden');
+                document.getElementById('manage-mint').value = '';
+            } else {
+                alert("Delete Failed: " + data.error);
+            }
+        } catch(e) { 
+            alert("Network Error"); 
+        } finally {
+            btn.innerHTML = ogText;
+            btn.disabled = false;
+            lucide.createIcons();
+        }
     }
 
     async function refreshKScore() {
