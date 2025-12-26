@@ -284,9 +284,9 @@
             <div class="fee-card" id="fee-panel">
                 <div class="text-[#9a3412] font-bold text-xs uppercase tracking-wider mb-2">Required Fees</div>
                 <div class="flex justify-center gap-6 items-center">
-                    <div class="flex flex-col"><span class="text-xl font-mono text-[#fb923c]" id="fee-sol">-- SOL</span><span class="text-[10px] text-[#9a3412]">Protocol Fee</span></div>
+                    <div class="flex flex-col"><span class="text-xl font-mono text-[#fb923c]" id="fee-sol">-- SOL</span><span class="text-[10px] text-[#9a3412] text-center">Protocol Fee</span></div>
                     <div class="text-[#7c2d12]">+</div>
-                    <div class="flex flex-col"><span class="text-xl font-mono text-[#a855f7]" id="fee-token">-- TOKENS</span><span class="text-[10px] text-[#9a3412]">$ASDFASDFA</span></div>
+                    <div class="flex flex-col"><span class="text-xl font-mono text-[#a855f7]" id="fee-token">-- TOKENS</span><span class="text-[10px] text-[#9a3412] text-center">$ASDFASDFA</span></div>
                 </div>
             </div>
             
@@ -496,8 +496,8 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     const FALLBACK_BANNER = "https://images.squarespace-cdn.com/content/690b8c21384b3f1201c2650c/967ea61f-a88a-4497-81c2-5c67d3d06d9e/Gemini_Generated_Image_c82gwyc82gwyc82g.png?content-type=image%2Fpng";
     const TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
     const ASSOCIATED_TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
-    // STRICT RPC POLICY: Use public mainnet for frontend interactions
-    const RPC_ENDPOINTS = ["https://api.mainnet.solana.com"];
+    
+    // We removed client-side RPC ENDPOINTS. All traffic now proxies through backend.
 
     let currentSort = 'kscore'; 
     let searchQuery = '';
@@ -642,7 +642,110 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     function updateWalletUI(connected) { const discDiv = document.getElementById('wallet-disconnected'); const connDiv = document.getElementById('wallet-connected'); const submitBtn = document.getElementById('submit-btn'); const displayAddr = document.getElementById('display-address'); if (connected) { const shortAddr = walletAddress.slice(0,4) + '...' + walletAddress.slice(-4); if (discDiv) discDiv.classList.add('hidden'); if (connDiv) connDiv.classList.remove('hidden'); if (displayAddr) displayAddr.innerText = shortAddr; if (submitBtn) submitBtn.disabled = false; } else { if (discDiv) discDiv.classList.remove('hidden'); if (connDiv) connDiv.classList.add('hidden'); if (submitBtn) submitBtn.disabled = true; } lucide.createIcons(); }
     async function refreshBalances() { if (!walletAddress) return; const icon = document.getElementById('refresh-icon'); if (icon) icon.classList.add('animate-spin'); try { const tokenMint = feeConfig.tokenMint; const res = await fetch(`${API_URL}/api/proxy/balance/${walletAddress}?tokenMint=${tokenMint}`); const data = await res.json(); const solEl = document.getElementById('balance-sol'); const tokEl = document.getElementById('balance-token'); if (data.success) { if(solEl) solEl.innerText = (data.sol || 0).toFixed(4); if(tokEl) tokEl.innerText = (data.tokens || 0).toLocaleString(); } else { if(solEl) solEl.innerText = "Err"; if(tokEl) tokEl.innerText = "Err"; } } catch (e) { console.error("Balance Refresh Failed", e); } finally { if (icon) setTimeout(() => icon.classList.remove('animate-spin'), 500); } }
 
-    async function submitUpdate(e) { e.preventDefault(); if (!walletAddress || !walletProvider) { alert("Please connect wallet first"); return; } const statusDiv = document.getElementById('update-status'); const mint = document.getElementById('update-mint').value; const twitter = document.getElementById('update-twitter').value; const website = document.getElementById('update-website').value; const telegram = document.getElementById('update-telegram').value; const banner = document.getElementById('update-banner').value; const descInput = document.getElementById('update-description'); const description = descInput ? sanitizeInput(descInput.value.substring(0, 250)) : ''; if (banner && !banner.match(/\.(jpeg|jpg|gif|png|webp)$/i)) { statusDiv.innerText = "❌ Error: Banner URL must end in .jpg, .png, .gif, or .webp"; statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500"; return; } statusDiv.innerText = "Initializing Transaction..."; statusDiv.className = "mt-4 text-center text-sm font-mono text-[#ea580c]"; statusDiv.classList.remove('hidden'); try { let connection, blockhash; for (const endpoint of RPC_ENDPOINTS) { try { const conn = new solanaWeb3.Connection(endpoint, "confirmed"); const latest = await conn.getLatestBlockhash(); connection = conn; blockhash = latest.blockhash; break; } catch (err) {} } if (!connection) throw new Error("RPCs failed"); const fromPubkey = new solanaWeb3.PublicKey(walletAddress); const toPubkey = new solanaWeb3.PublicKey(feeConfig.treasury); const tokenMintPubkey = new solanaWeb3.PublicKey(feeConfig.tokenMint); const getATA = async (owner, mint) => { const [addr] = await solanaWeb3.PublicKey.findProgramAddress([owner.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mint.toBytes()], ASSOCIATED_TOKEN_PROGRAM_ID); return addr; }; const fromTokenAccount = await getATA(fromPubkey, tokenMintPubkey); const toTokenAccount = await getATA(toPubkey, tokenMintPubkey); const transaction = new solanaWeb3.Transaction(); transaction.add(solanaWeb3.SystemProgram.transfer({ fromPubkey, toPubkey, lamports: Math.round(feeConfig.solFee * solanaWeb3.LAMPORTS_PER_SOL) })); const decimals = 6; const rawAmount = BigInt(Math.floor(feeConfig.tokenFee * Math.pow(10, decimals))); const dataLayout = new Uint8Array(9); dataLayout[0] = 3; let remaining = rawAmount; for (let i = 0; i < 8; i++) { dataLayout[i + 1] = Number(remaining & 0xFFn); remaining >>= 8n; } const transferIx = new solanaWeb3.TransactionInstruction({ keys: [{ pubkey: fromTokenAccount, isSigner: false, isWritable: true }, { pubkey: toTokenAccount, isSigner: false, isWritable: true }, { pubkey: fromPubkey, isSigner: true, isWritable: false }], programId: TOKEN_PROGRAM_ID, data: dataLayout }); transaction.add(transferIx); transaction.recentBlockhash = blockhash; transaction.feePayer = fromPubkey; statusDiv.innerText = "Please Sign in Wallet..."; const { signature } = await walletProvider.signAndSendTransaction(transaction); statusDiv.innerText = "Verifying Payment..."; const payload = { mint, twitter, website, telegram, banner, description, signature, userPublicKey: walletAddress }; const res = await fetch(`${API_URL}/api/request-update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); const dataRes = await res.json(); if (dataRes.success) { statusDiv.innerText = "✅ Success! Update queued."; statusDiv.className = "mt-4 text-center text-sm font-mono text-green-500"; e.target.reset(); document.getElementById('char-count').innerText = "0"; } else { statusDiv.innerText = `❌ Verification Failed: ${dataRes.error}`; statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500"; } } catch (err) { console.error(err); statusDiv.innerText = `❌ Error: ${err.message}`; statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500"; } }
+    // --- UPDATED SUBMIT FUNCTION (Uses Proxy) ---
+    async function submitUpdate(e) { 
+        e.preventDefault(); 
+        if (!walletAddress || !walletProvider) { alert("Please connect wallet first"); return; } 
+        const statusDiv = document.getElementById('update-status'); 
+        const mint = document.getElementById('update-mint').value; 
+        const twitter = document.getElementById('update-twitter').value; 
+        const website = document.getElementById('update-website').value; 
+        const telegram = document.getElementById('update-telegram').value; 
+        const banner = document.getElementById('update-banner').value; 
+        const descInput = document.getElementById('update-description'); 
+        const description = descInput ? sanitizeInput(descInput.value.substring(0, 250)) : ''; 
+
+        if (banner && !banner.match(/\.(jpeg|jpg|gif|png|webp)$/i)) { 
+            statusDiv.innerText = "❌ Error: Banner URL must end in .jpg, .png, .gif, or .webp"; 
+            statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500"; 
+            return; 
+        } 
+        
+        statusDiv.innerText = "Fetching Network Data..."; 
+        statusDiv.className = "mt-4 text-center text-sm font-mono text-[#ea580c]"; 
+        statusDiv.classList.remove('hidden'); 
+
+        try { 
+            // 1. Get Blockhash via Proxy
+            const bhRes = await fetch(`${API_URL}/api/proxy/blockhash`);
+            const bhData = await bhRes.json();
+            if(!bhData.success) throw new Error("Failed to get blockhash from backend");
+            const blockhash = bhData.blockhash;
+
+            const fromPubkey = new solanaWeb3.PublicKey(walletAddress); 
+            const toPubkey = new solanaWeb3.PublicKey(feeConfig.treasury); 
+            const tokenMintPubkey = new solanaWeb3.PublicKey(feeConfig.tokenMint); 
+            
+            const getATA = async (owner, mint) => { 
+                const [addr] = await solanaWeb3.PublicKey.findProgramAddress([owner.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mint.toBytes()], ASSOCIATED_TOKEN_PROGRAM_ID); 
+                return addr; 
+            }; 
+            const fromTokenAccount = await getATA(fromPubkey, tokenMintPubkey); 
+            const toTokenAccount = await getATA(toPubkey, tokenMintPubkey); 
+            
+            const transaction = new solanaWeb3.Transaction(); 
+            transaction.add(solanaWeb3.SystemProgram.transfer({ fromPubkey, toPubkey, lamports: Math.round(feeConfig.solFee * solanaWeb3.LAMPORTS_PER_SOL) })); 
+            
+            const decimals = 6; 
+            const rawAmount = BigInt(Math.floor(feeConfig.tokenFee * Math.pow(10, decimals))); 
+            const dataLayout = new Uint8Array(9); 
+            dataLayout[0] = 3; 
+            let remaining = rawAmount; 
+            for (let i = 0; i < 8; i++) { dataLayout[i + 1] = Number(remaining & 0xFFn); remaining >>= 8n; } 
+            
+            const transferIx = new solanaWeb3.TransactionInstruction({ 
+                keys: [{ pubkey: fromTokenAccount, isSigner: false, isWritable: true }, { pubkey: toTokenAccount, isSigner: false, isWritable: true }, { pubkey: fromPubkey, isSigner: true, isWritable: false }], 
+                programId: TOKEN_PROGRAM_ID, 
+                data: dataLayout 
+            }); 
+            transaction.add(transferIx); 
+            
+            transaction.recentBlockhash = blockhash; 
+            transaction.feePayer = fromPubkey; 
+            
+            statusDiv.innerText = "Please Sign in Wallet..."; 
+            
+            // 2. Sign Only (Do not send via wallet RPC)
+            const signedTx = await walletProvider.signTransaction(transaction); 
+            
+            // 3. Serialize & Send via Backend Proxy
+            const serialized = signedTx.serialize();
+            // Use browser Buffer polyfill to ensure correct Base64
+            const base64Tx = window.Buffer.from(serialized).toString('base64');
+            
+            statusDiv.innerText = "Broadcasting (Premium RPC)...";
+            
+            const sendRes = await fetch(`${API_URL}/api/proxy/send-tx`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ signedTx: base64Tx })
+            });
+            const sendData = await sendRes.json();
+            
+            if(!sendData.success) throw new Error(sendData.error || "Transaction Failed");
+            const signature = sendData.signature;
+
+            statusDiv.innerText = "Verifying Payment..."; 
+            
+            const payload = { mint, twitter, website, telegram, banner, description, signature, userPublicKey: walletAddress }; 
+            const res = await fetch(`${API_URL}/api/request-update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); 
+            const dataRes = await res.json(); 
+            
+            if (dataRes.success) { 
+                statusDiv.innerText = "✅ Success! Update queued."; 
+                statusDiv.className = "mt-4 text-center text-sm font-mono text-green-500"; 
+                e.target.reset(); 
+                document.getElementById('char-count').innerText = "0"; 
+            } else { 
+                statusDiv.innerText = `❌ Verification Failed: ${dataRes.error}`; 
+                statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500"; 
+            } 
+        } catch (err) { 
+            console.error(err); 
+            statusDiv.innerText = `❌ Error: ${err.message}`; 
+            statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500"; 
+        } 
+    }
 
     const formatMoney = (val) => { if (val === undefined || val === null || isNaN(val)) return "$0.00"; return val < 0.01 ? '$' + val.toExponential(2) : '$' + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }); };
     const formatCompact = (val) => { if (val === undefined || val === null || isNaN(val)) return "$0"; return '$' + new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val); };

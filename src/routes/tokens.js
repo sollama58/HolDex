@@ -140,6 +140,36 @@ function init(deps) {
 
     // --- PUBLIC ROUTES ---
 
+    // 1. PROXY: Get Blockhash (Hides Helius Key)
+    router.get('/proxy/blockhash', async (req, res) => {
+        try {
+            const { blockhash, lastValidBlockHeight } = await solanaConnection.getLatestBlockhash('confirmed');
+            res.json({ success: true, blockhash, lastValidBlockHeight });
+        } catch (e) {
+            logger.error(`Proxy Blockhash Failed: ${e.message}`);
+            res.status(500).json({ success: false, error: "Network Busy" });
+        }
+    });
+
+    // 2. PROXY: Send Transaction (Hides Helius Key)
+    router.post('/proxy/send-tx', async (req, res) => {
+        try {
+            const { signedTx } = req.body; // base64 string
+            if (!signedTx) return res.status(400).json({ success: false, error: "No transaction data" });
+
+            const txBuffer = Buffer.from(signedTx, 'base64');
+            const signature = await solanaConnection.sendRawTransaction(txBuffer, {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed'
+            });
+
+            res.json({ success: true, signature });
+        } catch (e) {
+            logger.error(`Proxy Send Failed: ${e.message}`);
+            res.status(500).json({ success: false, error: "Transaction Failed at RPC" });
+        }
+    });
+
     router.get('/token/:mint/candles', async (req, res) => {
         const { mint } = req.params;
         const { resolution = '5', from, to, poolAddress } = req.query; 
