@@ -50,7 +50,12 @@ async function updateMetadata(deps) {
                 let totalVolume24h = 0;
                 let totalLiquidity = 0;
                 let bestPrice = 0;
-                let bestChange24h = null; // Changed to null initial to detect existence
+                
+                // Track all timeframes. Initialize to null to avoid overwriting with 0.
+                let bestChange24h = null;
+                let bestChange1h = null;
+                let bestChange5m = null;
+
                 let maxLiquidity = -1;
 
                 for (const poolData of poolsData) {
@@ -69,8 +74,15 @@ async function updateMetadata(deps) {
                     if (liqUsd > maxLiquidity) {
                         maxLiquidity = liqUsd;
                         bestPrice = price;
-                        // Capture the change from the most liquid pool
-                        bestChange24h = parseFloat(attr.price_change_percentage?.h24 || 0);
+                        
+                        // --- CRITICAL FIX: Safe Parsing ---
+                        // Only set if the value is defined and not null.
+                        // We do NOT use "|| 0" here, because 0 is a specific value we don't want to fake.
+                        const parseChange = (val) => (val !== undefined && val !== null) ? parseFloat(val) : null;
+                        
+                        bestChange24h = parseChange(attr.price_change_percentage?.h24);
+                        bestChange1h = parseChange(attr.price_change_percentage?.h1);
+                        bestChange5m = parseChange(attr.price_change_percentage?.m5);
                     }
 
                     await db.run(`
@@ -95,11 +107,6 @@ async function updateMetadata(deps) {
                     marketCap = supply * bestPrice;
                 }
 
-                // --- CRITICAL FIX FOR 0% CHANGE ---
-                // We only update change24h if we found a valid pool with data.
-                // We do NOT overwrite it if bestChange24h is technically 0 but maybe valid? 
-                // Gecko usually returns valid float or null.
-                
                 const params = [totalVolume24h, marketCap, bestPrice, totalLiquidity, now, t.mint];
                 let query = `
                     UPDATE tokens 
@@ -108,14 +115,55 @@ async function updateMetadata(deps) {
                         updated_at = CURRENT_TIMESTAMP
                 `;
 
+                // Only append update clauses if we actually found valid data
                 if (bestChange24h !== null) {
                     query += `, change24h = $${params.length + 1}`;
                     params.push(bestChange24h);
                 }
+                if (bestChange1h !== null) {
+                    query += `, change1h = $${params.length + 1}`;
+                    params.push(bestChange1h);
+                }
+                if (bestChange5m !== null) {
+                    query += `, change5m = $${params.length + 1}`;
+                    params.push(bestChange5m);
+                }
 
-                query += ` WHERE mint = $${params.length === 6 ? 6 : 7}`; // Adjust index based on whether we pushed change24h
+                // Dynamically find the index for the WHERE clause
+                query += ` WHERE mint = $${params.length}`; 
 
-                await db.run(query, params);
+                // FIX: params.length includes t.mint which is the last one pushed before the optionals
+                // wait, the logic above for params.push order is tricky.
+                // Let's rewrite the query builder to be cleaner and safer.
+                
+                const finalParams = [totalVolume24h, marketCap, bestPrice, totalLiquidity, now];
+                let updateParts = [
+                    "volume24h = $1", 
+                    "marketCap = $2", 
+                    "priceUsd = $3", 
+                    "liquidity = $4", 
+                    "timestamp = $5", 
+                    "updated_at = CURRENT_TIMESTAMP"
+                ];
+                
+                let idx = 6;
+                if (bestChange24h !== null) {
+                    updateParts.push(`change24h = $${idx++}`);
+                    finalParams.push(bestChange24h);
+                }
+                if (bestChange1h !== null) {
+                    updateParts.push(`change1h = $${idx++}`);
+                    finalParams.push(bestChange1h);
+                }
+                if (bestChange5m !== null) {
+                    updateParts.push(`change5m = $${idx++}`);
+                    finalParams.push(bestChange5m);
+                }
+                
+                const finalQuery = `UPDATE tokens SET ${updateParts.join(', ')} WHERE mint = $${idx}`;
+                finalParams.push(t.mint);
+
+                await db.run(finalQuery, finalParams);
 
             } catch (err) {
                 logger.error(`Token Update Failed [${t.mint}]: ${err.message}`);

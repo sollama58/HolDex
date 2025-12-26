@@ -277,6 +277,8 @@ async function aggregateAndSaveToken(db, mint) {
 
         let pIdx = 5;
 
+        // CRITICAL UPDATE LOGIC FOR PERCENTAGES
+        // We now force an update even if value is 0, as long as it's not null.
         if (change24h !== null) {
             query += `, change24h = $${pIdx++}`;
             params.push(change24h);

@@ -70,6 +70,9 @@ function init(deps) {
                 priceUsd: parseFloat(attrs.price_usd || 0),
                 volume24h: parseFloat(attrs.volume_usd?.h24 || 0),
                 change24h: parseFloat(attrs.price_change_percentage?.h24 || 0),
+                // NEW: Populate 1h and 5m initially
+                change1h: parseFloat(attrs.price_change_percentage?.h1 || 0),
+                change5m: parseFloat(attrs.price_change_percentage?.m5 || 0),
                 marketCap: parseFloat(attrs.fdv_usd || attrs.market_cap_usd || 0)
             };
         } catch (e) {
@@ -129,11 +132,13 @@ function init(deps) {
         const initialPrice = marketData?.priceUsd || 0;
         const initialVol = marketData?.volume24h || 0;
         const initialChange = marketData?.change24h || 0;
+        const initialChange1h = marketData?.change1h || 0;
+        const initialChange5m = marketData?.change5m || 0;
         const initialMcap = marketData?.marketCap || 0;
 
         await db.run(`
-            INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, timestamp)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, change1h, change5m, timestamp)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             ON CONFLICT(mint) DO UPDATE SET
             name = EXCLUDED.name,
             symbol = EXCLUDED.symbol,
@@ -151,7 +156,9 @@ function init(deps) {
             0, // Liquidity updated by aggregator 
             initialMcap, 
             initialVol, 
-            initialChange, 
+            initialChange,
+            initialChange1h,
+            initialChange5m,
             Date.now()
         ]);
 
@@ -567,6 +574,8 @@ function init(deps) {
                 else if (sort === 'volume') orderBy = 'volume24h DESC';
                 else if (sort === '24h') orderBy = 'change24h DESC';
                 else if (sort === 'liquidity') orderBy = 'liquidity DESC';
+                else if (sort === '5m') orderBy = 'change5m DESC';
+                else if (sort === '1h') orderBy = 'change1h DESC';
 
                 const offset = (page - 1) * 100;
                 rows = await db.all(`SELECT * FROM tokens ORDER BY ${orderBy} LIMIT 100 OFFSET ${offset}`);
