@@ -9,6 +9,7 @@ const RPC_ENDPOINTS = [
     config.SOLANA_RPC_URL,
     'https://api.mainnet-beta.solana.com',
     'https://rpc.ankr.com/solana',
+    'https://solana-api.projectserum.com'
 ].filter((url, index, self) => url && self.indexOf(url) === index); // Dedupe
 
 let currentEndpointIndex = 0;
@@ -21,7 +22,7 @@ function createConnection(url) {
     return new Connection(url, {
         commitment: 'confirmed',
         confirmTransactionInitialTimeout: 60000,
-        disableRetryOnRateLimit: false, // Let retryRPC handle logic
+        disableRetryOnRateLimit: true, // We handle retries manually
     });
 }
 
@@ -45,16 +46,19 @@ async function retryRPC(fn, retries = 3, delay = 1000) {
     try {
         return await fn(getSolanaConnection());
     } catch (err) {
-        const msg = err.message.toLowerCase();
-        // Rotate only on specific network/rate errors
+        const msg = err.message ? err.message.toLowerCase() : '';
+        
+        // Critical Errors where we should rotate
         if (msg.includes('429') || msg.includes('limit') || msg.includes('network') || msg.includes('timeout')) {
             rotateConnection();
         }
 
         if (retries <= 0) {
-            logger.error(`RPC Final Failure: ${err.message}`);
+            // logger.error(`RPC Final Failure: ${err.message}`);
             throw err;
         }
+
+        // Exponential backoff
         await new Promise(r => setTimeout(r, delay));
         return retryRPC(fn, retries - 1, delay * 2);
     }
