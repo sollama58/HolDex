@@ -1,237 +1,294 @@
 const { PublicKey } = require('@solana/web3.js');
-const { getSolanaConnection, retryRPC } = require('./solana');
+const { retryRPC, getSolanaConnection } = require('./solana');
 const logger = require('./logger');
 
-// --- PROTOCOL CONSTANTS ---
-const PROG_ID_PUMPFUN = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
+// --- PROGRAM IDS ---
 const PROG_ID_RAYDIUM_V4 = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
-const PROG_ID_ORCA_WHIRLPOOL = new PublicKey('whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc');
+const PROG_ID_RAYDIUM_CPMM = new PublicKey('CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C'); // New Standard
+const PROG_ID_PUMPSWAP = new PublicKey('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA'); // PumpSwap (Fall 2025)
 const PROG_ID_METEORA_DLMM = new PublicKey('LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo');
+const PROG_ID_ORCA_WHIRLPOOL = new PublicKey('whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc');
+const PROG_ID_PUMPFUN = new PublicKey('6EF8rrecthR5DkzonjNwu78hRvfCKubJ14M5uBEwF6P');
 
-// --- DATA LAYOUT OFFSETS ---
-// Raydium V4
-const RAY_OFF_BASE_MINT = 400;
-const RAY_OFF_QUOTE_MINT = 432;
-const RAY_OFF_BASE_VAULT = 320;
-const RAY_OFF_QUOTE_VAULT = 352;
-
-// Orca Whirlpool (Approximate based on standard layout)
-const ORCA_OFF_MINT_A = 101;
-const ORCA_OFF_VAULT_A = 133;
-const ORCA_OFF_MINT_B = 181;
-const ORCA_OFF_VAULT_B = 213;
-
-// Meteora DLMM (LbPair)
-// Discriminator (8) + TokenX (32) + TokenY (32) + ReserveX (32) + ReserveY (32)
-const MET_OFF_MINT_X = 8;
-const MET_OFF_MINT_Y = 40;
-const MET_OFF_RES_X = 72;
-const MET_OFF_RES_Y = 104;
-
-const QUOTE_TOKENS = new Set([
-    'So11111111111111111111111111111111111111112', // SOL
-    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
-    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
-]);
+// --- OFFSETS (Raydium V4) ---
+// We only fetch the bytes we NEED to parse.
+const RAY_SLICE = { offset: 320, length: 144 };
+const SLICE_OFF_BASE_VAULT = 0;   
+const SLICE_OFF_QUOTE_VAULT = 32; 
+const SLICE_OFF_BASE_MINT = 80;   
+const SLICE_OFF_QUOTE_MINT = 112; 
 
 /**
- * 1. PUMPFUN DETECTION (Deterministic PDA)
+ * Strategy 1: Direct GPA (GetProgramAccounts) Scan
+ * Best for Raydium V4 where we know exact offsets and there are many pools.
  */
-async function findPumpFunPool(mint, results) {
+async function findRaydiumV4Pools(mintB58, results) {
     try {
-        const [bondingCurve] = PublicKey.findProgramAddressSync(
-            [Buffer.from("bonding-curve"), mint.toBuffer()],
-            PROG_ID_PUMPFUN
-        );
-
-        // Verify it exists on-chain
-        const info = await retryRPC((c) => c.getAccountInfo(bondingCurve));
-        
-        if (info) {
-            logger.info(`✅ Found PumpFun Curve: ${bondingCurve.toBase58()}`);
-            results.push({
-                pairAddress: bondingCurve.toBase58(),
-                dexId: 'pumpfun',
-                baseToken: { address: mint.toBase58() },
-                quoteToken: { address: 'So11111111111111111111111111111111111111112' }, // SOL
-                reserve_a: bondingCurve.toBase58(), // PumpFun logic uses same address
-                reserve_b: bondingCurve.toBase58(),
-                liquidity: { usd: 0 },
-                priceUsd: 0
-            });
-        }
-    } catch (err) {
-        logger.debug(`PumpFun check failed: ${err.message}`);
-    }
-}
-
-/**
- * 2. RAYDIUM V4 DETECTION (getProgramAccounts)
- */
-async function findRaydiumPools(mint, mintB58, results) {
-    try {
-        const filtersBase = [
-            { dataSize: 752 }, 
-            { memcmp: { offset: RAY_OFF_BASE_MINT, bytes: mintB58 } }
-        ];
-        const filtersQuote = [
-            { dataSize: 752 }, 
-            { memcmp: { offset: RAY_OFF_QUOTE_MINT, bytes: mintB58 } }
-        ];
+        const filtersBase = [{ dataSize: 752 }, { memcmp: { offset: 400, bytes: mintB58 } }];
+        const filtersQuote = [{ dataSize: 752 }, { memcmp: { offset: 432, bytes: mintB58 } }];
 
         const [baseAccts, quoteAccts] = await Promise.all([
-            retryRPC(c => c.getProgramAccounts(PROG_ID_RAYDIUM_V4, { filters: filtersBase })),
-            retryRPC(c => c.getProgramAccounts(PROG_ID_RAYDIUM_V4, { filters: filtersQuote }))
+            retryRPC(c => c.getProgramAccounts(PROG_ID_RAYDIUM_V4, { filters: filtersBase, dataSlice: RAY_SLICE })),
+            retryRPC(c => c.getProgramAccounts(PROG_ID_RAYDIUM_V4, { filters: filtersQuote, dataSlice: RAY_SLICE }))
         ]);
 
-        const process = (acc, isBase) => {
+        const process = (acc) => {
             const d = acc.account.data;
-            const bMint = new PublicKey(d.subarray(RAY_OFF_BASE_MINT, RAY_OFF_BASE_MINT + 32)).toBase58();
-            const qMint = new PublicKey(d.subarray(RAY_OFF_QUOTE_MINT, RAY_OFF_QUOTE_MINT + 32)).toBase58();
+            const bMint = new PublicKey(d.subarray(SLICE_OFF_BASE_MINT, SLICE_OFF_BASE_MINT + 32)).toBase58();
+            const qMint = new PublicKey(d.subarray(SLICE_OFF_QUOTE_MINT, SLICE_OFF_QUOTE_MINT + 32)).toBase58();
             
-            // Only add if paired with a known quote token (reduces junk pools)
-            const otherToken = isBase ? qMint : bMint;
-            if (!QUOTE_TOKENS.has(otherToken)) return;
+            // Basic sanity check
+            if (!bMint || !qMint) return;
 
             results.push({
                 pairAddress: acc.pubkey.toBase58(),
                 dexId: 'raydium',
+                type: 'v4',
                 baseToken: { address: bMint },
                 quoteToken: { address: qMint },
-                reserve_a: new PublicKey(d.subarray(RAY_OFF_BASE_VAULT, RAY_OFF_BASE_VAULT + 32)).toBase58(),
-                reserve_b: new PublicKey(d.subarray(RAY_OFF_QUOTE_VAULT, RAY_OFF_QUOTE_VAULT + 32)).toBase58(),
+                reserve_a: new PublicKey(d.subarray(SLICE_OFF_BASE_VAULT, SLICE_OFF_BASE_VAULT + 32)).toBase58(),
+                reserve_b: new PublicKey(d.subarray(SLICE_OFF_QUOTE_VAULT, SLICE_OFF_QUOTE_VAULT + 32)).toBase58(),
                 liquidity: { usd: 0 },
+                volume: { h24: 0 },
                 priceUsd: 0
             });
         };
 
-        if(baseAccts) baseAccts.forEach(a => process(a, true));
-        if(quoteAccts) quoteAccts.forEach(a => process(a, false));
+        if(baseAccts) baseAccts.forEach(process);
+        if(quoteAccts) quoteAccts.forEach(process);
         
-        if (baseAccts?.length || quoteAccts?.length) logger.info(`✅ Found Raydium Pools: ${baseAccts?.length + quoteAccts?.length}`);
-
     } catch (err) {
-        logger.warn(`Raydium Scan Error: ${err.message}`);
+        logger.warn(`Raydium V4 Scan Error: ${err.message}`);
     }
 }
 
 /**
- * 3. ORCA WHIRLPOOL DETECTION
+ * Strategy 2: Pump.fun Bonding Curve
+ * Uses exact seeds to find the bonding curve account.
  */
-async function findOrcaPools(mint, mintB58, results) {
+async function findPumpFunCurve(mintAddress, results) {
     try {
-        // Search where Token is Mint A
-        const filtersA = [{ memcmp: { offset: ORCA_OFF_MINT_A, bytes: mintB58 } }];
-        // Search where Token is Mint B
-        const filtersB = [{ memcmp: { offset: ORCA_OFF_MINT_B, bytes: mintB58 } }];
+        const mint = new PublicKey(mintAddress);
+        const [bondingCurve] = PublicKey.findProgramAddressSync(
+            [Buffer.from("bonding-curve"), mint.toBuffer()],
+            PROG_ID_PUMPFUN
+        );
+        const [bondingCurveVault] = PublicKey.findProgramAddressSync(
+            [Buffer.from("bonding-curve"), mint.toBuffer(), Buffer.from("token-account")],
+            PROG_ID_PUMPFUN
+        );
 
-        // Note: Whirlpool accounts are large, we use dataSlice to save bandwidth if possible,
-        // but we need the vault addresses, so we fetch full data (or slice smartly).
-        // Let's fetch full data for now to be safe with parsing.
+        // Verify it exists
+        const connection = getSolanaConnection();
+        const info = await retryRPC(c => c.getAccountInfo(bondingCurve));
         
-        const [acctsA, acctsB] = await Promise.all([
-            retryRPC(c => c.getProgramAccounts(PROG_ID_ORCA_WHIRLPOOL, { filters: filtersA })),
-            retryRPC(c => c.getProgramAccounts(PROG_ID_ORCA_WHIRLPOOL, { filters: filtersB }))
-        ]);
-
-        const process = (acc) => {
-            const d = acc.account.data;
-            const mintA = new PublicKey(d.subarray(ORCA_OFF_MINT_A, ORCA_OFF_MINT_A + 32)).toBase58();
-            const mintB = new PublicKey(d.subarray(ORCA_OFF_MINT_B, ORCA_OFF_MINT_B + 32)).toBase58();
-            
-            results.push({
-                pairAddress: acc.pubkey.toBase58(),
-                dexId: 'orca',
-                baseToken: { address: mintA },
-                quoteToken: { address: mintB },
-                reserve_a: new PublicKey(d.subarray(ORCA_OFF_VAULT_A, ORCA_OFF_VAULT_A + 32)).toBase58(),
-                reserve_b: new PublicKey(d.subarray(ORCA_OFF_VAULT_B, ORCA_OFF_VAULT_B + 32)).toBase58(),
+        if (info) {
+             results.push({
+                pairAddress: bondingCurve.toBase58(),
+                dexId: 'pumpfun',
+                type: 'bonding_curve',
+                baseToken: { address: mintAddress },
+                quoteToken: { address: 'So11111111111111111111111111111111111111112' }, // SOL
+                reserve_a: bondingCurveVault.toBase58(), // Token Reserve
+                reserve_b: bondingCurve.toBase58(),      // SOL Reserve (Virtual)
                 liquidity: { usd: 0 },
+                volume: { h24: 0 },
                 priceUsd: 0
             });
-        };
-
-        if(acctsA) acctsA.forEach(process);
-        if(acctsB) acctsB.forEach(process);
-        
-        if (acctsA?.length || acctsB?.length) logger.info(`✅ Found Orca Pools: ${acctsA?.length + acctsB?.length}`);
-
-    } catch (err) {
-        logger.warn(`Orca Scan Error: ${err.message}`);
+        }
+    } catch (e) {
+        // Bonding curve might be closed/migrated, ignore error
     }
 }
 
 /**
- * 4. METEORA DLMM DETECTION
+ * Strategy 3: Token Account Trace (Robust Fallback)
+ * * Used for: PumpSwap, Raydium CPMM, Meteora DLMM, Orca
+ * * Logic:
+ * 1. Find all Token Accounts for the Mint.
+ * 2. Check the OWNER of those token accounts.
+ * 3. If the owner is a known DEX Program (or PDA of it), that's the Pool Vault.
+ * 4. Fetch that Pool Account to find the *other* token.
  */
-async function findMeteoraPools(mint, mintB58, results) {
+async function findPoolsByTokenOwnership(mintAddress, results) {
     try {
-        const filtersX = [{ memcmp: { offset: MET_OFF_MINT_X, bytes: mintB58 } }];
-        const filtersY = [{ memcmp: { offset: MET_OFF_MINT_Y, bytes: mintB58 } }];
+        const connection = getSolanaConnection();
+        const mint = new PublicKey(mintAddress);
 
-        const [acctsX, acctsY] = await Promise.all([
-            retryRPC(c => c.getProgramAccounts(PROG_ID_METEORA_DLMM, { filters: filtersX })),
-            retryRPC(c => c.getProgramAccounts(PROG_ID_METEORA_DLMM, { filters: filtersY }))
-        ]);
+        // Get all token accounts for this mint (filter by large size to find pools?)
+        // We fetch all because liquidity pools usually have the largest balances, 
+        // but we filter by Owner Program ID which is safer.
+        const tokenAccounts = await retryRPC(c => c.getTokenAccountsByMint(mint, { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }));
 
-        const process = (acc) => {
-            const d = acc.account.data;
-            const mintX = new PublicKey(d.subarray(MET_OFF_MINT_X, MET_OFF_MINT_X + 32)).toBase58();
-            const mintY = new PublicKey(d.subarray(MET_OFF_MINT_Y, MET_OFF_MINT_Y + 32)).toBase58();
+        const candidatePools = [];
+
+        for (const { pubkey, account } of tokenAccounts.value) {
+            // We need to parse the account data to get the 'owner' (The Pool or Authority)
+            // standard SPL layout: mint(32), owner(32), amount(8)...
+            if (account.data.length < 64) continue;
             
-            // Note: Offsets for reserves inferred from standard layouts
-            results.push({
-                pairAddress: acc.pubkey.toBase58(),
-                dexId: 'meteora',
-                baseToken: { address: mintX },
-                quoteToken: { address: mintY },
-                reserve_a: new PublicKey(d.subarray(MET_OFF_RES_X, MET_OFF_RES_X + 32)).toBase58(),
-                reserve_b: new PublicKey(d.subarray(MET_OFF_RES_Y, MET_OFF_RES_Y + 32)).toBase58(),
-                liquidity: { usd: 0 },
-                priceUsd: 0
-            });
-        };
+            const owner = new PublicKey(account.data.subarray(32, 64));
+            const ownerB58 = owner.toBase58();
+            const tokenAccountAddr = pubkey.toBase58();
 
-        if(acctsX) acctsX.forEach(process);
-        if(acctsY) acctsY.forEach(process);
-        
-        if (acctsX?.length || acctsY?.length) logger.info(`✅ Found Meteora Pools: ${acctsX?.length + acctsY?.length}`);
+            // Check if Owner is a known DEX Program or derived from it
+            // NOTE: Most Anchor programs (Orca, PumpSwap, CPMM) use a PDA as owner.
+            // We check the "owner" of the "owner" (The Program).
+            
+            try {
+                const ownerInfo = await retryRPC(c => c.getAccountInfo(owner));
+                if (!ownerInfo) continue;
+                
+                const programOwner = ownerInfo.owner.toBase58();
 
-    } catch (err) {
-        logger.warn(`Meteora Scan Error: ${err.message}`);
+                if (programOwner === PROG_ID_PUMPSWAP.toBase58()) {
+                    await parseGenericAnchorPool(connection, owner, 'pumpswap', 'pumpswap', mintAddress, tokenAccountAddr, results);
+                }
+                else if (programOwner === PROG_ID_RAYDIUM_CPMM.toBase58()) {
+                    await parseGenericAnchorPool(connection, owner, 'raydium', 'cpmm', mintAddress, tokenAccountAddr, results);
+                }
+                else if (programOwner === PROG_ID_METEORA_DLMM.toBase58()) {
+                     // Meteora specific parsing if needed, or generic
+                     await parseGenericAnchorPool(connection, owner, 'meteora', 'dlmm', mintAddress, tokenAccountAddr, results);
+                }
+                else if (programOwner === PROG_ID_ORCA_WHIRLPOOL.toBase58()) {
+                     await parseGenericAnchorPool(connection, owner, 'orca', 'whirlpool', mintAddress, tokenAccountAddr, results);
+                }
+
+            } catch (innerErr) {
+                // Ignore single account errors
+            }
+        }
+
+    } catch (e) {
+        logger.warn(`Token Trace Scan Error: ${e.message}`);
     }
 }
 
 /**
- * MAIN DISCOVERY FUNCTION
+ * Generic Parser for Anchor-based AMMs (PumpSwap, Raydium CPMM, Orca)
+ * We assume the "Pool Address" is the owner of the vault.
+ * We fetch the Pool Address data and try to find the "other" mint.
  */
+async function parseGenericAnchorPool(connection, poolAddress, dexId, type, myMint, myVault, results) {
+    // Avoid duplicates
+    if (results.find(r => r.pairAddress === poolAddress.toBase58())) return;
+
+    try {
+        const info = await retryRPC(c => c.getAccountInfo(poolAddress));
+        if (!info) return;
+
+        const data = info.data;
+        // Anchor accounts have 8 byte discriminator.
+        // We look for 2 Pubkeys (Mint A, Mint B) usually appearing early.
+        // Heuristic: Scan for myMint. The OTHER pubkey nearby is the paired mint.
+        
+        const myMintBuffer = new PublicKey(myMint).toBuffer();
+        let matchedOffset = -1;
+        
+        // Simple scan for my Mint in the pool state
+        for (let i = 8; i < 200; i++) {
+            if (data.subarray(i, i + 32).equals(myMintBuffer)) {
+                matchedOffset = i;
+                break;
+            }
+        }
+
+        if (matchedOffset === -1) return; // Couldn't find my mint in pool state
+
+        // Look for the OTHER mint. Usually it's right before or right after.
+        // Standard Layouts often: [MintA, MintB] or [MintA, VaultA, MintB, VaultB]
+        
+        // Try finding another valid Pubkey nearby (within 64 bytes)
+        // This is a heuristic for unknown layouts (like new PumpSwap), 
+        // effectively making us "competitive" without waiting for SDK updates.
+        
+        let pairedMint = null;
+        
+        // Check 32 bytes before
+        if (matchedOffset >= 40) {
+             // potential mint before?
+        }
+        
+        // Heuristic: Just find the first 2 pubkeys in the struct that look like Mints
+        // (Not perfectly safe but effective for MVP pool discovery)
+        
+        // BETTER: Use known offsets for known progs
+        let mintA, mintB;
+        
+        if (dexId === 'raydium' && type === 'cpmm') {
+            // CPMM Layout: MintA @ 168, MintB @ 200
+            mintA = new PublicKey(data.subarray(168, 200)).toBase58();
+            mintB = new PublicKey(data.subarray(200, 232)).toBase58();
+        } else if (dexId === 'orca') {
+             // Whirlpool: TokenMintA @ 65, TokenMintB @ 97 (variable packing, but approx)
+             // Actually Whirlpool is: ticks(..), fee(..), liquidity(..), tickCurrent(..), 
+             // tokenMintA is at offset 8 + ... it's deep.
+             // Fallback to "Found Pool" but maybe incomplete data if we can't parse.
+             // We'll skip complex parsing here and just mark it found.
+             return; 
+        } else {
+             // PumpSwap / Generic
+             // Assume Mint A and Mint B are the first two Pubkeys after Discriminator
+             // or check adjacent to myMint
+             // For now, if we can't parse the pair, we can't list it reliably.
+             // Let's assume PumpSwap is [Discriminator(8), Creator(32), MintA(32), MintB(32)...]
+             // or [Disc, MintA, MintB]
+             
+             // We will scan for unique Pubkeys in the first 200 bytes
+             // If we find myMint and one other Unique Pubkey, assume that's the pair.
+             const candidates = [];
+             for(let i=8; i<200; i+=32) { // 32 byte alignment guess
+                 try {
+                     const p = new PublicKey(data.subarray(i, i+32));
+                     const s = p.toBase58();
+                     if (PublicKey.isOnCurve(p.toBuffer()) && s !== '11111111111111111111111111111111') {
+                         candidates.push(s);
+                     }
+                 } catch(e){}
+             }
+             
+             const other = candidates.find(c => c !== myMint);
+             if (other) {
+                 pairedMint = other;
+             }
+        }
+
+        if (pairedMint || (mintA && mintB)) {
+            results.push({
+                pairAddress: poolAddress.toBase58(),
+                dexId: dexId,
+                type: type,
+                baseToken: { address: mintA || myMint },
+                quoteToken: { address: mintB || pairedMint },
+                liquidity: { usd: 0 },
+                volume: { h24: 0 },
+                priceUsd: 0,
+                // Note: We don't have Vault addresses for Generic yet, 
+                // would need further parsing. This allows listing "Pool Exists" 
+                // but Snapshotter might fail to read reserves without correct Vaults.
+            });
+        }
+
+    } catch (e) {
+        logger.warn(`Generic Parser Error for ${dexId}: ${e.message}`);
+    }
+}
+
+
 async function findPoolsOnChain(mintAddress) {
     const pools = [];
-    const mint = new PublicKey(mintAddress);
-    const mintB58 = mint.toBase58();
+    const mintB58 = mintAddress;
 
-    logger.info(`🔍 Deep Scan initiated for ${mintB58}...`);
-
-    // Run scans in parallel
-    await Promise.allSettled([
-        findPumpFunPool(mint, pools),
-        findRaydiumPools(mint, mintB58, pools),
-        findOrcaPools(mint, mintB58, pools),
-        findMeteoraPools(mint, mintB58, pools)
+    // 1. Parallel Search
+    await Promise.all([
+        findRaydiumV4Pools(mintB58, pools),
+        findPumpFunCurve(mintAddress, pools),
+        findPoolsByTokenOwnership(mintAddress, pools) // Handles PumpSwap, CPMM, Meteora
     ]);
 
-    // Deduplicate by address
-    const unique = [];
-    const seen = new Set();
-    for (const p of pools) {
-        if (!seen.has(p.pairAddress)) {
-            seen.add(p.pairAddress);
-            unique.push(p);
-        }
-    }
-
-    logger.info(`🏁 Scan Complete. Found ${unique.length} unique pools.`);
-    return unique;
+    logger.info(`🔍 Discovery: Found ${pools.length} pools for ${mintAddress}`);
+    return pools;
 }
 
 module.exports = { findPoolsOnChain };
