@@ -11,6 +11,7 @@ const kScoreUpdater = require('../tasks/kScoreUpdater');
 // NEW IMPORTS
 const { snapshotPools } = require('../indexer/tasks/snapshotter');
 const { updateTokenStats } = require('../tasks/metadataUpdater');
+const { fetchSolscanData } = require('../services/solscan');
 
 const router = express.Router();
 const solanaConnection = new Connection(config.SOLANA_RPC_URL, 'confirmed');
@@ -37,13 +38,17 @@ function init(deps) {
         const meta = await fetchTokenMetadata(mint);
         
         let supply = '0';
-        let decimals = 9; // Default to 9 for SOL standard
+        let decimals = 9; 
         
         try {
             const supplyInfo = await solanaConnection.getTokenSupply(new PublicKey(mint));
             supply = supplyInfo.value.amount;
-            decimals = supplyInfo.value.decimals; // Capture decimals
+            decimals = supplyInfo.value.decimals;
         } catch (e) { console.warn(`Failed to fetch supply for ${mint}`); }
+
+        // Fetch Initial External Data (Solscan)
+        const solscan = await fetchSolscanData(mint);
+        const initialVol = solscan?.volume24h || 0;
 
         const pools = await findPoolsOnChain(mint);
         const poolAddresses = [];
@@ -69,17 +74,16 @@ function init(deps) {
             description: meta?.description || ''
         };
 
-        // FIXED: Insert Decimals
         await db.run(`
-            INSERT INTO tokens (mint, name, symbol, image, supply, decimals, timestamp)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO tokens (mint, name, symbol, image, supply, decimals, volume24h, timestamp)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT(mint) DO UPDATE SET
             name = EXCLUDED.name,
             symbol = EXCLUDED.symbol,
             image = EXCLUDED.image,
             supply = EXCLUDED.supply,
             decimals = EXCLUDED.decimals
-        `, [mint, baseData.name, baseData.ticker, baseData.image, supply, decimals, Date.now()]);
+        `, [mint, baseData.name, baseData.ticker, baseData.image, supply, decimals, initialVol, Date.now()]);
 
         if (poolAddresses.length > 0) {
             await snapshotPools(poolAddresses);
@@ -129,7 +133,6 @@ function init(deps) {
 
     /**
      * CANDLES ENDPOINT (UPDATED FOR AGGREGATION)
-     * Handles 1m -> 5m/15m/1h/4h/1d aggregation
      */
     router.get('/token/:mint/candles', async (req, res) => {
         const { mint } = req.params;
@@ -158,7 +161,7 @@ function init(deps) {
                     ORDER BY timestamp ASC
                 `, [pool.address, fromMs, toMs]);
                 
-                // 2. Direct Return if Resolution is 1m (though removed from UI)
+                // 2. Direct Return if Resolution is 1m
                 if (resMinutes === 1) {
                     return { success: true, candles: rows.map(r => ({
                         time: Math.floor(parseInt(r.timestamp) / 1000),
@@ -166,18 +169,17 @@ function init(deps) {
                     }))};
                 }
 
-                // 3. Aggregate for Higher Timeframes (5m, 15m, etc.)
+                // 3. Aggregate
                 const candles = [];
                 let currentCandle = null;
 
                 for (const r of rows) {
                     const time = parseInt(r.timestamp);
-                    // Floor time to nearest resolution bucket
                     const bucketStart = Math.floor(time / resMs) * resMs;
 
                     if (!currentCandle || currentCandle.timeMs !== bucketStart) {
                         if (currentCandle) {
-                            currentCandle.time = Math.floor(currentCandle.timeMs / 1000); // Send seconds to UI
+                            currentCandle.time = Math.floor(currentCandle.timeMs / 1000); 
                             delete currentCandle.timeMs;
                             candles.push(currentCandle);
                         }
@@ -191,14 +193,12 @@ function init(deps) {
                         };
                     }
 
-                    // Update Aggregated Candle High/Low/Close
                     if (r.high > currentCandle.high) currentCandle.high = r.high;
                     if (r.low < currentCandle.low) currentCandle.low = r.low;
                     currentCandle.close = r.close;
                     if (r.volume) currentCandle.volume += r.volume;
                 }
 
-                // Push last candle
                 if (currentCandle) {
                     currentCandle.time = Math.floor(currentCandle.timeMs / 1000);
                     delete currentCandle.timeMs;
