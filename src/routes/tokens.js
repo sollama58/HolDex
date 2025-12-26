@@ -1,14 +1,12 @@
 const express = require('express');
-const axios = require('axios'); 
 const { Connection, PublicKey } = require('@solana/web3.js');
 const { isValidPubkey } = require('../utils/solana');
-const { smartCache, enableIndexing, aggregateAndSaveToken } = require('../services/database');
+const { smartCache, enableIndexing } = require('../services/database');
 const { findPoolsOnChain } = require('../services/pool_finder');
 const { fetchTokenMetadata } = require('../utils/metaplex');
 const config = require('../config/env');
 const kScoreUpdater = require('../tasks/kScoreUpdater'); 
 
-// NEW IMPORTS
 const { snapshotPools } = require('../indexer/tasks/snapshotter');
 const { updateTokenStats } = require('../tasks/metadataUpdater');
 const { fetchSolscanData } = require('../services/solscan');
@@ -46,9 +44,21 @@ function init(deps) {
             decimals = supplyInfo.value.decimals;
         } catch (e) { console.warn(`Failed to fetch supply for ${mint}`); }
 
-        // Fetch Initial External Data (Solscan)
+        // FETCH SOLSCAN IMMEDIATELY
         const solscan = await fetchSolscanData(mint);
-        const initialVol = solscan?.volume24h || 0;
+        
+        // Defaults
+        let priceUsd = 0;
+        let marketCap = 0;
+        let volume24h = 0;
+        let change24h = 0;
+
+        if (solscan) {
+            priceUsd = solscan.priceUsd;
+            marketCap = solscan.marketCap;
+            volume24h = solscan.volume24h;
+            change24h = solscan.change24h;
+        }
 
         const pools = await findPoolsOnChain(mint);
         const poolAddresses = [];
@@ -70,32 +80,31 @@ function init(deps) {
             name: meta?.name || 'Unknown',
             ticker: meta?.symbol || 'UNKNOWN',
             image: meta?.image || null,
-            marketCap: 0, 
-            description: meta?.description || ''
         };
 
+        // Insert with ALL Initial Data
         await db.run(`
-            INSERT INTO tokens (mint, name, symbol, image, supply, decimals, volume24h, timestamp)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, marketCap, volume24h, change24h, timestamp)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             ON CONFLICT(mint) DO UPDATE SET
             name = EXCLUDED.name,
             symbol = EXCLUDED.symbol,
             image = EXCLUDED.image,
             supply = EXCLUDED.supply,
-            decimals = EXCLUDED.decimals
-        `, [mint, baseData.name, baseData.ticker, baseData.image, supply, decimals, initialVol, Date.now()]);
+            decimals = EXCLUDED.decimals,
+            priceUsd = EXCLUDED.priceUsd,
+            marketCap = EXCLUDED.marketCap,
+            volume24h = EXCLUDED.volume24h,
+            change24h = EXCLUDED.change24h
+        `, [mint, baseData.name, baseData.ticker, baseData.image, supply, decimals, priceUsd, marketCap, volume24h, change24h, Date.now()]);
 
         if (poolAddresses.length > 0) {
             await snapshotPools(poolAddresses);
-            await updateTokenStats(mint);
         }
-
-        const finalToken = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]);
 
         return { 
             ...baseData, 
-            priceUsd: finalToken?.priceUsd || 0,
-            marketCap: finalToken?.marketCap || 0,
+            priceUsd, marketCap, volume24h, change24h,
             pairs: pools 
         };
     }
@@ -131,12 +140,9 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "Submission failed: " + e.message }); }
     });
 
-    /**
-     * CANDLES ENDPOINT (UPDATED FOR AGGREGATION)
-     */
     router.get('/token/:mint/candles', async (req, res) => {
         const { mint } = req.params;
-        const { resolution = '5', from, to } = req.query; // Default to 5m
+        const { resolution = '5', from, to } = req.query; 
         
         const resMinutes = parseInt(resolution);
         const resMs = resMinutes * 60 * 1000;
@@ -151,7 +157,6 @@ function init(deps) {
                 let pool = await db.get(`SELECT address FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC LIMIT 1`, [mint]);
                 if (!pool) return { success: false, error: "Token not indexed yet" };
 
-                // 1. Fetch Raw 1m Candles
                 const rows = await db.all(`
                     SELECT timestamp, open, high, low, close, volume 
                     FROM candles_1m 
@@ -161,7 +166,6 @@ function init(deps) {
                     ORDER BY timestamp ASC
                 `, [pool.address, fromMs, toMs]);
                 
-                // 2. Direct Return if Resolution is 1m
                 if (resMinutes === 1) {
                     return { success: true, candles: rows.map(r => ({
                         time: Math.floor(parseInt(r.timestamp) / 1000),
@@ -169,7 +173,6 @@ function init(deps) {
                     }))};
                 }
 
-                // 3. Aggregate
                 const candles = [];
                 let currentCandle = null;
 
@@ -231,7 +234,13 @@ function init(deps) {
             if (isAddressSearch && rows.length === 0) {
                 const newData = await indexTokenOnChain(search);
                 if (newData.name !== 'Unknown') {
-                    rows.push({ ...newData, mint: search, hasCommunityUpdate: false, kScore: 0, timestamp: Date.now() });
+                    rows.push({ 
+                        ...newData, 
+                        mint: search, 
+                        hasCommunityUpdate: false, 
+                        kScore: 0, 
+                        timestamp: Date.now() 
+                    });
                 }
             }
 
