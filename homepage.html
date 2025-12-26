@@ -9,22 +9,15 @@
     <!-- 1. ESSENTIAL LIBRARIES                     -->
     <!-- ========================================== -->
     
-    <!-- 1. Buffer (Browser Compatible) -->
     <script src="https://bundle.run/buffer@6.0.3"></script>
     <script>
-        // Expose Buffer globally for any legacy dependency
         if (typeof window.buffer !== 'undefined') {
             window.Buffer = window.buffer.Buffer;
         }
     </script>
 
-    <!-- 2. Solana Web3.js -->
     <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
-
-    <!-- 3. Lightweight Charts (TradingView) - PINNED VERSION for Stability -->
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
-
-    <!-- 4. Styling & Icons -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -84,12 +77,17 @@
         .view-section.active { display: block; animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         
-        /* NEW CHART STYLES */
+        /* CHART STYLES */
         .chart-wrapper { width: 100%; height: 500px; background: #1a0a05; border-radius: 16px; overflow: hidden; border: 2px solid #7c2d12; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
-        .chart-header { padding: 8px 16px; background: #2a1005; border-bottom: 1px solid #7c2d12; display: flex; justify-content: space-between; align-items: center; }
+        .chart-header { padding: 8px 16px; background: #2a1005; border-bottom: 1px solid #7c2d12; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
         .res-btn { background: transparent; border: 1px solid transparent; color: #9a3412; padding: 4px 8px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 11px; font-weight: bold; cursor: pointer; transition: all 0.1s; }
         .res-btn:hover { color: #fb923c; border-color: #451a03; }
         .res-btn.active { background: #451a03; color: #ea580c; border-color: #7c2d12; }
+        
+        .mode-btn { background: #2a1005; border: 1px solid #451a03; color: #9a3412; padding: 4px 8px; border-radius: 4px; font-family: 'JetBrains Mono'; font-size: 11px; font-weight: bold; cursor: pointer; transition: all 0.1s; }
+        .mode-btn:hover { color: #fb923c; border-color: #7c2d12; }
+        .mode-btn.active { background: #451a03; color: #ea580c; border-color: #7c2d12; box-shadow: 0 0 5px rgba(234, 88, 12, 0.2); }
+
         #tv-chart { flex: 1; position: relative; width: 100%; height: 100%; }
 
         .stat-card { background: rgba(69, 26, 3, 0.8); border: 2px solid #7c2d12; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 4px; box-shadow: 4px 4px 0 rgba(0,0,0,0.2); }
@@ -97,12 +95,6 @@
         .stat-value { font-size: 18px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
         .modal-overlay { position: fixed; inset: 0; background: rgba(15, 5, 2, 0.95); backdrop-filter: blur(5px); z-index: 100; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
         .modal-overlay.open { opacity: 1; pointer-events: auto; }
-        .status-bar { position: fixed; bottom: 0; left: 0; width: 100%; background: #451a03; border-top: 2px solid #ea580c; padding: 0 16px; height: 50px; display: flex; justify-content: space-between; align-items: center; z-index: 50; transition: background 0.2s; box-shadow: 0 -5px 20px rgba(234, 88, 12, 0.2); }
-        .status-bar:hover { background: #582206; }
-        .pulse-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 8px; border: 1px solid rgba(255,255,255,0.2); }
-        .pulse-dot.green { background: #22c55e; box-shadow: 0 0 12px #22c55e; animation: pulseGlow 2s infinite; }
-        .pulse-dot.red { background: #ef4444; box-shadow: 0 0 12px #ef4444; }
-        @keyframes pulseGlow { 0% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); } 70% { opacity: 1; box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); } 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); } }
         .action-btn { background: #451a03; border: 2px solid #ea580c; color: #fb923c; padding: 12px 20px; border-radius: 12px; font-weight: 700; text-transform: uppercase; font-size: 13px; transition: all 0.2s; box-shadow: 4px 4px 0 #7c2d12; }
         .action-btn:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 #7c2d12; background: #582206; color: #fff; }
         .action-btn:active { transform: translate(2px, 2px); box-shadow: 0 0 0; }
@@ -116,29 +108,22 @@
         .form-label { display: block; color: #9a3412; font-size: 12px; font-weight: bold; margin-bottom: 6px; text-transform: uppercase; }
         .social-btn { display: flex; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 12px; border: 2px solid #7c2d12; background: #451a03; color: #ea580c; transition: all 0.2s; }
         .social-btn:hover { border-color: #ea580c; color: #fff; background: #582206; transform: translateY(-2px); }
-        .pool-tab { padding: 8px 16px; font-size: 12px; font-weight: bold; color: #9a3412; cursor: pointer; border-bottom: 2px solid transparent; }
-        .pool-tab.active { color: #ea580c; border-bottom-color: #ea580c; }
-        .pool-tab:hover:not(.active) { color: #fb923c; }
+        .pool-tab { padding: 8px 16px; font-size: 12px; font-weight: bold; color: #9a3412; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; }
+        .pool-tab.active { color: #ea580c; border-bottom-color: #ea580c; background: #2a1005; }
+        .pool-tab:hover:not(.active) { color: #fb923c; background: rgba(69, 26, 3, 0.5); }
         .verified-badge { display: inline-flex; align-items: center; justify-content: center; background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #22c55e; border-radius: 50%; width: 20px; height: 20px; margin-left: 6px; box-shadow: 0 0 10px rgba(34, 197, 94, 0.3); }
         .verified-badge i { width: 12px; height: 12px; }
         .info-btn { color: #9a3412; cursor: pointer; transition: color 0.2s; }
         .info-btn:hover { color: #fb923c; }
         .info-box { background: #451a03; border: 1px solid #7c2d12; border-radius: 8px; padding: 16px; margin-bottom: 16px; color: #ffedd5; font-size: 13px; line-height: 1.5; }
         .info-box a { color: #fb923c; text-decoration: underline; }
-        .preview-content { max-height: 80vh; overflow-y: auto; padding: 20px; }
         .feature-box { background: #451a03; border: 2px solid #7c2d12; border-radius: 16px; padding: 24px; transition: transform 0.2s; display: flex; flex-direction: column; gap: 8px; }
         .feature-box:hover { border-color: #ea580c; transform: translateY(-4px); }
-        .connect-btn { background: #581c87; border: 2px solid #a855f7; color: white; padding: 8px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 8px; }
-        .connect-btn:hover { background: #6b21a8; box-shadow: 0 0 15px rgba(168, 85, 247, 0.4); }
         .fee-card { background: rgba(0,0,0,0.3); border: 1px dashed #7c2d12; padding: 12px; border-radius: 8px; margin-bottom: 16px; text-align: center; }
         
         .wallet-btn { background: #2a1005; border: 2px solid #7c2d12; padding: 16px; border-radius: 12px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.2s; color: #ffedd5; font-weight: bold; }
         .wallet-btn:hover { border-color: #ea580c; background: #451a03; transform: translateX(5px); }
         .wallet-icon { width: 32px; height: 32px; border-radius: 8px; }
-        
-        .status-bar-btn { padding: 6px 12px; border-radius: 6px; border: 1px solid #7c2d12; background: #2a1005; color: #9a3412; font-size: 11px; font-weight: bold; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-        .status-bar-btn:hover { border-color: #ea580c; color: #fb923c; background: #451a03; }
-        .status-bar-btn.connected { border-color: #22c55e; color: #22c55e; background: rgba(34, 197, 94, 0.1); }
         
         /* Large social buttons for detail view */
         .social-btn-lg { display: flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 14px; border: 2px solid #7c2d12; background: #451a03; color: #ea580c; transition: all 0.2s; }
@@ -172,22 +157,16 @@
         </div>
         
         <div id="table-controls" class="flex items-center gap-3 w-full md:w-auto transition-opacity duration-300">
-            <!-- Filter: Verified -->
             <button id="filter-verified" onclick="toggleVerifiedFilter()" class="filter-toggle" title="Show only Verified Community Updates">
                 <i data-lucide="shield-check" width="16"></i> Verified Only
             </button>
-            
-            <!-- Filter: Zero Vol (NEW) - Active by default -->
             <button id="filter-zerovol" onclick="toggleZeroVolFilter()" class="filter-toggle active" title="Hide tokens with 0 Volume">
                 <i data-lucide="bar-chart-2" width="16"></i> Hide 0 Vol
             </button>
-
-            <!-- Search with Clear Button -->
             <div class="relative w-full md:w-auto search-container">
                 <input type="text" id="search" placeholder="Search..." class="search-box" onkeyup="handleSearch(event)">
                 <i id="clear-search-btn" data-lucide="x" width="16" class="clear-search" onclick="clearSearch()"></i>
             </div>
-
             <button id="manual-refresh" onclick="handleManualRefresh()" class="refresh-btn" title="Refresh Data">
                 <i data-lucide="refresh-cw" width="18"></i>
             </button>
@@ -241,11 +220,9 @@
         </div>
     </div>
 
-    <!-- ABOUT VIEW (EXPANDED) -->
+    <!-- ABOUT VIEW -->
     <div id="view-about" class="view-section px-4 md:px-0">
         <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 md:p-12 shadow-2xl max-w-5xl mx-auto space-y-12">
-            
-            <!-- HERO -->
             <div class="flex items-center gap-6 border-b-2 border-[#7c2d12] pb-8">
                 <div class="w-20 h-20 rounded-2xl flex items-center justify-center bg-[#451a03] text-orange-500 border-2 border-[#7c2d12] shadow-lg flex-shrink-0">
                     <i data-lucide="flame" width="40"></i>
@@ -255,192 +232,74 @@
                     <p class="text-[#ea580c] font-mono text-lg mt-1">Community-Verified Asset Data Layer for Solana</p>
                 </div>
             </div>
-
-            <!-- MISSION -->
             <div class="grid md:grid-cols-2 gap-8">
                 <div>
                     <h3 class="text-2xl font-bold text-white mb-4">The Mission</h3>
-                    <p class="text-[#ffedd5] leading-relaxed mb-4">
-                        The Solana ecosystem moves at the speed of light. Thousands of tokens launch daily, creating a noisy environment where legitimate projects often get lost.
-                    </p>
-                    <p class="text-[#ffedd5] leading-relaxed">
-                        **HolDex** solves this by providing a clean, terminal-grade interface that prioritizes **data accuracy** and **community verification**. We don't just index tokens; we verify them.
-                    </p>
+                    <p class="text-[#ffedd5] leading-relaxed mb-4">The Solana ecosystem moves at the speed of light. Thousands of tokens launch daily, creating a noisy environment.</p>
+                    <p class="text-[#ffedd5] leading-relaxed">**HolDex** solves this by providing a clean, terminal-grade interface that prioritizes **data accuracy** and **community verification**.</p>
                 </div>
                 <div class="bg-[#451a03] p-6 rounded-xl border border-[#7c2d12] flex flex-col justify-center">
-                    <div class="flex items-center gap-3 mb-2">
-                        <i data-lucide="server" width="20" class="text-[#22c55e]"></i>
-                        <span class="font-bold text-white">Real-Time Sync</span>
-                    </div>
-                    <p class="text-sm text-[#9a3412] mb-4">Direct connection to Solana RPC nodes and DexScreener API for sub-second updates.</p>
-                    
-                    <div class="flex items-center gap-3 mb-2">
-                        <i data-lucide="shield-check" width="20" class="text-[#ea580c]"></i>
-                        <span class="font-bold text-white">Bot Filtering</span>
-                    </div>
-                    <p class="text-sm text-[#9a3412]">Advanced algorithms to filter out wash trading and low-effort spam tokens.</p>
+                    <div class="flex items-center gap-3 mb-2"><i data-lucide="server" width="20" class="text-[#22c55e]"></i><span class="font-bold text-white">Real-Time Sync</span></div>
+                    <p class="text-sm text-[#9a3412] mb-4">Direct connection to Solana RPC nodes and DexScreener API.</p>
+                    <div class="flex items-center gap-3 mb-2"><i data-lucide="shield-check" width="20" class="text-[#ea580c]"></i><span class="font-bold text-white">Bot Filtering</span></div>
+                    <p class="text-sm text-[#9a3412]">Advanced algorithms to filter out wash trading and low-effort spam.</p>
                 </div>
             </div>
-
-            <!-- FEATURES -->
             <div class="grid md:grid-cols-3 gap-6">
-                <div class="feature-box">
-                    <div class="text-[#fb923c] mb-2"><i data-lucide="lock" width="24"></i></div>
-                    <h4 class="font-bold text-white text-lg">K-Score Protocol</h4>
-                    <p class="text-sm text-[#9a3412]">Our proprietary "Conviction Score" analyzes holder distribution and velocity. A high K-Score (💎) indicates strong community holding patterns.</p>
-                </div>
-                <div class="feature-box">
-                    <div class="text-[#22c55e] mb-2"><i data-lucide="users" width="24"></i></div>
-                    <h4 class="font-bold text-white text-lg">Community Verified</h4>
-                    <p class="text-sm text-[#9a3412]">Projects can verify their metadata (socials, banners) on-chain via our "Update" tab. Verified projects get a green badge and higher visibility.</p>
-                </div>
-                <div class="feature-box">
-                    <div class="text-[#a855f7] mb-2"><i data-lucide="zap" width="24"></i></div>
-                    <h4 class="font-bold text-white text-lg">Fast Execution</h4>
-                    <p class="text-sm text-[#9a3412]">Built for speed. No bloat. Just the data you need to make informed decisions in a volatile market.</p>
-                </div>
+                <div class="feature-box"><div class="text-[#fb923c] mb-2"><i data-lucide="lock" width="24"></i></div><h4 class="font-bold text-white text-lg">K-Score Protocol</h4><p class="text-sm text-[#9a3412]">"Conviction Score" analyzes holder distribution and velocity.</p></div>
+                <div class="feature-box"><div class="text-[#22c55e] mb-2"><i data-lucide="users" width="24"></i></div><h4 class="font-bold text-white text-lg">Community Verified</h4><p class="text-sm text-[#9a3412]">Verified projects get a green badge and higher visibility.</p></div>
+                <div class="feature-box"><div class="text-[#a855f7] mb-2"><i data-lucide="zap" width="24"></i></div><h4 class="font-bold text-white text-lg">Fast Execution</h4><p class="text-sm text-[#9a3412]">Built for speed. No bloat.</p></div>
             </div>
-
-            <!-- DEVELOPERS / API -->
             <div class="bg-[#0f0502] border border-[#7c2d12] rounded-xl p-8 relative overflow-hidden">
                 <div class="absolute top-4 right-4 p-4 opacity-10"><i data-lucide="code" width="100" class="text-[#ea580c]"></i></div>
                 <h3 class="text-2xl font-bold text-white mb-2">Developers & API</h3>
-                <p class="text-[#9a3412] mb-6 max-w-2xl">
-                    Building a trading bot or dashboard? HolDex exposes a public API to fetch sanitized, verified token metadata including social links and banner images.
-                </p>
-                <button onclick="toggleApiModal()" class="action-btn flex items-center gap-2">
-                    <i data-lucide="terminal" width="16"></i> View API Documentation
-                </button>
+                <p class="text-[#9a3412] mb-6 max-w-2xl">HolDex exposes a public API to fetch sanitized, verified token metadata.</p>
+                <button onclick="toggleApiModal()" class="action-btn flex items-center gap-2"><i data-lucide="terminal" width="16"></i> View API Documentation</button>
             </div>
-
-            <!-- FOOTER INFO -->
-             <div class="border-t border-[#7c2d12] pt-8 flex justify-between items-center text-xs text-[#9a3412]">
-                <div>&copy; 2025 HolDex Protocol. All rights reserved.</div>
-                <div class="font-mono">v2.3.1</div>
-            </div>
+             <div class="border-t border-[#7c2d12] pt-8 flex justify-between items-center text-xs text-[#9a3412]"><div>&copy; 2025 HolDex Protocol. All rights reserved.</div><div class="font-mono">v2.3.1</div></div>
         </div>
     </div>
 
     <!-- UPDATE VIEW -->
     <div id="view-update" class="view-section px-4 md:px-0">
         <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 shadow-2xl max-w-2xl mx-auto">
-            
-            <!-- WALLET DASHBOARD -->
             <div class="bg-[#451a03] border-2 border-[#ea580c] rounded-xl p-4 mb-8">
-                <!-- Disconnected State -->
                 <div id="wallet-disconnected" class="flex justify-between items-center">
-                    <div>
-                        <h2 class="text-2xl font-bold text-white mb-1 font-sans">Update Token</h2>
-                        <p class="text-[#9a3412] text-xs">Connect wallet to pay fees & submit updates.</p>
-                    </div>
-                    <!-- New Connect Button -->
-                    <button onclick="openWalletModal()" class="action-btn text-xs py-2 px-4 flex items-center gap-2">
-                        <i data-lucide="wallet" width="14"></i> Connect
-                    </button>
+                    <div><h2 class="text-2xl font-bold text-white mb-1 font-sans">Update Token</h2><p class="text-[#9a3412] text-xs">Connect wallet to pay fees & submit updates.</p></div>
+                    <button onclick="openWalletModal()" class="action-btn text-xs py-2 px-4 flex items-center gap-2"><i data-lucide="wallet" width="14"></i> Connect</button>
                 </div>
-
-                <!-- Connected State -->
                 <div id="wallet-connected" class="hidden">
                     <div class="flex justify-between items-start border-b border-[#7c2d12] pb-3 mb-3">
-                        <div>
-                            <div class="text-[#9a3412] text-[10px] font-bold uppercase tracking-wider">Connected Wallet</div>
-                            <div class="font-mono text-[#fb923c] font-bold text-lg flex items-center gap-2">
-                                <span id="display-address">...</span>
-                                <i data-lucide="check-circle" width="16" class="text-green-500"></i>
-                            </div>
-                        </div>
-                        <button onclick="disconnectWallet()" class="text-[#9a3412] hover:text-red-500 text-xs font-bold flex items-center gap-1 transition">
-                            <i data-lucide="log-out" width="14"></i> Disconnect
-                        </button>
+                        <div><div class="text-[#9a3412] text-[10px] font-bold uppercase tracking-wider">Connected Wallet</div><div class="font-mono text-[#fb923c] font-bold text-lg flex items-center gap-2"><span id="display-address">...</span><i data-lucide="check-circle" width="16" class="text-green-500"></i></div></div>
+                        <button onclick="disconnectWallet()" class="text-[#9a3412] hover:text-red-500 text-xs font-bold flex items-center gap-1 transition"><i data-lucide="log-out" width="14"></i> Disconnect</button>
                     </div>
-                    
                     <div class="grid grid-cols-2 gap-4">
-                        <div class="bg-[#2a1005] rounded-lg p-3 border border-[#7c2d12]">
-                            <div class="text-[#9a3412] text-[10px] font-bold uppercase">SOL Balance</div>
-                            <div class="font-mono text-white text-xl" id="balance-sol">0.00</div>
-                        </div>
-                        <div class="bg-[#2a1005] rounded-lg p-3 border border-[#7c2d12]">
-                            <div class="text-[#9a3412] text-[10px] font-bold uppercase">$ASDFASDFA Balance</div>
-                            <div class="font-mono text-[#a855f7] text-xl" id="balance-token">0.00</div>
-                        </div>
+                        <div class="bg-[#2a1005] rounded-lg p-3 border border-[#7c2d12]"><div class="text-[#9a3412] text-[10px] font-bold uppercase">SOL Balance</div><div class="font-mono text-white text-xl" id="balance-sol">0.00</div></div>
+                        <div class="bg-[#2a1005] rounded-lg p-3 border border-[#7c2d12]"><div class="text-[#9a3412] text-[10px] font-bold uppercase">$ASDFASDFA Balance</div><div class="font-mono text-[#a855f7] text-xl" id="balance-token">0.00</div></div>
                     </div>
-                    
-                    <div class="mt-3 text-right">
-                         <button onclick="refreshBalances()" class="text-[#ea580c] hover:text-white text-xs font-bold flex items-center justify-end gap-1 w-full">
-                            <i id="refresh-icon" data-lucide="refresh-cw" width="12"></i> Refresh Balances
-                        </button>
-                    </div>
+                    <div class="mt-3 text-right"><button onclick="refreshBalances()" class="text-[#ea580c] hover:text-white text-xs font-bold flex items-center justify-end gap-1 w-full"><i id="refresh-icon" data-lucide="refresh-cw" width="12"></i> Refresh Balances</button></div>
                 </div>
             </div>
 
-            <!-- Fee Display -->
             <div class="fee-card" id="fee-panel">
                 <div class="text-[#9a3412] font-bold text-xs uppercase tracking-wider mb-2">Required Fees</div>
                 <div class="flex justify-center gap-6 items-center">
-                    <div class="flex flex-col">
-                        <span class="text-xl font-mono text-[#fb923c]" id="fee-sol">-- SOL</span>
-                        <span class="text-[10px] text-[#9a3412]">Protocol Fee</span>
-                    </div>
+                    <div class="flex flex-col"><span class="text-xl font-mono text-[#fb923c]" id="fee-sol">-- SOL</span><span class="text-[10px] text-[#9a3412]">Protocol Fee</span></div>
                     <div class="text-[#7c2d12]">+</div>
-                    <div class="flex flex-col">
-                        <span class="text-xl font-mono text-[#a855f7]" id="fee-token">-- TOKENS</span>
-                        <span class="text-[10px] text-[#9a3412]">$ASDFASDFA</span>
-                    </div>
+                    <div class="flex flex-col"><span class="text-xl font-mono text-[#a855f7]" id="fee-token">-- TOKENS</span><span class="text-[10px] text-[#9a3412]">$ASDFASDFA</span></div>
                 </div>
             </div>
             
             <form onsubmit="submitUpdate(event)">
                 <label class="form-label">Token Mint Address</label>
-                <div class="relative">
-                    <input type="text" id="update-mint" class="form-input" placeholder="Enter Solana Mint Address..." required onblur="fetchTokenForUpdate(this.value)">
-                    <div id="mint-check-spinner" class="absolute right-3 top-3 hidden"><i data-lucide="loader-2" class="animate-spin text-[#ea580c]" width="18"></i></div>
-                </div>
-                
-                <div id="token-preview-info" class="mb-6 p-4 bg-[#451a03] border border-[#7c2d12] rounded-lg hidden flex items-center gap-4">
-                    <img id="update-token-img" src="" class="w-12 h-12 rounded-md object-cover bg-black">
-                    <div>
-                        <div class="font-bold text-white" id="update-token-name">Token Name</div>
-                        <div class="text-xs text-[#9a3412] font-mono" id="update-token-ticker">TICKER</div>
-                    </div>
-                </div>
-                
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="form-label">X (Twitter)</label>
-                        <input type="url" id="update-twitter" class="form-input" placeholder="https://x.com/...">
-                    </div>
-                    <div>
-                         <label class="form-label">Telegram</label>
-                        <input type="url" id="update-telegram" class="form-input" placeholder="https://t.me/...">
-                    </div>
-                </div>
-                
-                <label class="form-label">Website</label>
-                <input type="url" id="update-website" class="form-input" placeholder="https://...">
-                
-                <!-- NEW DESCRIPTION FIELD -->
-                <div class="mt-2">
-                    <label class="form-label">Description (Max 250 chars)</label>
-                    <textarea id="update-description" class="form-input h-24 resize-none" maxlength="250" placeholder="Briefly describe your token project..."></textarea>
-                    <div class="text-right text-[10px] text-[#9a3412] font-mono font-bold"><span id="char-count">0</span>/250</div>
-                </div>
-                
-                <div class="flex justify-between items-center mb-1 mt-2">
-                    <label class="form-label mb-0">Banner Image URL</label>
-                    <button type="button" class="info-btn flex items-center gap-1 text-xs" onclick="toggleInfoModal()">
-                        <i data-lucide="help-circle" width="14"></i> How to upload?
-                    </button>
-                </div>
+                <div class="relative"><input type="text" id="update-mint" class="form-input" placeholder="Enter Solana Mint Address..." required onblur="fetchTokenForUpdate(this.value)"><div id="mint-check-spinner" class="absolute right-3 top-3 hidden"><i data-lucide="loader-2" class="animate-spin text-[#ea580c]" width="18"></i></div></div>
+                <div id="token-preview-info" class="mb-6 p-4 bg-[#451a03] border border-[#7c2d12] rounded-lg hidden flex items-center gap-4"><img id="update-token-img" src="" class="w-12 h-12 rounded-md object-cover bg-black"><div><div class="font-bold text-white" id="update-token-name">Token Name</div><div class="text-xs text-[#9a3412] font-mono" id="update-token-ticker">TICKER</div></div></div>
+                <div class="grid grid-cols-2 gap-4"><div><label class="form-label">X (Twitter)</label><input type="url" id="update-twitter" class="form-input" placeholder="https://x.com/..."></div><div><label class="form-label">Telegram</label><input type="url" id="update-telegram" class="form-input" placeholder="https://t.me/..."></div></div>
+                <label class="form-label">Website</label><input type="url" id="update-website" class="form-input" placeholder="https://...">
+                <div class="mt-2"><label class="form-label">Description (Max 250 chars)</label><textarea id="update-description" class="form-input h-24 resize-none" maxlength="250" placeholder="Briefly describe your token project..."></textarea><div class="text-right text-[10px] text-[#9a3412] font-mono font-bold"><span id="char-count">0</span>/250</div></div>
+                <div class="flex justify-between items-center mb-1 mt-2"><label class="form-label mb-0">Banner Image URL</label><button type="button" class="info-btn flex items-center gap-1 text-xs" onclick="toggleInfoModal()"><i data-lucide="help-circle" width="14"></i> How to upload?</button></div>
                 <input type="url" id="update-banner" class="form-input" placeholder="https://i.imgur.com/...">
-                
-                <div class="flex gap-4 mt-6">
-                    <button type="button" onclick="openPreview()" class="action-btn flex-1 flex items-center justify-center gap-2 bg-[#451a03] text-[#fb923c] border-[#ea580c] hover:bg-[#582206]">
-                        <i data-lucide="eye" width="16"></i> Preview
-                    </button>
-                    <button type="submit" id="submit-btn" class="action-btn flex-1 flex items-center justify-center gap-2 bg-[#2a1005] border-[#22c55e] text-[#22c55e] hover:bg-green-900/20 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-                        <i data-lucide="wallet" width="16"></i> Pay & Submit
-                    </button>
-                </div>
+                <div class="flex gap-4 mt-6"><button type="button" onclick="openPreview()" class="action-btn flex-1 flex items-center justify-center gap-2 bg-[#451a03] text-[#fb923c] border-[#ea580c] hover:bg-[#582206]"><i data-lucide="eye" width="16"></i> Preview</button><button type="submit" id="submit-btn" class="action-btn flex-1 flex items-center justify-center gap-2 bg-[#2a1005] border-[#22c55e] text-[#22c55e] hover:bg-green-900/20 disabled:opacity-50 disabled:cursor-not-allowed" disabled><i data-lucide="wallet" width="16"></i> Pay & Submit</button></div>
             </form>
             <div id="update-status" class="mt-4 text-center text-sm font-mono hidden"></div>
         </div>
@@ -454,21 +313,10 @@
 
             <div class="flex flex-col md:flex-row gap-6 mb-8 items-start">
                 <div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl">
-                    <!-- REPLACED IMG WITH CONTAINER FOR MEDIA -->
-                    <div id="detail-media-container" class="flex-shrink-0">
-                        <img class="w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black shadow-lg">
-                    </div>
-                    
+                    <div id="detail-media-container" class="flex-shrink-0"><img class="w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black shadow-lg"></div>
                     <div class="flex-1 min-w-0">
-                        <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mb-1">
-                            <h2 id="detail-ticker" class="text-3xl md:text-4xl font-bold text-white tracking-tight truncate font-mono"></h2>
-                            <span id="detail-name" class="text-[#fb923c] text-xs md:text-sm bg-[#2a1005] px-3 py-1 rounded-lg border border-[#7c2d12] truncate"></span>
-                        </div>
-                        <div class="flex items-center gap-2 cursor-pointer group" onclick="copyMint()">
-                            <span id="detail-mint" class="text-xs text-[#9a3412] font-mono group-hover:text-[#ea580c] transition truncate max-w-[200px] md:max-w-none"></span>
-                            <i data-lucide="copy" width="12" class="text-[#9a3412] group-hover:text-[#ea580c] flex-shrink-0"></i>
-                        </div>
-                        <!-- Description Injection Point -->
+                        <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mb-1"><h2 id="detail-ticker" class="text-3xl md:text-4xl font-bold text-white tracking-tight truncate font-mono"></h2><span id="detail-name" class="text-[#fb923c] text-xs md:text-sm bg-[#2a1005] px-3 py-1 rounded-lg border border-[#7c2d12] truncate"></span></div>
+                        <div class="flex items-center gap-2 cursor-pointer group" onclick="copyMint()"><span id="detail-mint" class="text-xs text-[#9a3412] font-mono group-hover:text-[#ea580c] transition truncate max-w-[200px] md:max-w-none"></span><i data-lucide="copy" width="12" class="text-[#9a3412] group-hover:text-[#ea580c] flex-shrink-0"></i></div>
                         <div id="detail-desc" class="mt-3 text-sm text-[#ffedd5] font-sans leading-relaxed opacity-90 hidden"></div>
                     </div>
                 </div>
@@ -477,14 +325,9 @@
             </div>
             
             <div class="grid grid-cols-2 lg:grid-cols-6 gap-3 md:gap-4 mb-6">
-                <!-- K-SCORE CARD (Strict Logic) -->
-                <div class="stat-card border-[#ea580c] relative overflow-hidden">
-                    <span class="stat-label text-[#ea580c]">K-Score</span>
-                    <span id="stat-kscore" class="stat-value text-[#fb923c] text-2xl font-bold font-mono">🔒</span>
-                </div>
+                <div class="stat-card border-[#ea580c] relative overflow-hidden"><span class="stat-label text-[#ea580c]">K-Score</span><span id="stat-kscore" class="stat-value text-[#fb923c] text-2xl font-bold font-mono">🔒</span></div>
                 <div class="stat-card"><span class="stat-label">Price</span><span id="stat-price" class="stat-value text-[#ffedd5]">-</span></div>
                 <div class="stat-card"><span class="stat-label">MCap</span><span id="stat-mcap" class="stat-value text-[#ea580c]">-</span></div>
-                <!-- RENAMED ALPHA TO 24H VOL -->
                 <div class="stat-card col-span-2 md:col-span-1"><span class="stat-label">24h Vol</span><span id="stat-vol" class="stat-value text-[#22c55e]">-</span></div>
                 <div class="stat-card"><span class="stat-label">1H</span><span id="stat-chg1h" class="stat-value">-</span></div>
                 <div class="stat-card"><span class="stat-label">24H</span><span id="stat-chg24h" class="stat-value">-</span></div>
@@ -492,10 +335,18 @@
             
             <div id="pool-tabs-container" class="flex gap-4 border-b border-[#7c2d12] mb-4 overflow-x-auto"></div>
             
-            <!-- REPLACED: DexScreener iframe with Custom Chart -->
             <div class="chart-wrapper">
                 <div class="chart-header">
-                     <div class="text-[#fb923c] font-bold font-mono text-sm flex items-center gap-2"><i data-lucide="activity" width="16"></i> INTERNAL FEED</div>
+                     <div class="flex items-center gap-2">
+                         <div class="text-[#fb923c] font-bold font-mono text-sm flex items-center gap-2"><i data-lucide="activity" width="16"></i> INTERNAL FEED <span id="chart-pool-name" class="text-xs text-[#9a3412] ml-2"></span></div>
+                         
+                         <!-- CHART MODE TOGGLE -->
+                         <div class="flex items-center gap-1 bg-[#0f0502] p-1 rounded-lg border border-[#7c2d12] ml-4">
+                             <button onclick="setChartMode('price')" class="mode-btn active" id="mode-price">Price</button>
+                             <button onclick="setChartMode('mcap')" class="mode-btn" id="mode-mcap">M.Cap</button>
+                         </div>
+                     </div>
+                     
                      <div class="flex items-center gap-1 bg-[#0f0502] p-1 rounded-lg border border-[#7c2d12]">
                          <button onclick="setResolution('1')" class="res-btn" id="res-1">1m</button>
                          <button onclick="setResolution('5')" class="res-btn" id="res-5">5m</button>
@@ -507,196 +358,29 @@
                 </div>
                 <div id="tv-chart" style="width: 100%; height: 100%;"></div>
             </div>
-
         </div>
     </div>
 </main>
 
-<!-- WALLET SELECTION MODAL -->
 <div id="wallet-modal" class="modal-overlay">
     <div class="bg-[#2a1005] border-2 border-[#ea580c] p-6 rounded-2xl max-w-sm w-full shadow-2xl relative" onclick="event.stopPropagation()">
         <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="closeWalletModal()"><i data-lucide="x" width="24"></i></button>
         <h3 class="text-xl font-bold text-white mb-6 font-sans text-center">Connect Wallet</h3>
-        
         <div class="space-y-3">
-            <div onclick="connectProvider('phantom')" class="wallet-btn group">
-                <div class="flex items-center gap-3">
-                    <div class="w-8 h-8 rounded bg-[#581c87] flex items-center justify-center">
-                        <i data-lucide="ghost" width="20" class="text-white"></i>
-                    </div>
-                    <span>Phantom</span>
-                </div>
-                <div class="text-[#22c55e] text-xs font-mono opacity-0 group-hover:opacity-100 transition">Detected</div>
-            </div>
-
-            <div onclick="connectProvider('solflare')" class="wallet-btn group">
-                <div class="flex items-center gap-3">
-                    <div class="w-8 h-8 rounded bg-[#ea580c] flex items-center justify-center">
-                        <i data-lucide="flame" width="20" class="text-white"></i>
-                    </div>
-                    <span>Solflare</span>
-                </div>
-                <div class="text-[#22c55e] text-xs font-mono opacity-0 group-hover:opacity-100 transition">Detected</div>
-            </div>
+            <div onclick="connectProvider('phantom')" class="wallet-btn group"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded bg-[#581c87] flex items-center justify-center"><i data-lucide="ghost" width="20" class="text-white"></i></div><span>Phantom</span></div><div class="text-[#22c55e] text-xs font-mono opacity-0 group-hover:opacity-100 transition">Detected</div></div>
+            <div onclick="connectProvider('solflare')" class="wallet-btn group"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded bg-[#ea580c] flex items-center justify-center"><i data-lucide="flame" width="20" class="text-white"></i></div><span>Solflare</span></div><div class="text-[#22c55e] text-xs font-mono opacity-0 group-hover:opacity-100 transition">Detected</div></div>
         </div>
-    </div>
-</div>
-
-<!-- API DOCUMENTATION MODAL (Updated) -->
-<div id="api-docs-modal" class="modal-overlay">
-    <div class="bg-[#2a1005] border-2 border-[#ea580c] p-8 rounded-2xl max-w-3xl w-full shadow-2xl relative overflow-y-auto max-h-[90vh]" onclick="event.stopPropagation()">
-        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleApiModal()"><i data-lucide="x" width="24"></i></button>
-        
-        <div class="flex items-center gap-3 mb-6">
-            <div class="w-10 h-10 rounded-lg flex items-center justify-center bg-[#451a03] text-[#ea580c] border border-[#7c2d12]">
-                <i data-lucide="terminal" width="20"></i>
-            </div>
-            <h3 class="text-xl font-bold text-white font-sans">HolDex Developer API</h3>
-        </div>
-
-        <p class="text-[#ffedd5] text-sm mb-6 leading-relaxed">
-            The HolDex API provides programmatic access to verified token metadata, real-time pricing, and community conviction scores. 
-            Designed for trading bots, dashboards, and research tools.
-        </p>
-
-        <div class="space-y-6">
-            <!-- Section 1: Authentication -->
-            <div>
-                <h4 class="text-sm font-bold text-[#ea580c] uppercase mb-2">1. Authentication & Limits</h4>
-                <div class="bg-[#451a03] p-4 rounded-lg border border-[#7c2d12] text-xs text-[#9a3412]">
-                    <ul class="list-disc pl-4 space-y-1">
-                        <li><span class="text-white">Public Access:</span> No API key required for standard rate limits.</li>
-                        <li><span class="text-white">Rate Limit:</span> 60 requests per minute per IP.</li>
-                        <li><span class="text-white">CORS:</span> Enabled for all origins (*).</li>
-                    </ul>
-                </div>
-            </div>
-
-            <!-- Section 2: Endpoints -->
-            <div>
-                <h4 class="text-sm font-bold text-[#ea580c] uppercase mb-2">2. Endpoints</h4>
-                
-                <!-- Get Token List -->
-                <div class="mb-4">
-                    <div class="flex justify-between items-center mb-1">
-                        <span class="text-white text-xs font-bold">List Tokens</span>
-                        <span class="text-[#22c55e] text-[10px] font-mono bg-[#2a1005] px-2 py-1 rounded border border-[#22c55e]">GET</span>
-                    </div>
-                    <div class="code-block mb-2">
-                        <span class="text-[#fb923c]">https://asdev-backend.onrender.com/api/tokens</span>
-                    </div>
-                    <p class="text-xs text-[#9a3412] mb-1">Parameters:</p>
-                    <div class="grid grid-cols-2 gap-2 text-[10px] font-mono text-[#fb923c]">
-                        <div>sort (kscore, volume, newest)</div>
-                        <div>page (number)</div>
-                        <div>search (string)</div>
-                        <div>limit (max 100)</div>
-                    </div>
-                </div>
-
-                <!-- Get Token Details -->
-                <div class="mb-4">
-                    <div class="flex justify-between items-center mb-1">
-                        <span class="text-white text-xs font-bold">Get Token Details</span>
-                        <span class="text-[#22c55e] text-[10px] font-mono bg-[#2a1005] px-2 py-1 rounded border border-[#22c55e]">GET</span>
-                    </div>
-                    <div class="code-block">
-                        <span class="text-[#fb923c]">https://asdev-backend.onrender.com/api/token/{mint_address}</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Section 3: Example Response -->
-            <div>
-                <h4 class="text-sm font-bold text-[#ea580c] uppercase mb-2">3. Response Object</h4>
-                <div class="code-block" style="max-height: 200px; overflow-y: auto;">
-{
-  "success": true,
-  "token": {
-    "mint": "7ey...",
-    "name": "Bonk",
-    "ticker": "BONK",
-    "image": "https://arweave.net/...",
-    "priceUsd": 0.0000123,
-    "marketCap": 1500000000,
-    "volume24h": 45000000,
-    "kScore": 95,
-    "hasCommunityUpdate": true,
-    "pairs": [
-      {
-        "dexId": "raydium",
-        "pairAddress": "...",
-        "liquidity": 500000
-      }
-    ]
-  }
-}
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- INFO MODAL (Updated for Imgur Guide) -->
-<div id="info-modal" class="modal-overlay">
-    <div class="bg-[#2a1005] border-2 border-[#ea580c] p-8 rounded-2xl max-w-lg w-full shadow-2xl relative" onclick="event.stopPropagation()">
-        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleInfoModal()"><i data-lucide="x" width="24"></i></button>
-        
-        <div class="flex items-center gap-3 mb-6">
-            <div class="w-10 h-10 rounded-lg flex items-center justify-center bg-[#451a03] text-[#ea580c] border border-[#7c2d12]">
-                <i data-lucide="image" width="20"></i>
-            </div>
-            <h3 class="text-xl font-bold text-white font-sans">Uploading Your Banner</h3>
-        </div>
-
-        <div class="info-box mb-6">
-            <p class="mb-4 text-[#ffedd5] text-sm">
-                HolDex does not host large image files directly. We recommend using a reliable, free image host like <strong>Imgur</strong>.
-            </p>
-            
-            <h4 class="text-[#fb923c] font-bold text-xs uppercase mb-2">Step-by-Step Instructions:</h4>
-            <ol class="list-decimal pl-5 space-y-3 text-xs text-[#9a3412] font-mono">
-                <li>
-                    Go to <a href="https://imgur.com/upload" target="_blank" class="text-[#22c55e] underline hover:text-white">imgur.com/upload</a>.
-                </li>
-                <li>
-                    Drag & drop your banner image (Recommended size: <strong>1500x500px</strong>).
-                </li>
-                <li>
-                    Wait for the upload to complete.
-                </li>
-                <li class="bg-[#451a03] p-2 rounded border border-[#7c2d12]">
-                    <strong>CRITICAL STEP:</strong> Right-click the image itself and select <strong>"Copy Image Address"</strong> (Chrome) or <strong>"Copy Image Link"</strong> (Firefox).
-                    <br><span class="text-[10px] opacity-75">Do NOT copy the URL from the browser address bar.</span>
-                </li>
-                <li>
-                    The link must end in a file extension like <span class="text-[#fb923c]">.jpg</span>, <span class="text-[#fb923c]">.png</span>, or <span class="text-[#fb923c]">.gif</span>.
-                </li>
-                <li>
-                    Paste that link into the Banner URL field.
-                </li>
-            </ol>
-        </div>
-        <button onclick="toggleInfoModal()" class="w-full bg-[#ea580c] text-[#2a1005] py-3 rounded-xl hover:bg-[#fb923c] font-bold shadow-lg transition transform hover:scale-[1.02]">Got it, I'm ready</button>
     </div>
 </div>
 
 <script>
-    // --- Constants ---
     const API_URL = 'https://asdev-backend.onrender.com';
     const FALLBACK_BANNER = "https://images.squarespace-cdn.com/content/690b8c21384b3f1201c2650c/967ea61f-a88a-4497-81c2-5c67d3d06d9e/Gemini_Generated_Image_c82gwyc82gwyc82g.png?content-type=image%2Fpng";
     const TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
     const ASSOCIATED_TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
+    const RPC_ENDPOINTS = ["https://api.mainnet-beta.solana.com","https://rpc.ankr.com/solana","https://solana-api.projectserum.com"];
 
-    // SWITCH TO PUBLIC RPCs
-    const RPC_ENDPOINTS = [
-        "https://api.mainnet-beta.solana.com",
-        "https://rpc.ankr.com/solana",
-        "https://solana-api.projectserum.com"
-    ];
-
-    // --- State ---
-    let currentSort = 'kscore'; // Default to K-Score
+    let currentSort = 'kscore'; 
     let searchQuery = '';
     let pollingInterval;
     let isConnected = true;
@@ -705,696 +389,192 @@
     let isWalletModalOpen = false;
     let currentPage = 1;
     let isVerifiedFilter = false;
-    let isZeroVolHidden = true; // Default to Hidden
+    let isZeroVolHidden = true; 
     let currentUpdateTokenData = null;
     let walletAddress = null;
     let walletProvider = null; 
     let feeConfig = { solFee: 0.1, tokenFee: 1000, tokenMint: '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump', treasury: 'H8sMJqC9X8rJ8W1a6VjFq7X5gZ5fX9x8x8x8x8x8x8' };
     
-    // --- Chart State ---
+    // CHART STATE
     let chartInstance = null;
     let candleSeries = null;
     let currentMint = null;
+    let currentPoolAddress = null;
     let currentResolution = '60';
+    let currentChartMode = 'price'; // 'price' or 'mcap'
+    let currentNormalizedSupply = 1;
 
-    // --- Init ---
-    window.onload = async () => {
-        handleRoute();
-        await fetchFees();
-        lucide.createIcons();
-        
-        // Character counter listener
-        const descInput = document.getElementById('update-description');
-        const charCount = document.getElementById('char-count');
-        if(descInput && charCount) {
-            descInput.addEventListener('input', () => {
-                charCount.innerText = descInput.value.length;
-            });
-        }
-    };
+    window.onload = async () => { handleRoute(); await fetchFees(); lucide.createIcons(); const descInput = document.getElementById('update-description'); const charCount = document.getElementById('char-count'); if(descInput && charCount) { descInput.addEventListener('input', () => { charCount.innerText = descInput.value.length; }); } };
     window.addEventListener('hashchange', handleRoute);
 
-    // --- Chart Functions ---
-    // FIXED: Cleanup Function
+    // --- CHART LOGIC UPDATED ---
     function cleanupChart() {
-        if (chartInstance) {
-            chartInstance.remove(); // Destroy old chart
-            chartInstance = null;
-            candleSeries = null;
-        }
-        document.getElementById('tv-chart').innerHTML = ''; // Clear container
+        if (chartInstance) { chartInstance.remove(); chartInstance = null; candleSeries = null; }
+        document.getElementById('tv-chart').innerHTML = '';
     }
 
     function initChart() {
-        if (chartInstance) {
-            // Force resize if already exists
-            const container = document.getElementById('tv-chart');
-            if (container) {
-                const rect = container.getBoundingClientRect();
-                if (rect.width > 0 && rect.height > 0) {
-                    chartInstance.applyOptions({ width: rect.width, height: rect.height });
-                }
-            }
-            return;
-        }
-
+        if (chartInstance) return;
         const container = document.getElementById('tv-chart');
         if (!container) return;
-
-        // Ensure container has dimensions
         const rect = container.getBoundingClientRect();
-        const width = rect.width > 0 ? rect.width : container.clientWidth;
-        const height = rect.height > 0 ? rect.height : container.clientHeight;
-
-        // SAFEGUARD: Don't init if size is 0 (causes library issues)
-        if (width === 0 || height === 0) return;
+        if (rect.width === 0 || rect.height === 0) return;
 
         chartInstance = LightweightCharts.createChart(container, {
-            width: width,
-            height: height,
+            width: rect.width,
+            height: rect.height,
             layout: { background: { type: 'solid', color: '#1a0a05' }, textColor: '#9a3412' },
             grid: { vertLines: { color: '#2a1005' }, horzLines: { color: '#2a1005' } },
             crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
             rightPriceScale: { borderColor: '#7c2d12' },
             timeScale: { borderColor: '#7c2d12', timeVisible: true, secondsVisible: false }
         });
-
-        candleSeries = chartInstance.addCandlestickSeries({
-            upColor: '#22c55e', downColor: '#ef4444', borderVisible: false, wickUpColor: '#22c55e', wickDownColor: '#ef4444'
-        });
-        
-        // Resize Handler
+        candleSeries = chartInstance.addCandlestickSeries({ upColor: '#22c55e', downColor: '#ef4444', borderVisible: false, wickUpColor: '#22c55e', wickDownColor: '#ef4444' });
         new ResizeObserver(entries => {
-            if (entries.length === 0 || entries[0].target !== container) return;
-            const newRect = entries[0].contentRect;
-            if (newRect.width > 0 && newRect.height > 0 && chartInstance) {
-                 chartInstance.applyOptions({ width: newRect.width, height: newRect.height });
+            if (entries.length > 0 && chartInstance) {
+                 const { width, height } = entries[0].contentRect;
+                 chartInstance.applyOptions({ width, height });
             }
         }).observe(container);
     }
 
     async function setResolution(res) {
         currentResolution = res;
-        // Update Buttons
         document.querySelectorAll('.res-btn').forEach(b => b.classList.remove('active'));
         document.getElementById(`res-${res}`).classList.add('active');
-        // Fetch
-        if (currentMint) await fetchCandles(currentMint);
+        if (currentMint) await fetchCandles(currentMint, currentPoolAddress);
     }
 
-    async function fetchCandles(mint) {
+    async function setChartMode(mode) {
+        if (currentChartMode === mode) return;
+        currentChartMode = mode;
+        document.getElementById('mode-price').classList.toggle('active', mode === 'price');
+        document.getElementById('mode-mcap').classList.toggle('active', mode === 'mcap');
+        if (currentMint) await fetchCandles(currentMint, currentPoolAddress);
+    }
+
+    async function fetchCandles(mint, poolAddress = null) {
         if (!mint) return;
         currentMint = mint;
+        currentPoolAddress = poolAddress;
         
-        // Ensure chart is initialized
         initChart();
-        
-        // SAFEGUARD: If initChart failed (e.g. 0 size), stop here
-        if (!chartInstance || !candleSeries) {
-            // Try one more time, maybe DOM is ready now
-            initChart();
-            if (!chartInstance || !candleSeries) return;
-        }
+        if (!chartInstance || !candleSeries) return;
 
         try {
-            // Determine 'from' based on resolution to get a decent initial view
             const now = Math.floor(Date.now() / 1000);
-            let from = now - (24 * 60 * 60); // Default 24h
-            if (currentResolution === '1') from = now - (4 * 60 * 60); // 4h for 1m
-            if (currentResolution === 'D') from = now - (30 * 24 * 60 * 60); // 30d for Daily
+            let from = now - (24 * 60 * 60);
+            if (currentResolution === '1') from = now - (4 * 60 * 60);
+            if (currentResolution === 'D') from = now - (30 * 24 * 60 * 60);
 
-            // Add Cache Busting
-            const endpoint = `${API_URL}/api/token/${mint}/candles?resolution=${currentResolution}&from=${from}&to=${now}&_=${Date.now()}`;
+            let endpoint = `${API_URL}/api/token/${mint}/candles?resolution=${currentResolution}&from=${from}&to=${now}`;
+            if (poolAddress) endpoint += `&poolAddress=${poolAddress}`;
+            endpoint += `&_=${Date.now()}`;
             
             const res = await fetch(endpoint);
             const data = await res.json();
             
-            // SAFEGUARD: Check candleSeries again before writing
             if (data.success && Array.isArray(data.candles) && candleSeries) {
-                 // Map data to ensure strict format if needed
-                const cleanData = data.candles.map(c => ({
-                    time: c.time,
-                    open: parseFloat(c.open),
-                    high: parseFloat(c.high),
-                    low: parseFloat(c.low),
-                    close: parseFloat(c.close)
-                }));
+                const cleanData = data.candles.map(c => {
+                    let open = parseFloat(c.open);
+                    let high = parseFloat(c.high);
+                    let low = parseFloat(c.low);
+                    let close = parseFloat(c.close);
+                    
+                    if (currentChartMode === 'mcap') {
+                        open *= currentNormalizedSupply;
+                        high *= currentNormalizedSupply;
+                        low *= currentNormalizedSupply;
+                        close *= currentNormalizedSupply;
+                    }
+
+                    return { time: c.time, open, high, low, close };
+                });
+
+                // Update formatting based on mode
+                chartInstance.applyOptions({
+                    rightPriceScale: {
+                        autoScale: true,
+                        format: {
+                            type: currentChartMode === 'mcap' ? 'volume' : 'price',
+                            precision: currentChartMode === 'mcap' ? 0 : 6,
+                            minMove: currentChartMode === 'mcap' ? 1 : 0.000001,
+                        }
+                    }
+                });
 
                 candleSeries.setData(cleanData);
                 if (cleanData.length > 0) chartInstance.timeScale().fitContent();
             } else if (candleSeries) {
-                candleSeries.setData([]); // Clear
+                candleSeries.setData([]);
             }
         } catch (e) { console.error("Chart Fetch Failed", e); }
     }
 
-    // --- API Calls ---
-    async function fetchFees() {
-        try {
-            const res = await fetch(`${API_URL}/api/config/fees`);
-            const data = await res.json();
-            if (data.success) {
-                feeConfig = data;
-                // Safely update DOM
-                const solEl = document.getElementById('fee-sol');
-                const tokEl = document.getElementById('fee-token');
-                if (solEl) solEl.innerText = `${data.solFee} SOL`;
-                if (tokEl) tokEl.innerText = `${data.tokenFee.toLocaleString()} TOKENS`;
-            }
-        } catch (e) { console.error("Fee fetch failed", e); }
-    }
-
-    // --- Helper: Input Sanitization ---
-    function sanitizeInput(str) {
-        if(!str) return '';
-        const div = document.createElement('div');
-        div.innerText = str;
-        return div.innerHTML; // Returns escaped HTML (safe to display)
-    }
-
-    // --- Wallet Logic ---
-    function openWalletModal() {
-        const modal = document.getElementById('wallet-modal');
-        if (modal) modal.classList.add('open');
-        isWalletModalOpen = true;
-    }
-
-    function closeWalletModal() {
-        const modal = document.getElementById('wallet-modal');
-        if (modal) modal.classList.remove('open');
-        isWalletModalOpen = false;
-    }
-
-    async function connectProvider(providerName) {
-        let provider = null;
-        if (providerName === 'phantom' && window.solana && window.solana.isPhantom) {
-            provider = window.solana;
-        } else if (providerName === 'solflare' && window.solflare) {
-            provider = window.solflare;
-        }
-
-        if (!provider) {
-            alert(`${providerName} not found. Please install the extension.`);
-            return;
-        }
-
-        try {
-            // Connect
-            const resp = await provider.connect();
-            walletAddress = resp.publicKey.toString();
-            walletProvider = provider;
-            
-            closeWalletModal();
-            updateWalletUI(true);
-            refreshBalances();
-        } catch (err) {
-            console.error("Connection Failed:", err);
-            alert("Connection denied or failed.");
-        }
-    }
-
-    function disconnectWallet() {
-        if (walletProvider && walletProvider.disconnect) {
-            walletProvider.disconnect();
-        }
-        walletAddress = null;
-        walletProvider = null;
-        updateWalletUI(false);
-    }
-
-    function updateWalletUI(connected) {
-        const discDiv = document.getElementById('wallet-disconnected');
-        const connDiv = document.getElementById('wallet-connected');
-        const submitBtn = document.getElementById('submit-btn');
-        const statusBtn = document.getElementById('statusbar-wallet-btn');
-        const displayAddr = document.getElementById('display-address');
-
-        if (connected) {
-            const shortAddr = walletAddress.slice(0,4) + '...' + walletAddress.slice(-4);
-            
-            // Update UI elements if they exist
-            if (discDiv) discDiv.classList.add('hidden');
-            if (connDiv) connDiv.classList.remove('hidden');
-            if (displayAddr) displayAddr.innerText = shortAddr;
-            if (submitBtn) submitBtn.disabled = false;
-            
-            if (statusBtn) {
-                statusBtn.innerHTML = `<i data-lucide="wallet" width="14"></i> <span>${shortAddr}</span>`;
-                statusBtn.classList.add('connected');
-            }
-        } else {
-            if (discDiv) discDiv.classList.remove('hidden');
-            if (connDiv) connDiv.classList.add('hidden');
-            if (submitBtn) submitBtn.disabled = true;
-            
-            if (statusBtn) {
-                statusBtn.innerHTML = `<i data-lucide="wallet" width="14"></i> <span class="hidden sm:inline">Connect Wallet</span><span class="sm:hidden">Wallet</span>`;
-                statusBtn.classList.remove('connected');
-            }
-        }
-        lucide.createIcons();
-    }
-
-    async function refreshBalances() {
-        if (!walletAddress) return;
-        const icon = document.getElementById('refresh-icon');
-        if (icon) icon.classList.add('animate-spin');
-
-        try {
-            const tokenMint = feeConfig.tokenMint || '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump';
-            const res = await fetch(`${API_URL}/api/proxy/balance/${walletAddress}?tokenMint=${tokenMint}`);
-            const data = await res.json();
-
-            const solEl = document.getElementById('balance-sol');
-            const tokEl = document.getElementById('balance-token');
-
-            if (data.success) {
-                if(solEl) solEl.innerText = (data.sol || 0).toFixed(4);
-                if(tokEl) tokEl.innerText = (data.tokens || 0).toLocaleString();
-            } else {
-                if(solEl) solEl.innerText = "Err";
-                if(tokEl) tokEl.innerText = "Err";
-            }
-        } catch (e) {
-            console.error("Balance Refresh Failed", e);
-        } finally {
-            if (icon) setTimeout(() => icon.classList.remove('animate-spin'), 500);
-        }
-    }
-
-    // --- Transaction Logic ---
-    async function submitUpdate(e) {
-        e.preventDefault();
+    // --- POOL SWITCHING & DETAILS ---
+    window.switchPool = (pairAddress, dexId, dexName) => {
+        document.querySelectorAll('.pool-tab').forEach(t => t.classList.remove('active')); 
+        const tab = document.getElementById(`tab-${pairAddress}`); 
+        if(tab) tab.classList.add('active');
         
-        if (!walletAddress || !walletProvider) { alert("Please connect wallet first"); return; }
+        const label = document.getElementById('chart-pool-name');
+        if(label) label.innerText = `— ${dexName || dexId.toUpperCase()}`;
         
-        const statusDiv = document.getElementById('update-status');
-        const mint = document.getElementById('update-mint').value;
-        const twitter = document.getElementById('update-twitter').value;
-        const website = document.getElementById('update-website').value;
-        const telegram = document.getElementById('update-telegram').value;
-        const banner = document.getElementById('update-banner').value;
-        const descInput = document.getElementById('update-description');
-        
-        // Capture and Sanitize Description
-        const description = descInput ? sanitizeInput(descInput.value.substring(0, 250)) : '';
-
-        // Validation
-        if (banner && !banner.match(/\.(jpeg|jpg|gif|png|webp)$/i)) {
-            statusDiv.innerText = "❌ Error: Banner URL must end in .jpg, .png, .gif, or .webp";
-            statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500";
-            return;
-        }
-
-        statusDiv.innerText = "Initializing Transaction...";
-        statusDiv.className = "mt-4 text-center text-sm font-mono text-[#ea580c]";
-        statusDiv.classList.remove('hidden');
-
-        try {
-            // --- RPC ROTATION LOGIC ---
-            let connection;
-            let blockhash;
-            let rpcError;
-
-            // Try public RPCs
-            for (const endpoint of RPC_ENDPOINTS) {
-                try {
-                    const host = new URL(endpoint).hostname;
-                    statusDiv.innerText = `Connecting to ${host}...`;
-                    const conn = new solanaWeb3.Connection(endpoint, "confirmed");
-                    const latest = await conn.getLatestBlockhash();
-                    connection = conn;
-                    blockhash = latest.blockhash;
-                    break; // Success!
-                } catch (err) {
-                    console.warn(`RPC ${endpoint} failed:`, err);
-                    rpcError = err;
-                }
-            }
-
-            if (!connection || !blockhash) {
-                throw new Error(`All RPC endpoints failed. Please try again later. (Last error: ${rpcError?.message})`);
-            }
-            
-            // Public Keys
-            const fromPubkey = new solanaWeb3.PublicKey(walletAddress);
-            const toPubkey = new solanaWeb3.PublicKey(feeConfig.treasury);
-            const tokenMintPubkey = new solanaWeb3.PublicKey(feeConfig.tokenMint);
-
-            // Find ATAs (Associated Token Accounts)
-            const getATA = async (owner, mint) => {
-                const [addr] = await solanaWeb3.PublicKey.findProgramAddress(
-                    [owner.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mint.toBytes()],
-                    ASSOCIATED_TOKEN_PROGRAM_ID
-                );
-                return addr;
-            };
-
-            const fromTokenAccount = await getATA(fromPubkey, tokenMintPubkey);
-            const toTokenAccount = await getATA(toPubkey, tokenMintPubkey);
-
-            statusDiv.innerText = "Building Transaction...";
-            const transaction = new solanaWeb3.Transaction();
-
-            // 1. SOL Transfer
-            transaction.add(
-                solanaWeb3.SystemProgram.transfer({
-                    fromPubkey: fromPubkey,
-                    toPubkey: toPubkey,
-                    lamports: Math.round(feeConfig.solFee * solanaWeb3.LAMPORTS_PER_SOL)
-                })
-            );
-
-            // 2. Token Transfer (Manual Instruction Data)
-            const decimals = 6;
-            const rawAmount = BigInt(Math.floor(feeConfig.tokenFee * Math.pow(10, decimals)));
-            
-            // Build buffer manually
-            const dataLayout = new Uint8Array(9);
-            dataLayout[0] = 3; // Transfer instruction
-            
-            // Write 64-bit integer
-            let remaining = rawAmount;
-            for (let i = 0; i < 8; i++) {
-                dataLayout[i + 1] = Number(remaining & 0xFFn);
-                remaining >>= 8n;
-            }
-
-            const transferIx = new solanaWeb3.TransactionInstruction({
-                keys: [
-                    { pubkey: fromTokenAccount, isSigner: false, isWritable: true },
-                    { pubkey: toTokenAccount, isSigner: false, isWritable: true },
-                    { pubkey: fromPubkey, isSigner: true, isWritable: false } // Owner
-                ],
-                programId: TOKEN_PROGRAM_ID,
-                data: dataLayout
-            });
-            
-            transaction.add(transferIx);
-
-            // Sign & Send
-            transaction.recentBlockhash = blockhash;
-            transaction.feePayer = fromPubkey;
-
-            statusDiv.innerText = "Please Sign in Wallet...";
-            const { signature } = await walletProvider.signAndSendTransaction(transaction);
-            
-            statusDiv.innerText = "Verifying Payment...";
-
-            // 3. Backend Verification
-            const payload = {
-                mint, twitter, website, telegram, banner, description, // Included Description
-                signature: signature,
-                userPublicKey: walletAddress
-            };
-
-            const res = await fetch(`${API_URL}/api/request-update`, {
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            const dataRes = await res.json();
-            
-            if (dataRes.success) {
-                statusDiv.innerText = "✅ Success! Update queued.";
-                statusDiv.className = "mt-4 text-center text-sm font-mono text-green-500";
-                e.target.reset();
-                document.getElementById('char-count').innerText = "0";
-            } else {
-                statusDiv.innerText = `❌ Verification Failed: ${dataRes.error}`;
-                statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500";
-            }
-
-        } catch (err) {
-            console.error(err);
-            statusDiv.innerText = `❌ Error: ${err.message}`;
-            statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500";
-        }
-    }
-
-    // --- Helper Functions (Search, Formatting, Routing) ---
-    const formatMoney = (val) => { 
-        if (val === undefined || val === null || isNaN(val)) return "$0.00"; 
-        return val < 0.01 ? '$' + val.toExponential(2) : '$' + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }); 
-    };
-    const formatCompact = (val) => { 
-        if (val === undefined || val === null || isNaN(val)) return "$0"; 
-        return '$' + new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val); 
-    };
-    const formatPct = (val) => { 
-        if (val === undefined || val === null || isNaN(val) || val === 0) return `<span class="text-[#9a3412]">-</span>`; 
-        const cls = val > 0 ? 'pill-green' : (val < 0 ? 'pill-red' : 'text-[#9a3412]'); 
-        return `<span class="pill ${cls}">${val > 0 ? '+' : ''}${val.toFixed(2)}%</span>`; 
-    };
-    const timeAgo = (ts) => { 
-        if (!ts) return ''; 
-        const seconds = Math.floor((Date.now() - ts) / 1000); 
-        return seconds < 60 ? `${seconds}s ago` : (seconds < 3600 ? `${Math.floor(seconds/60)}m ago` : `${Math.floor(seconds/3600)}h ago`); 
+        fetchCandles(currentMint, pairAddress);
     };
 
-    // --- NEW MEDIA RENDERER HELPER ---
-    function renderTokenMedia(url, className, fallbackText = '?') {
-        const fallback = `https://placehold.co/80x80/2a1005/7c2d12?text=${fallbackText}`;
-        const safeUrl = url || fallback;
-        
-        // Check for video extensions (simple regex check)
-        // Some tokens use mp4 for "animated images"
-        const isVideo = safeUrl.match(/\.(mp4|webm|mov)$/i);
-        
-        if (isVideo) {
-            return `<video src="${safeUrl}" class="${className}" autoplay loop muted playsinline poster="${fallback}"></video>`;
-        }
-        
-        // Default to Image (handles GIF, PNG, JPG, WEBP)
-        // Note: onerror=null prevents infinite loop if fallback also fails
-        return `<img src="${safeUrl}" class="${className}" loading="lazy" onerror="this.onerror=null;this.src='${fallback}'">`;
-    }
+    // ... (Standard Helpers) ...
+    async function fetchFees() { try { const res = await fetch(`${API_URL}/api/config/fees`); const data = await res.json(); if (data.success) { feeConfig = data; const solEl = document.getElementById('fee-sol'); const tokEl = document.getElementById('fee-token'); if (solEl) solEl.innerText = `${data.solFee} SOL`; if (tokEl) tokEl.innerText = `${data.tokenFee.toLocaleString()} TOKENS`; } } catch (e) { console.error("Fee fetch failed", e); } }
+    function sanitizeInput(str) { if(!str) return ''; const div = document.createElement('div'); div.innerText = str; return div.innerHTML; }
+    function openWalletModal() { document.getElementById('wallet-modal').classList.add('open'); isWalletModalOpen = true; }
+    function closeWalletModal() { document.getElementById('wallet-modal').classList.remove('open'); isWalletModalOpen = false; }
+    async function connectProvider(providerName) { let provider = null; if (providerName === 'phantom' && window.solana && window.solana.isPhantom) provider = window.solana; else if (providerName === 'solflare' && window.solflare) provider = window.solflare; if (!provider) { alert(`${providerName} not found.`); return; } try { const resp = await provider.connect(); walletAddress = resp.publicKey.toString(); walletProvider = provider; closeWalletModal(); updateWalletUI(true); refreshBalances(); } catch (err) { console.error(err); alert("Connection failed."); } }
+    function disconnectWallet() { if (walletProvider?.disconnect) walletProvider.disconnect(); walletAddress = null; walletProvider = null; updateWalletUI(false); }
+    function updateWalletUI(connected) { const discDiv = document.getElementById('wallet-disconnected'); const connDiv = document.getElementById('wallet-connected'); const submitBtn = document.getElementById('submit-btn'); const displayAddr = document.getElementById('display-address'); if (connected) { const shortAddr = walletAddress.slice(0,4) + '...' + walletAddress.slice(-4); if (discDiv) discDiv.classList.add('hidden'); if (connDiv) connDiv.classList.remove('hidden'); if (displayAddr) displayAddr.innerText = shortAddr; if (submitBtn) submitBtn.disabled = false; } else { if (discDiv) discDiv.classList.remove('hidden'); if (connDiv) connDiv.classList.add('hidden'); if (submitBtn) submitBtn.disabled = true; } lucide.createIcons(); }
+    async function refreshBalances() { if (!walletAddress) return; const icon = document.getElementById('refresh-icon'); if (icon) icon.classList.add('animate-spin'); try { const tokenMint = feeConfig.tokenMint; const res = await fetch(`${API_URL}/api/proxy/balance/${walletAddress}?tokenMint=${tokenMint}`); const data = await res.json(); const solEl = document.getElementById('balance-sol'); const tokEl = document.getElementById('balance-token'); if (data.success) { if(solEl) solEl.innerText = (data.sol || 0).toFixed(4); if(tokEl) tokEl.innerText = (data.tokens || 0).toLocaleString(); } else { if(solEl) solEl.innerText = "Err"; if(tokEl) tokEl.innerText = "Err"; } } catch (e) { console.error("Balance Refresh Failed", e); } finally { if (icon) setTimeout(() => icon.classList.remove('animate-spin'), 500); } }
 
+    async function submitUpdate(e) { e.preventDefault(); if (!walletAddress || !walletProvider) { alert("Please connect wallet first"); return; } const statusDiv = document.getElementById('update-status'); const mint = document.getElementById('update-mint').value; const twitter = document.getElementById('update-twitter').value; const website = document.getElementById('update-website').value; const telegram = document.getElementById('update-telegram').value; const banner = document.getElementById('update-banner').value; const descInput = document.getElementById('update-description'); const description = descInput ? sanitizeInput(descInput.value.substring(0, 250)) : ''; if (banner && !banner.match(/\.(jpeg|jpg|gif|png|webp)$/i)) { statusDiv.innerText = "❌ Error: Banner URL must end in .jpg, .png, .gif, or .webp"; statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500"; return; } statusDiv.innerText = "Initializing Transaction..."; statusDiv.className = "mt-4 text-center text-sm font-mono text-[#ea580c]"; statusDiv.classList.remove('hidden'); try { let connection, blockhash; for (const endpoint of RPC_ENDPOINTS) { try { const conn = new solanaWeb3.Connection(endpoint, "confirmed"); const latest = await conn.getLatestBlockhash(); connection = conn; blockhash = latest.blockhash; break; } catch (err) {} } if (!connection) throw new Error("RPCs failed"); const fromPubkey = new solanaWeb3.PublicKey(walletAddress); const toPubkey = new solanaWeb3.PublicKey(feeConfig.treasury); const tokenMintPubkey = new solanaWeb3.PublicKey(feeConfig.tokenMint); const getATA = async (owner, mint) => { const [addr] = await solanaWeb3.PublicKey.findProgramAddress([owner.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mint.toBytes()], ASSOCIATED_TOKEN_PROGRAM_ID); return addr; }; const fromTokenAccount = await getATA(fromPubkey, tokenMintPubkey); const toTokenAccount = await getATA(toPubkey, tokenMintPubkey); const transaction = new solanaWeb3.Transaction(); transaction.add(solanaWeb3.SystemProgram.transfer({ fromPubkey, toPubkey, lamports: Math.round(feeConfig.solFee * solanaWeb3.LAMPORTS_PER_SOL) })); const decimals = 6; const rawAmount = BigInt(Math.floor(feeConfig.tokenFee * Math.pow(10, decimals))); const dataLayout = new Uint8Array(9); dataLayout[0] = 3; let remaining = rawAmount; for (let i = 0; i < 8; i++) { dataLayout[i + 1] = Number(remaining & 0xFFn); remaining >>= 8n; } const transferIx = new solanaWeb3.TransactionInstruction({ keys: [{ pubkey: fromTokenAccount, isSigner: false, isWritable: true }, { pubkey: toTokenAccount, isSigner: false, isWritable: true }, { pubkey: fromPubkey, isSigner: true, isWritable: false }], programId: TOKEN_PROGRAM_ID, data: dataLayout }); transaction.add(transferIx); transaction.recentBlockhash = blockhash; transaction.feePayer = fromPubkey; statusDiv.innerText = "Please Sign in Wallet..."; const { signature } = await walletProvider.signAndSendTransaction(transaction); statusDiv.innerText = "Verifying Payment..."; const payload = { mint, twitter, website, telegram, banner, description, signature, userPublicKey: walletAddress }; const res = await fetch(`${API_URL}/api/request-update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); const dataRes = await res.json(); if (dataRes.success) { statusDiv.innerText = "✅ Success! Update queued."; statusDiv.className = "mt-4 text-center text-sm font-mono text-green-500"; e.target.reset(); document.getElementById('char-count').innerText = "0"; } else { statusDiv.innerText = `❌ Verification Failed: ${dataRes.error}`; statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500"; } } catch (err) { console.error(err); statusDiv.innerText = `❌ Error: ${err.message}`; statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500"; } }
+
+    const formatMoney = (val) => { if (val === undefined || val === null || isNaN(val)) return "$0.00"; return val < 0.01 ? '$' + val.toExponential(2) : '$' + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }); };
+    const formatCompact = (val) => { if (val === undefined || val === null || isNaN(val)) return "$0"; return '$' + new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val); };
+    const formatPct = (val) => { if (val === undefined || val === null || isNaN(val) || val === 0) return `<span class="text-[#9a3412]">-</span>`; const cls = val > 0 ? 'pill-green' : (val < 0 ? 'pill-red' : 'text-[#9a3412]'); return `<span class="pill ${cls}">${val > 0 ? '+' : ''}${val.toFixed(2)}%</span>`; };
+    const timeAgo = (ts) => { if (!ts) return ''; const seconds = Math.floor((Date.now() - ts) / 1000); return seconds < 60 ? `${seconds}s ago` : (seconds < 3600 ? `${Math.floor(seconds/60)}m ago` : `${Math.floor(seconds/3600)}h ago`); };
+    function renderTokenMedia(url, className, fallbackText = '?') { const fallback = `https://placehold.co/80x80/2a1005/7c2d12?text=${fallbackText}`; const safeUrl = url || fallback; const isVideo = safeUrl.match(/\.(mp4|webm|mov)$/i); if (isVideo) { return `<video src="${safeUrl}" class="${className}" autoplay loop muted playsinline poster="${fallback}"></video>`; } return `<img src="${safeUrl}" class="${className}" loading="lazy" onerror="this.onerror=null;this.src='${fallback}'">`; }
     function navigateTo(path) { window.location.hash = path; }
-    
-    function handleRoute() {
-        const hash = window.location.hash;
-        document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
-        document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
-        const tableControls = document.getElementById('table-controls');
-        const detailControls = document.getElementById('detail-controls');
-        
-        if (tableControls) tableControls.classList.add('hidden');
-        if (detailControls) detailControls.classList.add('hidden');
-        
-        if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
+    function handleRoute() { const hash = window.location.hash; document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active')); document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active')); const tableControls = document.getElementById('table-controls'); const detailControls = document.getElementById('detail-controls'); if (tableControls) tableControls.classList.add('hidden'); if (detailControls) detailControls.classList.add('hidden'); if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; } if (hash === '' || hash === '#') { document.getElementById('view-dashboard').classList.add('active'); document.querySelector('button[onclick="navigateTo(\'\')"]').classList.add('active'); if(tableControls) tableControls.classList.remove('hidden'); fetchList(); pollingInterval = setInterval(fetchList, 5000); } else if (hash === '#about') { document.getElementById('view-about').classList.add('active'); document.querySelector('button[onclick="navigateTo(\'about\')"]').classList.add('active'); } else if (hash === '#update') { document.getElementById('view-update').classList.add('active'); document.querySelector('button[onclick="navigateTo(\'update\')"]').classList.add('active'); updateWalletUI(walletAddress !== null); } else if (hash.startsWith('#token/')) { showDetailView(hash.split('/')[1]); } }
 
-        if (hash === '' || hash === '#') {
-            const el = document.getElementById('view-dashboard');
-            const btn = document.querySelector('button[onclick="navigateTo(\'\')"]');
-            if(el) el.classList.add('active');
-            if(btn) btn.classList.add('active');
-            if(tableControls) tableControls.classList.remove('hidden');
-            fetchList();
-            pollingInterval = setInterval(fetchList, 5000);
-        } else if (hash === '#about') {
-            const el = document.getElementById('view-about');
-            const btn = document.querySelector('button[onclick="navigateTo(\'about\')"]');
-            if(el) el.classList.add('active');
-            if(btn) btn.classList.add('active');
-        } else if (hash === '#update') {
-            const el = document.getElementById('view-update');
-            const btn = document.querySelector('button[onclick="navigateTo(\'update\')"]');
-            if(el) el.classList.add('active');
-            if(btn) btn.classList.add('active');
-            // Refresh wallet UI in case we connected on another tab
-            updateWalletUI(walletAddress !== null);
-        } else if (hash.startsWith('#token/')) {
-            showDetailView(hash.split('/')[1]);
-        }
-    }
-
-    // --- Token Preview Logic ---
-    async function fetchTokenForUpdate(mint) {
-        if (!mint || mint.length < 30) return;
-        const spinner = document.getElementById('mint-check-spinner');
-        const infoBox = document.getElementById('token-preview-info');
-        if(spinner) spinner.classList.remove('hidden'); 
-        if(infoBox) infoBox.classList.add('hidden');
-        try {
-            const res = await fetch(`${API_URL}/api/tokens?search=${mint}&limit=1`);
-            const data = await res.json();
-            if (data.success && data.tokens.length > 0) {
-                const token = data.tokens[0];
-                if (token.mint === mint) {
-                    currentUpdateTokenData = token;
-                    const img = document.getElementById('update-token-img');
-                    const name = document.getElementById('update-token-name');
-                    const tick = document.getElementById('update-token-ticker');
-                    
-                    if(img) img.src = token.image || 'https://placehold.co/50';
-                    if(name) name.innerText = token.name;
-                    if(tick) tick.innerText = token.ticker;
-                    if(infoBox) infoBox.classList.remove('hidden');
-                }
-            }
-        } catch (e) { console.error("Fetch failed", e); } finally { if(spinner) spinner.classList.add('hidden'); }
-    }
-
-    function openPreview() {
-        if (!currentUpdateTokenData) { alert("Please enter a valid Mint Address first."); return; }
-        const banner = document.getElementById('update-banner').value;
-        const twitter = document.getElementById('update-twitter').value;
-        const website = document.getElementById('update-website').value;
-        const telegram = document.getElementById('update-telegram').value;
-        const t = { ...currentUpdateTokenData, banner, twitter, website, telegram, hasCommunityUpdate: true };
-        const container = document.getElementById('preview-container');
-        
-        let html = '';
-        if (t.banner) {
-            html += `<div class="w-full h-48 md:h-64 rounded-xl border-2 border-[#7c2d12] shadow-lg relative overflow-hidden bg-black mb-6"><img src="${t.banner}" class="w-full h-full object-cover object-center" onerror="this.src='${FALLBACK_BANNER}'"><div class="absolute inset-0 bg-gradient-to-t from-[#2a1005] to-transparent opacity-80 pointer-events-none"></div></div>`;
-        }
-        let linksHtml = '';
-        if (t.twitter) linksHtml += `<a href="#" class="social-btn"><i data-lucide="twitter" width="20"></i></a>`;
-        if (t.website) linksHtml += `<a href="#" class="social-btn"><i data-lucide="globe" width="20"></i></a>`;
-        if (t.telegram) linksHtml += `<a href="#" class="social-btn"><i data-lucide="send" width="20"></i></a>`;
-
-        // USE NEW RENDER HELPER IN PREVIEW
-        const mediaHtml = renderTokenMedia(t.image, "w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black");
-
-        html += `<div class="flex flex-col md:flex-row gap-6 mb-8 items-start"><div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl">${mediaHtml}<div class="flex-1 min-w-0"><div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mb-1"><h2 class="text-3xl font-bold text-white tracking-tight font-mono">${t.ticker}</h2><span class="text-[#fb923c] text-sm bg-[#2a1005] px-3 py-1 rounded-lg border border-[#7c2d12]">${t.name}</span></div><div class="text-xs text-[#9a3412] font-mono">${t.mint}</div></div></div><div class="flex-1"></div><div class="flex flex-wrap gap-3">${linksHtml}</div></div><div class="text-center text-[#9a3412] font-mono text-xs mt-10">-- End of Preview --</div>`;
-        if(container) container.innerHTML = html;
-        lucide.createIcons();
-        const modal = document.getElementById('preview-modal');
-        if(modal) modal.classList.add('open');
-    }
-
-    function closePreview() { const modal = document.getElementById('preview-modal'); if(modal) modal.classList.remove('open'); }
+    async function fetchTokenForUpdate(mint) { if (!mint || mint.length < 30) return; const spinner = document.getElementById('mint-check-spinner'); const infoBox = document.getElementById('token-preview-info'); if(spinner) spinner.classList.remove('hidden'); if(infoBox) infoBox.classList.add('hidden'); try { const res = await fetch(`${API_URL}/api/tokens?search=${mint}&limit=1`); const data = await res.json(); if (data.success && data.tokens.length > 0) { const token = data.tokens[0]; if (token.mint === mint) { currentUpdateTokenData = token; const img = document.getElementById('update-token-img'); const name = document.getElementById('update-token-name'); const tick = document.getElementById('update-token-ticker'); if(img) img.src = token.image || 'https://placehold.co/50'; if(name) name.innerText = token.name; if(tick) tick.innerText = token.ticker; if(infoBox) infoBox.classList.remove('hidden'); } } } catch (e) { console.error("Fetch failed", e); } finally { if(spinner) spinner.classList.add('hidden'); } }
+    function openPreview() { if (!currentUpdateTokenData) { alert("Please enter a valid Mint Address first."); return; } const banner = document.getElementById('update-banner').value; const twitter = document.getElementById('update-twitter').value; const website = document.getElementById('update-website').value; const telegram = document.getElementById('update-telegram').value; const t = { ...currentUpdateTokenData, banner, twitter, website, telegram, hasCommunityUpdate: true }; const container = document.getElementById('preview-container'); let html = ''; if (t.banner) { html += `<div class="w-full h-48 md:h-64 rounded-xl border-2 border-[#7c2d12] shadow-lg relative overflow-hidden bg-black mb-6"><img src="${t.banner}" class="w-full h-full object-cover object-center" onerror="this.src='${FALLBACK_BANNER}'"><div class="absolute inset-0 bg-gradient-to-t from-[#2a1005] to-transparent opacity-80 pointer-events-none"></div></div>`; } let linksHtml = ''; if (t.twitter) linksHtml += `<a href="#" class="social-btn"><i data-lucide="twitter" width="20"></i></a>`; if (t.website) linksHtml += `<a href="#" class="social-btn"><i data-lucide="globe" width="20"></i></a>`; if (t.telegram) linksHtml += `<a href="#" class="social-btn"><i data-lucide="send" width="20"></i></a>`; const mediaHtml = renderTokenMedia(t.image, "w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black"); html += `<div class="flex flex-col md:flex-row gap-6 mb-8 items-start"><div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl">${mediaHtml}<div class="flex-1 min-w-0"><div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mb-1"><h2 class="text-3xl font-bold text-white tracking-tight font-mono">${t.ticker}</h2><span class="text-[#fb923c] text-sm bg-[#2a1005] px-3 py-1 rounded-lg border border-[#7c2d12]">${t.name}</span></div><div class="text-xs text-[#9a3412] font-mono">${t.mint}</div></div></div><div class="flex-1"></div><div class="flex flex-wrap gap-3">${linksHtml}</div></div><div class="text-center text-[#9a3412] font-mono text-xs mt-10">-- End of Preview --</div>`; if(container) container.innerHTML = html; lucide.createIcons(); document.getElementById('preview-modal').classList.add('open'); }
+    function closePreview() { document.getElementById('preview-modal').classList.remove('open'); }
     function toggleInfoModal() { const modal = document.getElementById('info-modal'); isInfoModalOpen = !isInfoModalOpen; if (isInfoModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
-    
-    // Toggle Functions
     function toggleVerifiedFilter() { isVerifiedFilter = !isVerifiedFilter; const btn = document.getElementById('filter-verified'); if(btn) { if (isVerifiedFilter) btn.classList.add('active'); else btn.classList.remove('active'); } currentPage = 1; fetchList(); }
     function toggleZeroVolFilter() { isZeroVolHidden = !isZeroVolHidden; const btn = document.getElementById('filter-zerovol'); if(btn) { if (isZeroVolHidden) btn.classList.add('active'); else btn.classList.remove('active'); } currentPage = 1; fetchList(); }
-    
-    async function fetchList() {
-        try {
-            const pDisplay = document.getElementById('page-display');
-            const prev = document.getElementById('btn-prev');
-            const next = document.getElementById('btn-next');
-            if(pDisplay) pDisplay.innerText = `Page ${currentPage}`;
-            if(prev) prev.disabled = currentPage <= 1;
-            
-            let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&search=${encodeURIComponent(searchQuery)}&limit=100&page=${currentPage}`;
-            if (isVerifiedFilter) endpoint += '&filter=verified';
-            const res = await fetch(endpoint);
-            const data = await res.json();
-            if (data.success) {
-                // Update Sync Time from backend response
-                const syncEl = document.getElementById('last-sync-time');
-                if (syncEl && data.lastUpdate) {
-                    const date = new Date(data.lastUpdate);
-                    syncEl.innerText = date.toLocaleTimeString();
-                }
+    async function fetchList() { try { const pDisplay = document.getElementById('page-display'); const prev = document.getElementById('btn-prev'); const next = document.getElementById('btn-next'); if(pDisplay) pDisplay.innerText = `Page ${currentPage}`; if(prev) prev.disabled = currentPage <= 1; let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&search=${encodeURIComponent(searchQuery)}&limit=100&page=${currentPage}`; if (isVerifiedFilter) endpoint += '&filter=verified'; const res = await fetch(endpoint); const data = await res.json(); if (data.success) { renderTable(data.tokens); if(next) next.disabled = data.tokens.length < 100; } } catch (e) { console.error("API Connection Failed", e); } }
+    function changePage(delta) { currentPage += delta; if (currentPage < 1) currentPage = 1; if (pollingInterval) clearInterval(pollingInterval); const tbody = document.getElementById('table-body'); if(tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-orange-700 font-mono animate-pulse">Loading Page ${currentPage}...</td></tr>`; fetchList().then(() => { if (currentPage === 1) { pollingInterval = setInterval(fetchList, 5000); } }); }
+    function renderTable(tokens) { const tbody = document.getElementById('table-body'); if(!tbody) return; let displayTokens = tokens; if (isZeroVolHidden) { displayTokens = tokens.filter(t => (t.volume24h || 0) > 0); } if (displayTokens.length === 0) { tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-[#9a3412] font-mono">${searchQuery ? `Searching global network for "${searchQuery}"...` : 'No tokens found.'}</td></tr>`; return; } tbody.innerHTML = displayTokens.map(t => { const score = t.kScore || t.k_score || 0; const isVerified = t.hasCommunityUpdate || t.hascommunityupdate; const mcap = Number(t.marketCap || t.marketcap || 0); const vol = Number(t.volume24h || 0); const chg1h = t.change1h || 0; const chg5m = t.change5m || 0; const chg24h = t.change24h || 0; let kScoreDisplay; if (isVerified) { if (score > 0) { kScoreDisplay = `${score}${score > 50 ? ' 💎' : ''}`; } else { kScoreDisplay = `<span title="Calculating Score..." class="animate-pulse">🕒</span>`; } } else { kScoreDisplay = '<span title="Community Update Required" class="text-gray-500">🔒</span>'; } const mediaHtml = renderTokenMedia(t.image, "img-token group-hover:border-[#ea580c] transition"); return ` <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group"> <td><div class="flex items-center gap-3">${mediaHtml}<div class="flex flex-col min-w-0"><div class="flex items-center gap-2"><span class="font-bold text-white text-sm group-hover:text-[#ea580c] transition truncate font-sans tracking-wide">${t.ticker}</span>${isVerified ? '<span title="Verified Community Update" class="verified-badge"><i data-lucide="check" width="12"></i></span>' : ''}</div><span class="text-[10px] text-[#9a3412] truncate max-w-[120px] md:max-w-[200px] font-mono group-hover:text-[#fb923c]">${t.name}</span></div></div></td> <td class="text-right text-[#fb923c] font-mono font-bold">${kScoreDisplay}</td> <td class="hidden md:table-cell text-right">${formatPct(chg5m)}</td> <td class="hidden md:table-cell text-right">${formatPct(chg1h)}</td> <td class="text-right">${formatPct(chg24h)}</td> <td class="text-right font-mono text-[#fb923c] font-bold">${formatCompact(mcap)}</td> <td class="text-right font-mono text-[#22c55e]">${formatCompact(vol)}</td> <td class="hidden md:table-cell text-right text-xs text-[#9a3412] font-mono">${timeAgo(t.timestamp)}</td> </tr> `}).join(''); lucide.createIcons(); }
 
-                renderTable(data.tokens);
-                // Note: With client-side filtering, next button logic is imperfect but functional
-                if(next) next.disabled = data.tokens.length < 100;
-            }
-        } catch (e) { console.error("API Connection Failed", e); }
-    }
+    window.handleSearch = (e) => { searchQuery = e.target.value; const clearBtn = document.getElementById('clear-search-btn'); if (searchQuery.length > 0) { clearBtn.style.display = 'block'; } else { clearBtn.style.display = 'none'; } currentPage = 1; clearTimeout(window.searchTimeout); window.searchTimeout = setTimeout(fetchList, 1000); };
+    window.clearSearch = () => { const input = document.getElementById('search'); input.value = ''; searchQuery = ''; document.getElementById('clear-search-btn').style.display = 'none'; currentPage = 1; fetchList(); };
+    window.copyMint = () => { const el = document.getElementById('detail-mint'); if(el) navigator.clipboard.writeText(el.innerText); };
+    window.handleManualRefresh = () => { fetchList(); };
+    window.toggleApiModal = () => { const modal = document.getElementById('api-docs-modal'); isApiModalOpen = !isApiModalOpen; if (isApiModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
 
-    function changePage(delta) {
-        currentPage += delta; if (currentPage < 1) currentPage = 1;
-        if (pollingInterval) clearInterval(pollingInterval);
-        const tbody = document.getElementById('table-body');
-        if(tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-orange-700 font-mono animate-pulse">Loading Page ${currentPage}...</td></tr>`;
-        fetchList().then(() => { if (currentPage === 1) { pollingInterval = setInterval(fetchList, 5000); } });
-    }
-
-    function renderTable(tokens) {
-        const tbody = document.getElementById('table-body');
-        if(!tbody) return;
-
-        // Apply Client-Side Filter for Zero Volume
-        let displayTokens = tokens;
-        if (isZeroVolHidden) {
-            displayTokens = tokens.filter(t => (t.volume24h || 0) > 0);
-        }
-
-        if (displayTokens.length === 0) { 
-            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-[#9a3412] font-mono">${searchQuery ? `Searching global network for "${searchQuery}"...` : 'No tokens found.'}</td></tr>`; return; 
-        }
-
-        tbody.innerHTML = displayTokens.map(t => {
-            // Robust check for properties (camelCase vs snake_case)
-            const score = t.kScore || t.k_score || 0;
-            const isVerified = t.hasCommunityUpdate || t.hascommunityupdate;
-            const mcap = Number(t.marketCap || t.marketcap || 0);
-            const vol = Number(t.volume24h || 0);
-            
-            // Explicitly extract change values
-            const chg1h = t.change1h || 0;
-            const chg5m = t.change5m || 0;
-            const chg24h = t.change24h || 0;
-            
-            // LOGIC FIX: Show Clock if Verified but Score is 0
-            let kScoreDisplay;
-            if (isVerified) {
-                if (score > 0) {
-                     kScoreDisplay = `${score}${score > 50 ? ' 💎' : ''}`;
-                } else {
-                     kScoreDisplay = `<span title="Calculating Score..." class="animate-pulse">🕒</span>`;
-                }
-            } else {
-                 kScoreDisplay = '<span title="Community Update Required" class="text-gray-500">🔒</span>';
-            }
-
-            // USE NEW MEDIA RENDERER
-            const mediaHtml = renderTokenMedia(t.image, "img-token group-hover:border-[#ea580c] transition");
-
-            return `
-            <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group">
-                <td><div class="flex items-center gap-3">${mediaHtml}<div class="flex flex-col min-w-0"><div class="flex items-center gap-2"><span class="font-bold text-white text-sm group-hover:text-[#ea580c] transition truncate font-sans tracking-wide">${t.ticker}</span>${isVerified ? '<span title="Verified Community Update" class="verified-badge"><i data-lucide="check" width="12"></i></span>' : ''}</div><span class="text-[10px] text-[#9a3412] truncate max-w-[120px] md:max-w-[200px] font-mono group-hover:text-[#fb923c]">${t.name}</span></div></div></td>
-                <td class="text-right text-[#fb923c] font-mono font-bold">${kScoreDisplay}</td>
-                <td class="hidden md:table-cell text-right">${formatPct(chg5m)}</td>
-                <td class="hidden md:table-cell text-right">${formatPct(chg1h)}</td>
-                <td class="text-right">${formatPct(chg24h)}</td>
-                <td class="text-right font-mono text-[#fb923c] font-bold">${formatCompact(mcap)}</td>
-                <td class="text-right font-mono text-[#22c55e]">${formatCompact(vol)}</td>
-                <td class="hidden md:table-cell text-right text-xs text-[#9a3412] font-mono">${timeAgo(t.timestamp)}</td>
-            </tr>
-        `}).join('');
-        lucide.createIcons();
-    }
-
-    window.switchPool = (pairAddress, dexId) => {
-        document.querySelectorAll('.pool-tab').forEach(t => t.classList.remove('active')); const tab = document.getElementById(`tab-${pairAddress}`); if(tab) tab.classList.add('active');
-        // IFrame logic removed for internal chart
-        // You can add logic here if you want the internal chart to switch specific pools for the same token,
-        // but currently fetchCandles uses the mint to find the best pool automatically.
-    };
-
+    // SHOW DETAIL VIEW
     async function showDetailView(mint) {
         clearInterval(pollingInterval); pollingInterval = null;
-        
-        // Hide others, Show detail
-        const db = document.getElementById('view-dashboard');
-        const dt = document.getElementById('view-detail');
-        const ab = document.getElementById('view-about');
-        const up = document.getElementById('view-update');
-        const dc = document.getElementById('detail-controls');
-        
-        if(db) db.classList.remove('active');
-        if(ab) ab.classList.remove('active');
-        if(up) up.classList.remove('active');
-        if(dt) dt.classList.add('active');
-        if(dc) dc.classList.remove('hidden');
+        document.getElementById('view-dashboard').classList.remove('active');
+        document.getElementById('view-about').classList.remove('active');
+        document.getElementById('view-update').classList.remove('active');
+        document.getElementById('view-detail').classList.add('active');
+        document.getElementById('detail-controls').classList.remove('hidden');
 
         const loadingDiv = document.getElementById('detail-loading');
         const contentDiv = document.getElementById('detail-content');
         const bannerContainer = document.getElementById('detail-banner-container');
-        
         if(loadingDiv) loadingDiv.style.display = 'block'; 
         if(contentDiv) contentDiv.style.display = 'none'; 
         if(bannerContainer) { bannerContainer.classList.add('hidden'); bannerContainer.innerHTML = ''; }
 
-        // --- NEW: Cleanup Chart ---
         cleanupChart();
 
         try {
@@ -1402,31 +582,23 @@
             const data = await res.json();
             if (data.success) {
                 const t = data.token;
-                const ticker = document.getElementById('detail-ticker');
-                const name = document.getElementById('detail-name');
-                const mintEl = document.getElementById('detail-mint');
-                const descEl = document.getElementById('detail-desc');
+                document.getElementById('detail-ticker').innerText = t.ticker;
+                document.getElementById('detail-name').innerText = t.name;
+                document.getElementById('detail-mint').innerText = t.mint;
                 
-                // INJECT MEDIA DYNAMICALLY (Video or Img)
+                // Set normalized supply for Mcap Chart Mode
+                const rawSupply = parseFloat(t.supply || '0');
+                const decimals = t.decimals || 9;
+                currentNormalizedSupply = rawSupply / Math.pow(10, decimals);
+                if (currentNormalizedSupply === 0) currentNormalizedSupply = 1000000000; // Fallback
+
                 const mediaContainer = document.getElementById('detail-media-container');
-                if (mediaContainer) {
-                    mediaContainer.innerHTML = renderTokenMedia(t.image, "w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black shadow-lg");
-                }
+                if (mediaContainer) mediaContainer.innerHTML = renderTokenMedia(t.image, "w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black shadow-lg");
 
-                if(ticker) ticker.innerText = t.ticker;
-                if(name) name.innerText = t.name;
-                if(mintEl) mintEl.innerText = t.mint;
-                
-                // Verified Status Check
                 const isVerified = t.hasCommunityUpdate || t.hascommunityupdate;
-
-                // Show Description if available AND Verified
-                if (t.description && descEl && isVerified) {
-                    descEl.innerHTML = sanitizeInput(t.description); 
-                    descEl.classList.remove('hidden');
-                } else if (descEl) {
-                    descEl.classList.add('hidden');
-                }
+                const descEl = document.getElementById('detail-desc');
+                if (t.description && descEl && isVerified) { descEl.innerHTML = sanitizeInput(t.description); descEl.classList.remove('hidden'); } 
+                else if (descEl) { descEl.classList.add('hidden'); }
                 
                 if (t.banner && bannerContainer) {
                     bannerContainer.innerHTML = `<div class="w-full h-48 md:h-64 rounded-xl border-2 border-[#7c2d12] shadow-lg relative overflow-hidden bg-black"><img src="${t.banner}" class="w-full h-full object-cover object-center" onerror="this.src='${FALLBACK_BANNER}'"><div class="absolute inset-0 bg-gradient-to-t from-[#2a1005] to-transparent opacity-80 pointer-events-none"></div></div>`;
@@ -1435,19 +607,10 @@
 
                 const actionsDiv = document.getElementById('detail-actions'); 
                 if(actionsDiv) {
-                    let linksHtml = '';
-                    
-                    // 1. Jupiter Link (Replaces Pump.fun)
-                    linksHtml += `<a href="https://jup.ag/swap?sell=So11111111111111111111111111111111111111112&buy=${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow bg-[#191e29] border-[#c7f284] text-[#c7f284] hover:bg-[#c7f284] hover:text-[#000]">Jupiter Swap</a>`;
-                    
-                    // 2. Solscan Link
+                    let linksHtml = `<a href="https://jup.ag/swap?sell=So11111111111111111111111111111111111111112&buy=${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow bg-[#191e29] border-[#c7f284] text-[#c7f284] hover:bg-[#c7f284] hover:text-[#000]">Jupiter Swap</a>`;
                     linksHtml += `<a href="https://solscan.io/token/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><i data-lucide="search" width="16"></i> Solscan</a>`;
-                    
                     if (isVerified) {
-                        // Badge
                         linksHtml += `<div class="flex items-center px-4 py-2 bg-green-900/30 border border-green-500 text-green-500 rounded-xl font-bold uppercase text-xs tracking-wider h-14"><i data-lucide="shield-check" width="18" class="mr-2"></i> VERIFIED UPDATE</div>`;
-
-                        // Large Social Links
                         if (t.twitter) linksHtml += `<a href="${t.twitter}" target="_blank" class="social-btn-lg"><i data-lucide="twitter" width="24"></i></a>`;
                         if (t.website) linksHtml += `<a href="${t.website}" target="_blank" class="social-btn-lg"><i data-lucide="globe" width="24"></i></a>`;
                         if (t.telegram) linksHtml += `<a href="${t.telegram}" target="_blank" class="social-btn-lg"><i data-lucide="send" width="24"></i></a>`;
@@ -1455,137 +618,56 @@
                     actionsDiv.innerHTML = linksHtml; lucide.createIcons();
                 }
 
-                // Stats - Robust Data Handling (CamelCase vs SnakeCase)
                 const mcap = Number(t.marketCap || t.marketcap || 0);
                 const price = Number(t.priceUsd || t.priceusd || 0);
-                const vol = Number(t.volume24h || t.volume24h || 0);
+                const vol = Number(t.volume24h || 0);
                 const score = t.kScore || t.k_score || 0;
 
-                const sPrice = document.getElementById('stat-price'); if(sPrice) sPrice.innerText = formatMoney(price);
-                const sMcap = document.getElementById('stat-mcap'); if(sMcap) sMcap.innerText = formatCompact(mcap);
-                const sVol = document.getElementById('stat-vol'); if(sVol) sVol.innerText = formatCompact(vol);
-                const s1h = document.getElementById('stat-chg1h'); if(s1h) s1h.innerHTML = formatPct(t.change1h);
-                const s24h = document.getElementById('stat-chg24h'); if(s24h) s24h.innerHTML = formatPct(t.change24h);
+                document.getElementById('stat-price').innerText = formatMoney(price);
+                document.getElementById('stat-mcap').innerText = formatCompact(mcap);
+                document.getElementById('stat-vol').innerText = formatCompact(vol);
+                document.getElementById('stat-chg1h').innerHTML = formatPct(t.change1h);
+                document.getElementById('stat-chg24h').innerHTML = formatPct(t.change24h);
                 
                 const kEl = document.getElementById('stat-kscore');
                 if(kEl) {
                     if (isVerified) {
-                        if (score > 0) {
-                            kEl.innerText = score;
-                            kEl.classList.remove('text-gray-500'); kEl.classList.add('text-[#fb923c]');
-                            kEl.title = "Conviction Score";
-                        } else {
-                            kEl.innerText = '🕒';
-                            kEl.classList.remove('text-gray-500', 'text-[#fb923c]'); kEl.classList.add('text-[#fb923c]', 'animate-pulse');
-                            kEl.title = "Calculating Score...";
-                        }
-                    } else {
-                        kEl.innerText = '🔒';
-                        kEl.classList.remove('text-[#fb923c]', 'animate-pulse'); kEl.classList.add('text-gray-500'); 
-                        kEl.title = "Requires Community Update";
-                    }
+                        if (score > 0) { kEl.innerText = score; kEl.classList.remove('text-gray-500'); kEl.classList.add('text-[#fb923c]'); kEl.title = "Conviction Score"; } 
+                        else { kEl.innerText = '🕒'; kEl.classList.remove('text-gray-500', 'text-[#fb923c]'); kEl.classList.add('text-[#fb923c]', 'animate-pulse'); kEl.title = "Calculating Score..."; }
+                    } else { kEl.innerText = '🔒'; kEl.classList.remove('text-[#fb923c]', 'animate-pulse'); kEl.classList.add('text-gray-500'); kEl.title = "Requires Community Update"; }
                 }
 
+                // POOL TABS LOGIC
                 const tabsContainer = document.getElementById('pool-tabs-container'); 
                 if(tabsContainer) {
                     tabsContainer.innerHTML = '';
                     if (t.pairs && t.pairs.length > 0) {
                         t.pairs.forEach((pair, idx) => {
-                            // SAFEGUARD: Missing Pair or DexID
                             if (!pair) return;
                             const tab = document.createElement('div'); 
                             tab.className = `pool-tab ${idx === 0 ? 'active' : ''}`;
-                            
-                            // SAFEGUARD: Ensure String before UpperCase
-                            let dexId = "UNKNOWN";
-                            if (pair.dexId) dexId = String(pair.dexId);
+                            let dexId = String(pair.dex || pair.dexId || "Unknown");
                             const dexName = dexId.toUpperCase();
-
-                            tab.id = `tab-${pair.pairAddress}`; 
-                            tab.innerText = `${dexName} ($${formatCompact(pair.liquidity)} Liq)`;
-                            tab.onclick = () => switchPool(pair.pairAddress, pair.dexId); 
+                            tab.id = `tab-${pair.address || pair.pairAddress}`; 
+                            tab.innerText = `${dexName} ($${formatCompact(pair.liquidity_usd || pair.liquidity)})`;
+                            tab.onclick = () => switchPool(pair.address || pair.pairAddress, dexId, dexName); 
                             tabsContainer.appendChild(tab);
                         });
+                        
+                        // Set Initial Pool Name for Chart Label
+                        const initialPair = t.pairs[0];
+                        const initialDex = String(initialPair.dex || initialPair.dexId || "Unknown").toUpperCase();
+                        const label = document.getElementById('chart-pool-name');
+                        if(label) label.innerText = `— ${initialDex}`;
                     }
                 }
                 
                 if(loadingDiv) loadingDiv.style.display = 'none'; 
                 if(contentDiv) contentDiv.style.display = 'block';
 
-                // --- CRITICAL FIX: Load Chart AFTER View is Visible ---
-                setTimeout(async () => {
-                     await fetchCandles(mint);
-                }, 100);
-
+                setTimeout(async () => { await fetchCandles(mint); }, 100);
             }
         } catch (e) { console.error(e); if(loadingDiv) loadingDiv.innerText = "Error Loading Token Data"; }
-    }
-
-    window.setSort = (sort, btn) => { currentSort = sort; currentPage = 1; fetchList(); };
-    
-    // UPDATED SEARCH HANDLER
-    window.handleSearch = (e) => { 
-        searchQuery = e.target.value; 
-        
-        // Show/Hide Clear Button
-        const clearBtn = document.getElementById('clear-search-btn');
-        if (searchQuery.length > 0) {
-            clearBtn.style.display = 'block';
-        } else {
-            clearBtn.style.display = 'none';
-        }
-
-        currentPage = 1; 
-        clearTimeout(window.searchTimeout); 
-        window.searchTimeout = setTimeout(fetchList, 1000); 
-    };
-
-    // NEW CLEAR FUNCTION
-    window.clearSearch = () => {
-        const input = document.getElementById('search');
-        input.value = '';
-        searchQuery = '';
-        document.getElementById('clear-search-btn').style.display = 'none';
-        currentPage = 1;
-        fetchList();
-    };
-
-    window.copyMint = () => { const el = document.getElementById('detail-mint'); if(el) navigator.clipboard.writeText(el.innerText); };
-    window.handleManualRefresh = () => { fetchList(); };
-    lucide.createIcons();
-    
-    // Status Modal Toggle
-    window.toggleStatusModal = () => {
-        const modal = document.getElementById('status-modal');
-        if(modal) {
-             if(modal.style.opacity === '1' || modal.classList.contains('open')) {
-                 modal.classList.remove('open');
-                 modal.style.opacity = '0';
-                 modal.style.pointerEvents = 'none';
-             } else {
-                 modal.classList.add('open');
-                 modal.style.opacity = '1';
-                 modal.style.pointerEvents = 'auto';
-             }
-        }
-    }
-
-    // API Modal Logic
-    window.toggleApiModal = () => {
-        const modal = document.getElementById('api-docs-modal');
-        isApiModalOpen = !isApiModalOpen;
-        if (isApiModalOpen) modal.classList.add('open');
-        else modal.classList.remove('open');
-    }
-
-    window.copyApiUrl = () => {
-        const text = document.getElementById('api-url-text').innerText;
-        navigator.clipboard.writeText(text).then(() => {
-            const btn = document.querySelector('.code-copy-btn');
-            const original = btn.innerText;
-            btn.innerText = "Copied!";
-            setTimeout(() => btn.innerText = original, 2000);
-        });
     }
 </script>
 </body>

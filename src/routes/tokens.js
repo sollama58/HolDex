@@ -10,7 +10,6 @@ const kScoreUpdater = require('../tasks/kScoreUpdater');
 const { getClient } = require('../services/redis'); 
 const { enqueueTokenUpdate } = require('../services/queue'); 
 const { snapshotPools } = require('../indexer/tasks/snapshotter'); 
-const { fetchSolscanData } = require('../services/solscan');
 
 const router = express.Router();
 const solanaConnection = getSolanaConnection();
@@ -68,7 +67,6 @@ function init(deps) {
             image: meta?.image || null,
         };
 
-        // Insert Base Record
         await db.run(`
             INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, timestamp)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -134,19 +132,28 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "Submission failed: " + e.message }); }
     });
 
+    // UPDATED CANDLE ENDPOINT - SUPPORTS SPECIFIC POOL
     router.get('/token/:mint/candles', async (req, res) => {
         const { mint } = req.params;
-        const { resolution = '5', from, to } = req.query; 
+        const { resolution = '5', from, to, poolAddress } = req.query; 
         const resMinutes = parseInt(resolution);
         const resMs = resMinutes * 60 * 1000;
         const fromMs = parseInt(from) * 1000 || (Date.now() - 24 * 60 * 60 * 1000);
         const toMs = parseInt(to) * 1000 || Date.now();
-        const cacheKey = `chart:${mint}:${resolution}:${Math.floor(Date.now() / 30000)}`; 
+        
+        // Include poolAddress in cache key if present
+        const cacheKey = `chart:${mint}:${poolAddress || 'best'}:${resolution}:${Math.floor(Date.now() / 30000)}`; 
 
         try {
             const result = await smartCache(cacheKey, 30, async () => {
-                let pool = await db.get(`SELECT address FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC LIMIT 1`, [mint]);
-                if (!pool) return { success: false, error: "Token not indexed yet" };
+                let targetPoolAddress = poolAddress;
+
+                // If no specific pool requested, find the best one
+                if (!targetPoolAddress) {
+                    const bestPool = await db.get(`SELECT address FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC LIMIT 1`, [mint]);
+                    if (!bestPool) return { success: false, error: "Token not indexed yet" };
+                    targetPoolAddress = bestPool.address;
+                }
 
                 const rows = await db.all(`
                     SELECT timestamp, open, high, low, close, volume 
@@ -155,7 +162,7 @@ function init(deps) {
                     AND timestamp >= $2 
                     AND timestamp <= $3 
                     ORDER BY timestamp ASC
-                `, [pool.address, fromMs, toMs]);
+                `, [targetPoolAddress, fromMs, toMs]);
                 
                 if (resMinutes === 1) {
                     return { success: true, candles: rows.map(r => ({
@@ -164,6 +171,7 @@ function init(deps) {
                     }))};
                 }
 
+                // Aggregate candles for higher resolutions
                 const candles = [];
                 let currentCandle = null;
                 for (const r of rows) {
@@ -281,6 +289,7 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, tokens: [], error: e.message }); }
     });
 
+    // ... (Admin routes unchanged)
     router.get('/admin/updates', requireAdmin, async (req, res) => {
         const { type } = req.query;
         let sql = `SELECT u.*, t.name, t.symbol as ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`;
@@ -295,7 +304,6 @@ function init(deps) {
         let currentMeta = token?.metadata || {};
         if (typeof currentMeta === 'string') currentMeta = JSON.parse(currentMeta);
         const newMeta = { ...currentMeta, ...update }; 
-        // FIX: Ensure boolean syntax is consistent, though Postgres allows casting in updates usually.
         await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE WHERE mint = $2`, [JSON.stringify(newMeta), update.mint]);
         await db.run("UPDATE token_updates SET status = 'approved' WHERE id = $1", [id]);
         res.json({success: true});

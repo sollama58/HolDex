@@ -42,7 +42,6 @@ const dbWrapper = {
 
 const initDB = async () => {
     try {
-        // AUTO-MIGRATION: Ensure reserve columns exist
         await pool.query(`ALTER TABLE pools ADD COLUMN IF NOT EXISTS reserve_a TEXT;`);
         await pool.query(`ALTER TABLE pools ADD COLUMN IF NOT EXISTS reserve_b TEXT;`);
         logger.info('✅ Database Schema Verified (Reserves Columns Present)');
@@ -51,8 +50,6 @@ const initDB = async () => {
     }
 };
 
-// --- AGGREGATION LOGIC ---
-
 const enableIndexing = async (db, mint, pair) => {
     if (!pair || !pair.pairAddress) return;
     
@@ -60,7 +57,6 @@ const enableIndexing = async (db, mint, pair) => {
     const vol = Number(pair.volume?.h24 || 0);
     const price = Number(pair.priceUsd || 0);
 
-    // Update the POOL record
     await db.run(`
         INSERT INTO pools (
             address, mint, dex, 
@@ -94,7 +90,7 @@ const enableIndexing = async (db, mint, pair) => {
     `, [pair.pairAddress, Date.now()]);
 };
 
-// CRITICAL FIX: Update the parent TOKEN record based on child POOLS
+// CRITICAL LOGIC: Aggregation from Child Pools to Parent Token
 const aggregateAndSaveToken = async (db, mint) => {
     try {
         // 1. Get all pools for this mint
@@ -114,17 +110,16 @@ const aggregateAndSaveToken = async (db, mint) => {
             totalVolume += pVol;
             totalLiquidity += pLiq;
 
-            // Use price from the most liquid pool
-            if (pLiq > maxLiq && pPrice > 0) {
+            // Strict Logic: Price comes from the pool with Highest Liquidity
+            if (pLiq > maxLiq) {
                 maxLiq = pLiq;
-                bestPrice = pPrice;
+                if (pPrice > 0) bestPrice = pPrice;
             }
         }
 
-        // If no liquid pool found, keep existing price or 0
+        // Fallback: If main pool had no price (weird), but others did
         if (bestPrice === 0 && pools.length > 0) {
-             // Fallback to any pool with price
-             const anyPrice = pools.find(p => p.price_usd > 0);
+             const anyPrice = pools.find(p => Number(p.price_usd) > 0);
              if (anyPrice) bestPrice = Number(anyPrice.price_usd);
         }
 
@@ -147,8 +142,6 @@ const aggregateAndSaveToken = async (db, mint) => {
                 timestamp = $5
             WHERE mint = $6
         `, [totalLiquidity, totalVolume, bestPrice, marketCap, Date.now(), mint]);
-
-        // logger.info(`📊 Aggregated ${mint}: $${bestPrice} | Liq: $${totalLiquidity}`);
 
     } catch (err) {
         logger.error(`Aggregation Failed for ${mint}: ${err.message}`);
