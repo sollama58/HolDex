@@ -1314,7 +1314,7 @@
         // Apply Client-Side Filter for Zero Volume
         let displayTokens = tokens;
         if (isZeroVolHidden) {
-            displayTokens = tokens.filter(t => (t.volume24h || t.volume24h || 0) > 0);
+            displayTokens = tokens.filter(t => (t.volume24h || 0) > 0);
         }
 
         if (displayTokens.length === 0) { 
@@ -1326,7 +1326,12 @@
             const score = t.kScore || t.k_score || 0;
             const isVerified = t.hasCommunityUpdate || t.hascommunityupdate;
             const mcap = Number(t.marketCap || t.marketcap || 0);
-            const vol = Number(t.volume24h || t.volume24h || 0);
+            const vol = Number(t.volume24h || 0);
+            
+            // Explicitly extract change values
+            const chg1h = t.change1h || 0;
+            const chg5m = t.change5m || 0;
+            const chg24h = t.change24h || 0;
             
             // LOGIC FIX: Show Clock if Verified but Score is 0
             let kScoreDisplay;
@@ -1347,9 +1352,9 @@
             <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group">
                 <td><div class="flex items-center gap-3">${mediaHtml}<div class="flex flex-col min-w-0"><div class="flex items-center gap-2"><span class="font-bold text-white text-sm group-hover:text-[#ea580c] transition truncate font-sans tracking-wide">${t.ticker}</span>${isVerified ? '<span title="Verified Community Update" class="verified-badge"><i data-lucide="check" width="12"></i></span>' : ''}</div><span class="text-[10px] text-[#9a3412] truncate max-w-[120px] md:max-w-[200px] font-mono group-hover:text-[#fb923c]">${t.name}</span></div></div></td>
                 <td class="text-right text-[#fb923c] font-mono font-bold">${kScoreDisplay}</td>
-                <td class="hidden md:table-cell text-right">${formatPct(t.change5m)}</td>
-                <td class="hidden md:table-cell text-right">${formatPct(t.change1h)}</td>
-                <td class="text-right">${formatPct(t.change24h)}</td>
+                <td class="hidden md:table-cell text-right">${formatPct(chg5m)}</td>
+                <td class="hidden md:table-cell text-right">${formatPct(chg1h)}</td>
+                <td class="text-right">${formatPct(chg24h)}</td>
                 <td class="text-right font-mono text-[#fb923c] font-bold">${formatCompact(mcap)}</td>
                 <td class="text-right font-mono text-[#22c55e]">${formatCompact(vol)}</td>
                 <td class="hidden md:table-cell text-right text-xs text-[#9a3412] font-mono">${timeAgo(t.timestamp)}</td>
