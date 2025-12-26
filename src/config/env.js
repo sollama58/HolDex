@@ -2,8 +2,9 @@ require('dotenv').config();
 
 module.exports = {
     PORT: process.env.PORT || 3000,
-    // UPDATED: Use the provided PostgreSQL URL
-    DATABASE_URL: process.env.DATABASE_URL || 'postgresql://asdev_db_user:W6DVTVxCduqc8bwhouqACp8S3ncmW7Cd@dpg-d55etl3e5dus73c68i40-a/asdev_db',
+    // SECURITY FIX: Removed hardcoded production credentials.
+    // Use environment variables for production connection strings.
+    DATABASE_URL: process.env.DATABASE_URL || 'postgresql://user:password@localhost:5432/holdex',
     REDIS_URL: process.env.REDIS_URL || 'redis://redis:6379',
     SOLANA_RPC_URL: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
     CORS_ORIGINS: process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : '*',

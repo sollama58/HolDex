@@ -13,6 +13,7 @@ const MIN_LIQUIDITY = 5000;
 
 const knownMints = new Set();
 const MAX_HISTORY = 2000;
+let isRunning = false; // LOGIC FIX: Added Concurrency Lock
 
 function getSocialLink(pair, type) {
     if (!pair.info || !pair.info.socials) return null;
@@ -21,11 +22,11 @@ function getSocialLink(pair, type) {
 }
 
 async function checkNewTokens(deps) {
+    if (isRunning) return; // LOGIC FIX: Prevent overlapping execution
+    isRunning = true;
+
     try {
         // Search generically for "pump" related or just latest profiles to cast a wide net
-        // Note: DexScreener "latest" endpoint isn't fully public/documented for broad scanning without filters.
-        // We continue using a broad search term or specific chain filter if possible. 
-        // Using "pump" search is still effective for finding meme tokens, but we filter purely by stats now.
         const response = await axios.get('https://api.dexscreener.com/latest/dex/search?q=pump', {
             timeout: 5000
         });
@@ -91,6 +92,8 @@ async function checkNewTokens(deps) {
 
     } catch (e) {
         logger.error('NewTokenListener Error:', { error: e.message });
+    } finally {
+        isRunning = false; // LOGIC FIX: Release Lock
     }
 }
 

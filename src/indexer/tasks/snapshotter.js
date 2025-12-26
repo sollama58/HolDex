@@ -5,25 +5,19 @@ const logger = require('../../services/logger');
 
 let isSnapshotRunning = false;
 
-// --- PROTOCOL LAYOUT OFFSETS (Approximations for Discovery) ---
-// We use these to find the "Reserve/Vault" accounts inside the Pair data.
-
-// Raydium AMM v4
+// --- PROTOCOL LAYOUT OFFSETS (Approximations) ---
 const RAY_COIN_VAULT_OFFSET = 432; 
 const RAY_PC_VAULT_OFFSET = 464;
-
-// Orca Whirlpools (Standard Layout)
-// TokenVaultA is usually around offset 101 or similar. 
-// However, checking Account Data length is a good heuristic.
-// Whirlpool Data Length = 653 bytes usually.
-// Vault A is at offset 101 (32 bytes), Vault B at offset 133 (32 bytes).
 const ORCA_VAULT_A_OFFSET = 101;
 const ORCA_VAULT_B_OFFSET = 133;
 
-// Meteora DLMM / Amm
-// Layout varies, but standard DLMM usually puts reserves early.
-// We will attempt to use a balance check on the Pair Address itself first (some AMMs hold funds directly),
-// If that fails, we fallback to a heuristic offset scan or rely on DexScreener initial data.
+// --- KNOWN QUOTE MINTS (For Price Normalization) ---
+const QUOTE_MINTS = new Set([
+    'So11111111111111111111111111111111111111112', // SOL
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
+    'USD1ttGY1N17NEEHLmELoaybftRBUSErhqYiQzvEmuB'  // USD1 (Added per request)
+]);
 
 async function runSnapshotCycle() {
     if (isSnapshotRunning) return;
@@ -42,9 +36,9 @@ async function runSnapshotCycle() {
 
     try {
         while (keepFetching) {
-            // Fetch pools with their DEX type and reserve info
+            // FIX: Added token_a and token_b to query to identify Quote vs Base
             const pools = await db.all(`
-                SELECT t.pool_address, p.mint, p.dex, p.reserve_a, p.reserve_b
+                SELECT t.pool_address, p.mint, p.dex, p.reserve_a, p.reserve_b, p.token_a, p.token_b
                 FROM active_trackers t
                 JOIN pools p ON t.pool_address = p.address
                 ORDER BY t.priority DESC, t.pool_address ASC 
@@ -124,12 +118,7 @@ async function runSnapshotCycle() {
                                 vaultA = new PublicKey(data.subarray(ORCA_VAULT_A_OFFSET, ORCA_VAULT_A_OFFSET + 32));
                                 vaultB = new PublicKey(data.subarray(ORCA_VAULT_B_OFFSET, ORCA_VAULT_B_OFFSET + 32));
                             }
-                            else if (task.dex === 'meteora') {
-                                // Simple Meteora Fallback: 
-                                // Some Meteora pools keep Token X at offset 264 and Token Y at 296 (approx)
-                                // If parsing fails, we leave reserve_a/b null and rely on DexScreener updates.
-                            }
-
+                            
                             if (vaultA && vaultB) {
                                 await db.run(`UPDATE pools SET reserve_a = $1, reserve_b = $2 WHERE address = $3`, 
                                     [vaultA.toString(), vaultB.toString(), p.pool_address]);
@@ -144,20 +133,33 @@ async function runSnapshotCycle() {
 
                         // Parse SPL Token Account (Amount is at offset 64)
                         if (accA && accB && accA.data.length >= 72 && accB.data.length >= 72) {
-                            const balA = accA.data.readBigUInt64LE(64);
-                            const balB = accB.data.readBigUInt64LE(64);
+                            const balA = Number(accA.data.readBigUInt64LE(64));
+                            const balB = Number(accB.data.readBigUInt64LE(64));
                             
-                            // Naive Price Calculation (Quote / Base)
-                            // Assumption: Reserve B is Quote (SOL/USDC) and Reserve A is Token.
-                            // If this is inverted (Token is B), price will be inverted. 
-                            // Real production systems check the Mint of A vs B. 
-                            // For this version, we assume DexScreener order (Base/Quote) maps to Reserve A/B roughly,
-                            // or we accept that inverted charts will correct themselves when we add Mint checks.
+                            // LOGIC FIX: Determine which is Quote to calculate correct price
+                            // Price = Quote Amount / Base Amount
                             
-                            const valA = Number(balA);
-                            const valB = Number(balB);
+                            const isAQuote = QUOTE_MINTS.has(p.token_a);
+                            const isBQuote = QUOTE_MINTS.has(p.token_b);
 
-                            if (valA > 0) price = valB / valA; 
+                            if (isAQuote && !isBQuote) {
+                                // A is Quote (e.g. USDC), B is Token
+                                if (balB > 0) price = balA / balB; 
+                            } 
+                            else if (isBQuote && !isAQuote) {
+                                // B is Quote (e.g. SOL), A is Token
+                                if (balA > 0) price = balB / balA;
+                            } 
+                            else {
+                                // Fallback / Unknown / Pair of two quotes?
+                                // Default to assuming Token B is the Quote (DexScreener standard often Quote is 2nd)
+                                // but check against Mint
+                                if (p.token_a === p.mint && balA > 0) {
+                                    price = balB / balA;
+                                } else if (p.token_b === p.mint && balB > 0) {
+                                    price = balA / balB;
+                                }
+                            }
                         }
                     }
 
