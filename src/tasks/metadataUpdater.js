@@ -1,6 +1,5 @@
 const { getDB } = require('../services/database');
 const logger = require('../services/logger');
-// Removed Solscan dependency as requested to rely on internal calculated metrics
 
 let isRunning = false;
 
@@ -16,51 +15,55 @@ async function updateMetadata(deps) {
     const time5m = now - (5 * 60 * 1000);
 
     try {
-        // Fetch all tokens
         const tokens = await db.all(`SELECT mint, supply, decimals FROM tokens`);
         
         for (const t of tokens) {
             try {
-                // 1. Get Best Internal Pool (for Real-Time Price)
-                const pool = await db.get(`
-                    SELECT address, price_usd 
+                // 1. Fetch ALL pools for this mint
+                // We need all pools to sum volume correctly, but only the best pool for price.
+                const pools = await db.all(`
+                    SELECT address, price_usd, liquidity_usd 
                     FROM pools 
-                    WHERE mint = $1 
-                    ORDER BY liquidity_usd DESC 
-                    LIMIT 1
+                    WHERE mint = $1
                 `, [t.mint]);
                 
-                // If no pool, we can't calculate anything meaningful internally
-                if (!pool) continue;
+                if (!pools || pools.length === 0) continue;
 
-                let currentPrice = pool.price_usd || 0;
+                // 2. Determine Best Pool for Price (Highest Liquidity)
+                // sort descending by liquidity
+                pools.sort((a, b) => (b.liquidity_usd || 0) - (a.liquidity_usd || 0));
+                const bestPool = pools[0];
+                
+                const currentPrice = bestPool.price_usd || 0;
                 let volume24h = 0;
                 let change24h = 0;
                 let change1h = 0;
                 let change5m = 0;
 
-                // --- 2. CALCULATE INTERNAL VOLUME (Rolling 24h) ---
-                // We sum the volume from our own candles instead of asking Solscan
-                try {
-                    const volResult = await db.get(`
+                // 3. Aggregate Volume across ALL pools
+                // Fix: Previous version only checked bestPool, ignoring volume in other pairs
+                const poolAddresses = pools.map(p => p.address);
+                if (poolAddresses.length > 0) {
+                    // Construct dynamic IN clause parameters ($2, $3, $4...)
+                    const placeholders = poolAddresses.map((_, i) => `$${i + 2}`).join(',');
+                    const volQuery = `
                         SELECT SUM(volume) as total_vol 
                         FROM candles_1m 
-                        WHERE pool_address = $1 
-                        AND timestamp >= $2
-                    `, [pool.address, time24h]);
+                        WHERE timestamp >= $1 
+                        AND pool_address IN (${placeholders})
+                    `;
                     
+                    const volResult = await db.get(volQuery, [time24h, ...poolAddresses]);
                     if (volResult && volResult.total_vol) {
                         volume24h = parseFloat(volResult.total_vol);
                     }
-                } catch (err) {
-                    logger.warn(`Volume calc failed for ${t.mint}: ${err.message}`);
                 }
 
-                // --- 3. CALCULATE PRICE CHANGES ---
+                // 4. Calculate Price Changes (Based on Best Pool History)
                 if (currentPrice > 0) {
-                    // Helper to find the candle closest to a specific timestamp (but not newer than it)
+                    // Helper to get historical price
                     const getPriceAt = async (targetTime) => {
-                        // 1. Try to find a candle at or before the target time
+                        // Find closest candle BEFORE or AT target time
                         let res = await db.get(`
                             SELECT close 
                             FROM candles_1m 
@@ -68,10 +71,10 @@ async function updateMetadata(deps) {
                             AND timestamp <= $2 
                             ORDER BY timestamp DESC 
                             LIMIT 1
-                        `, [pool.address, targetTime]);
-                        
-                        // 2. Fallback: If the indexer is newer than 24h, use the oldest candle available
-                        // This effectively gives us "Change since inception"
+                        `, [bestPool.address, targetTime]);
+
+                        // Fallback: If no history that far back (Cold Start), grab the Oldest candle
+                        // This ensures we display "Change since inception" instead of blank
                         if (!res) {
                             res = await db.get(`
                                 SELECT open 
@@ -79,7 +82,7 @@ async function updateMetadata(deps) {
                                 WHERE pool_address = $1 
                                 ORDER BY timestamp ASC 
                                 LIMIT 1
-                            `, [pool.address]);
+                            `, [bestPool.address]);
                         }
                         return res ? (res.close || res.open) : null;
                     };
@@ -88,12 +91,12 @@ async function updateMetadata(deps) {
                     const price1h = await getPriceAt(time1h);
                     const price5m = await getPriceAt(time5m);
 
-                    if (price24h && price24h > 0) change24h = ((currentPrice - price24h) / price24h) * 100;
-                    if (price1h && price1h > 0) change1h = ((currentPrice - price1h) / price1h) * 100;
-                    if (price5m && price5m > 0) change5m = ((currentPrice - price5m) / price5m) * 100;
+                    if (price24h) change24h = ((currentPrice - price24h) / price24h) * 100;
+                    if (price1h) change1h = ((currentPrice - price1h) / price1h) * 100;
+                    if (price5m) change5m = ((currentPrice - price5m) / price5m) * 100;
                 }
 
-                // --- 4. CALCULATE MARKET CAP ---
+                // 5. Calculate Market Cap
                 let marketCap = 0;
                 if (currentPrice > 0) {
                     const decimals = t.decimals || 9;
@@ -102,17 +105,30 @@ async function updateMetadata(deps) {
                     marketCap = supply * currentPrice;
                 }
 
-                // --- 5. SAVE UPDATES ---
+                // 6. Save Updates
                 await db.run(`
                     UPDATE tokens 
-                    SET volume24h = $1, marketCap = $2, priceUsd = $3, 
-                        change1h = $4, change24h = $5, change5m = $6, 
+                    SET volume24h = $1, 
+                        marketCap = $2, 
+                        priceUsd = $3, 
+                        change1h = $4, 
+                        change24h = $5, 
+                        change5m = $6, 
                         timestamp = $7 
                     WHERE mint = $8
-                `, [volume24h, marketCap, currentPrice, change1h, change24h, change5m, now, t.mint]);
+                `, [
+                    volume24h, 
+                    marketCap, 
+                    currentPrice, 
+                    change1h || 0, // Ensure we store 0 instead of NULL/NaN
+                    change24h || 0, 
+                    change5m || 0, 
+                    now, 
+                    t.mint
+                ]);
 
-                // Rate limiting protection for the loop itself
-                await new Promise(r => setTimeout(r, 50)); 
+                // Rate limiting protection
+                await new Promise(r => setTimeout(r, 20)); 
 
             } catch (err) {
                 logger.error(`Token meta update failed ${t.mint}: ${err.message}`);
@@ -126,13 +142,12 @@ async function updateMetadata(deps) {
 }
 
 function start(deps) {
-    // Run every minute to keep 24h stats rolling
-    setInterval(() => updateMetadata(deps), 60000);
+    setInterval(() => updateMetadata(deps), 60000); // Run every minute
     setTimeout(() => updateMetadata(deps), 5000);   // Initial run
 }
 
 async function updateTokenStats(mint) {
-   // Placeholder for manual trigger if needed
+   // Placeholder for manual trigger
 }
 
 module.exports = { start, updateTokenStats };
