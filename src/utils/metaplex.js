@@ -18,10 +18,15 @@ async function fetchTokenMetadata(mintAddress) {
                 const c = result.content;
                 const m = result.content.metadata;
                 
-                // Prioritize Helius CDN images, fall back to JSON uri
-                let image = result.content.links?.image || result.content.files?.[0]?.uri || c.json_uri;
+                // Check for GIF in files (Helius usually flags mime types)
+                const files = c.files || [];
+                const gifFile = files.find(f => (f.mimeType === 'image/gif' || f.mime === 'image/gif'));
+
+                // Prioritize GIF -> Helius Image CDN -> First File -> JSON URI
+                // We prefer the raw GIF uri over the optimized CDN image if it exists to preserve animation.
+                let image = gifFile?.uri || c.links?.image || files[0]?.uri || c.json_uri;
                 
-                // Fetch JSON if image is missing but URI exists
+                // Fetch JSON if image is missing but URI exists (Last resort)
                 if (!image && c.json_uri) {
                     try {
                         const jsonRes = await axios.get(c.json_uri, { timeout: 2000 });
