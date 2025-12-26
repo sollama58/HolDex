@@ -1014,11 +1014,8 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         if (tableControls) tableControls.classList.add('hidden'); 
         if (detailControls) detailControls.classList.add('hidden'); 
         
-        // --- SOCKET MANAGEMENT ---
-        if (socket) {
-            // Unsubscribe from previous token room if leaving detail view
-            if (currentMint) socket.emit('unsubscribe', currentMint);
-        }
+        if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; } 
+        if (detailPollingInterval) { clearInterval(detailPollingInterval); detailPollingInterval = null; }
 
         if (hash === '' || hash === '#') { 
             document.getElementById('view-dashboard').classList.add('active'); 

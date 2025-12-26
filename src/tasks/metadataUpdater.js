@@ -1,6 +1,7 @@
 const axios = require('axios');
 const logger = require('../services/logger');
-const { broadcastTokenUpdate } = require('../services/socket'); // NEW
+const { broadcastTokenUpdate } = require('../services/socket'); 
+const { fetchSolscanData } = require('../services/solscan'); // Import Solscan for fallback
 
 let isRunning = false;
 const BATCH_SIZE = 5; 
@@ -35,9 +36,21 @@ async function processSingleToken(db, t, now) {
         const poolsData = await fetchGeckoTerminalData(t.mint);
         const tokenDetails = await fetchTokenDetails(t.mint);
         
+        // --- HOLDER COUNT LOGIC (WITH FALLBACK) ---
         let holderCount = 0;
+        
+        // 1. Try GeckoTerminal
         if (tokenDetails && tokenDetails.attributes && tokenDetails.attributes.holder_count) {
             holderCount = parseInt(tokenDetails.attributes.holder_count);
+        }
+
+        // 2. Fallback to Solscan if Gecko fails or returns 0
+        if (!holderCount || holderCount === 0) {
+            const solscanData = await fetchSolscanData(t.mint);
+            if (solscanData && solscanData.holders > 0) {
+                holderCount = solscanData.holders;
+                // logger.info(`Using Solscan Holder Count for ${t.mint}: ${holderCount}`);
+            }
         }
 
         if (!poolsData || poolsData.length === 0) {
@@ -52,10 +65,19 @@ async function processSingleToken(db, t, now) {
         let bestChange1h = null;
         let bestChange5m = null;
         let maxLiquidity = -1;
+        let earliestPoolTime = null; // Track earliest pool creation time
 
         for (const poolData of poolsData) {
             const attr = poolData.attributes;
             const rel = poolData.relationships;
+
+            // --- TRACK AGE ---
+            if (attr.pool_created_at) {
+                const createdAt = new Date(attr.pool_created_at).getTime();
+                if (!earliestPoolTime || createdAt < earliestPoolTime) {
+                    earliestPoolTime = createdAt;
+                }
+            }
 
             const address = attr.address;
             const dexId = rel?.dex?.data?.id || 'unknown';
@@ -107,17 +129,26 @@ async function processSingleToken(db, t, now) {
             marketCap = supply * bestPrice;
         }
 
-        const finalParams = [totalVolume24h, marketCap, bestPrice, totalLiquidity, now];
+        // Params for SQL Update
+        const finalParams = [totalVolume24h, marketCap, bestPrice, totalLiquidity];
         let updateParts = [
             "volume24h = $1", 
             "marketCap = $2", 
             "priceUsd = $3", 
             "liquidity = $4", 
-            "timestamp = $5", 
             "updated_at = CURRENT_TIMESTAMP"
         ];
         
-        let idx = 6;
+        let idx = 5;
+        
+        // --- AGE FIX ---
+        // Only update 'timestamp' if we found a valid pool creation date.
+        // We do NOT update timestamp to 'now', preserving the "Age".
+        if (earliestPoolTime && earliestPoolTime > 0) {
+            updateParts.push(`timestamp = $${idx++}`);
+            finalParams.push(earliestPoolTime);
+        }
+
         if (bestChange24h !== null) { updateParts.push(`change24h = $${idx++}`); finalParams.push(bestChange24h); }
         if (bestChange1h !== null) { updateParts.push(`change1h = $${idx++}`); finalParams.push(bestChange1h); }
         if (bestChange5m !== null) { updateParts.push(`change5m = $${idx++}`); finalParams.push(bestChange5m); }
@@ -139,7 +170,7 @@ async function processSingleToken(db, t, now) {
 
         await db.run(finalQuery, finalParams);
 
-        // NEW: Broadcast Real-Time Update
+        // Broadcast Real-Time Update
         broadcastTokenUpdate(t.mint, {
             priceUsd: bestPrice,
             marketCap: marketCap,
@@ -170,7 +201,7 @@ async function updateMetadata(deps) {
         `);
         
         if (tokens.length > 0) {
-            logger.info(`🔄 Metadata: Syncing ${tokens.length} tokens via GeckoTerminal (Parallel Batches)...`);
+            logger.info(`🔄 Metadata: Syncing ${tokens.length} tokens (Gecko/Solscan)...`);
         }
         
         for (let i = 0; i < tokens.length; i += BATCH_SIZE) {

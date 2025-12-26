@@ -28,7 +28,9 @@ async function fetchSolscanData(mint) {
                 volume24h: parseFloat(res.data.volumeUsd24h || 0),
                 // Prefer Fully Diluted, fall back to standard marketCap
                 marketCap: parseFloat(res.data.marketCapFD || res.data.marketCap || 0),
-                change24h: parseFloat(res.data.priceChange24h || 0)
+                change24h: parseFloat(res.data.priceChange24h || 0),
+                // Parse holder count (supports 'holder' or 'holderCount' fields)
+                holders: parseInt(res.data.holder || res.data.holderCount || 0)
             };
         }
     } catch (e) {
