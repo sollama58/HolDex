@@ -229,34 +229,38 @@
                 </div>
                 <div>
                     <h2 class="text-5xl font-bold text-white tracking-tight font-sans">About HolDex</h2>
-                    <p class="text-[#ea580c] font-mono text-lg mt-1">Community-Verified Asset Data Layer for Solana</p>
+                    <p class="text-[#ea580c] font-mono text-lg mt-1">The High-Velocity Terminal for Solana Assets</p>
                 </div>
             </div>
             <div class="grid md:grid-cols-2 gap-8">
                 <div>
-                    <h3 class="text-2xl font-bold text-white mb-4">The Mission</h3>
-                    <p class="text-[#ffedd5] leading-relaxed mb-4">The Solana ecosystem moves at the speed of light. Thousands of tokens launch daily, creating a noisy environment.</p>
-                    <p class="text-[#ffedd5] leading-relaxed">**HolDex** solves this by providing a clean, terminal-grade interface that prioritizes **data accuracy** and **community verification**.</p>
+                    <h3 class="text-2xl font-bold text-white mb-4">Core Philosophy</h3>
+                    <p class="text-[#ffedd5] leading-relaxed mb-4">
+                        HolDex is built for traders who demand raw speed and absolute truth. In an ecosystem flooded with noise, we provide a <strong>terminal-grade interface</strong> that cuts through the clutter.
+                    </p>
+                    <p class="text-[#ffedd5] leading-relaxed">
+                        We prioritize <strong>community verification</strong> and <strong>on-chain data integrity</strong>. Our proprietary indexing engine snapshots liquidity pools directly from the Solana RPC, ensuring you see price action as it happens, not minutes later.
+                    </p>
                 </div>
-                <div class="bg-[#451a03] p-6 rounded-xl border border-[#7c2d12] flex flex-col justify-center">
-                    <div class="flex items-center gap-3 mb-2"><i data-lucide="server" width="20" class="text-[#22c55e]"></i><span class="font-bold text-white">Real-Time Sync</span></div>
-                    <p class="text-sm text-[#9a3412] mb-4">Direct connection to Solana RPC nodes and DexScreener API.</p>
+                <div class="bg-[#451a03] p-6 rounded-xl border border-[#7c2d12] flex flex-col justify-center shadow-inner">
+                    <div class="flex items-center gap-3 mb-2"><i data-lucide="server" width="20" class="text-[#22c55e]"></i><span class="font-bold text-white">Direct RPC Sync</span></div>
+                    <p class="text-sm text-[#9a3412] mb-4">No third-party delays. We index Raydium and Pump.fun directly.</p>
                     <div class="flex items-center gap-3 mb-2"><i data-lucide="shield-check" width="20" class="text-[#ea580c]"></i><span class="font-bold text-white">Bot Filtering</span></div>
-                    <p class="text-sm text-[#9a3412]">Advanced algorithms to filter out wash trading and low-effort spam.</p>
+                    <p class="text-sm text-[#9a3412]">Algorithms that separate organic volume from wash trading.</p>
                 </div>
             </div>
             <div class="grid md:grid-cols-3 gap-6">
-                <div class="feature-box"><div class="text-[#fb923c] mb-2"><i data-lucide="lock" width="24"></i></div><h4 class="font-bold text-white text-lg">K-Score Protocol</h4><p class="text-sm text-[#9a3412]">"Conviction Score" analyzes holder distribution and velocity.</p></div>
-                <div class="feature-box"><div class="text-[#22c55e] mb-2"><i data-lucide="users" width="24"></i></div><h4 class="font-bold text-white text-lg">Community Verified</h4><p class="text-sm text-[#9a3412]">Verified projects get a green badge and higher visibility.</p></div>
-                <div class="feature-box"><div class="text-[#a855f7] mb-2"><i data-lucide="zap" width="24"></i></div><h4 class="font-bold text-white text-lg">Fast Execution</h4><p class="text-sm text-[#9a3412]">Built for speed. No bloat.</p></div>
+                <div class="feature-box"><div class="text-[#fb923c] mb-2"><i data-lucide="lock" width="24"></i></div><h4 class="font-bold text-white text-lg">K-Score Protocol</h4><p class="text-sm text-[#9a3412]">Our "Conviction Score" analyzes holder distribution and token velocity to rate asset health.</p></div>
+                <div class="feature-box"><div class="text-[#22c55e] mb-2"><i data-lucide="users" width="24"></i></div><h4 class="font-bold text-white text-lg">Community Verified</h4><p class="text-sm text-[#9a3412]">Projects can verify their identity on-chain, earning the green badge and higher trust.</p></div>
+                <div class="feature-box"><div class="text-[#a855f7] mb-2"><i data-lucide="zap" width="24"></i></div><h4 class="font-bold text-white text-lg">Zero Bloat</h4><p class="text-sm text-[#9a3412]">No ads. No trackers. Just data. Built for maximum performance on any device.</p></div>
             </div>
-            <div class="bg-[#0f0502] border border-[#7c2d12] rounded-xl p-8 relative overflow-hidden">
-                <div class="absolute top-4 right-4 p-4 opacity-10"><i data-lucide="code" width="100" class="text-[#ea580c]"></i></div>
+            <div class="bg-[#0f0502] border border-[#7c2d12] rounded-xl p-8 relative overflow-hidden group hover:border-[#ea580c] transition-colors">
+                <div class="absolute top-4 right-4 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><i data-lucide="code" width="100" class="text-[#ea580c]"></i></div>
                 <h3 class="text-2xl font-bold text-white mb-2">Developers & API</h3>
-                <p class="text-[#9a3412] mb-6 max-w-2xl">HolDex exposes a public API to fetch sanitized, verified token metadata.</p>
+                <p class="text-[#9a3412] mb-6 max-w-2xl">HolDex exposes a robust public API. Build trading bots, analytics dashboards, or integrate our data into your dApp freely.</p>
                 <button onclick="toggleApiModal()" class="action-btn flex items-center gap-2"><i data-lucide="terminal" width="16"></i> View API Documentation</button>
             </div>
-             <div class="border-t border-[#7c2d12] pt-8 flex justify-between items-center text-xs text-[#9a3412]"><div>&copy; 2025 HolDex Protocol. All rights reserved.</div><div class="font-mono">v2.3.1</div></div>
+             <div class="border-t border-[#7c2d12] pt-8 flex justify-between items-center text-xs text-[#9a3412]"><div>&copy; 2025 HolDex Protocol. All rights reserved.</div><div class="font-mono">v2.4.0 (Stable)</div></div>
         </div>
     </div>
 
@@ -364,6 +368,67 @@
     </div>
 </main>
 
+<!-- API DOCUMENTATION MODAL (NEW) -->
+<div id="api-docs-modal" class="modal-overlay" onclick="toggleApiModal()">
+    <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto relative shadow-2xl" onclick="event.stopPropagation()">
+        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleApiModal()"><i data-lucide="x" width="24"></i></button>
+        <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 bg-[#451a03] rounded-lg border border-[#7c2d12] text-[#ea580c]"><i data-lucide="terminal" width="24"></i></div>
+            <div>
+                <h3 class="text-xl font-bold text-white font-sans">HolDex API Reference</h3>
+                <p class="text-xs text-[#9a3412] font-mono">Base URL: https://asdev-backend.onrender.com</p>
+            </div>
+        </div>
+
+        <div class="space-y-8">
+            <!-- ENDPOINT 1 -->
+            <div>
+                <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold">/api/tokens</span></div>
+                <p class="text-sm text-[#ffedd5] mb-2">Fetch a paginated list of tokens indexed by the protocol.</p>
+                <div class="code-block">
+<span class="text-[#9a3412]">// Example Request</span>
+fetch('<span class="text-white">https://asdev-backend.onrender.com/api/tokens?sort=kscore&page=1</span>');
+
+<span class="text-[#9a3412]">// Query Parameters</span>
+?sort   -> 'kscore', 'newest', 'volume', 'mcap', '24h' (default: kscore)
+?page   -> Integer (default: 1)
+?limit  -> Integer (default: 100)
+?search -> String (Ticker, Name, or Mint Address)
+                </div>
+            </div>
+
+            <!-- ENDPOINT 2 -->
+            <div>
+                <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold">/api/token/:mint</span></div>
+                <p class="text-sm text-[#ffedd5] mb-2">Get detailed metadata, price stats, and pool information for a specific token.</p>
+                <div class="code-block">
+<span class="text-[#9a3412]">// Example Request</span>
+fetch('<span class="text-white">https://asdev-backend.onrender.com/api/token/So111...11112</span>');
+                </div>
+            </div>
+
+            <!-- ENDPOINT 3 -->
+            <div>
+                <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold">/api/token/:mint/candles</span></div>
+                <p class="text-sm text-[#ffedd5] mb-2">Fetch OHLCV candle data for charting. Returns data from the most liquid pool by default.</p>
+                <div class="code-block">
+<span class="text-[#9a3412]">// Example Request</span>
+fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1700000000&to=1700086400</span>');
+
+<span class="text-[#9a3412]">// Query Parameters</span>
+?resolution -> '1', '5', '15', '60', '240', 'D' (Minutes, default: 5)
+?from       -> Unix Timestamp (Seconds)
+?to         -> Unix Timestamp (Seconds)
+                </div>
+            </div>
+        </div>
+        
+        <div class="mt-8 flex justify-end">
+             <button onclick="toggleApiModal()" class="action-btn text-xs">Close Documentation</button>
+        </div>
+    </div>
+</div>
+
 <div id="wallet-modal" class="modal-overlay">
     <div class="bg-[#2a1005] border-2 border-[#ea580c] p-6 rounded-2xl max-w-sm w-full shadow-2xl relative" onclick="event.stopPropagation()">
         <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="closeWalletModal()"><i data-lucide="x" width="24"></i></button>
@@ -384,7 +449,7 @@
             <li>Go to <a href="https://imgur.com/upload" target="_blank" class="text-[#ea580c] underline hover:text-[#fb923c]">imgur.com/upload</a></li>
             <li>Upload your banner image (Rec: 1500x500px).</li>
             <li>Right-click the uploaded image and select <strong>"Copy Image Address"</strong>.</li>
-            <li>Paste the URL here. It must end in .jpg, .png, or .webp.</li>
+            <li>Paste the URL here. It must end in .jpg, .png, .webp, or .gif.</li>
         </ol>
         <div class="bg-[#451a03] p-3 rounded border border-[#7c2d12] text-xs text-[#9a3412]">
             <strong>Note:</strong> We do not host images directly to keep the protocol decentralized and lightweight.
