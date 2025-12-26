@@ -2,25 +2,18 @@ const axios = require('axios');
 const logger = require('../services/logger');
 
 let isRunning = false;
-
-// GeckoTerminal Free Tier is ~30 requests per minute.
 const DELAY_BETWEEN_TOKENS_MS = 2000; 
 
 async function fetchGeckoTerminalData(mintAddress) {
     try {
         const url = `https://api.geckoterminal.com/api/v2/networks/solana/tokens/${mintAddress}/pools?page=1`;
         const response = await axios.get(url, { timeout: 5000 });
-        
-        if (!response.data || !response.data.data || response.data.data.length === 0) {
-            return null;
-        }
-
-        return response.data.data; // Return the RAW array of pools
-
+        if (!response.data || !response.data.data) return null;
+        return response.data.data;
     } catch (e) {
         if (e.response && e.response.status === 429) {
             logger.warn("⚠️ GeckoTerminal Rate Limit! Slowing down...");
-            await new Promise(r => setTimeout(r, 5000)); 
+            await new Promise(r => setTimeout(r, 10000)); 
         }
         return null;
     }
@@ -33,29 +26,27 @@ async function updateMetadata(deps) {
     const now = Date.now();
 
     try {
-        const tokens = await db.all(`SELECT mint, supply, decimals FROM tokens`);
+        const tokens = await db.all(`SELECT mint, supply, decimals FROM tokens ORDER BY updated_at ASC LIMIT 50`);
         if (tokens.length > 0) {
-            logger.info(`🔄 Syncing Pools & Metadata for ${tokens.length} tokens...`);
+            logger.info(`🔄 Metadata: Syncing ${tokens.length} tokens via GeckoTerminal...`);
         }
         
         for (const t of tokens) {
             try {
-                // 1. Fetch ALL pools for this token
                 const poolsData = await fetchGeckoTerminalData(t.mint);
 
-                if (!poolsData) {
+                if (!poolsData || poolsData.length === 0) {
+                    // Touch updated_at so we don't loop the same failed tokens immediately
+                    await db.run(`UPDATE tokens SET updated_at = CURRENT_TIMESTAMP WHERE mint = $1`, [t.mint]);
                     continue; 
                 }
 
                 let totalVolume24h = 0;
-                let totalLiquidity = 0; // Sum of ALL pools
-                
-                // Track Primary Pool (Largest Liquidity)
-                let maxLiquidity = -1;
+                let totalLiquidity = 0;
                 let bestPrice = 0;
                 let bestChange24h = 0;
+                let maxLiquidity = -1;
 
-                // 2. Iterate and Update INDIVIDUAL Pools
                 for (const poolData of poolsData) {
                     const attr = poolData.attributes;
                     const rel = poolData.relationships;
@@ -66,18 +57,15 @@ async function updateMetadata(deps) {
                     const liqUsd = parseFloat(attr.reserve_in_usd || 0);
                     const vol24h = parseFloat(attr.volume_usd?.h24 || 0);
                     
-                    // Accumulate Totals
                     totalVolume24h += vol24h;
                     totalLiquidity += liqUsd;
 
-                    // Determine Primary Pool (For Price & Mcap)
                     if (liqUsd > maxLiquidity) {
                         maxLiquidity = liqUsd;
                         bestPrice = price;
                         bestChange24h = parseFloat(attr.price_change_percentage?.h24 || 0);
                     }
 
-                    // UPDATE POOL RECORD
                     await db.run(`
                         INSERT INTO pools (
                             address, mint, dex, price_usd, liquidity_usd, volume_24h, created_at
@@ -89,34 +77,26 @@ async function updateMetadata(deps) {
                     `, [address, t.mint, dexId, price, liqUsd, vol24h, now]);
                 }
 
-                // Fallback: If no pool had liquidity > -1 (weird edge case), try to use any valid price
-                if (bestPrice === 0 && poolsData.length > 0) {
-                     const fallback = poolsData.find(p => parseFloat(p.attributes.base_token_price_usd) > 0);
-                     if (fallback) {
-                         bestPrice = parseFloat(fallback.attributes.base_token_price_usd);
-                         bestChange24h = parseFloat(fallback.attributes.price_change_percentage?.h24 || 0);
-                     }
-                }
-
-                // 3. Update PARENT TOKEN Stats
+                // --- CRITICAL FIX: Ensure Decimals are saved if possible ---
+                // Does Gecko provide decimals? Not directly in pools list usually.
+                // But we calculate Mcap here.
+                
                 let marketCap = 0;
                 if (bestPrice > 0) {
-                    const decimals = t.decimals || 9;
+                    const decimals = t.decimals || 9; // Default to 9 if DB is 0/null
                     let rawSupply = parseFloat(t.supply || '0');
-                    // Fallback for missing supply (common in some memes)
                     if (rawSupply === 0) rawSupply = 1000000000 * Math.pow(10, decimals); 
 
                     const divisor = Math.pow(10, decimals);
                     const supply = rawSupply / divisor;
-                    
-                    // Mcap is ALWAYS Supply * Primary Pool Price
                     marketCap = supply * bestPrice;
                 }
 
                 await db.run(`
                     UPDATE tokens 
                     SET volume24h = $1, marketCap = $2, priceUsd = $3, 
-                        liquidity = $4, change24h = $5, timestamp = $6 
+                        liquidity = $4, change24h = $5, timestamp = $6,
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE mint = $7
                 `, [totalVolume24h, marketCap, bestPrice, totalLiquidity, bestChange24h, now, t.mint]);
 
