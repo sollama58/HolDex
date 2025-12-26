@@ -50,6 +50,13 @@ async function fetchTokenMetadata(mintAddress) {
             try {
                 const jsonRes = await axios.get(uri, { timeout: 2000 });
                 image = jsonRes.data.image;
+                
+                // FALLBACK: If 'image' is missing, check 'animation_url'
+                // This supports tokens that only have a video/gif defined
+                if (!image && jsonRes.data.animation_url) {
+                    image = jsonRes.data.animation_url;
+                }
+
                 description = jsonRes.data.description;
             } catch (e) { /* uri fetch failed */ }
         }

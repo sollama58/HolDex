@@ -303,7 +303,7 @@
 
             <!-- DEVELOPERS / API -->
             <div class="bg-[#0f0502] border border-[#7c2d12] rounded-xl p-8 relative overflow-hidden">
-                <div class="absolute top-0 right-0 p-4 opacity-10"><i data-lucide="code" width="100" class="text-[#ea580c]"></i></div>
+                <div class="absolute top-4 right-4 p-4 opacity-10"><i data-lucide="code" width="100" class="text-[#ea580c]"></i></div>
                 <h3 class="text-2xl font-bold text-white mb-2">Developers & API</h3>
                 <p class="text-[#9a3412] mb-6 max-w-2xl">
                     Building a trading bot or dashboard? HolDex exposes a public API to fetch sanitized, verified token metadata including social links and banner images.
@@ -454,7 +454,11 @@
 
             <div class="flex flex-col md:flex-row gap-6 mb-8 items-start">
                 <div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl">
-                    <img id="detail-img" src="" class="w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black shadow-lg">
+                    <!-- REPLACED IMG WITH CONTAINER FOR MEDIA -->
+                    <div id="detail-media-container" class="flex-shrink-0">
+                        <img class="w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black shadow-lg">
+                    </div>
+                    
                     <div class="flex-1 min-w-0">
                         <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mb-1">
                             <h2 id="detail-ticker" class="text-3xl md:text-4xl font-bold text-white tracking-tight truncate font-mono"></h2>
@@ -1146,6 +1150,24 @@
         return seconds < 60 ? `${seconds}s ago` : (seconds < 3600 ? `${Math.floor(seconds/60)}m ago` : `${Math.floor(seconds/3600)}h ago`); 
     };
 
+    // --- NEW MEDIA RENDERER HELPER ---
+    function renderTokenMedia(url, className, fallbackText = '?') {
+        const fallback = `https://placehold.co/80x80/2a1005/7c2d12?text=${fallbackText}`;
+        const safeUrl = url || fallback;
+        
+        // Check for video extensions (simple regex check)
+        // Some tokens use mp4 for "animated images"
+        const isVideo = safeUrl.match(/\.(mp4|webm|mov)$/i);
+        
+        if (isVideo) {
+            return `<video src="${safeUrl}" class="${className}" autoplay loop muted playsinline poster="${fallback}"></video>`;
+        }
+        
+        // Default to Image (handles GIF, PNG, JPG, WEBP)
+        // Note: onerror=null prevents infinite loop if fallback also fails
+        return `<img src="${safeUrl}" class="${className}" loading="lazy" onerror="this.onerror=null;this.src='${fallback}'">`;
+    }
+
     function navigateTo(path) { window.location.hash = path; }
     
     function handleRoute() {
@@ -1230,7 +1252,10 @@
         if (t.website) linksHtml += `<a href="#" class="social-btn"><i data-lucide="globe" width="20"></i></a>`;
         if (t.telegram) linksHtml += `<a href="#" class="social-btn"><i data-lucide="send" width="20"></i></a>`;
 
-        html += `<div class="flex flex-col md:flex-row gap-6 mb-8 items-start"><div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl"><img src="${t.image}" class="w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black"><div class="flex-1 min-w-0"><div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mb-1"><h2 class="text-3xl font-bold text-white tracking-tight font-mono">${t.ticker}</h2><span class="text-[#fb923c] text-sm bg-[#2a1005] px-3 py-1 rounded-lg border border-[#7c2d12]">${t.name}</span></div><div class="text-xs text-[#9a3412] font-mono">${t.mint}</div></div></div><div class="flex-1"></div><div class="flex flex-wrap gap-3">${linksHtml}</div></div><div class="text-center text-[#9a3412] font-mono text-xs mt-10">-- End of Preview --</div>`;
+        // USE NEW RENDER HELPER IN PREVIEW
+        const mediaHtml = renderTokenMedia(t.image, "w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black");
+
+        html += `<div class="flex flex-col md:flex-row gap-6 mb-8 items-start"><div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl">${mediaHtml}<div class="flex-1 min-w-0"><div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mb-1"><h2 class="text-3xl font-bold text-white tracking-tight font-mono">${t.ticker}</h2><span class="text-[#fb923c] text-sm bg-[#2a1005] px-3 py-1 rounded-lg border border-[#7c2d12]">${t.name}</span></div><div class="text-xs text-[#9a3412] font-mono">${t.mint}</div></div></div><div class="flex-1"></div><div class="flex flex-wrap gap-3">${linksHtml}</div></div><div class="text-center text-[#9a3412] font-mono text-xs mt-10">-- End of Preview --</div>`;
         if(container) container.innerHTML = html;
         lucide.createIcons();
         const modal = document.getElementById('preview-modal');
@@ -1312,9 +1337,12 @@
                  kScoreDisplay = '<span title="Community Update Required" class="text-gray-500">🔒</span>';
             }
 
+            // USE NEW MEDIA RENDERER
+            const mediaHtml = renderTokenMedia(t.image, "img-token group-hover:border-[#ea580c] transition");
+
             return `
             <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group">
-                <td><div class="flex items-center gap-3"><img src="${t.image || 'https://placehold.co/40x40/2a1005/7c2d12?text=?'}" class="img-token group-hover:border-[#ea580c] transition" loading="lazy" onerror="this.src='https://placehold.co/40x40/2a1005/7c2d12?text=?'"><div class="flex flex-col min-w-0"><div class="flex items-center gap-2"><span class="font-bold text-white text-sm group-hover:text-[#ea580c] transition truncate font-sans tracking-wide">${t.ticker}</span>${isVerified ? '<span title="Verified Community Update" class="verified-badge"><i data-lucide="check" width="12"></i></span>' : ''}</div><span class="text-[10px] text-[#9a3412] truncate max-w-[120px] md:max-w-[200px] font-mono group-hover:text-[#fb923c]">${t.name}</span></div></div></td>
+                <td><div class="flex items-center gap-3">${mediaHtml}<div class="flex flex-col min-w-0"><div class="flex items-center gap-2"><span class="font-bold text-white text-sm group-hover:text-[#ea580c] transition truncate font-sans tracking-wide">${t.ticker}</span>${isVerified ? '<span title="Verified Community Update" class="verified-badge"><i data-lucide="check" width="12"></i></span>' : ''}</div><span class="text-[10px] text-[#9a3412] truncate max-w-[120px] md:max-w-[200px] font-mono group-hover:text-[#fb923c]">${t.name}</span></div></div></td>
                 <td class="text-right text-[#fb923c] font-mono font-bold">${kScoreDisplay}</td>
                 <td class="hidden md:table-cell text-right">${formatPct(t.change5m)}</td>
                 <td class="hidden md:table-cell text-right">${formatPct(t.change1h)}</td>
@@ -1369,13 +1397,17 @@
                 const ticker = document.getElementById('detail-ticker');
                 const name = document.getElementById('detail-name');
                 const mintEl = document.getElementById('detail-mint');
-                const img = document.getElementById('detail-img');
                 const descEl = document.getElementById('detail-desc');
                 
+                // INJECT MEDIA DYNAMICALLY (Video or Img)
+                const mediaContainer = document.getElementById('detail-media-container');
+                if (mediaContainer) {
+                    mediaContainer.innerHTML = renderTokenMedia(t.image, "w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black shadow-lg");
+                }
+
                 if(ticker) ticker.innerText = t.ticker;
                 if(name) name.innerText = t.name;
                 if(mintEl) mintEl.innerText = t.mint;
-                if(img) img.src = t.image || 'https://placehold.co/80x80/2a1005/7c2d12?text=?';
                 
                 // Verified Status Check
                 const isVerified = t.hasCommunityUpdate || t.hascommunityupdate;
