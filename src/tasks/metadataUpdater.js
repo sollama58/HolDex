@@ -15,8 +15,8 @@ async function fetchGeckoTerminalData(mintAddress) {
         return response.data.data;
     } catch (e) {
         if (e.response && e.response.status === 429) {
-            logger.warn("⚠️ GeckoTerminal Rate Limit! Slowing down...");
-            await new Promise(r => setTimeout(r, 30000)); 
+            // logger.warn("⚠️ GeckoTerminal Rate Limit");
+            await new Promise(r => setTimeout(r, 10000)); 
         }
         return null;
     }
@@ -48,11 +48,13 @@ async function processSingleToken(db, t, now) {
             }
         }
 
-        // Strategy B: Direct RPC Scan (Helius/Solana)
-        // Only run if Gecko failed or returned 0
+        // Strategy B: Direct RPC Scan (Fallback)
         if (!holderCount || holderCount === 0) {
-            // logger.debug(`Fetching RPC holders for ${t.mint}...`);
-            holderCount = await getHolderCountFromRPC(t.mint);
+            try {
+                holderCount = await getHolderCountFromRPC(t.mint);
+            } catch (rpcErr) {
+                holderCount = 0;
+            }
         }
 
         // --- 2. PREPARE DATA ---
@@ -122,7 +124,7 @@ async function processSingleToken(db, t, now) {
         // --- 3. MARKET CAP LOGIC ---
         let marketCap = 0;
         
-        // A. Try direct FDV from Gecko (Most Accurate)
+        // A. Try direct FDV from Gecko
         if (tokenDetails && tokenDetails.attributes) {
             marketCap = parseFloat(tokenDetails.attributes.fdv_usd || tokenDetails.attributes.market_cap_usd || 0);
         }
@@ -132,12 +134,9 @@ async function processSingleToken(db, t, now) {
             const decimals = t.decimals || 9; 
             let rawSupply = parseFloat(t.supply || '0');
             
-            // Try to heal missing supply from Gecko
             if (rawSupply === 0 && tokenDetails?.attributes?.total_supply) {
                 rawSupply = parseFloat(tokenDetails.attributes.total_supply);
             }
-
-            // Ultimate Fallback
             if (rawSupply === 0) rawSupply = 1000000000 * Math.pow(10, decimals); 
 
             const divisor = Math.pow(10, decimals);
@@ -150,7 +149,6 @@ async function processSingleToken(db, t, now) {
         const updateParts = [];
         let idx = 1;
 
-        // Only update stats if we found pools (to avoid zeroing out existing data on error)
         if (poolsData && poolsData.length > 0) {
             updateParts.push(`volume24h = $${idx++}`); finalParams.push(totalVolume24h);
             updateParts.push(`marketCap = $${idx++}`); finalParams.push(marketCap);
@@ -166,12 +164,10 @@ async function processSingleToken(db, t, now) {
             }
         }
         
-        // Always attempt to update holders if we found them (via Gecko or RPC)
         if (holderCount > 0) {
             updateParts.push(`holders = $${idx++}`);
             finalParams.push(holderCount);
 
-            // Record History
             const today = Math.floor(now / (24 * 60 * 60 * 1000)) * (24 * 60 * 60 * 1000);
             await db.run(`
                 INSERT INTO holders_history (mint, count, timestamp)
@@ -180,7 +176,6 @@ async function processSingleToken(db, t, now) {
             `, [t.mint, holderCount, today]);
         }
 
-        // Always update timestamp
         updateParts.push(`updated_at = CURRENT_TIMESTAMP`);
 
         if (updateParts.length > 0) {
@@ -189,7 +184,6 @@ async function processSingleToken(db, t, now) {
             await db.run(finalQuery, finalParams);
         }
 
-        // Broadcast Real-Time Update
         if (poolsData && poolsData.length > 0) {
             broadcastTokenUpdate(t.mint, {
                 priceUsd: bestPrice,
@@ -201,7 +195,6 @@ async function processSingleToken(db, t, now) {
                 updatedAt: now
             });
         } else if (holderCount > 0) {
-             // Broadcast just holders if that's all we found
              broadcastTokenUpdate(t.mint, {
                 holders: holderCount,
                 updatedAt: now
@@ -220,7 +213,6 @@ async function updateMetadata(deps) {
     const now = Date.now();
 
     try {
-        // Prioritize tokens with liquidity or recent updates
         const tokens = await db.all(`
             SELECT mint, supply, decimals 
             FROM tokens 
@@ -231,7 +223,6 @@ async function updateMetadata(deps) {
         for (let i = 0; i < tokens.length; i += BATCH_SIZE) {
             const batch = tokens.slice(i, i + BATCH_SIZE);
             await Promise.all(batch.map(t => processSingleToken(db, t, now)));
-            
             if (i + BATCH_SIZE < tokens.length) {
                 await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
             }

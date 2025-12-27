@@ -4,10 +4,15 @@ const logger = require('./logger');
 
 let connection;
 
+/**
+ * Returns the singleton Solana Connection instance.
+ */
 function getSolanaConnection() {
     if (!connection) {
-        // Use the configured RPC URL (likely Helius/QuickNode based on your env)
-        connection = new Connection(config.RPC_URL, {
+        if (!config.RPC_URL) {
+            logger.warn("⚠️ RPC_URL is missing in config/env.js, using default public RPC.");
+        }
+        connection = new Connection(config.RPC_URL || 'https://api.mainnet-beta.solana.com', {
             commitment: 'confirmed',
             confirmTransactionInitialTimeout: 60000
         });
@@ -18,9 +23,10 @@ function getSolanaConnection() {
 /**
  * Fetches the number of holders directly from the RPC.
  * Uses getProgramAccounts with filters to be lightweight (dataSlice).
- * Recommended to use with a paid RPC (Helius/QuickNode) as public RPCs may 429 this.
  */
 async function getHolderCountFromRPC(mintAddress) {
+    if (!mintAddress) return 0;
+    
     try {
         const conn = getSolanaConnection();
         const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
@@ -31,7 +37,7 @@ async function getHolderCountFromRPC(mintAddress) {
             { memcmp: { offset: 0, bytes: mintAddress } }
         ];
 
-        // Fetch only keys (dataSlice length 0) to save massive bandwidth
+        // Fetch only keys (dataSlice length 0) to save bandwidth
         const accounts = await conn.getProgramAccounts(TOKEN_PROGRAM_ID, {
             filters: filters,
             dataSlice: { offset: 0, length: 0 }
@@ -39,26 +45,12 @@ async function getHolderCountFromRPC(mintAddress) {
 
         return accounts.length;
     } catch (e) {
-        // It's common for public RPCs to block getProgramAccounts
-        // logger.warn(`RPC Holder Count failed for ${mintAddress}: ${e.message}`);
+        // Suppress errors for now to prevent log spam if RPC limits are hit
         return 0;
-    }
-}
-
-/**
- * Validates a Solana public key
- */
-function isValidPubkey(str) {
-    try {
-        new PublicKey(str);
-        return true;
-    } catch (e) {
-        return false;
     }
 }
 
 module.exports = { 
     getSolanaConnection, 
-    isValidPubkey,
     getHolderCountFromRPC 
 };
