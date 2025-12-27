@@ -138,7 +138,7 @@ router.get('/tokens', async (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// GET /token/:mint (Detail View) - WITH LIVE REPAIR
+// GET /token/:mint (Detail View) - WITH LIVE REPAIR & SANITIZATION
 // -----------------------------------------------------------------------------
 router.get('/token/:mint', async (req, res) => {
     const { mint } = req.params;
@@ -153,8 +153,6 @@ router.get('/token/:mint', async (req, res) => {
             if (!token) return { success: false, error: "Token not found" };
 
             // --- LIVE DATA REPAIR ---
-            // If essential data is missing (0), try to fetch it fresh NOW
-            // instead of waiting for the background worker.
             let marketCap = token.marketcap || token.marketCap || 0;
             let holders = token.holders || 0;
             let priceUsd = token.priceusd || token.priceUsd || 0;
@@ -166,7 +164,6 @@ router.get('/token/:mint', async (req, res) => {
                     if (holders === 0 && freshData.holders > 0) holders = freshData.holders;
                     if (priceUsd === 0 && freshData.priceUsd > 0) priceUsd = freshData.priceUsd;
 
-                    // Fire-and-forget update to DB to save this fresh data
                     db.run(`
                         UPDATE tokens 
                         SET marketCap = $1, holders = $2, priceUsd = $3, updated_at = CURRENT_TIMESTAMP 
@@ -177,6 +174,14 @@ router.get('/token/:mint', async (req, res) => {
 
             const pairs = await db.all('SELECT * FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC', [mint]);
             const holderHistory = await db.all('SELECT * FROM holders_history WHERE mint = $1 ORDER BY timestamp ASC', [mint]);
+
+            // --- SANITIZE CHART DATA (Fix "Value is null" error) ---
+            const cleanHolderHistory = holderHistory
+                .map(h => ({
+                    timestamp: Number(h.timestamp),
+                    count: h.count ? Number(h.count) : 0 // Force number, default to 0
+                }))
+                .filter(h => h.timestamp > 0); // Remove invalid timestamps
 
             let tokenData = { ...token };
             if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
@@ -192,7 +197,6 @@ router.get('/token/:mint', async (req, res) => {
             tokenData.change5m = tokenData.change5m || 0;
             tokenData.timestamp = tokenData.timestamp || 0;
 
-            // Patch price from main pool if still zero
             if (pairs.length > 0 && tokenData.priceUsd === 0) {
                 if (pairs[0].price_usd > 0) tokenData.priceUsd = pairs[0].price_usd;
             }
@@ -202,7 +206,7 @@ router.get('/token/:mint', async (req, res) => {
                 token: { 
                     ...tokenData, 
                     pairs, 
-                    holderHistory 
+                    holderHistory: cleanHolderHistory // Return sanitized history
                 } 
             };
         });

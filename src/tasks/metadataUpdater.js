@@ -7,6 +7,13 @@ let isRunning = false;
 const BATCH_SIZE = 5; 
 const BATCH_DELAY_MS = 2000; 
 
+// Helper: Safely parse numbers, returning 0 if invalid/null to prevent chart crashes
+const parseSafeFloat = (val) => {
+    if (val === undefined || val === null || val === 'null' || val === '') return 0;
+    const num = parseFloat(val);
+    return isFinite(num) ? num : 0;
+};
+
 async function fetchGeckoTerminalData(mintAddress) {
     try {
         const url = `https://api.geckoterminal.com/api/v2/networks/solana/tokens/${mintAddress}/pools?page=1`;
@@ -39,14 +46,12 @@ async function processSingleToken(db, t, now) {
         // --- 1. HOLDER COUNT LOGIC ---
         let holderCount = 0;
         
-        // Try GeckoTerminal first
         if (tokenDetails && tokenDetails.attributes && tokenDetails.attributes.holder_count) {
             holderCount = parseInt(tokenDetails.attributes.holder_count);
         } else if (tokenDetails && tokenDetails.attributes && tokenDetails.attributes.holders_count) {
             holderCount = parseInt(tokenDetails.attributes.holders_count);
         }
 
-        // Fallback to Solscan
         if (!holderCount || holderCount === 0) {
             const solscanData = await fetchSolscanData(t.mint);
             if (solscanData && solscanData.holders > 0) {
@@ -54,7 +59,6 @@ async function processSingleToken(db, t, now) {
             }
         }
 
-        // If no pools, just update timestamp/holders and return
         if (!poolsData || poolsData.length === 0) {
             if (holderCount > 0) {
                 await db.run(`UPDATE tokens SET holders = $1, updated_at = CURRENT_TIMESTAMP WHERE mint = $2`, [holderCount, t.mint]);
@@ -77,7 +81,6 @@ async function processSingleToken(db, t, now) {
             const attr = poolData.attributes;
             const rel = poolData.relationships;
 
-            // --- TRACK AGE ---
             if (attr.pool_created_at) {
                 const createdAt = new Date(attr.pool_created_at).getTime();
                 if (!earliestPoolTime || createdAt < earliestPoolTime) {
@@ -107,10 +110,10 @@ async function processSingleToken(db, t, now) {
                 maxLiquidity = liqUsd;
                 bestPrice = price;
                 
-                const parseChange = (val) => (val !== undefined && val !== null) ? parseFloat(val) : null;
-                bestChange24h = parseChange(attr.price_change_percentage?.h24);
-                bestChange1h = parseChange(attr.price_change_percentage?.h1);
-                bestChange5m = parseChange(attr.price_change_percentage?.m5);
+                // Use safe parsing
+                bestChange24h = parseSafeFloat(attr.price_change_percentage?.h24);
+                bestChange1h = parseSafeFloat(attr.price_change_percentage?.h1);
+                bestChange5m = parseSafeFloat(attr.price_change_percentage?.m5);
             }
 
             await db.run(`
@@ -124,27 +127,22 @@ async function processSingleToken(db, t, now) {
             `, [address, t.mint, dexId, price, liqUsd, vol24h, now, tokenA, tokenB]);
         }
         
-        // --- 2. MARKET CAP & SUPPLY LOGIC ---
         let marketCap = 0;
         let newSupply = 0;
         
-        // A. Try direct FDV from Gecko (Most Accurate)
         if (tokenDetails && tokenDetails.attributes) {
             marketCap = parseFloat(tokenDetails.attributes.fdv_usd || tokenDetails.attributes.market_cap_usd || 0);
         }
 
-        // B. Fallback: Manual Calculation
         const decimals = t.decimals || 9; 
         let rawSupply = parseFloat(t.supply || '0');
         
-        // Try to heal missing supply from Gecko
         if ((rawSupply === 0) && tokenDetails?.attributes?.total_supply) {
             rawSupply = parseFloat(tokenDetails.attributes.total_supply);
-            newSupply = rawSupply; // Flag to update DB
+            newSupply = rawSupply;
         }
 
         if (marketCap === 0 && bestPrice > 0) {
-            // Ultimate Fallback for supply
             if (rawSupply === 0) rawSupply = 1000000000 * Math.pow(10, decimals); 
 
             const divisor = Math.pow(10, decimals);
@@ -152,7 +150,6 @@ async function processSingleToken(db, t, now) {
             marketCap = supply * bestPrice;
         }
 
-        // Params for SQL Update
         const finalParams = [totalVolume24h, marketCap, bestPrice, totalLiquidity];
         let updateParts = [
             "volume24h = $1", 
@@ -164,17 +161,16 @@ async function processSingleToken(db, t, now) {
         
         let idx = 5;
         
-        // --- AGE FIX ---
         if (earliestPoolTime && earliestPoolTime > 0) {
             updateParts.push(`timestamp = $${idx++}`);
             finalParams.push(earliestPoolTime);
         }
 
-        if (bestChange24h !== null) { updateParts.push(`change24h = $${idx++}`); finalParams.push(bestChange24h); }
-        if (bestChange1h !== null) { updateParts.push(`change1h = $${idx++}`); finalParams.push(bestChange1h); }
-        if (bestChange5m !== null) { updateParts.push(`change5m = $${idx++}`); finalParams.push(bestChange5m); }
+        // Always update changes now, they are safe 0s if missing
+        updateParts.push(`change24h = $${idx++}`); finalParams.push(bestChange24h);
+        updateParts.push(`change1h = $${idx++}`); finalParams.push(bestChange1h);
+        updateParts.push(`change5m = $${idx++}`); finalParams.push(bestChange5m);
         
-        // --- SUPPLY FIX ---
         if (newSupply > 0) {
             updateParts.push(`supply = $${idx++}`);
             finalParams.push(newSupply);
@@ -197,14 +193,14 @@ async function processSingleToken(db, t, now) {
 
         await db.run(finalQuery, finalParams);
 
-        // Broadcast Real-Time Update
+        // Broadcast Real-Time Update with SAFE values
         broadcastTokenUpdate(t.mint, {
-            priceUsd: bestPrice,
-            marketCap: marketCap,
-            volume24h: totalVolume24h,
-            change1h: bestChange1h,
-            change24h: bestChange24h,
-            holders: holderCount,
+            priceUsd: bestPrice || 0,
+            marketCap: marketCap || 0,
+            volume24h: totalVolume24h || 0,
+            change1h: bestChange1h, // Guaranteed number or 0 by parseSafeFloat
+            change24h: bestChange24h, 
+            holders: holderCount || 0,
             updatedAt: now
         });
 
