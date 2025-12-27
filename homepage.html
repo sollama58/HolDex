@@ -5,20 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HolDex | The Terminal Fire Explorer</title>
     
-    <script src="https://bundle.run/buffer@6.0.3"></script>
+    <script src="[https://bundle.run/buffer@6.0.3](https://bundle.run/buffer@6.0.3)"></script>
     <script>
         if (typeof window.buffer !== 'undefined') {
             window.Buffer = window.buffer.Buffer;
         }
     </script>
 
-    <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
-    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
-    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <script src="https://unpkg.com/tweetnacl@1.0.3/nacl-fast.min.js"></script> 
-    <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script src="[https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js](https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js)"></script>
+    <script src="[https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js](https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js)"></script>
+    <script src="[https://cdn.socket.io/4.7.4/socket.io.min.js](https://cdn.socket.io/4.7.4/socket.io.min.js)"></script>
+    <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
+    <script src="[https://unpkg.com/lucide@latest](https://unpkg.com/lucide@latest)"></script>
+    <script src="[https://unpkg.com/tweetnacl@1.0.3/nacl-fast.min.js](https://unpkg.com/tweetnacl@1.0.3/nacl-fast.min.js)"></script> 
+    <link href="[https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap](https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap)" rel="stylesheet">
     
     <script>
         tailwind.config = {
@@ -203,14 +203,14 @@
                     <thead>
                         <tr>
                             <th width="30%" class="sort-header" onclick="setSort('newest')">Asset <i data-lucide="arrow-down-up" width="10" class="inline opacity-50 ml-1"></i></th>
-                            <th class="sort-header text-[#ea580c] border-b-[#ea580c] border-b-2" onclick="setSort('kscore')">K-Score</th>
-                            <th class="hidden md:table-cell sort-header" onclick="setSort('5m')">5m</th>
-                            <th class="hidden md:table-cell sort-header" onclick="setSort('1h')">1h</th>
-                            <th class="sort-header" onclick="setSort('24h')">24h</th>
-                            <th class="sort-header" onclick="setSort('mcap')">Mkt Cap</th>
-                            <th class="hidden md:table-cell sort-header" onclick="setSort('holders')">Holders</th>
-                            <th class="sort-header" onclick="setSort('volume')">Vol (24h)</th> 
-                            <th class="hidden md:table-cell sort-header" onclick="setSort('age')">Age</th>
+                            <th class="sort-header text-[#ea580c] border-b-[#ea580c] border-b-2" onclick="setSort('kscore')">K-Score <i data-lucide="arrow-down-up" width="10" class="inline opacity-50 ml-1"></i></th>
+                            <th class="hidden md:table-cell sort-header" onclick="setSort('5m')">5m <i data-lucide="arrow-down-up" width="10" class="inline opacity-50 ml-1"></i></th>
+                            <th class="hidden md:table-cell sort-header" onclick="setSort('1h')">1h <i data-lucide="arrow-down-up" width="10" class="inline opacity-50 ml-1"></i></th>
+                            <th class="sort-header" onclick="setSort('24h')">24h <i data-lucide="arrow-down-up" width="10" class="inline opacity-50 ml-1"></i></th>
+                            <th class="sort-header" onclick="setSort('mcap')">Mkt Cap <i data-lucide="arrow-down-up" width="10" class="inline opacity-50 ml-1"></i></th>
+                            <th class="hidden md:table-cell sort-header" onclick="setSort('holders')">Holders <i data-lucide="arrow-down-up" width="10" class="inline opacity-50 ml-1"></i></th>
+                            <th class="sort-header" onclick="setSort('volume')">Vol (24h) <i data-lucide="arrow-down-up" width="10" class="inline opacity-50 ml-1"></i></th> 
+                            <th class="hidden md:table-cell sort-header" onclick="setSort('age')">Age <i data-lucide="arrow-down-up" width="10" class="inline opacity-50 ml-1"></i></th>
                         </tr>
                     </thead>
                     <tbody id="table-body">
@@ -317,11 +317,11 @@
                 <label class="form-label">Token Mint Address</label>
                 <div class="relative"><input type="text" id="update-mint" class="form-input" placeholder="Enter Solana Mint Address..." required onblur="fetchTokenForUpdate(this.value)"><div id="mint-check-spinner" class="absolute right-3 top-3 hidden"><i data-lucide="loader-2" class="animate-spin text-[#ea580c]" width="18"></i></div></div>
                 <div id="token-preview-info" class="mb-6 p-4 bg-[#451a03] border border-[#7c2d12] rounded-lg hidden flex items-center gap-4"><img id="update-token-img" src="" class="w-12 h-12 rounded-md object-cover bg-black"><div><div class="font-bold text-white" id="update-token-name">Token Name</div><div class="text-xs text-[#9a3412] font-mono" id="update-token-ticker">TICKER</div></div></div>
-                <div class="grid grid-cols-2 gap-4"><div><label class="form-label">X (Twitter)</label><input type="url" id="update-twitter" class="form-input" placeholder="https://x.com/..."></div><div><label class="form-label">Telegram</label><input type="url" id="update-telegram" class="form-input" placeholder="https://t.me/..."></div></div>
+                <div class="grid grid-cols-2 gap-4"><div><label class="form-label">X (Twitter)</label><input type="url" id="update-twitter" class="form-input" placeholder="[https://x.com/](https://x.com/)..."></div><div><label class="form-label">Telegram</label><input type="url" id="update-telegram" class="form-input" placeholder="[https://t.me/](https://t.me/)..."></div></div>
                 <label class="form-label">Website</label><input type="url" id="update-website" class="form-input" placeholder="https://...">
                 <div class="mt-2"><label class="form-label">Description (Max 250 chars)</label><textarea id="update-description" class="form-input h-24 resize-none" maxlength="250" placeholder="Briefly describe your token project..."></textarea><div class="text-right text-[10px] text-[#9a3412] font-mono font-bold"><span id="char-count">0</span>/250</div></div>
                 <div class="flex justify-between items-center mb-1 mt-2"><label class="form-label mb-0">Banner Image URL</label><button type="button" class="info-btn flex items-center gap-1 text-xs" onclick="toggleInfoModal()"><i data-lucide="help-circle" width="14"></i> How to upload?</button></div>
-                <input type="url" id="update-banner" class="form-input" placeholder="https://i.imgur.com/...">
+                <input type="url" id="update-banner" class="form-input" placeholder="[https://i.imgur.com/](https://i.imgur.com/)...">
                 <div class="flex gap-4 mt-6"><button type="button" onclick="openPreview()" class="action-btn flex-1 flex items-center justify-center gap-2 bg-[#451a03] text-[#fb923c] border-[#ea580c] hover:bg-[#582206]"><i data-lucide="eye" width="16"></i> Preview</button><button type="submit" id="submit-btn" class="action-btn flex-1 flex items-center justify-center gap-2 bg-[#2a1005] border-[#22c55e] text-[#22c55e] hover:bg-green-900/20 disabled:opacity-50 disabled:cursor-not-allowed" disabled><i data-lucide="wallet" width="16"></i> Pay & Submit</button></div>
             </form>
             <div id="update-status" class="mt-4 text-center text-sm font-mono hidden"></div>
@@ -481,7 +481,7 @@
             <div class="p-2 bg-[#451a03] rounded-lg border border-[#7c2d12] text-[#ea580c]"><i data-lucide="terminal" width="24"></i></div>
             <div>
                 <h3 class="text-xl font-bold text-white font-sans">HolDex API Reference</h3>
-                <p class="text-xs text-[#9a3412] font-mono">Base URL: https://asdev-backend.onrender.com</p>
+                <p class="text-xs text-[#9a3412] font-mono">Base URL: [https://asdev-backend.onrender.com](https://asdev-backend.onrender.com)</p>
             </div>
         </div>
 
@@ -515,7 +515,7 @@
                 <p class="text-sm text-[#ffedd5] mb-2">Get detailed metadata, price stats, pool information, and <strong>daily holder history snapshots</strong>.</p>
                 <div class="code-block">
 <span class="text-[#9a3412]">// Example Request</span>
-fetch('<span class="text-white">https://asdev-backend.onrender.com/api/token/So111...11112</span>');
+fetch('<span class="text-white">[https://asdev-backend.onrender.com/api/token/So111...11112](https://asdev-backend.onrender.com/api/token/So111...11112)</span>');
                 </div>
             </div>
 
@@ -577,7 +577,7 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleInfoModal()"><i data-lucide="x" width="24"></i></button>
         <h3 class="text-xl font-bold text-white mb-4 font-sans">How to upload a Banner?</h3>
         <ol class="list-decimal list-inside text-[#ffedd5] space-y-3 mb-6 font-mono text-sm">
-            <li>Go to <a href="https://imgur.com/upload" target="_blank" class="text-[#ea580c] underline hover:text-[#fb923c]">imgur.com/upload</a></li>
+            <li>Go to <a href="[https://imgur.com/upload](https://imgur.com/upload)" target="_blank" class="text-[#ea580c] underline hover:text-[#fb923c]">[imgur.com/upload](https://imgur.com/upload)</a></li>
             <li>Upload your banner image (Rec: 1500x500px).</li>
             <li>Right-click the uploaded image and select <strong>"Copy Image Address"</strong>.</li>
             <li>Paste the URL here. It must end in .jpg, .png, .webp, .gif.</li>
@@ -628,14 +628,15 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
 </div>
 
 <script>
-    const API_URL = 'https://asdev-backend.onrender.com';
-    const FALLBACK_BANNER = "https://images.squarespace-cdn.com/content/690b8c21384b3f1201c2650c/967ea61f-a88a-4497-81c2-5c67d3d06d9e/Gemini_Generated_Image_c82gwyc82gwyc82g.png?content-type=image%2Fpng";
+    const API_URL = '[https://asdev-backend.onrender.com](https://asdev-backend.onrender.com)';
+    const FALLBACK_BANNER = "[https://images.squarespace-cdn.com/content/690b8c21384b3f1201c2650c/967ea61f-a88a-4497-81c2-5c67d3d06d9e/Gemini_Generated_Image_c82gwyc82gwyc82g.png?content-type=image%2Fpng](https://images.squarespace-cdn.com/content/690b8c21384b3f1201c2650c/967ea61f-a88a-4497-81c2-5c67d3d06d9e/Gemini_Generated_Image_c82gwyc82gwyc82g.png?content-type=image%2Fpng)";
     const TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
     const ASSOCIATED_TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
     
     // We removed client-side RPC ENDPOINTS. All traffic now proxies through backend.
 
     let currentSort = 'kscore'; 
+    let currentDirection = 'desc'; // Added direction state
     let searchQuery = '';
     let pollingInterval;
     let detailPollingInterval; 
@@ -1229,7 +1230,7 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         } 
     }
 
-    async function fetchTokenForUpdate(mint) { if (!mint || mint.length < 30) return; const spinner = document.getElementById('mint-check-spinner'); const infoBox = document.getElementById('token-preview-info'); if(spinner) spinner.classList.remove('hidden'); if(infoBox) infoBox.classList.add('hidden'); try { const res = await fetch(`${API_URL}/api/tokens?search=${mint}&limit=1`); const data = await res.json(); if (data.success && data.tokens.length > 0) { const token = data.tokens[0]; if (token.mint === mint) { currentUpdateTokenData = token; const img = document.getElementById('update-token-img'); const name = document.getElementById('update-token-name'); const tick = document.getElementById('update-token-ticker'); if(img) img.src = token.image || 'https://placehold.co/50'; if(name) name.innerText = token.name; if(tick) tick.innerText = token.ticker; if(infoBox) infoBox.classList.remove('hidden'); } } } catch (e) { console.error("Fetch failed", e); } finally { if(spinner) spinner.classList.add('hidden'); } }
+    async function fetchTokenForUpdate(mint) { if (!mint || mint.length < 30) return; const spinner = document.getElementById('mint-check-spinner'); const infoBox = document.getElementById('token-preview-info'); if(spinner) spinner.classList.remove('hidden'); if(infoBox) infoBox.classList.add('hidden'); try { const res = await fetch(`${API_URL}/api/tokens?search=${mint}&limit=1`); const data = await res.json(); if (data.success && data.tokens.length > 0) { const token = data.tokens[0]; if (token.mint === mint) { currentUpdateTokenData = token; const img = document.getElementById('update-token-img'); const name = document.getElementById('update-token-name'); const tick = document.getElementById('update-token-ticker'); if(img) img.src = token.image || '[https://placehold.co/50](https://placehold.co/50)'; if(name) name.innerText = token.name; if(tick) tick.innerText = token.ticker; if(infoBox) infoBox.classList.remove('hidden'); } } } catch (e) { console.error("Fetch failed", e); } finally { if(spinner) spinner.classList.add('hidden'); } }
     function openPreview() { if (!currentUpdateTokenData) { alert("Please enter a valid Mint Address first."); return; } const banner = document.getElementById('update-banner').value; const twitter = document.getElementById('update-twitter').value; const website = document.getElementById('update-website').value; const telegram = document.getElementById('update-telegram').value; const t = { ...currentUpdateTokenData, banner, twitter, website, telegram, hasCommunityUpdate: true }; const container = document.getElementById('preview-container'); let html = ''; if (t.banner) { html += `<div class="w-full h-48 md:h-64 rounded-xl border-2 border-[#7c2d12] shadow-lg relative overflow-hidden bg-black mb-6"><img src="${t.banner}" class="w-full h-full object-cover object-center" onerror="this.src='${FALLBACK_BANNER}'"><div class="absolute inset-0 bg-gradient-to-t from-[#2a1005] to-transparent opacity-80 pointer-events-none"></div></div>`; } let linksHtml = ''; if (t.twitter) linksHtml += `<a href="#" class="social-btn"><i data-lucide="twitter" width="20"></i></a>`; if (t.website) linksHtml += `<a href="#" class="social-btn"><i data-lucide="globe" width="20"></i></a>`; if (t.telegram) linksHtml += `<a href="#" class="social-btn"><i data-lucide="send" width="20"></i></a>`; const mediaHtml = renderTokenMedia(t.image, "w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black"); html += `<div class="flex flex-col md:flex-row gap-6 mb-8 items-start"><div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl">${mediaHtml}<div class="flex-1 min-w-0"><div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mb-1"><h2 class="text-3xl font-bold text-white tracking-tight font-mono">${t.ticker}</h2><span class="text-[#fb923c] text-sm bg-[#2a1005] px-3 py-1 rounded-lg border border-[#7c2d12]">${t.name}</span></div><div class="text-xs text-[#9a3412] font-mono">${t.mint}</div></div></div><div class="flex-1"></div><div class="flex flex-wrap gap-3">${linksHtml}</div></div><div class="text-center text-[#9a3412] font-mono text-xs mt-10">-- End of Preview --</div>`; if(container) container.innerHTML = html; lucide.createIcons(); document.getElementById('preview-modal').classList.add('open'); }
     function closePreview() { document.getElementById('preview-modal').classList.remove('open'); }
     function toggleInfoModal() { const modal = document.getElementById('info-modal'); isInfoModalOpen = !isInfoModalOpen; if (isInfoModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
@@ -1277,19 +1278,36 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     window.toggleApiModal = () => { const modal = document.getElementById('api-docs-modal'); isApiModalOpen = !isApiModalOpen; if (isApiModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
     window.toggleLpModal = () => { const modal = document.getElementById('lp-modal'); isLpModalOpen = !isLpModalOpen; if (isLpModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
     
-    // NEW: SET SORT FUNCTION
+    // NEW: SET SORT FUNCTION WITH TOGGLE
     window.setSort = (sort) => {
-        currentSort = sort;
+        if (currentSort === sort) {
+            // Toggle Direction
+            currentDirection = currentDirection === 'desc' ? 'asc' : 'desc';
+        } else {
+            // New Column
+            currentSort = sort;
+            currentDirection = 'desc'; // Default
+        }
         currentPage = 1;
+        
         // Update visual sort indicators
         document.querySelectorAll('.sort-header').forEach(th => {
             const onclickVal = th.getAttribute('onclick') || '';
+            const icon = th.querySelector('i');
+            
+            // Reset styles
+            th.classList.remove('text-[#ea580c]', 'border-b-[#ea580c]', 'border-b-2');
+            if(icon) icon.setAttribute('data-lucide', 'arrow-down-up');
+
+            // Apply active styles
             if (onclickVal.includes(`'${sort}'`)) {
                 th.classList.add('text-[#ea580c]', 'border-b-[#ea580c]', 'border-b-2');
-            } else {
-                th.classList.remove('text-[#ea580c]', 'border-b-[#ea580c]', 'border-b-2');
+                if(icon) {
+                    icon.setAttribute('data-lucide', currentDirection === 'desc' ? 'arrow-down' : 'arrow-up');
+                }
             }
         });
+        lucide.createIcons();
         fetchList();
     }
 
@@ -1306,7 +1324,7 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             if(pDisplay) pDisplay.innerText = `Page ${currentPage}`; 
             if(prev) prev.disabled = currentPage <= 1; 
             
-            let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&search=${encodeURIComponent(searchQuery)}&limit=100&page=${currentPage}`; 
+            let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&direction=${currentDirection}&search=${encodeURIComponent(searchQuery)}&limit=100&page=${currentPage}`; 
             
             // FIXED: Send filter to backend
             if (isVerifiedFilter) endpoint += '&filter=verified'; 

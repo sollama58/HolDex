@@ -502,10 +502,10 @@ function init(deps) {
 
     // FIXED: ADDED 'filter' query support
     router.get('/tokens', cacheControl(2, 5), apiKeyAuth(false), async (req, res) => {
-        const { search = '', sort = 'kscore', page = 1, filter } = req.query;
+        const { search = '', sort = 'kscore', page = 1, filter, direction = 'desc' } = req.query;
         try {
-            const isGenericView = !search && !filter; // Only use cache if no search and no filter
-            const cacheKey = `api:tokens:list:${sort}:${page}:${search}:${filter}`;
+            const isGenericView = !search && !filter && direction === 'desc'; // Only cache default desc sort
+            const cacheKey = `api:tokens:list:${sort}:${page}:${search}:${filter}:${direction}`;
             const redis = getClient(); 
             if (isGenericView && redis) { try { const cached = await redis.get(cacheKey); if (cached) { res.setHeader('X-Cache', 'HIT'); return res.json(JSON.parse(cached)); } } catch(e) {} }
 
@@ -520,16 +520,23 @@ function init(deps) {
                     rows = await db.all(`SELECT * FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) LIMIT 50`, [`%${search}%`]);
                 }
             } else {
-                let orderBy = 'k_score DESC';
-                if (sort === 'newest') orderBy = 'timestamp DESC';
-                else if (sort === 'age') orderBy = 'timestamp ASC'; 
-                else if (sort === 'mcap') orderBy = 'marketCap DESC';
-                else if (sort === 'volume') orderBy = 'volume24h DESC';
-                else if (sort === '24h') orderBy = 'change24h DESC';
-                else if (sort === 'liquidity') orderBy = 'liquidity DESC';
-                else if (sort === '5m') orderBy = 'change5m DESC';
-                else if (sort === '1h') orderBy = 'change1h DESC';
-                else if (sort === 'holders') orderBy = 'holders DESC'; 
+                const dir = direction.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+                let sortColumn = 'k_score';
+
+                switch(sort) {
+                    case 'newest': sortColumn = 'timestamp'; break;
+                    case 'age': sortColumn = 'timestamp'; break; 
+                    case 'mcap': sortColumn = 'marketCap'; break;
+                    case 'volume': sortColumn = 'volume24h'; break;
+                    case '24h': sortColumn = 'change24h'; break;
+                    case 'liquidity': sortColumn = 'liquidity'; break;
+                    case '5m': sortColumn = 'change5m'; break;
+                    case '1h': sortColumn = 'change1h'; break;
+                    case 'holders': sortColumn = 'holders'; break;
+                    default: sortColumn = 'k_score'; break;
+                }
+
+                let orderBy = `${sortColumn} ${dir}`;
 
                 let whereClause = '';
                 // FILTER: Only return tokens with community updates if requested
