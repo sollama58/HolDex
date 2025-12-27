@@ -233,7 +233,7 @@ function init(deps) {
     // --- BACKUP & RESTORE ---
     router.get('/admin/backup/updates', requireAdmin, async (req, res) => { try { const updates = await db.all('SELECT * FROM token_updates ORDER BY submittedAt DESC'); const keys = await db.all('SELECT * FROM api_keys'); res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Disposition', `attachment; filename=holdex_full_backup_${Date.now()}.json`); res.json({ success: true, timestamp: Date.now(), updates: updates, api_keys: keys }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     
-    // RESTORE ROUTES - FIXED: Handle lowercase keys & API Keys
+    // RESTORE ROUTES - MERGING ENABLED
     router.post('/admin/restore/updates', requireAdmin, async (req, res) => { 
         const { updates, api_keys } = req.body; 
         
@@ -243,24 +243,44 @@ function init(deps) {
         }
         
         const results = {
-            updates: { restored: 0, skipped: 0 },
-            keys: { restored: 0, skipped: 0 }
+            updates: { restored: 0, skipped: 0, merged: 0 },
+            keys: { restored: 0, skipped: 0, merged: 0 }
         };
 
         try {
-            // 1. Restore Updates
+            // 1. Restore Updates with Merge Logic
             if (Array.isArray(updates)) {
                 for (const u of updates) {
                     try {
-                        // FIX: Check signature uniqueness
                         const sig = u.signature || u.txId || 'manual_' + Date.now();
-                        const existing = await db.get('SELECT id FROM token_updates WHERE signature = $1', [sig]);
+                        const existing = await db.get('SELECT * FROM token_updates WHERE signature = $1', [sig]);
+                        
                         if (existing) {
-                            results.updates.skipped++;
+                            // MERGE: Only update if DB is empty and Backup has data
+                            const fields = ['twitter', 'website', 'telegram', 'banner', 'description', 'payer', 'status'];
+                            const sets = [];
+                            const vals = [];
+                            let idx = 1;
+
+                            for(const f of fields) {
+                                // Check if DB field is null or empty string, AND backup has a valid value
+                                if ((existing[f] === null || existing[f] === '') && (u[f] !== null && u[f] !== undefined && u[f] !== '')) {
+                                    sets.push(`${f} = $${idx++}`);
+                                    vals.push(u[f]);
+                                }
+                            }
+
+                            if (sets.length > 0) {
+                                vals.push(existing.id);
+                                await db.run(`UPDATE token_updates SET ${sets.join(', ')} WHERE id = $${idx}`, vals);
+                                results.updates.merged++;
+                            } else {
+                                results.updates.skipped++;
+                            }
                             continue;
                         }
 
-                        // FIX: Handle lowercase keys from DB dumps (submittedat vs submittedAt)
+                        // INSERT NEW
                         const timestamp = u.submittedAt || u.submittedat || Date.now();
                         const status = u.status || 'pending';
 
@@ -284,17 +304,36 @@ function init(deps) {
                 }
             }
 
-            // 2. Restore API Keys
+            // 2. Restore API Keys with Merge Logic
             if (Array.isArray(api_keys)) {
                 for (const k of api_keys) {
                     try {
-                        const existing = await db.get('SELECT key FROM api_keys WHERE key = $1', [k.key]);
+                        const existing = await db.get('SELECT * FROM api_keys WHERE key = $1', [k.key]);
                         if (existing) {
-                            results.keys.skipped++;
+                             // MERGE
+                            const fields = ['owner', 'tier']; 
+                            const sets = [];
+                            const vals = [];
+                            let idx = 1;
+
+                            for(const f of fields) {
+                                if ((existing[f] === null || existing[f] === '') && (k[f])) {
+                                    sets.push(`${f} = $${idx++}`);
+                                    vals.push(k[f]);
+                                }
+                            }
+                            
+                            if (sets.length > 0) {
+                                vals.push(existing.key);
+                                await db.run(`UPDATE api_keys SET ${sets.join(', ')} WHERE key = $${idx}`, vals);
+                                results.keys.merged++;
+                            } else {
+                                results.keys.skipped++;
+                            }
                             continue;
                         }
                         
-                        // FIX: Handle lowercase keys
+                        // INSERT NEW
                         const createdAt = k.created_at || k.createdAt || Date.now();
                         const limit = k.requests_limit || k.requestsLimit || 1000;
                         const active = (k.is_active !== undefined) ? k.is_active : true;
@@ -309,7 +348,7 @@ function init(deps) {
                 }
             }
 
-            res.json({ success: true, results, message: `Restored: ${results.updates.restored} updates, ${results.keys.restored} keys.` });
+            res.json({ success: true, results, message: `Update Log: ${results.updates.restored} added, ${results.updates.merged} merged. Keys: ${results.keys.restored} added, ${results.keys.merged} merged.` });
 
         } catch (e) { 
             res.status(500).json({ success: false, error: e.message }); 
