@@ -4,8 +4,11 @@ const { broadcastTokenUpdate } = require('../services/socket');
 const { getHolderCountFromRPC } = require('../services/solana');
 
 let isRunning = false;
-const BATCH_SIZE = 5; 
-const BATCH_DELAY_MS = 2000; 
+
+// OOM FIX: Reduced concurrency to 1 to prevent multiple massive holder arrays (100k+ items) 
+// from existing in memory simultaneously.
+const BATCH_SIZE = 1; 
+const BATCH_DELAY_MS = 1000; 
 
 async function fetchGeckoTerminalData(mintAddress) {
     try {
@@ -33,8 +36,8 @@ async function fetchTokenDetails(mintAddress) {
 
 async function processSingleToken(db, t, now) {
     try {
-        const poolsData = await fetchGeckoTerminalData(t.mint);
-        const tokenDetails = await fetchTokenDetails(t.mint);
+        let poolsData = await fetchGeckoTerminalData(t.mint);
+        let tokenDetails = await fetchTokenDetails(t.mint);
         
         // --- 1. HOLDER COUNT LOGIC (OPTIMIZED) ---
         let holderCount = t.holders || 0;
@@ -159,12 +162,16 @@ async function processSingleToken(db, t, now) {
             marketCap = supply * bestPrice;
         }
 
+        // Explicitly clear large objects
+        poolsData = null;
+        tokenDetails = null;
+
         // --- 4. CONSTRUCT QUERY ---
         const finalParams = [];
         const updateParts = [];
         let idx = 1;
 
-        if (poolsData && poolsData.length > 0) {
+        if (totalVolume24h > 0 || totalLiquidity > 0) {
             updateParts.push(`volume24h = $${idx++}`); finalParams.push(totalVolume24h);
             updateParts.push(`marketCap = $${idx++}`); finalParams.push(marketCap);
             updateParts.push(`priceUsd = $${idx++}`); finalParams.push(bestPrice);
@@ -205,7 +212,7 @@ async function processSingleToken(db, t, now) {
         }
 
         // Broadcast (Always broadcast current state)
-        if (poolsData && poolsData.length > 0) {
+        if (totalLiquidity > 0) {
             broadcastTokenUpdate(t.mint, {
                 priceUsd: bestPrice,
                 marketCap: marketCap,
@@ -234,20 +241,32 @@ async function updateMetadata(deps) {
     const now = Date.now();
 
     try {
-        // Fetch last_holder_check and holders in the query
-        const tokens = await db.all(`
+        // Fetch tokens that haven't been updated recently or need holder checks
+        // OOM FIX: Reduced LIMIT from 75 to 25 to reduce working set size
+        let tokens = await db.all(`
             SELECT mint, supply, decimals, holders, last_holder_check 
             FROM tokens 
             ORDER BY liquidity DESC, updated_at ASC 
-            LIMIT 75
+            LIMIT 25
         `);
         
-        for (let i = 0; i < tokens.length; i += BATCH_SIZE) {
-            const batch = tokens.slice(i, i + BATCH_SIZE);
-            await Promise.all(batch.map(t => processSingleToken(db, t, now)));
-            if (i + BATCH_SIZE < tokens.length) {
-                await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
+        if (tokens && tokens.length > 0) {
+            // Process serially or in small batches
+            for (let i = 0; i < tokens.length; i += BATCH_SIZE) {
+                const batch = tokens.slice(i, i + BATCH_SIZE);
+                await Promise.all(batch.map(t => processSingleToken(db, t, now)));
+                if (i + BATCH_SIZE < tokens.length) {
+                    await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
+                }
             }
+        }
+        
+        // OOM FIX: Explicitly nullify the large array to help GC
+        tokens = null;
+
+        // OOM FIX: Manual GC Trigger (if available)
+        if (global.gc) {
+            try { global.gc(); } catch (e) {}
         }
 
     } catch (e) {

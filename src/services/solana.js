@@ -74,22 +74,32 @@ async function fetchAccountsForProgram(conn, programId, mintAddress) {
         filters.push({ memcmp: { offset: 0, bytes: mintAddress } });
 
         // Fetch just the Amount (offset 64, length 8) to verify balance > 0
-        const accounts = await retryRPC(() => conn.getProgramAccounts(programId, {
+        // NOTE: This can still return a massive array for tokens with 100k+ holders
+        let accounts = await retryRPC(() => conn.getProgramAccounts(programId, {
             filters: filters,
             dataSlice: { offset: 64, length: 8 } 
         }), 2, 500); 
 
         let activeHolders = 0;
-        for (const acc of accounts) {
-            if (acc.account.data && acc.account.data.length === 8) {
-                const balance = acc.account.data.readBigUInt64LE(0);
-                if (balance > 0n) activeHolders++;
+        if (accounts) {
+            for (const acc of accounts) {
+                if (acc.account.data && acc.account.data.length === 8) {
+                    const balance = acc.account.data.readBigUInt64LE(0);
+                    if (balance > 0n) activeHolders++;
+                }
             }
         }
+        
+        // OOM FIX: Explicitly nullify the large array immediately after use
+        accounts = null;
+        
         return activeHolders;
     } catch (e) {
         if (e.message.includes('429')) {
              logger.warn(`⚠️ RPC Rate Limit (Holders Check): ${e.message}`);
+        } else {
+             // If we hit an OOM or other error here, log it but don't crash
+             logger.warn(`⚠️ RPC Holder Check Error: ${e.message}`);
         }
         return 0;
     }
