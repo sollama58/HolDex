@@ -36,6 +36,7 @@ async function fetchInitialMarketData(mint) {
             change1h: parseFloat(attrs.price_change_percentage?.h1 || 0),
             change5m: parseFloat(attrs.price_change_percentage?.m5 || 0),
             marketCap: parseFloat(attrs.fdv_usd || attrs.market_cap_usd || 0),
+            supply: parseFloat(attrs.total_supply || 0),
             holders: holders
         };
     } catch (e) {
@@ -47,15 +48,9 @@ async function fetchInitialMarketData(mint) {
 // HELPER: Index Token On-Chain (If not exists)
 // -----------------------------------------------------------------------------
 async function indexTokenOnChain(mint) {
-    // 1. Check if exists
     const existing = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
     if (existing) return;
 
-    // 2. Fetch Metadata (Metaplex / Helius / Etc would go here, simplified for now)
-    // For now we use a placeholder or basic fetch if we had a metadata service.
-    // We'll rely on the background worker to fill in details later.
-    
-    // 3. Fetch Initial Market Data
     const marketData = await fetchInitialMarketData(mint);
     
     const initialPrice = marketData?.priceUsd || 0;
@@ -63,7 +58,6 @@ async function indexTokenOnChain(mint) {
     const initialVol = marketData?.volume24h || 0;
     const initialHolders = marketData?.holders || 0;
 
-    // 4. Insert into DB
     try {
         await db.run(`
             INSERT INTO tokens (
@@ -85,7 +79,6 @@ async function indexTokenOnChain(mint) {
             initialHolders 
         ]);
 
-        // Trigger background update immediately
         const { enqueueTokenUpdate } = require('../services/queue');
         if (enqueueTokenUpdate) enqueueTokenUpdate(mint);
 
@@ -109,15 +102,10 @@ router.get('/tokens', async (req, res) => {
             `;
             const params = [`%${search}%`];
 
-            // Whitelist sort columns
             const safeSort = ['k_score', 'volume24h', 'liquidity', 'marketCap', 'created_at', 'change24h'].includes(sort) 
                 ? sort 
                 : 'k_score';
             
-            // Handle casing for sort if needed (though Postgres is case insensitive for unquoted)
-            // But if we used CamelCase in CREATE TABLE, we might need quotes or rely on it being lowercase in DB.
-            // Assuming DB columns are effectively lowercase or case-insensitive.
-
             query += ` ORDER BY "${safeSort}" ${order === 'asc' ? 'ASC' : 'DESC'} LIMIT $2`;
             params.push(limit);
 
@@ -137,7 +125,7 @@ router.get('/tokens', async (req, res) => {
                     holders: r.holders || 0,
                     k_score: r.k_score || 0,
                     risk_score: r.risk_score || 0,
-                    timestamp: r.timestamp // Creation time or pool time
+                    timestamp: r.timestamp 
                 }))
             };
         });
@@ -150,15 +138,13 @@ router.get('/tokens', async (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// GET /token/:mint (Detail View)
+// GET /token/:mint (Detail View) - WITH LIVE REPAIR
 // -----------------------------------------------------------------------------
 router.get('/token/:mint', async (req, res) => {
     const { mint } = req.params;
     const cacheKey = `token_detail_${mint}`;
 
     try {
-        // 1. Try to index if missing (Lazy Indexing)
-        // We do this outside cache so it happens once
         await indexTokenOnChain(mint);
 
         const result = await smartCache(cacheKey, 5, async () => {
@@ -166,35 +152,49 @@ router.get('/token/:mint', async (req, res) => {
             
             if (!token) return { success: false, error: "Token not found" };
 
-            // Fetch Pairs/Pools
-            const pairs = await db.all('SELECT * FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC', [mint]);
+            // --- LIVE DATA REPAIR ---
+            // If essential data is missing (0), try to fetch it fresh NOW
+            // instead of waiting for the background worker.
+            let marketCap = token.marketcap || token.marketCap || 0;
+            let holders = token.holders || 0;
+            let priceUsd = token.priceusd || token.priceUsd || 0;
 
-            // Fetch Holder History
+            if (marketCap === 0 || holders === 0) {
+                const freshData = await fetchInitialMarketData(mint);
+                if (freshData) {
+                    if (marketCap === 0 && freshData.marketCap > 0) marketCap = freshData.marketCap;
+                    if (holders === 0 && freshData.holders > 0) holders = freshData.holders;
+                    if (priceUsd === 0 && freshData.priceUsd > 0) priceUsd = freshData.priceUsd;
+
+                    // Fire-and-forget update to DB to save this fresh data
+                    db.run(`
+                        UPDATE tokens 
+                        SET marketCap = $1, holders = $2, priceUsd = $3, updated_at = CURRENT_TIMESTAMP 
+                        WHERE mint = $4
+                    `, [marketCap, holders, priceUsd, mint]).catch(err => console.error("Live patch DB error:", err.message));
+                }
+            }
+
+            const pairs = await db.all('SELECT * FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC', [mint]);
             const holderHistory = await db.all('SELECT * FROM holders_history WHERE mint = $1 ORDER BY timestamp ASC', [mint]);
 
-            // Clone and Normalize Token Data
             let tokenData = { ...token };
             if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
 
-            // --- KEY FIX: Normalize Casing for Frontend ---
-            // Postgres returns lowercase keys. Frontend expects camelCase.
-            tokenData.marketCap = tokenData.marketcap || tokenData.marketCap || 0;
-            tokenData.priceUsd = tokenData.priceusd || tokenData.priceUsd || 0;
+            // Normalize Keys for Frontend
+            tokenData.marketCap = marketCap;
+            tokenData.holders = holders;
+            tokenData.priceUsd = priceUsd;
             tokenData.volume24h = tokenData.volume24h || 0;
             tokenData.liquidity = tokenData.liquidity || 0;
-            tokenData.holders = tokenData.holders || 0;
             tokenData.change24h = tokenData.change24h || 0;
             tokenData.change1h = tokenData.change1h || 0;
             tokenData.change5m = tokenData.change5m || 0;
             tokenData.timestamp = tokenData.timestamp || 0;
-            
-            // Patch price from main pool if available/better
-            if (pairs.length > 0) {
-                const mainPool = pairs[0];
-                // If token price is 0 or missing, use pool price
-                if (!tokenData.priceUsd || tokenData.priceUsd === 0) {
-                    if (mainPool.price_usd > 0) tokenData.priceUsd = mainPool.price_usd;
-                }
+
+            // Patch price from main pool if still zero
+            if (pairs.length > 0 && tokenData.priceUsd === 0) {
+                if (pairs[0].price_usd > 0) tokenData.priceUsd = pairs[0].price_usd;
             }
 
             return { 

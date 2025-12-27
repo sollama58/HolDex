@@ -43,7 +43,6 @@ async function processSingleToken(db, t, now) {
         if (tokenDetails && tokenDetails.attributes && tokenDetails.attributes.holder_count) {
             holderCount = parseInt(tokenDetails.attributes.holder_count);
         } else if (tokenDetails && tokenDetails.attributes && tokenDetails.attributes.holders_count) {
-             // Handle potential API property variations
             holderCount = parseInt(tokenDetails.attributes.holders_count);
         }
 
@@ -57,7 +56,6 @@ async function processSingleToken(db, t, now) {
 
         // If no pools, just update timestamp/holders and return
         if (!poolsData || poolsData.length === 0) {
-            // Still save holders if we found them
             if (holderCount > 0) {
                 await db.run(`UPDATE tokens SET holders = $1, updated_at = CURRENT_TIMESTAMP WHERE mint = $2`, [holderCount, t.mint]);
             } else {
@@ -126,8 +124,9 @@ async function processSingleToken(db, t, now) {
             `, [address, t.mint, dexId, price, liqUsd, vol24h, now, tokenA, tokenB]);
         }
         
-        // --- 2. MARKET CAP LOGIC (IMPROVED) ---
+        // --- 2. MARKET CAP & SUPPLY LOGIC ---
         let marketCap = 0;
+        let newSupply = 0;
         
         // A. Try direct FDV from Gecko (Most Accurate)
         if (tokenDetails && tokenDetails.attributes) {
@@ -135,16 +134,17 @@ async function processSingleToken(db, t, now) {
         }
 
         // B. Fallback: Manual Calculation
-        if (marketCap === 0 && bestPrice > 0) {
-            const decimals = t.decimals || 9; 
-            let rawSupply = parseFloat(t.supply || '0');
-            
-            // Try to heal missing supply from Gecko
-            if (rawSupply === 0 && tokenDetails?.attributes?.total_supply) {
-                rawSupply = parseFloat(tokenDetails.attributes.total_supply);
-            }
+        const decimals = t.decimals || 9; 
+        let rawSupply = parseFloat(t.supply || '0');
+        
+        // Try to heal missing supply from Gecko
+        if ((rawSupply === 0) && tokenDetails?.attributes?.total_supply) {
+            rawSupply = parseFloat(tokenDetails.attributes.total_supply);
+            newSupply = rawSupply; // Flag to update DB
+        }
 
-            // Ultimate Fallback
+        if (marketCap === 0 && bestPrice > 0) {
+            // Ultimate Fallback for supply
             if (rawSupply === 0) rawSupply = 1000000000 * Math.pow(10, decimals); 
 
             const divisor = Math.pow(10, decimals);
@@ -174,6 +174,12 @@ async function processSingleToken(db, t, now) {
         if (bestChange1h !== null) { updateParts.push(`change1h = $${idx++}`); finalParams.push(bestChange1h); }
         if (bestChange5m !== null) { updateParts.push(`change5m = $${idx++}`); finalParams.push(bestChange5m); }
         
+        // --- SUPPLY FIX ---
+        if (newSupply > 0) {
+            updateParts.push(`supply = $${idx++}`);
+            finalParams.push(newSupply);
+        }
+
         if (holderCount > 0) {
             updateParts.push(`holders = $${idx++}`);
             finalParams.push(holderCount);
