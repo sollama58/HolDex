@@ -46,6 +46,9 @@ async function retryRPC(fn, retries = 3, delay = 1000) {
             // Don't retry if it's a 400 Bad Request (Invalid input)
             if (e.message && e.message.includes('400')) throw e;
 
+            // Don't retry "Too many accounts" errors - they will never succeed
+            if (e.message && (e.message.includes('Too many accounts') || e.message.includes('Size limit'))) throw e;
+
             if (i === retries - 1) throw e; // Throw on last failure
             
             // Check for specific RPC errors to handle smarter
@@ -95,6 +98,12 @@ async function fetchAccountsForProgram(conn, programId, mintAddress) {
         
         return activeHolders;
     } catch (e) {
+        // Specific handling for "Too many accounts"
+        if (e.message.includes('Too many accounts') || e.message.includes('Size limit')) {
+            logger.info(`ℹ️ Token ${mintAddress} has too many holders to scan via standard RPC. Skipping count.`);
+            return 0; // Return 0 (or a high placeholder like 999999 if preferred)
+        }
+        
         if (e.message.includes('429')) {
              logger.warn(`⚠️ RPC Rate Limit (Holders Check): ${e.message}`);
         } else {
@@ -112,16 +121,19 @@ async function fetchAccountsForProgram(conn, programId, mintAddress) {
 async function getHolderCountFromRPC(mintAddress) {
     if (!mintAddress) return 0;
     
+    // Sanitize input
+    const cleanMint = mintAddress.trim();
+    
     const conn = getSolanaConnection();
 
     // 1. Check Legacy Token Program first (Most common)
-    let count = await fetchAccountsForProgram(conn, TOKEN_PROGRAM_ID, mintAddress);
+    let count = await fetchAccountsForProgram(conn, TOKEN_PROGRAM_ID, cleanMint);
 
     // 2. If Legacy returns 0, it MIGHT be a Token-2022 token. Check that.
     // NOTE: Some tokens might have holders in BOTH if they are migrating, so strictly 
     // speaking we should sum them, but usually it's one or the other.
     if (count === 0) {
-        const count2022 = await fetchAccountsForProgram(conn, TOKEN_2022_PROGRAM_ID, mintAddress);
+        const count2022 = await fetchAccountsForProgram(conn, TOKEN_2022_PROGRAM_ID, cleanMint);
         count += count2022;
     }
 
