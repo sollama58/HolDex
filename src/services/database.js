@@ -54,8 +54,8 @@ async function initDB() {
                 logger.info(`🔌 Database: No Read Replica configured. Using Primary for reads.`);
             }
 
-            // Schema Creation (Only on Primary)
-            // Added updated_at column
+            // --- TABLE CREATION ---
+            // Note: CREATE TABLE IF NOT EXISTS does NOT add missing columns to existing tables.
             await primaryPool.query(`
                 CREATE TABLE IF NOT EXISTS tokens (
                     mint TEXT PRIMARY KEY,
@@ -142,11 +142,29 @@ async function initDB() {
 
                 CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score DESC);
                 CREATE INDEX IF NOT EXISTS idx_tokens_timestamp ON tokens(timestamp DESC);
-                CREATE INDEX IF NOT EXISTS idx_tokens_updated_at ON tokens(updated_at ASC);
                 CREATE INDEX IF NOT EXISTS idx_pools_mint ON pools(mint);
                 CREATE INDEX IF NOT EXISTS idx_candles_pool_time ON candles_1m(pool_address, timestamp);
                 CREATE INDEX IF NOT EXISTS idx_holders_hist_mint ON holders_history(mint);
             `);
+
+            // --- AUTO-MIGRATIONS (CRITICAL FIX) ---
+            // Explicitly force these columns to exist to fix "column does not exist" errors
+            // on pre-existing databases.
+            try {
+                // Postgres 9.6+ supports IF NOT EXISTS for ADD COLUMN
+                await primaryPool.query(`
+                    ALTER TABLE tokens ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+                    ALTER TABLE tokens ADD COLUMN IF NOT EXISTS last_holder_check BIGINT DEFAULT 0;
+                    ALTER TABLE tokens ADD COLUMN IF NOT EXISTS holders INTEGER DEFAULT 0;
+                `);
+                
+                // Ensure index exists for performance
+                await primaryPool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_updated_at ON tokens(updated_at ASC)`);
+                
+                // logger.info("✅ Database Schema & Migrations Verified.");
+            } catch (migErr) {
+                logger.warn(`Migration Warning (non-fatal): ${migErr.message}`);
+            }
 
             dbWrapper = {
                 // Route SELECT to Read Pool, everything else to Primary
