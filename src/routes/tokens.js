@@ -3,6 +3,9 @@ const router = express.Router();
 const { db } = require('../services/database'); 
 const axios = require('axios');
 
+// Helper for delay
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 // Simple in-memory cache helper
 const cache = new Map();
 async function smartCache(key, ttlSeconds, fetchFn) {
@@ -24,7 +27,6 @@ async function fetchInitialMarketData(mint) {
         const res = await axios.get(url, { timeout: 3000 });
         const attrs = res.data.data.attributes;
         
-        // Try to get holders immediately if available
         let holders = 0;
         if (attrs.holder_count) holders = parseInt(attrs.holder_count);
         else if (attrs.holders_count) holders = parseInt(attrs.holders_count);
@@ -138,58 +140,82 @@ router.get('/tokens', async (req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// GET /token/:mint (Detail View) - WITH LIVE REPAIR & SANITIZATION
+// GET /token/:mint (Detail View) - WITH DELAY & RETRY
 // -----------------------------------------------------------------------------
 router.get('/token/:mint', async (req, res) => {
     const { mint } = req.params;
     const cacheKey = `token_detail_${mint}`;
 
     try {
+        // 1. Initial Check / Index
         await indexTokenOnChain(mint);
 
-        const result = await smartCache(cacheKey, 5, async () => {
-            let token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+        // 2. DELAY LOOP: Wait for data readiness
+        // We bypass cache if data looks invalid to force a retry logic, then cache the result
+        const fetchAndValidate = async () => {
+            let token = null;
+            let attempts = 0;
+            const maxAttempts = 3;
+
+            while (attempts < maxAttempts) {
+                token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+                
+                // If we have valid critical data, break loop early
+                if (token && (token.holders > 0 || token.priceusd > 0)) {
+                    break;
+                }
+                
+                // If missing data, trigger live repair logic
+                if (token) {
+                    const freshData = await fetchInitialMarketData(mint);
+                    if (freshData) {
+                        const mcap = freshData.marketCap || token.marketcap || 0;
+                        const hld = freshData.holders || token.holders || 0;
+                        const prc = freshData.priceUsd || token.priceusd || 0;
+                        
+                        // Update DB immediately and await
+                        await db.run(`
+                            UPDATE tokens 
+                            SET marketCap = $1, holders = $2, priceUsd = $3, updated_at = CURRENT_TIMESTAMP 
+                            WHERE mint = $4
+                        `, [mcap, hld, prc, mint]);
+
+                        // Also push to history if we have holders
+                        if (hld > 0) {
+                            const today = Math.floor(Date.now() / (24 * 60 * 60 * 1000)) * (24 * 60 * 60 * 1000);
+                            await db.run(`
+                                INSERT INTO holders_history (mint, count, timestamp)
+                                VALUES ($1, $2, $3)
+                                ON CONFLICT(mint, timestamp) DO UPDATE SET count = EXCLUDED.count
+                            `, [mint, hld, today]);
+                        }
+                    }
+                }
+
+                // Wait 500ms before checking again
+                if (attempts < maxAttempts - 1) {
+                    await delay(500);
+                }
+                attempts++;
+            }
             
+            // Final Fetch
+            token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
             if (!token) return { success: false, error: "Token not found" };
 
-            // --- LIVE DATA REPAIR ---
-            let marketCap = token.marketcap || token.marketCap || 0;
-            let holders = token.holders || 0;
-            let priceUsd = token.priceusd || token.priceUsd || 0;
-
-            if (marketCap === 0 || holders === 0) {
-                const freshData = await fetchInitialMarketData(mint);
-                if (freshData) {
-                    if (marketCap === 0 && freshData.marketCap > 0) marketCap = freshData.marketCap;
-                    if (holders === 0 && freshData.holders > 0) holders = freshData.holders;
-                    if (priceUsd === 0 && freshData.priceUsd > 0) priceUsd = freshData.priceUsd;
-
-                    db.run(`
-                        UPDATE tokens 
-                        SET marketCap = $1, holders = $2, priceUsd = $3, updated_at = CURRENT_TIMESTAMP 
-                        WHERE mint = $4
-                    `, [marketCap, holders, priceUsd, mint]).catch(err => console.error("Live patch DB error:", err.message));
-                }
-            }
-
+            // Fetch relations
             const pairs = await db.all('SELECT * FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC', [mint]);
             const holderHistory = await db.all('SELECT * FROM holders_history WHERE mint = $1 ORDER BY timestamp ASC', [mint]);
 
-            // --- SANITIZE CHART DATA (Fix "Value is null" error) ---
-            const cleanHolderHistory = holderHistory
-                .map(h => ({
-                    timestamp: Number(h.timestamp),
-                    count: h.count ? Number(h.count) : 0 // Force number, default to 0
-                }))
-                .filter(h => h.timestamp > 0); // Remove invalid timestamps
-
+            // --- DATA NORMALIZATION & SANITIZATION ---
+            
             let tokenData = { ...token };
             if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
 
-            // Normalize Keys for Frontend
-            tokenData.marketCap = marketCap;
-            tokenData.holders = holders;
-            tokenData.priceUsd = priceUsd;
+            // Map DB lowercase to frontend camelCase
+            tokenData.marketCap = tokenData.marketcap || tokenData.marketCap || 0;
+            tokenData.holders = tokenData.holders || 0;
+            tokenData.priceUsd = tokenData.priceusd || tokenData.priceUsd || 0;
             tokenData.volume24h = tokenData.volume24h || 0;
             tokenData.liquidity = tokenData.liquidity || 0;
             tokenData.change24h = tokenData.change24h || 0;
@@ -197,8 +223,37 @@ router.get('/token/:mint', async (req, res) => {
             tokenData.change5m = tokenData.change5m || 0;
             tokenData.timestamp = tokenData.timestamp || 0;
 
+            // Patch price
             if (pairs.length > 0 && tokenData.priceUsd === 0) {
                 if (pairs[0].price_usd > 0) tokenData.priceUsd = pairs[0].price_usd;
+            }
+
+            // Sanitize History for Charts
+            // 1. Convert timestamp to SECONDS (standard for charts) if it looks like MS
+            // 2. Ensure count is not null
+            let cleanHolderHistory = holderHistory
+                .map(h => {
+                    let ts = Number(h.timestamp);
+                    // Heuristic: If timestamp is > 10 trillion, it's probably micro; > 10 billion, it's MS. 
+                    // Standard Unix seconds ~1.7 billion.
+                    if (ts > 10000000000) ts = Math.floor(ts / 1000); 
+                    
+                    return {
+                        time: ts, // "time" is standard for Lightweight Charts
+                        value: h.count ? Number(h.count) : 0 // "value" is standard
+                    };
+                })
+                .filter(h => h.time > 0 && h.value >= 0)
+                // Sort by time just in case
+                .sort((a, b) => a.time - b.time);
+
+            // If history is empty but we have current holders, fake a point
+            // This prevents "Value is null" if the chart tries to render "current" state
+            if (cleanHolderHistory.length === 0 && tokenData.holders > 0) {
+                cleanHolderHistory.push({
+                    time: Math.floor(Date.now() / 1000),
+                    value: tokenData.holders
+                });
             }
 
             return { 
@@ -206,11 +261,12 @@ router.get('/token/:mint', async (req, res) => {
                 token: { 
                     ...tokenData, 
                     pairs, 
-                    holderHistory: cleanHolderHistory // Return sanitized history
+                    holderHistory: cleanHolderHistory 
                 } 
             };
-        });
+        };
 
+        const result = await smartCache(cacheKey, 5, fetchAndValidate);
         res.json(result);
 
     } catch (e) {
