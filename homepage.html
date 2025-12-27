@@ -772,12 +772,21 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             const data = await res.json();
             
             if (data.success && Array.isArray(data.candles)) {
-                const cleanData = data.candles.map(c => {
+                // ROBUST DATA CLEANING (Fixes "Value is Null")
+                // 1. Map and Parse
+                // 2. Filter invalid numbers/NaN/nulls
+                // 3. Sort by Time Ascending
+                // 4. Deduplicate Times
+                let cleanData = data.candles.map(c => {
                     let open = parseFloat(c.open);
                     let high = parseFloat(c.high);
                     let low = parseFloat(c.low);
                     let close = parseFloat(c.close);
+                    let time = parseInt(c.time);
                     
+                    // Filter out bad data points that crash the chart
+                    if (!time || isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close)) return null;
+
                     if (currentChartMode === 'mcap') {
                         open *= currentNormalizedSupply;
                         high *= currentNormalizedSupply;
@@ -785,9 +794,21 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
                         close *= currentNormalizedSupply;
                     }
 
-                    return { time: c.time, open, high, low, close };
-                });
+                    return { time: time, open, high, low, close };
+                })
+                .filter(c => c !== null)
+                .sort((a,b) => a.time - b.time); // Lightweight charts STRICTLY requires ascending order
 
+                // Deduplicate (Duplicate times crash the chart)
+                const uniqueData = [];
+                const seenTimes = new Set();
+                for (const d of cleanData) {
+                    if (!seenTimes.has(d.time)) {
+                        seenTimes.add(d.time);
+                        uniqueData.push(d);
+                    }
+                }
+                
                 chartInstance.applyOptions({
                     rightPriceScale: {
                         autoScale: true,
@@ -799,10 +820,10 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
                     }
                 });
 
-                candleSeries.setData(cleanData);
+                candleSeries.setData(uniqueData);
                 
-                // Always fit content on load
-                if (cleanData.length > 0) {
+                // Always fit content on load if data exists
+                if (uniqueData.length > 0) {
                      chartInstance.timeScale().fitContent();
                 }
             } else if (candleSeries) {
