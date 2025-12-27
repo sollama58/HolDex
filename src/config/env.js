@@ -47,7 +47,10 @@ module.exports = {
     PORT: process.env.PORT || 3000,
     DATABASE_URL: process.env.DATABASE_URL || 'postgresql://user:password@localhost:5432/holdex',
     REDIS_URL: process.env.REDIS_URL || 'redis://redis:6379',
+    
+    // EXPORT BOTH NAMES TO PREVENT MISMATCHES
     SOLANA_RPC_URL: rpcUrl,
+    RPC_URL: rpcUrl, 
     
     // CORS Configuration
     CORS_ORIGINS: parseCors(process.env.CORS_ORIGINS),
