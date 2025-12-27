@@ -255,7 +255,7 @@ function init(deps) {
     router.post('/admin/delete-token', requireAdmin, async (req, res) => { const { mint } = req.body; try { const pools = await db.all(`SELECT address FROM pools WHERE mint = $1`, [mint]); const poolAddresses = pools.map(p => p.address); if (poolAddresses.length > 0) { await db.run(`DELETE FROM candles_1m WHERE pool_address = ANY($1)`, [poolAddresses]); await db.run(`DELETE FROM active_trackers WHERE pool_address = ANY($1)`, [poolAddresses]); } await db.run(`DELETE FROM pools WHERE mint = $1`, [mint]); await db.run(`DELETE FROM k_scores WHERE mint = $1`, [mint]); await db.run(`DELETE FROM token_updates WHERE mint = $1`, [mint]); await db.run(`DELETE FROM holders_history WHERE mint = $1`, [mint]); await db.run(`DELETE FROM tokens WHERE mint = $1`, [mint]); const redis = getClient(); if (redis) { await redis.del(`token:detail:${mint}`); } res.json({ success: true, message: "Token and all history permanently deleted." }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => { const { mint } = req.body; try { const newScore = await updateSingleToken({ db }, mint); res.json({ success: true, message: `K-Score Updated: ${newScore}` }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
 
-    // --- NEW: BACKUP & RESTORE ROUTES ---
+    // --- BACKUP & RESTORE ROUTES ---
     
     // BACKUP: Dump all token_updates to a JSON file
     router.get('/admin/backup/updates', requireAdmin, async (req, res) => {
@@ -269,7 +269,7 @@ function init(deps) {
         }
     });
 
-    // RESTORE: Import token_updates from JSON (Merge Logic)
+    // RESTORE: Import token_updates with Force-Indexing
     router.post('/admin/restore/updates', requireAdmin, async (req, res) => {
         const { updates } = req.body;
         if (!Array.isArray(updates)) {
@@ -278,14 +278,15 @@ function init(deps) {
 
         let restoredCount = 0;
         let skippedCount = 0;
+        let indexedCount = 0;
 
         try {
             for (const u of updates) {
-                // PG column names are often lowercase, handle both camelCase (JS) and lowercase (DB dump)
-                const signature = u.signature;
-                const mint = u.mint;
+                // Normalize keys (handle case sensitivity from JSON)
+                const signature = u.signature || u.Signature;
+                const mint = u.mint || u.Mint;
                 
-                // Use fallback for case-sensitivity issues
+                // Fields with fallback
                 const twitter = u.twitter;
                 const website = u.website;
                 const telegram = u.telegram;
@@ -297,26 +298,71 @@ function init(deps) {
 
                 if (!signature || !mint) {
                     skippedCount++; 
-                    continue; // Invalid record
+                    continue; 
                 }
 
-                // Check duplicate by signature
-                const existing = await db.get('SELECT id FROM token_updates WHERE signature = $1', [signature]);
+                // 1. RESTORE UPDATE RECORD
+                const existingUpdate = await db.get('SELECT id FROM token_updates WHERE signature = $1', [signature]);
                 
-                if (existing) {
+                if (!existingUpdate) {
+                    await db.run(`
+                        INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    `, [mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer]);
+                    restoredCount++;
+                } else {
                     skippedCount++;
-                    continue;
                 }
 
-                await db.run(`
-                    INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                `, [mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer]);
+                // 2. ENSURE TOKEN EXISTS (CRITICAL FIX)
+                let tokenRow = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
                 
-                restoredCount++;
+                if (!tokenRow) {
+                    try {
+                        // logger.info(`Restoring: Token ${mint} missing from DB. Indexing from Chain...`);
+                        await indexTokenOnChain(mint);
+                        // RE-FETCH after indexing to get the row
+                        tokenRow = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+                        if (tokenRow) indexedCount++;
+                    } catch (idxErr) {
+                        logger.warn(`Failed to auto-index token ${mint} during restore: ${idxErr.message}`);
+                    }
+                }
+
+                // 3. IF APPROVED, SYNC METADATA TO TOKENS TABLE
+                // This ensures the website/twitter links appear immediately
+                if (tokenRow && status === 'approved') {
+                    try {
+                        let meta = {};
+                        if (tokenRow.metadata) {
+                            try { meta = typeof tokenRow.metadata === 'string' ? JSON.parse(tokenRow.metadata) : tokenRow.metadata; } catch (e) {}
+                        }
+                        
+                        // Merge restored data over existing data
+                        meta.community = {
+                            ...(meta.community || {}),
+                            twitter: twitter || meta.community?.twitter,
+                            website: website || meta.community?.website,
+                            telegram: telegram || meta.community?.telegram,
+                            banner: banner || meta.community?.banner,
+                            description: description || meta.community?.description
+                        };
+                        
+                        const jsonStr = JSON.stringify(meta);
+                        await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE WHERE mint = $2`, [jsonStr, mint]);
+                    } catch (syncErr) {
+                        logger.warn(`Failed to sync metadata for ${mint}: ${syncErr.message}`);
+                    }
+                }
             }
 
-            res.json({ success: true, restored: restoredCount, skipped: skippedCount, message: `Restore Complete. Imported: ${restoredCount}, Skipped (Duplicates): ${skippedCount}` });
+            res.json({ 
+                success: true, 
+                restored: restoredCount, 
+                skipped: skippedCount, 
+                indexed: indexedCount,
+                message: `Restore Complete. Imported: ${restoredCount}, Skipped: ${skippedCount}, Auto-Indexed Tokens: ${indexedCount}` 
+            });
         } catch (e) {
             res.status(500).json({ success: false, error: e.message });
         }
