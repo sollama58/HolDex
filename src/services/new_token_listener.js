@@ -1,9 +1,10 @@
 const { Connection, PublicKey } = require('@solana/web3.js');
 const { getSolanaConnection } = require('./solana');
 const { getDB } = require('./database');
+const { getClient } = require('./redis'); // Need Redis for the pending list
 const { indexTokenOnChain } = require('./indexer'); 
 const logger = require('./logger');
-const axios = require('axios'); // Needed to check mcap
+const axios = require('axios');
 
 // Raydium Liquidity Pool V4
 const RAYDIUM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
@@ -13,6 +14,7 @@ const PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5DkzonjNwu78hRvfCKubJ14M5uBEwF
 
 // MINIMUM MARKET CAP CONFIG
 const MIN_MCAP_USD = 20000;
+const PENDING_GROWERS_KEY = 'pending_growers'; // Redis Set Key
 
 let isListening = false;
 
@@ -54,8 +56,6 @@ async function startNewTokenListener() {
 
 async function getQuickMarketCap(mint) {
     try {
-        // Quick check via GeckoTerminal API (or your preferred price source)
-        // Since it's a brand new token, this might return 0 or 404 initially.
         // Strategy: Wait 5 seconds to let price aggregators index it, then check.
         await new Promise(r => setTimeout(r, 5000));
 
@@ -66,7 +66,7 @@ async function getQuickMarketCap(mint) {
         const mcap = parseFloat(attrs?.fdv_usd || attrs?.market_cap_usd || 0);
         return mcap;
     } catch (e) {
-        return 0; // Assume 0 on error (safer to skip)
+        return 0; 
     }
 }
 
@@ -83,6 +83,7 @@ async function processNewPoolTx(signature, connection, db, source) {
         
         if (tx.meta.postTokenBalances) {
             tx.meta.postTokenBalances.forEach(bal => {
+                // Filter out SOL and known quote tokens if necessary
                 if (bal.mint && bal.mint !== 'So11111111111111111111111111111111111111112') {
                     mints.add(bal.mint);
                 }
@@ -93,12 +94,19 @@ async function processNewPoolTx(signature, connection, db, source) {
             const exists = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
             
             if (!exists) {
-                // FILTER: Market Cap Check
                 logger.info(`🔍 Discovery [${source}]: Checking MCAP for ${mint}...`);
                 const mcap = await getQuickMarketCap(mint);
 
                 if (mcap < MIN_MCAP_USD) {
-                    logger.warn(`⚠️ Skipped ${mint}: MCAP $${mcap.toFixed(0)} < $${MIN_MCAP_USD}`);
+                    // CHANGED: Instead of skipping, add to "Pending Growers" list in Redis
+                    logger.info(`🌱 Potential Grower ${mint}: MCAP $${mcap.toFixed(0)} < $${MIN_MCAP_USD}. Added to watch list.`);
+                    
+                    const redis = getClient();
+                    if (redis) {
+                        // Store as JSON with timestamp to allow expiration later
+                        const payload = JSON.stringify({ mint, addedAt: Date.now() });
+                        await redis.sadd(PENDING_GROWERS_KEY, payload);
+                    }
                     continue; 
                 }
 
