@@ -365,8 +365,14 @@
             </div>
             
             <div class="grid grid-cols-2 lg:grid-cols-6 gap-3 md:gap-4 mb-6">
-                <!-- NEW: K-Score Logic -->
-                <div class="stat-card border-[#ea580c] relative overflow-hidden"><span class="stat-label text-[#ea580c]">K-Score</span><span id="stat-kscore" class="stat-value text-[#fb923c] text-2xl font-bold font-mono">🔒</span></div>
+                <!-- NEW: K-Score Logic with Info Modal Trigger -->
+                <div class="stat-card border-[#ea580c] relative overflow-hidden">
+                    <div class="flex justify-between items-center">
+                        <span class="stat-label text-[#ea580c]">K-Score</span>
+                        <i data-lucide="info" width="14" class="text-[#ea580c] cursor-pointer hover:text-white" onclick="toggleKScoreModal()"></i>
+                    </div>
+                    <span id="stat-kscore" class="stat-value text-[#fb923c] text-2xl font-bold font-mono">🔒</span>
+                </div>
                 
                 <div class="stat-card"><span class="stat-label flex items-center gap-1">Price <span class="live-indicator ml-1"></span></span><span id="stat-price" class="stat-value text-[#ffedd5]">-</span></div>
                 <div class="stat-card"><span class="stat-label">MCap</span><span id="stat-mcap" class="stat-value text-[#ea580c]">-</span></div>
@@ -442,6 +448,55 @@
         </button>
     </div>
 </footer>
+
+<!-- NEW: K-SCORE MODAL -->
+<div id="kscore-modal" class="modal-overlay" onclick="toggleKScoreModal()">
+    <div class="bg-[#2a1005] border-2 border-[#ea580c] rounded-2xl p-6 w-full max-w-lg shadow-2xl relative" onclick="event.stopPropagation()">
+        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleKScoreModal()"><i data-lucide="x" width="24"></i></button>
+        
+        <div class="flex items-center gap-3 mb-4">
+            <div class="p-2 bg-[#451a03] rounded-lg border border-[#ea580c] text-[#ea580c]"><i data-lucide="lock" width="24"></i></div>
+            <div>
+                <h3 class="text-xl font-bold text-white font-sans">K-Score Explained</h3>
+                <p class="text-[#9a3412] text-xs font-mono">Conviction & Longevity Metric</p>
+            </div>
+        </div>
+
+        <p class="text-[#ffedd5] text-sm mb-6 leading-relaxed">
+            The K-Score rates tokens from 0-100 based on holder behavior and project maturity. It rewards communities that hold through volatility.
+        </p>
+
+        <div class="space-y-4">
+            <div class="bg-[#451a03] p-4 rounded-lg border border-[#7c2d12] flex gap-4">
+                <div class="text-[#fb923c]"><i data-lucide="diamond" width="20"></i></div>
+                <div>
+                    <h4 class="text-white font-bold text-sm">Diamond Hands (~60%)</h4>
+                    <p class="text-[#9a3412] text-xs">Based on the average hold time of the top 20 wallets. Long-term holding by whales drastically increases this score.</p>
+                </div>
+            </div>
+
+            <div class="bg-[#451a03] p-4 rounded-lg border border-[#7c2d12] flex gap-4">
+                <div class="text-[#22c55e]"><i data-lucide="clock" width="20"></i></div>
+                <div>
+                    <h4 class="text-white font-bold text-sm">Token Age (~30%)</h4>
+                    <p class="text-[#9a3412] text-xs">Older tokens are statistically less likely to rug. We reward longevity on a logarithmic scale.</p>
+                </div>
+            </div>
+
+            <div class="bg-[#451a03] p-4 rounded-lg border border-[#7c2d12] flex gap-4">
+                <div class="text-[#3b82f6]"><i data-lucide="trending-up" width="20"></i></div>
+                <div>
+                    <h4 class="text-white font-bold text-sm">Virality (~10%)</h4>
+                    <p class="text-[#9a3412] text-xs">Rewards rapid growth in unique wallet holders over the last 24 hours.</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="mt-6 text-center">
+             <div class="inline-block bg-[#0f0502] border border-[#ea580c] rounded px-2 py-1 text-[10px] text-[#ea580c] font-mono font-bold uppercase">Requirement: Community Verified</div>
+        </div>
+    </div>
+</div>
 
 <!-- NEW: HOW IT WORKS MODAL -->
 <div id="how-it-works-modal" class="modal-overlay" onclick="toggleHowItWorksModal()">
@@ -660,7 +715,8 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     let isApiModalOpen = false;
     let isLpModalOpen = false;
     let isWalletModalOpen = false;
-    let isHowItWorksModalOpen = false; // NEW
+    let isHowItWorksModalOpen = false;
+    let isKScoreModalOpen = false; // NEW
     let currentPage = 1;
     let isVerifiedFilter = false;
     let isZeroVolHidden = true; 
@@ -1056,6 +1112,13 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         const key = document.getElementById('generated-key-display').innerText;
         navigator.clipboard.writeText(key);
         alert("API Key copied to clipboard!");
+    }
+
+    // NEW: K-Score Modal Toggle
+    function toggleKScoreModal() {
+        const modal = document.getElementById('kscore-modal');
+        isKScoreModalOpen = !isKScoreModalOpen;
+        if (isKScoreModalOpen) modal.classList.add('open'); else modal.classList.remove('open');
     }
 
     // ... (Standard Helpers) ...
