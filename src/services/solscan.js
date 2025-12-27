@@ -50,4 +50,9 @@ async function fetchSolscanData(mint) {
     return null;
 }
 
-module.exports = { fetchSolscanData };
+// --- HYBRID EXPORT PATTERN ---
+// 1. Assign the function to module.exports so require('...')() works (Backward Compatibility)
+module.exports = fetchSolscanData;
+
+// 2. Assign the named property so { fetchSolscanData } = require('...') works (New Logic)
+module.exports.fetchSolscanData = fetchSolscanData;
