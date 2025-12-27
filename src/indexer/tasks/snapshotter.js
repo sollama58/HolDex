@@ -16,6 +16,7 @@ const QUOTE_TOKENS = {
 };
 
 let solPriceCache = 0; 
+let isCycleRunning = false; // LOCKING MECHANISM
 
 async function updateSolPrice(db) {
     try {
@@ -76,10 +77,7 @@ async function processPoolBatch(db, connection, pools, redis) {
 
     let accounts = [];
     try { 
-        // FIX: Ensure 'connection' object is used, not 'conn' from callback argument if it wasn't passed correctly
-        // But here we rely on 'connection' being a valid object passed into processPoolBatch
         if (!connection) throw new Error("Connection object is undefined in processPoolBatch");
-        
         accounts = await retryRPC(() => connection.getMultipleAccountsInfo(keysToFetch));
     } catch (e) {
         logger.warn(`Batch RPC Failed for ${pools.length} pools: ${e.message}`);
@@ -90,6 +88,7 @@ async function processPoolBatch(db, connection, pools, redis) {
     const trackerUpdates = [];
     
     for (const p of pools) {
+        // Update last_check to NOW so it won't be picked up again for 5 minutes
         trackerUpdates.push(db.query(`UPDATE active_trackers SET last_check = $1 WHERE pool_address = $2`, [now, p.address]));
 
         const task = poolMap.get(p.address);
@@ -174,9 +173,11 @@ async function processPoolBatch(db, connection, pools, redis) {
         }
 
         // --- VOLUME TRACKING (ASYNC) ---
+        // Keeps checking volume even if price is stale, but respects the loop batching
         const volKey = `vol_last_check:${p.address}`;
         const lastCheck = stateCache.get(volKey) || 0;
         
+        // Only run volume check if > 2 mins passed (separate from price check)
         if (now - lastCheck > 120000) { 
             stateCache.set(volKey, now);
             const sigKey = `vol_sig:${p.address}`;
@@ -226,46 +227,60 @@ async function processPoolBatch(db, connection, pools, redis) {
 }
 
 async function runSnapshotCycle() {
+    // PREVENT OVERLAP
+    if (isCycleRunning) {
+        logger.warn("⚠️ Snapshotter: Previous cycle still running. Skipping.");
+        return;
+    }
+    isCycleRunning = true;
+
     try {
         const db = getDB();
-        // FIX: Ensure getSolanaConnection() is called to get the instance
         const connection = getSolanaConnection(); 
         
         await updateSolPrice(db);
         
+        // SMART POLLING: Only fetch pools that haven't been checked in 5 minutes (300000ms)
+        // We do NOT filter by volume, so 0 volume pools are included.
+        const staleThreshold = Date.now() - 300000;
+
         const res = await db.query(`
             SELECT tr.pool_address, tr.last_check, p.*, t.decimals as token_decimals 
             FROM active_trackers tr 
             JOIN pools p ON tr.pool_address = p.address 
             LEFT JOIN tokens t ON p.mint = t.mint
+            WHERE tr.last_check < $1
             ORDER BY tr.priority DESC, tr.last_check ASC 
             LIMIT 200
-        `);
+        `, [staleThreshold]);
+        
         const pools = res.rows;
 
-        // logger.info(`⏱️ Snapshotter: Checking ${pools.length} pools`);
-
-        for (let i = 0; i < pools.length; i += 50) {
-            await processPoolBatch(db, connection, pools.slice(i, i + 50), null);
-            await new Promise(r => setTimeout(r, 200)); 
+        if (pools.length > 0) {
+            // logger.info(`⏱️ Snapshotter: Refreshing ${pools.length} stale pools...`);
+            for (let i = 0; i < pools.length; i += 50) {
+                await processPoolBatch(db, connection, pools.slice(i, i + 50), null);
+                await new Promise(r => setTimeout(r, 200)); 
+            }
         }
     } catch (e) {
         logger.error(`Snapshot Cycle Error: ${e.message}`);
+    } finally {
+        isCycleRunning = false;
     }
 }
 
 function startSnapshotter() {
     setTimeout(() => {
-        logger.info("🟢 Snapshotter Engine Started");
+        logger.info("🟢 Snapshotter Engine Started (Smart Polling 5m)");
         runSnapshotCycle();
-        setInterval(runSnapshotCycle, 30000); 
+        setInterval(runSnapshotCycle, 30000); // Run cycle every 30s to pick up next batch
     }, 5000);
 }
 
 async function snapshotPools(poolAddresses) {
     if (!poolAddresses.length) return;
     const db = getDB();
-    // FIX: Ensure getSolanaConnection() is called here too
     const connection = getSolanaConnection();
     await updateSolPrice(db);
     const res = await db.query(`

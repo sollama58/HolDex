@@ -16,6 +16,9 @@ const logger = require('../services/logger');
 const router = express.Router();
 const solanaConnection = getSolanaConnection();
 
+// In-Memory Lock to prevent RPC spam on popular stale tokens
+const pendingRefreshes = new Set();
+
 // Middleware for Admin Routes
 const requireAdmin = (req, res, next) => {
     const authHeader = req.headers['x-admin-auth'];
@@ -242,153 +245,14 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "Submission failed" }); }
     });
 
-    // --- ADMIN ROUTES ---
-
-    // 1. Get Updates
-    router.get('/admin/updates', requireAdmin, async (req, res) => { 
-        const { type } = req.query; 
-        try { 
-            let sql = `SELECT u.*, t.symbol as ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`; 
-            if (type === 'history') { sql += ` WHERE u.status != 'pending' ORDER BY u.submittedAt DESC LIMIT 50`; } 
-            else { sql += ` WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`; } 
-            const updates = await db.all(sql); 
-            res.json({ success: true, updates }); 
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
-    });
-
-    // 2. Approve Update (FIXED for TEXT/JSONB Compatibility)
-    router.post('/admin/approve-update', requireAdmin, async (req, res) => { 
-        const { id } = req.body; 
-        try { 
-            const request = await db.get(`SELECT * FROM token_updates WHERE id = $1`, [id]); 
-            if (!request) return res.status(404).json({ success: false, error: "Request not found" }); 
-
-            // Handle metadata merge in JS to support both TEXT and JSONB columns
-            const token = await db.get(`SELECT metadata FROM tokens WHERE mint = $1`, [request.mint]);
-            let currentMeta = {};
-            if (token && token.metadata) {
-                try {
-                    currentMeta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata;
-                } catch (e) {}
-            }
-
-            const newCommunity = { 
-                twitter: request.twitter, 
-                website: request.website, 
-                telegram: request.telegram, 
-                banner: request.banner, 
-                description: request.description 
-            };
-            
-            currentMeta.community = { ...(currentMeta.community || {}), ...newCommunity };
-            const jsonStr = JSON.stringify(currentMeta);
-
-            await db.run(`
-                UPDATE tokens 
-                SET metadata = $1, hasCommunityUpdate = TRUE, updated_at = CURRENT_TIMESTAMP 
-                WHERE mint = $2
-            `, [jsonStr, request.mint]); 
-
-            await db.run(`UPDATE token_updates SET status = 'approved' WHERE id = $1`, [id]); 
-            await updateSingleToken({ db }, request.mint); 
-            res.json({ success: true }); 
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
-    });
-
-    // 3. Reject Update
-    router.post('/admin/reject-update', requireAdmin, async (req, res) => { 
-        const { id } = req.body; 
-        try { 
-            await db.run(`UPDATE token_updates SET status = 'rejected' WHERE id = $1`, [id]); 
-            res.json({ success: true }); 
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
-    });
-
-    // 4. Get Token Details
-    router.get('/admin/token/:mint', requireAdmin, async (req, res) => { 
-        const { mint } = req.params; 
-        try { 
-            const token = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]); 
-            if (!token) return res.status(404).json({ success: false, error: "Token not found" }); 
-            let meta = {}; 
-            try { 
-                if (typeof token.metadata === 'string') meta = JSON.parse(token.metadata); 
-                else meta = token.metadata || {}; 
-            } catch(e) {} 
-            const community = meta.community || {}; 
-            res.json({ 
-                success: true, 
-                token: { 
-                    ...token, 
-                    ticker: token.symbol, 
-                    twitter: community.twitter || meta.twitter, 
-                    website: community.website || meta.website, 
-                    telegram: community.telegram || meta.telegram, 
-                    banner: community.banner || meta.banner, 
-                    description: community.description || meta.description 
-                } 
-            }); 
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
-    });
-
-    // 5. Update Token (Manual) (FIXED for TEXT/JSONB Compatibility)
-    router.post('/admin/update-token', requireAdmin, async (req, res) => { 
-        const { mint, twitter, website, telegram, banner, description } = req.body; 
-        try { 
-            const token = await db.get(`SELECT metadata FROM tokens WHERE mint = $1`, [mint]);
-            let currentMeta = {};
-            if (token && token.metadata) {
-                try {
-                    currentMeta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata;
-                } catch (e) {}
-            }
-
-            const newCommunity = { twitter, website, telegram, banner, description };
-            currentMeta.community = { ...(currentMeta.community || {}), ...newCommunity };
-            const jsonStr = JSON.stringify(currentMeta);
-
-            await db.run(`
-                UPDATE tokens 
-                SET metadata = $1, hasCommunityUpdate = TRUE 
-                WHERE mint = $2
-            `, [jsonStr, mint]); 
-
-            await updateSingleToken({ db }, mint); 
-            res.json({ success: true }); 
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
-    });
-
-    // 6. Delete Token (FIXED to include holders_history)
-    router.post('/admin/delete-token', requireAdmin, async (req, res) => { 
-        const { mint } = req.body; 
-        try { 
-            const pools = await db.all(`SELECT address FROM pools WHERE mint = $1`, [mint]); 
-            const poolAddresses = pools.map(p => p.address); 
-            if (poolAddresses.length > 0) { 
-                await db.run(`DELETE FROM candles_1m WHERE pool_address = ANY($1)`, [poolAddresses]); 
-                await db.run(`DELETE FROM active_trackers WHERE pool_address = ANY($1)`, [poolAddresses]); 
-            } 
-            await db.run(`DELETE FROM pools WHERE mint = $1`, [mint]); 
-            await db.run(`DELETE FROM k_scores WHERE mint = $1`, [mint]); 
-            await db.run(`DELETE FROM token_updates WHERE mint = $1`, [mint]); 
-            await db.run(`DELETE FROM holders_history WHERE mint = $1`, [mint]); // Added
-            await db.run(`DELETE FROM tokens WHERE mint = $1`, [mint]); 
-            
-            const redis = getClient(); 
-            if (redis) { await redis.del(`token:detail:${mint}`); } 
-            
-            res.json({ success: true, message: "Token and all history permanently deleted." }); 
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
-    });
-
-    // 7. Refresh K-Score
-    router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => { 
-        const { mint } = req.body; 
-        try { 
-            const newScore = await updateSingleToken({ db }, mint); 
-            res.json({ success: true, message: `K-Score Updated: ${newScore}` }); 
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
-    });
+    // --- ADMIN ROUTES (Omitted for brevity, unchanged) ---
+    router.get('/admin/updates', requireAdmin, async (req, res) => { const { type } = req.query; try { let sql = `SELECT u.*, t.symbol as ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`; if (type === 'history') { sql += ` WHERE u.status != 'pending' ORDER BY u.submittedAt DESC LIMIT 50`; } else { sql += ` WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`; } const updates = await db.all(sql); res.json({ success: true, updates }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    router.post('/admin/approve-update', requireAdmin, async (req, res) => { const { id } = req.body; try { const request = await db.get(`SELECT * FROM token_updates WHERE id = $1`, [id]); if (!request) return res.status(404).json({ success: false, error: "Request not found" }); const token = await db.get(`SELECT metadata FROM tokens WHERE mint = $1`, [request.mint]); let currentMeta = {}; if (token && token.metadata) { try { currentMeta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata; } catch (e) {} } const newCommunity = { twitter: request.twitter, website: request.website, telegram: request.telegram, banner: request.banner, description: request.description }; currentMeta.community = { ...(currentMeta.community || {}), ...newCommunity }; const jsonStr = JSON.stringify(currentMeta); await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE, updated_at = CURRENT_TIMESTAMP WHERE mint = $2`, [jsonStr, request.mint]); await db.run(`UPDATE token_updates SET status = 'approved' WHERE id = $1`, [id]); await updateSingleToken({ db }, request.mint); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    router.post('/admin/reject-update', requireAdmin, async (req, res) => { const { id } = req.body; try { await db.run(`UPDATE token_updates SET status = 'rejected' WHERE id = $1`, [id]); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    router.get('/admin/token/:mint', requireAdmin, async (req, res) => { const { mint } = req.params; try { const token = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]); if (!token) return res.status(404).json({ success: false, error: "Token not found" }); let meta = {}; try { if (typeof token.metadata === 'string') meta = JSON.parse(token.metadata); else meta = token.metadata || {}; } catch(e) {} const community = meta.community || {}; res.json({ success: true, token: { ...token, ticker: token.symbol, twitter: community.twitter || meta.twitter, website: community.website || meta.website, telegram: community.telegram || meta.telegram, banner: community.banner || meta.banner, description: community.description || meta.description } }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    router.post('/admin/update-token', requireAdmin, async (req, res) => { const { mint, twitter, website, telegram, banner, description } = req.body; try { const token = await db.get(`SELECT metadata FROM tokens WHERE mint = $1`, [mint]); let currentMeta = {}; if (token && token.metadata) { try { currentMeta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata; } catch (e) {} } const newCommunity = { twitter, website, telegram, banner, description }; currentMeta.community = { ...(currentMeta.community || {}), ...newCommunity }; const jsonStr = JSON.stringify(currentMeta); await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE WHERE mint = $2`, [jsonStr, mint]); await updateSingleToken({ db }, mint); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    router.post('/admin/delete-token', requireAdmin, async (req, res) => { const { mint } = req.body; try { const pools = await db.all(`SELECT address FROM pools WHERE mint = $1`, [mint]); const poolAddresses = pools.map(p => p.address); if (poolAddresses.length > 0) { await db.run(`DELETE FROM candles_1m WHERE pool_address = ANY($1)`, [poolAddresses]); await db.run(`DELETE FROM active_trackers WHERE pool_address = ANY($1)`, [poolAddresses]); } await db.run(`DELETE FROM pools WHERE mint = $1`, [mint]); await db.run(`DELETE FROM k_scores WHERE mint = $1`, [mint]); await db.run(`DELETE FROM token_updates WHERE mint = $1`, [mint]); await db.run(`DELETE FROM holders_history WHERE mint = $1`, [mint]); await db.run(`DELETE FROM tokens WHERE mint = $1`, [mint]); const redis = getClient(); if (redis) { await redis.del(`token:detail:${mint}`); } res.json({ success: true, message: "Token and all history permanently deleted." }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => { const { mint } = req.body; try { const newScore = await updateSingleToken({ db }, mint); res.json({ success: true, message: `K-Score Updated: ${newScore}` }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
 
     // --- STANDARD PUBLIC ROUTES ---
     router.get('/token/:mint', async (req, res) => {
@@ -399,6 +263,7 @@ function init(deps) {
                 let token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
                 let pairs = await db.all('SELECT * FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC', [mint]);
                 
+                // 1. If Missing completely, index it
                 if (!token) {
                     try {
                         const indexed = await indexTokenOnChain(mint);
@@ -409,9 +274,33 @@ function init(deps) {
                 
                 if (!token) return { success: false, error: "Token not found" };
 
+                // 2. FRESHNESS CHECK (Just-in-Time Update)
+                // If the token data is older than 60 seconds, force a refresh of its pools
+                // We use a memory lock (pendingRefreshes) to prevent RPC spam if multiple users view at once
+                const now = Date.now();
+                const isStale = !token.timestamp || (now - token.timestamp > 60000); // 60s Threshold
+
+                if (isStale && pairs.length > 0 && !pendingRefreshes.has(mint)) {
+                    pendingRefreshes.add(mint);
+                    try {
+                        // logger.info(`🔄 Lazy Refresh: Updating stale token ${mint}`);
+                        const poolAddresses = pairs.map(p => p.address);
+                        await snapshotPools(poolAddresses);
+                        await aggregateAndSaveToken(db, mint);
+
+                        // Reload data after update
+                        token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+                        pairs = await db.all('SELECT * FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC', [mint]);
+                    } catch (err) {
+                        logger.warn(`Lazy refresh failed for ${mint}: ${err.message}`);
+                    } finally {
+                        pendingRefreshes.delete(mint);
+                    }
+                }
+
                 let tokenData = { ...token };
                 
-                // --- FIX: CAPITALIZATION MAPPING ---
+                // Capitalization Safety
                 tokenData.marketCap = tokenData.marketCap || tokenData.marketcap || 0;
                 tokenData.priceUsd = tokenData.priceUsd || tokenData.priceusd || 0;
                 tokenData.volume24h = tokenData.volume24h || 0;
@@ -437,7 +326,6 @@ function init(deps) {
                     if (mainPool.price_usd > 0) tokenData.priceUsd = mainPool.price_usd;
                 }
 
-                // NEW: Fetch Holder History for Chart
                 const holderHistory = await db.all(`
                     SELECT count, timestamp FROM holders_history 
                     WHERE mint = $1 
