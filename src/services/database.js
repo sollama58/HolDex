@@ -2,6 +2,7 @@ const { Pool } = require('pg');
 const config = require('../config/env');
 const logger = require('./logger');
 const { getClient } = require('./redis');
+const { getHolderCountFromRPC } = require('./solana'); // NEW: Import RPC function
 
 let primaryPool = null;
 let readPool = null; 
@@ -55,7 +56,6 @@ async function initDB() {
             }
 
             // --- TABLE CREATION ---
-            // Note: CREATE TABLE IF NOT EXISTS does NOT add missing columns to existing tables.
             await primaryPool.query(`
                 CREATE TABLE IF NOT EXISTS tokens (
                     mint TEXT PRIMARY KEY,
@@ -147,41 +147,33 @@ async function initDB() {
                 CREATE INDEX IF NOT EXISTS idx_holders_hist_mint ON holders_history(mint);
             `);
 
-            // --- AUTO-MIGRATIONS (CRITICAL FIX) ---
-            // Explicitly force these columns to exist to fix "column does not exist" errors
-            // on pre-existing databases.
+            // --- AUTO-MIGRATIONS ---
             try {
-                // Postgres 9.6+ supports IF NOT EXISTS for ADD COLUMN
                 await primaryPool.query(`
                     ALTER TABLE tokens ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
                     ALTER TABLE tokens ADD COLUMN IF NOT EXISTS last_holder_check BIGINT DEFAULT 0;
                     ALTER TABLE tokens ADD COLUMN IF NOT EXISTS holders INTEGER DEFAULT 0;
                 `);
-                
-                // Ensure index exists for performance
                 await primaryPool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_updated_at ON tokens(updated_at ASC)`);
-                
-                // logger.info("✅ Database Schema & Migrations Verified.");
             } catch (migErr) {
                 logger.warn(`Migration Warning (non-fatal): ${migErr.message}`);
             }
 
             dbWrapper = {
-                // Route SELECT to Read Pool, everything else to Primary
                 query: (text, params) => {
                     const isSelect = text.trim().toUpperCase().startsWith('SELECT');
                     return (isSelect ? readPool : primaryPool).query(text, params);
                 },
                 get: async (text, params) => { 
-                    const res = await readPool.query(text, params); // Always read
+                    const res = await readPool.query(text, params); 
                     return res.rows[0]; 
                 },
                 all: async (text, params) => { 
-                    const res = await readPool.query(text, params); // Always read
+                    const res = await readPool.query(text, params); 
                     return res.rows; 
                 },
                 run: async (text, params) => { 
-                    const res = await primaryPool.query(text, params); // Always write
+                    const res = await primaryPool.query(text, params); 
                     return { rowCount: res.rowCount }; 
                 }
             };
@@ -330,6 +322,36 @@ async function aggregateAndSaveToken(db, mint) {
             if (p5m !== null && p5m > 0) change5m = ((price - p5m) / p5m) * 100;
         }
 
+        // --- NEW: HOLDER CHECK LOGIC ---
+        // We only check if it's a new token (never checked) OR if 60 minutes have passed
+        const now = Date.now();
+        const oneHour = 60 * 60 * 1000;
+        
+        const tokenRow = await db.get(`SELECT last_holder_check FROM tokens WHERE mint = $1`, [mint]);
+        const lastCheck = parseInt(tokenRow?.last_holder_check || 0);
+        
+        let holderCount = null;
+
+        if (lastCheck === 0 || (now - lastCheck > oneHour)) {
+            try {
+                // Fetch from RPC (Heavy operation, hence the throttle)
+                const count = await getHolderCountFromRPC(mint);
+                
+                // Only update if we got a valid number
+                if (typeof count === 'number') {
+                    holderCount = count;
+                    // Save history
+                    await db.run(`
+                        INSERT INTO holders_history (mint, count, timestamp) 
+                        VALUES ($1, $2, $3)
+                        ON CONFLICT (mint, timestamp) DO NOTHING
+                    `, [mint, holderCount, now]);
+                }
+            } catch (e) {
+                logger.warn(`Holder check failed for ${mint}: ${e.message}`);
+            }
+        }
+
         const updates = [];
         const params = [totalLiq, totalVol, price, mint];
         let query = `UPDATE tokens SET liquidity = $1, volume24h = $2, priceUsd = $3`;
@@ -340,6 +362,13 @@ async function aggregateAndSaveToken(db, mint) {
         if (change24h !== null) { query += `, change24h = $${pIdx++}`; params.push(change24h); }
         if (change1h !== null) { query += `, change1h = $${pIdx++}`; params.push(change1h); }
         if (change5m !== null) { query += `, change5m = $${pIdx++}`; params.push(change5m); }
+        
+        // NEW: Add Holders to update query
+        if (holderCount !== null) { 
+            query += `, holders = $${pIdx++}, last_holder_check = $${pIdx++}`; 
+            params.push(holderCount); 
+            params.push(now);
+        }
 
         query += ` WHERE mint = $4`;
 
