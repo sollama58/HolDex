@@ -6,7 +6,9 @@ const logger = require('../../services/logger');
 const { getRealVolume } = require('../services/volume_tracker');
 const { enrichPoolsWithReserves } = require('../../services/pool_finder');
 
+// MEMORY LEAK FIX: We will prune this cache periodically
 const stateCache = new Map();
+let lastPruneTime = Date.now();
 
 const QUOTE_TOKENS = {
     'So11111111111111111111111111111111111111112': { decimals: 9, symbol: 'SOL' },
@@ -16,6 +18,35 @@ const QUOTE_TOKENS = {
 
 let solPriceCache = 0; 
 let isCycleRunning = false; 
+
+// NEW: Prune function to prevent Map from growing infinitely
+function pruneStateCache() {
+    const now = Date.now();
+    // Run pruning only once per hour
+    if (now - lastPruneTime < 3600000) return;
+    
+    lastPruneTime = now;
+    const initialSize = stateCache.size;
+    
+    for (const [key, val] of stateCache.entries()) {
+        // If it's a timestamp (number) and older than 4 hours, delete it
+        if (typeof val === 'number' && (now - val > 14400000)) {
+            stateCache.delete(key);
+        }
+        // Signatures (strings) are harder to date, but we can assume if the 
+        // associated timestamp key is gone, we can clear the sig too.
+        // For simplicity, we just clear everything if the map gets HUGE.
+    }
+
+    // Safety valve: If cache is massive (>100k items), just clear it to save memory.
+    // It will just rebuild over the next few minutes.
+    if (stateCache.size > 50000) {
+        logger.warn(`🧹 StateCache too large (${stateCache.size}), performing hard reset.`);
+        stateCache.clear();
+    } else {
+        // logger.info(`🧹 StateCache Pruned: ${initialSize} -> ${stateCache.size}`);
+    }
+}
 
 async function updateSolPrice(db) {
     try {
@@ -38,6 +69,9 @@ async function updateSolPrice(db) {
 async function processPoolBatch(db, connection, pools, redis) {
     const timestamp = Math.floor(Date.now() / 60000) * 60000;
     const now = Date.now();
+    
+    // Prune cache if needed
+    pruneStateCache();
     
     // --- SELF-HEAL: FETCH MISSING RESERVES ---
     const poolsNeedingReserves = pools.filter(p => p.dex !== 'pumpfun' && (!p.reserve_a || !p.reserve_b));
