@@ -228,31 +228,30 @@ router.get('/token/:mint', async (req, res) => {
                 if (pairs[0].price_usd > 0) tokenData.priceUsd = pairs[0].price_usd;
             }
 
+            // Sanitize Pools Data
+            const cleanPairs = pairs.map(p => ({
+                ...p,
+                price_usd: p.price_usd || 0,
+                liquidity_usd: p.liquidity_usd || 0,
+                volume_24h: p.volume_24h || 0
+            }));
+
             // Sanitize History for Charts
-            // 1. Convert timestamp to SECONDS (standard for charts) if it looks like MS
-            // 2. Ensure count is not null
-            let cleanHolderHistory = holderHistory
-                .map(h => {
-                    let ts = Number(h.timestamp);
-                    // Heuristic: If timestamp is > 10 trillion, it's probably micro; > 10 billion, it's MS. 
-                    // Standard Unix seconds ~1.7 billion.
-                    if (ts > 10000000000) ts = Math.floor(ts / 1000); 
-                    
-                    return {
-                        time: ts, // "time" is standard for Lightweight Charts
-                        value: h.count ? Number(h.count) : 0 // "value" is standard
-                    };
-                })
-                .filter(h => h.time > 0 && h.value >= 0)
-                // Sort by time just in case
-                .sort((a, b) => a.time - b.time);
+            // FIX: Reverted to 'timestamp' and 'count' keys to maintain frontend compatibility
+            // FIX: Ensure values are never null to prevent "Value is null" error
+            const cleanHolderHistory = holderHistory
+                .map(h => ({
+                    timestamp: Number(h.timestamp), 
+                    count: h.count ? Number(h.count) : 0
+                }))
+                .filter(h => h.timestamp > 0 && h.count !== null && h.count !== undefined)
+                .sort((a, b) => a.timestamp - b.timestamp);
 
             // If history is empty but we have current holders, fake a point
-            // This prevents "Value is null" if the chart tries to render "current" state
             if (cleanHolderHistory.length === 0 && tokenData.holders > 0) {
                 cleanHolderHistory.push({
-                    time: Math.floor(Date.now() / 1000),
-                    value: tokenData.holders
+                    timestamp: Date.now(),
+                    count: tokenData.holders
                 });
             }
 
@@ -260,7 +259,7 @@ router.get('/token/:mint', async (req, res) => {
                 success: true, 
                 token: { 
                     ...tokenData, 
-                    pairs, 
+                    pairs: cleanPairs, 
                     holderHistory: cleanHolderHistory 
                 } 
             };
