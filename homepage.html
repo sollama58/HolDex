@@ -744,6 +744,10 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     let walletProvider = null; 
     let feeConfig = { solFee: 0.1, tokenFee: 1000, tokenMint: '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump', treasury: 'H8sMJqC9X8rJ8W1a6VjFq7X5gZ5fX9x8x8x8x8x8x8' };
     
+    // AUTH CACHE
+    let authSignature = null;
+    let authWallet = null;
+
     // CHART STATE
     let chartInstance = null;
     let candleSeries = null;
@@ -1082,6 +1086,34 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     }
 
     // --- API KEY GENERATION LOGIC ---
+    // Helper to get signature once and cache it
+    async function getAuthSignature() {
+        if (authSignature && authWallet === walletAddress) {
+            return authSignature;
+        }
+        
+        if (!walletProvider) throw new Error("Wallet not connected");
+
+        const message = "Request HolDex API Key";
+        const encodedMessage = new TextEncoder().encode(message);
+        
+        // Handle Phantom/Solflare differences
+        const signedMessage = await walletProvider.signMessage(encodedMessage, 'utf8');
+        let signatureBase64;
+        
+        if (signedMessage.signature) {
+            // Phantom/Solflare often return object with signature property
+            signatureBase64 = window.buffer.Buffer.from(signedMessage.signature).toString('base64');
+        } else {
+            // Standard byte array
+            signatureBase64 = window.buffer.Buffer.from(signedMessage).toString('base64');
+        }
+        
+        authSignature = signatureBase64;
+        authWallet = walletAddress;
+        return signatureBase64;
+    }
+
     async function requestApiKey() {
         if (!walletAddress || !walletProvider) {
             alert("Please connect your wallet first.");
@@ -1090,24 +1122,12 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         }
 
         try {
-            const message = "Request HolDex API Key";
-            const encodedMessage = new TextEncoder().encode(message);
-            const signedMessage = await walletProvider.signMessage(encodedMessage, 'utf8');
-            
-            // Handle different wallet signature formats
-            let signatureBase64;
-            if (signedMessage.signature) {
-                // Phantom/Solflare often return object with signature property
-                signatureBase64 = window.buffer.Buffer.from(signedMessage.signature).toString('base64');
-            } else {
-                // Standard byte array
-                signatureBase64 = window.buffer.Buffer.from(signedMessage).toString('base64');
-            }
+            const signature = await getAuthSignature();
 
             const res = await fetch(`${API_URL}/api/request-api-key`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ wallet: walletAddress, signature: signatureBase64 })
+                body: JSON.stringify({ wallet: walletAddress, signature: signature })
             });
 
             const data = await res.json();
@@ -1116,7 +1136,7 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
                 document.getElementById('key-modal').classList.add('open');
                 
                 // Refresh list if user is on the About page
-                fetchMyKeys();
+                fetchMyKeys(); // Uses cached signature
             } else {
                 alert("Failed: " + data.error);
             }
@@ -1132,24 +1152,20 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         
         const listDiv = document.getElementById('my-keys-list');
         if (!listDiv) return;
-        listDiv.innerHTML = '<div class="text-center py-4 text-[#9a3412] text-xs font-mono animate-pulse">Loading your keys... (Please sign to verify ownership)</div>';
+        
+        // Don't wipe list if we already have it, maybe just show loading indicator overlay?
+        // For now, simple loading text if empty
+        if (!listDiv.children.length || listDiv.innerText.includes('Loading')) {
+             listDiv.innerHTML = '<div class="text-center py-4 text-[#9a3412] text-xs font-mono animate-pulse">Loading your keys...</div>';
+        }
 
         try {
-            const message = "Request HolDex API Key";
-            const encodedMessage = new TextEncoder().encode(message);
-            const signedMessage = await walletProvider.signMessage(encodedMessage, 'utf8');
-            
-            let signatureBase64;
-            if (signedMessage.signature) {
-                signatureBase64 = window.buffer.Buffer.from(signedMessage.signature).toString('base64');
-            } else {
-                signatureBase64 = window.buffer.Buffer.from(signedMessage).toString('base64');
-            }
+            const signature = await getAuthSignature();
 
             const res = await fetch(`${API_URL}/api/request-my-keys`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ wallet: walletAddress, signature: signatureBase64 })
+                body: JSON.stringify({ wallet: walletAddress, signature: signature })
             });
 
             const data = await res.json();
@@ -1230,7 +1246,7 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     function openWalletModal() { document.getElementById('wallet-modal').classList.add('open'); isWalletModalOpen = true; }
     function closeWalletModal() { document.getElementById('wallet-modal').classList.remove('open'); isWalletModalOpen = false; }
     async function connectProvider(providerName) { let provider = null; if (providerName === 'phantom' && window.solana && window.solana.isPhantom) provider = window.solana; else if (providerName === 'solflare' && window.solflare) provider = window.solflare; if (!provider) { alert(`${providerName} not found.`); return; } try { const resp = await provider.connect(); walletAddress = resp.publicKey.toString(); walletProvider = provider; closeWalletModal(); updateWalletUI(true); refreshBalances(); } catch (err) { console.error(err); alert("Connection failed."); } }
-    function disconnectWallet() { if (walletProvider?.disconnect) walletProvider.disconnect(); walletAddress = null; walletProvider = null; updateWalletUI(false); }
+    function disconnectWallet() { if (walletProvider?.disconnect) walletProvider.disconnect(); walletAddress = null; walletProvider = null; authSignature = null; updateWalletUI(false); }
     
     // UPDATED WALLET UI HANDLER
     function updateWalletUI(connected) { 

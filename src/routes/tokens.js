@@ -194,39 +194,22 @@ function init(deps) {
 
     // --- API KEY GENERATION ---
     router.post('/request-api-key', async (req, res) => {
-        const { wallet, signature, rotate } = req.body; // Added rotate flag
+        const { wallet, signature } = req.body;
         try {
             if (!wallet || !signature) return res.status(400).json({ success: false, error: "Wallet and Signature required" });
+            
             const msg = new TextEncoder().encode("Request HolDex API Key");
             const sigBytes = Buffer.from(signature, 'base64');
             const pubBytes = new PublicKey(wallet).toBytes();
             const verified = nacl.sign.detached.verify(msg, sigBytes, pubBytes);
             if (!verified) return res.status(403).json({ success: false, error: "Invalid Signature" });
             
-            const existing = await db.get('SELECT key, tier, requests_limit FROM api_keys WHERE owner = $1', [wallet]);
+            // CHECK COUNT instead of assuming single key
+            const result = await db.get('SELECT COUNT(*) as count FROM api_keys WHERE owner = $1', [wallet]);
+            const count = parseInt(result?.count || 0);
             
-            if (existing) {
-                // KEY ROTATION LOGIC
-                if (rotate === true) {
-                    const newKey = 'hx_' + require('crypto').randomBytes(16).toString('hex');
-                    await db.run('UPDATE api_keys SET key = $1, created_at = $2 WHERE owner = $3', [newKey, Date.now(), wallet]);
-                    
-                    return res.json({ 
-                        success: true, 
-                        key: newKey, 
-                        tier: existing.tier,
-                        requests_limit: existing.requests_limit,
-                        message: "API Key Rotated Successfully" 
-                    });
-                }
-
-                return res.json({ 
-                    success: true, 
-                    key: existing.key, 
-                    tier: existing.tier,
-                    requests_limit: existing.requests_limit,
-                    message: "Existing Key Retrieved" 
-                });
+            if (count >= 5) {
+                return res.status(400).json({ success: false, error: "Limit reached (5 Keys). Revoke old keys first." });
             }
             
             const key = 'hx_' + require('crypto').randomBytes(16).toString('hex');
@@ -245,7 +228,7 @@ function init(deps) {
         } catch (e) { console.error(e); res.status(500).json({ success: false, error: "Server Error" }); }
     });
 
-    // --- NEW: FETCH MY KEYS ---
+    // --- FETCH MY KEYS ---
     router.post('/request-my-keys', async (req, res) => {
         const { wallet, signature } = req.body;
         try {
