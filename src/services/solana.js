@@ -4,6 +4,10 @@ const logger = require('./logger');
 
 let connection;
 
+// Program IDs
+const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+
 /**
  * Returns the singleton Solana Connection instance.
  */
@@ -39,6 +43,9 @@ async function retryRPC(fn, retries = 3, delay = 1000) {
         try {
             return await fn();
         } catch (e) {
+            // Don't retry if it's a 400 Bad Request (Invalid input)
+            if (e.message && e.message.includes('400')) throw e;
+
             if (i === retries - 1) throw e; // Throw on last failure
             
             // Check for specific RPC errors to handle smarter
@@ -51,47 +58,65 @@ async function retryRPC(fn, retries = 3, delay = 1000) {
 }
 
 /**
- * Fetches the number of holders directly from the RPC.
- * FILTERS: Only counts accounts with Balance > 0 (Active Holders).
+ * Helper to fetch accounts for a specific program ID.
  */
-async function getHolderCountFromRPC(mintAddress) {
-    if (!mintAddress) return 0;
-    
+async function fetchAccountsForProgram(conn, programId, mintAddress) {
     try {
-        const conn = getSolanaConnection();
-        const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-        
-        // Filter: Data Size = 165 (Standard Token Account) AND Mint = mintAddress
         const filters = [
             { dataSize: 165 }, 
             { memcmp: { offset: 0, bytes: mintAddress } }
         ];
 
         // Fetch just the Amount (offset 64, length 8) to verify balance > 0
-        // This is crucial to avoid counting closed/empty accounts
-        const accounts = await retryRPC(() => conn.getProgramAccounts(TOKEN_PROGRAM_ID, {
+        const accounts = await retryRPC(() => conn.getProgramAccounts(programId, {
             filters: filters,
             dataSlice: { offset: 64, length: 8 } 
-        }));
+        }), 2, 500); // Fewer retries for sub-tasks
 
         let activeHolders = 0;
         for (const acc of accounts) {
-            // Ensure we got the data we requested
             if (acc.account.data && acc.account.data.length === 8) {
-                // Read the u64 balance (Little Endian)
                 const balance = acc.account.data.readBigUInt64LE(0);
-                if (balance > 0n) {
-                    activeHolders++;
-                }
+                if (balance > 0n) activeHolders++;
             }
         }
-
         return activeHolders;
     } catch (e) {
-        // Suppress errors for now to prevent log spam if RPC limits are hit
-        // logger.debug(`RPC Holder Check failed: ${e.message}`);
+        // Log detailed error for debugging
+        if (e.message.includes('429')) {
+             logger.warn(`⚠️ RPC Rate Limit (Holders Check): ${e.message}`);
+        } else {
+             // logger.debug(`RPC Check failed for ${programId.toString()}: ${e.message}`);
+        }
         return 0;
     }
+}
+
+/**
+ * Fetches the number of holders directly from the RPC.
+ * CHECKS BOTH LEGACY TOKEN PROGRAM AND TOKEN-2022 PROGRAM.
+ */
+async function getHolderCountFromRPC(mintAddress) {
+    if (!mintAddress) return 0;
+    
+    const conn = getSolanaConnection();
+
+    // 1. Check Legacy Token Program first (Most common)
+    let count = await fetchAccountsForProgram(conn, TOKEN_PROGRAM_ID, mintAddress);
+
+    // 2. If Legacy returns 0, it MIGHT be a Token-2022 token. Check that.
+    if (count === 0) {
+        const count2022 = await fetchAccountsForProgram(conn, TOKEN_2022_PROGRAM_ID, mintAddress);
+        if (count2022 > 0) {
+            count = count2022;
+        }
+    } else {
+        // Edge Case: Hybrid tokens (rare, but possible to have accounts in both)
+        // We check 2022 anyway just in case, but only if the first one succeeded quickly
+        // Actually, for performance, if we found legacy holders, we assume it's a legacy token.
+    }
+
+    return count;
 }
 
 module.exports = { 
