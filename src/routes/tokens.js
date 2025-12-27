@@ -269,6 +269,16 @@ function init(deps) {
                 if (!token) return { success: false, error: "Token not found" };
 
                 let tokenData = { ...token };
+                
+                // --- FIX: CAPITALIZATION MAPPING ---
+                // PostgreSQL returns lowercase columns (marketcap, priceusd, etc)
+                // Frontend expects camelCase (marketCap, priceUsd)
+                tokenData.marketCap = tokenData.marketCap || tokenData.marketcap || 0;
+                tokenData.priceUsd = tokenData.priceUsd || tokenData.priceusd || 0;
+                tokenData.volume24h = tokenData.volume24h || 0;
+                tokenData.holders = tokenData.holders || 0;
+                tokenData.kScore = tokenData.k_score || tokenData.kScore || 0;
+                
                 if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
                 
                 // Merge JSON metadata
