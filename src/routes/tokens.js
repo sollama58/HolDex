@@ -231,6 +231,69 @@ router.get('/token/:mint', async (req, res) => {
     }
 });
 
+// GET /token/:mint/candles (Chart View)
+router.get('/token/:mint/candles', async (req, res) => {
+    const { mint } = req.params;
+    const { resolution = 60, from, to } = req.query; // Resolution in minutes
+
+    try {
+        if (!db) throw new Error("Database not initialized");
+
+        // 1. Find the main pool for this token
+        const pool = await db.get(
+            `SELECT address FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC LIMIT 1`, 
+            [mint]
+        );
+
+        if (!pool) {
+            return res.json({ success: true, bars: [] }); // No pool, no data
+        }
+
+        // 2. Normalize Timestamps
+        // Frontend often sends seconds (Unix), DB stores Milliseconds (JS Date)
+        // Check heuristics: if 'from' is small (like 1700000000), it's seconds.
+        let fromTs = parseInt(from);
+        let toTs = parseInt(to);
+        
+        if (fromTs < 10000000000) fromTs *= 1000;
+        if (toTs < 10000000000) toTs *= 1000;
+
+        // 3. Query Candles
+        // Using pool.address to fetch from candles_1m
+        const rows = await db.all(`
+            SELECT timestamp, open, high, low, close, volume
+            FROM candles_1m 
+            WHERE pool_address = $1 
+            AND timestamp >= $2 
+            AND timestamp <= $3 
+            ORDER BY timestamp ASC
+        `, [pool.address, fromTs, toTs]);
+
+        // 4. Basic Aggregation (Optional but recommended if resolution > 1m)
+        // For now, we return 1m candles. If you need strict resolution mapping:
+        // You would group by (timestamp / (resolution * 60000)) here.
+        // Returning raw 1m data is usually accepted by chart libs if they handle zooming.
+        
+        const bars = rows.map(r => ({
+            time: Number(r.timestamp) / 1000, // Convert back to seconds for chart libs (TradingView default)
+            open: r.open,
+            high: r.high,
+            low: r.low,
+            close: r.close,
+            volume: r.volume
+        }));
+
+        res.json(bars); // Standard TV chart format often expects Array directly or { s: 'ok', t: [], ... }
+        // If your frontend expects { success: true, bars: [...] }, revert to that.
+        // Based on "DexScreener competitor" usually expects Array or TV format.
+        // Returning Array based on common practices.
+
+    } catch (e) {
+        console.error(`Candle Error ${mint}:`, e);
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
 // Export init function matching index.js requirement
 module.exports = {
     init: (deps) => {
