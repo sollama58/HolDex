@@ -1,7 +1,16 @@
 const axios = require('axios');
 const logger = require('../services/logger');
 const { broadcastTokenUpdate } = require('../services/socket'); 
-const { fetchSolscanData } = require('../services/solscan'); 
+
+// Safe import for Solscan service
+let fetchSolscanData = async () => null;
+try {
+    const solService = require('../services/solscan');
+    // Handle { fetchSolscanData } or default export
+    fetchSolscanData = solService.fetchSolscanData || solService;
+} catch (e) {
+    logger.warn("MetadataUpdater: Solscan service import failed, using no-op.");
+}
 
 let isRunning = false;
 const BATCH_SIZE = 5; 

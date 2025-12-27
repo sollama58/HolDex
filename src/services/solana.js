@@ -1,61 +1,59 @@
-const { Connection } = require('@solana/web3.js');
-const config = require('../config/env');
-const logger = require('./logger');
+const axios = require('axios');
 
-// STRICT SINGLE RPC POLICY
-// We only use the URL defined in config (which prioritizes HELIUS_API_KEY)
-const RPC_URL = config.SOLANA_RPC_URL;
+// Try to load logger safely, fallback if missing to prevent crash
+let logger = { info: console.log, warn: console.warn, error: console.error, debug: () => {} };
+try {
+    const logService = require('./logger');
+    if (logService) logger = logService.default || logService;
+} catch (e) { /* ignore */ }
 
-let connectionInstance = null;
-
-function createConnection(url) {
-    logger.info(`🔌 Connecting to Primary RPC: [${url}]`);
-    
-    return new Connection(url, {
-        commitment: 'confirmed',
-        confirmTransactionInitialTimeout: 60000,
-        disableRetryOnRateLimit: true, // We handle retries manually
-    });
-}
-
-function getSolanaConnection() {
-    if (!connectionInstance) {
-        connectionInstance = createConnection(RPC_URL);
-    }
-    return connectionInstance;
-}
-
-function getRpcUrl() {
-    return RPC_URL;
-}
-
-function rotateConnection() {
-    // Since we are strictly using Helius, "rotation" just means 
-    // re-instantiating the connection to clear internal state.
-    logger.warn(`⚠️  Refreshing RPC Connection State...`);
-    connectionInstance = createConnection(RPC_URL);
-    return connectionInstance;
-}
-
-async function retryRPC(fn, retries = 3, delay = 1000) {
+/**
+ * Fetches data from Solscan's Public API.
+ */
+async function fetchSolscanData(mint) {
     try {
-        const conn = getSolanaConnection();
-        if (!conn) throw new Error("Connection initialization failed");
-        return await fn(conn);
-    } catch (err) {
-        if (retries <= 0) {
-            throw err;
-        }
+        const agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Safari/605.1.15',
+            'Mozilla/5.0 (Linux; Android 10; SM-G960U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.181 Mobile Safari/537.36'
+        ];
+        const ua = agents[Math.floor(Math.random() * agents.length)];
 
-        // Simple exponential backoff on the SAME endpoint
-        await new Promise(r => setTimeout(r, delay));
-        return retryRPC(fn, retries - 1, delay * 2);
+        // Primary: Token Meta Endpoint (Better for holders)
+        const url = `https://public-api.solscan.io/token/meta?tokenAddress=${mint}`;
+        
+        const res = await axios.get(url, { 
+            timeout: 5000,
+            headers: { 'User-Agent': ua }
+        });
+        
+        if (res.data) {
+            return {
+                holders: parseInt(res.data.holder || 0),
+                marketCap: parseFloat(res.data.marketCap || res.data.fdv || 0),
+                supply: res.data.supply || '0'
+            };
+        }
+    } catch (e) {
+        // Fallback: Market Endpoint
+        try {
+            if (e.response && e.response.status !== 404) {
+                const url2 = `https://public-api.solscan.io/market/token/${mint}`;
+                const res2 = await axios.get(url2, { timeout: 3000, headers: { 'User-Agent': ua } });
+                if (res2.data) {
+                    return {
+                        holders: parseInt(res2.data.holderCount || res2.data.holder || 0),
+                        marketCap: parseFloat(res2.data.marketCapFD || res2.data.marketCap || 0),
+                        priceUsd: parseFloat(res2.data.priceUsd || 0)
+                    };
+                }
+            }
+        } catch (err2) {
+            // silent fail
+        }
     }
+    return null;
 }
 
-module.exports = { 
-    getSolanaConnection,
-    getRpcUrl,
-    rotateConnection,
-    retryRPC
-};
+// Export as an object to be safe and standard
+module.exports = { fetchSolscanData };

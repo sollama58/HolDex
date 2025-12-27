@@ -1,7 +1,16 @@
 const express = require('express');
 const router = express.Router();
-const { db } = require('../services/database'); 
 const axios = require('axios');
+
+// --- ROBUST IMPORT: Handle both "module.exports = db" and "module.exports = { db }" ---
+let db;
+try {
+    const dbModule = require('../services/database');
+    // If dbModule has a .db property, use it; otherwise assume the module IS the db
+    db = dbModule.db ? dbModule.db : dbModule;
+} catch (err) {
+    console.error("CRITICAL: Failed to import database service in tokens.js", err);
+}
 
 // Helper for delay
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -52,6 +61,7 @@ async function fetchInitialMarketData(mint) {
 // HELPER: Index Token On-Chain (If not exists)
 // -----------------------------------------------------------------------------
 async function indexTokenOnChain(mint) {
+    if (!db) return; // Safety check
     try {
         const existing = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
         if (existing) return;
@@ -84,8 +94,9 @@ async function indexTokenOnChain(mint) {
         ]);
 
         try {
-            const { enqueueTokenUpdate } = require('../services/queue');
-            if (enqueueTokenUpdate) enqueueTokenUpdate(mint);
+            // Dynamic require to handle circular deps
+            const queue = require('../services/queue');
+            if (queue && queue.enqueueTokenUpdate) queue.enqueueTokenUpdate(mint);
         } catch (qErr) {
             console.warn("Queue service not available:", qErr.message);
         }
@@ -100,6 +111,8 @@ async function indexTokenOnChain(mint) {
 // -----------------------------------------------------------------------------
 router.get('/tokens', async (req, res) => {
     try {
+        if (!db) throw new Error("Database not connected");
+
         const { sort = 'k_score', order = 'desc', limit = 50, search = '' } = req.query;
         const cacheKey = `tokens_${sort}_${order}_${limit}_${search}`;
 
@@ -153,6 +166,8 @@ router.get('/token/:mint', async (req, res) => {
     const cacheKey = `token_detail_${mint}`;
 
     try {
+        if (!db) throw new Error("Database not connected");
+
         await indexTokenOnChain(mint);
 
         const fetchAndValidate = async () => {
