@@ -52,7 +52,7 @@ async function retryRPC(fn, retries = 3, delay = 1000) {
 
 /**
  * Fetches the number of holders directly from the RPC.
- * Uses getProgramAccounts with filters to be lightweight (dataSlice).
+ * FILTERS: Only counts accounts with Balance > 0 (Active Holders).
  */
 async function getHolderCountFromRPC(mintAddress) {
     if (!mintAddress) return 0;
@@ -67,14 +67,26 @@ async function getHolderCountFromRPC(mintAddress) {
             { memcmp: { offset: 0, bytes: mintAddress } }
         ];
 
-        // Fetch only keys (dataSlice length 0) to save bandwidth
-        // Wrapped in retryRPC for resilience
+        // Fetch just the Amount (offset 64, length 8) to verify balance > 0
+        // This is crucial to avoid counting closed/empty accounts
         const accounts = await retryRPC(() => conn.getProgramAccounts(TOKEN_PROGRAM_ID, {
             filters: filters,
-            dataSlice: { offset: 0, length: 0 }
+            dataSlice: { offset: 64, length: 8 } 
         }));
 
-        return accounts.length;
+        let activeHolders = 0;
+        for (const acc of accounts) {
+            // Ensure we got the data we requested
+            if (acc.account.data && acc.account.data.length === 8) {
+                // Read the u64 balance (Little Endian)
+                const balance = acc.account.data.readBigUInt64LE(0);
+                if (balance > 0n) {
+                    activeHolders++;
+                }
+            }
+        }
+
+        return activeHolders;
     } catch (e) {
         // Suppress errors for now to prevent log spam if RPC limits are hit
         // logger.debug(`RPC Holder Check failed: ${e.message}`);
