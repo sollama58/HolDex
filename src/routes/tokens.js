@@ -632,8 +632,12 @@ function init(deps) {
                 }
 
                 // FIX: Treat NULL as 0 for proper numeric sorting to prevent nulls appearing at top/bottom unexpectedly
+                // UPDATED: Special logic for K-Score sort (Unverified = 0)
                 let orderBy;
-                if (['timestamp', 'created_at'].includes(sortColumn)) {
+                if (sortColumn === 'k_score') {
+                    // If sorting by K-Score, force unverified tokens to 0
+                    orderBy = `CASE WHEN hasCommunityUpdate = TRUE THEN COALESCE(k_score, 0) ELSE 0 END ${dir}`;
+                } else if (['timestamp', 'created_at'].includes(sortColumn)) {
                     orderBy = `${sortColumn} ${dir}`;
                 } else {
                     orderBy = `COALESCE(${sortColumn}, 0) ${dir}`;

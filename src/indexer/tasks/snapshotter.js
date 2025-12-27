@@ -76,13 +76,17 @@ async function processPoolBatch(db, connection, pools, redis) {
     // --- SELF-HEAL: FETCH MISSING RESERVES ---
     const poolsNeedingReserves = pools.filter(p => p.dex !== 'pumpfun' && (!p.reserve_a || !p.reserve_b));
     if (poolsNeedingReserves.length > 0) {
-        await enrichPoolsWithReserves(poolsNeedingReserves);
-        const fixPromises = poolsNeedingReserves.map(p => {
-            if (p.reserve_a && p.reserve_b) {
-                return db.query(`UPDATE pools SET reserve_a = $1, reserve_b = $2 WHERE address = $3`, [p.reserve_a, p.reserve_b, p.address]);
-            }
-        });
-        await Promise.allSettled(fixPromises);
+        try {
+            await enrichPoolsWithReserves(poolsNeedingReserves);
+            const fixPromises = poolsNeedingReserves.map(p => {
+                if (p.reserve_a && p.reserve_b) {
+                    return db.query(`UPDATE pools SET reserve_a = $1, reserve_b = $2 WHERE address = $3`, [p.reserve_a, p.reserve_b, p.address]);
+                }
+            });
+            await Promise.allSettled(fixPromises);
+        } catch (e) {
+            logger.warn(`Self-Heal reserves failed: ${e.message}`);
+        }
     }
 
     const keysToFetch = [];
@@ -299,7 +303,12 @@ async function runSnapshotCycle() {
         pools = null;
 
     } catch (e) {
-        logger.error(`Snapshot Cycle Error: ${e.message}`);
+        if (e.message && e.message.includes('ECONNREFUSED')) {
+            logger.error(`Snapshot DB Connection Failed: ${e.message} (Retrying in 10s...)`);
+            // Don't crash, just log and wait.
+        } else {
+            logger.error(`Snapshot Cycle Error: ${e.message}`);
+        }
     } finally {
         isCycleRunning = false;
         

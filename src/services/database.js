@@ -22,10 +22,13 @@ async function initDB() {
             const isLocal = config.DATABASE_URL.includes('localhost') || config.DATABASE_URL.includes('127.0.0.1');
             const sslConfig = isLocal ? false : { rejectUnauthorized: false };
 
+            // SCALABILITY FIX: Reduced max connections from 50 to 10.
+            // With 3 services (API, Worker, Listener) running, 50 * 3 = 150 connections
+            // which exceeds standard Render/Postgres limits (usually 100).
             primaryPool = new Pool({
                 connectionString: config.DATABASE_URL,
                 ssl: sslConfig,
-                max: 50, 
+                max: 10, 
                 idleTimeoutMillis: 30000,
                 connectionTimeoutMillis: 5000,
             });
