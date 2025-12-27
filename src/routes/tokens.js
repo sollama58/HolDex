@@ -247,7 +247,7 @@ function init(deps) {
 
     // --- API KEY ADMIN ---
     router.get('/admin/keys', requireAdmin, async (req, res) => { try { const keys = await db.all('SELECT * FROM api_keys ORDER BY created_at DESC'); res.json({ success: true, keys }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.post('/admin/generate-key', requireAdmin, async (req, res) => { const { owner, tier } = req.body; if (!owner) return res.status(400).json({ success: false, error: "Owner name required" }); try { const key = 'hx_' + require('crypto').randomBytes(16).toString('hex'); const limit = tier === 'pro' ? 100000 : (tier === 'enterprise' ? 1000000 : 1000); await db.run(`INSERT INTO api_keys (key, owner, tier, requests_limit, created_at) VALUES ($1, $2, $3, $4, $5)`, [key, owner, tier || 'free', limit, Date.now()]); res.json({ success: true, key, message: "Key Generated" }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    router.post('/admin/generate-key', requireAdmin, async (req, res) => { const { owner, tier } = req.body; if (!owner) return res.status(400).json({ success: false, error: "Owner name required" }); try { const key = 'hx_' + require('crypto').randomBytes(16).toString('hex'); const limit = tier === 'pro' ? 100000 : (tier === 'enterprise' ? 1000000 : 1000); await db.run(`INSERT INTO api_keys (key, owner, tier, requests_limit, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) VALUES ($1, $2, $3, $4, $5, $6)`, [key, owner, tier || 'free', limit, Date.now()]); res.json({ success: true, key, message: "Key Generated" }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     
     // KEY MANAGEMENT ROUTES - FIXED
     router.post('/admin/update-key', requireAdmin, async (req, res) => { 
@@ -500,7 +500,7 @@ function init(deps) {
         } catch(e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
-    // FIXED: ADDED 'filter' query support
+    // FIXED: ADDED 'filter' query support & NULL sorting fix
     router.get('/tokens', cacheControl(2, 5), apiKeyAuth(false), async (req, res) => {
         const { search = '', sort = 'kscore', page = 1, filter, direction = 'desc' } = req.query;
         try {
@@ -536,7 +536,13 @@ function init(deps) {
                     default: sortColumn = 'k_score'; break;
                 }
 
-                let orderBy = `${sortColumn} ${dir}`;
+                // FIX: Treat NULL as 0 for proper numeric sorting to prevent nulls appearing at top/bottom unexpectedly
+                let orderBy;
+                if (['timestamp', 'created_at'].includes(sortColumn)) {
+                    orderBy = `${sortColumn} ${dir}`;
+                } else {
+                    orderBy = `COALESCE(${sortColumn}, 0) ${dir}`;
+                }
 
                 let whereClause = '';
                 // FILTER: Only return tokens with community updates if requested
