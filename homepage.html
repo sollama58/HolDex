@@ -378,7 +378,6 @@
                             <button onclick="toggleScale()" class="tool-btn" id="btn-scale">
                                 <i data-lucide="scaling" width="12"></i> <span id="scale-text">Linear</span>
                             </button>
-                            <!-- REMOVED INDICATORS TOGGLE -->
                         </div>
                      </div>
                      
@@ -522,7 +521,7 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             <li>Go to <a href="https://imgur.com/upload" target="_blank" class="text-[#ea580c] underline hover:text-[#fb923c]">imgur.com/upload</a></li>
             <li>Upload your banner image (Rec: 1500x500px).</li>
             <li>Right-click the uploaded image and select <strong>"Copy Image Address"</strong>.</li>
-            <li>Paste the URL here. It must end in .jpg, .png, .webp, or .gif.</li>
+            <li>Paste the URL here. It must end in .jpg, .png, .webp, .gif.</li>
         </ol>
         <div class="bg-[#451a03] p-3 rounded border border-[#7c2d12] text-xs text-[#9a3412]">
             <strong>Note:</strong> We do not host images directly to keep the protocol decentralized and lightweight.
@@ -840,6 +839,16 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     
     function closeHolderHistory() {
         document.getElementById('holder-modal').classList.remove('open');
+    }
+    
+    // NEW FUNCTION: Cleanup old holder charts
+    function cleanupHolderChart() {
+        if (holderChart) {
+            holderChart.remove();
+            holderChart = null;
+            holderAreaSeries = null;
+        }
+        document.getElementById('holder-chart-container').innerHTML = '';
     }
 
     function initHolderChart() {
@@ -1193,7 +1202,9 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         if(contentDiv) contentDiv.style.display = 'none'; 
         if(bannerContainer) { bannerContainer.classList.add('hidden'); bannerContainer.innerHTML = ''; }
 
+        // CLEANUP BOTH CHARTS ON SWITCH
         cleanupChart();
+        cleanupHolderChart();
 
         // SUBSCRIBE TO SOCKET ROOM
         if (socket) socket.emit('subscribe', mint);
