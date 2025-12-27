@@ -233,7 +233,7 @@ function init(deps) {
     // --- BACKUP & RESTORE ---
     router.get('/admin/backup/updates', requireAdmin, async (req, res) => { try { const updates = await db.all('SELECT * FROM token_updates ORDER BY submittedAt DESC'); const keys = await db.all('SELECT * FROM api_keys'); res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Disposition', `attachment; filename=holdex_full_backup_${Date.now()}.json`); res.json({ success: true, timestamp: Date.now(), updates: updates, api_keys: keys }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     
-    // RESTORE ROUTES - MERGING ENABLED
+    // RESTORE ROUTES - FULL SYNC ENABLED
     router.post('/admin/restore/updates', requireAdmin, async (req, res) => { 
         const { updates, api_keys } = req.body; 
         
@@ -248,22 +248,21 @@ function init(deps) {
         };
 
         try {
-            // 1. Restore Updates with Merge Logic
+            // 1. Restore Updates with Merge Logic & TOKENS SYNC
             if (Array.isArray(updates)) {
                 for (const u of updates) {
                     try {
                         const sig = u.signature || u.txId || 'manual_' + Date.now();
                         const existing = await db.get('SELECT * FROM token_updates WHERE signature = $1', [sig]);
                         
+                        // MERGE or INSERT into token_updates
                         if (existing) {
-                            // MERGE: Only update if DB is empty and Backup has data
                             const fields = ['twitter', 'website', 'telegram', 'banner', 'description', 'payer', 'status'];
                             const sets = [];
                             const vals = [];
                             let idx = 1;
 
                             for(const f of fields) {
-                                // Check if DB field is null or empty string, AND backup has a valid value
                                 if ((existing[f] === null || existing[f] === '') && (u[f] !== null && u[f] !== undefined && u[f] !== '')) {
                                     sets.push(`${f} = $${idx++}`);
                                     vals.push(u[f]);
@@ -277,49 +276,73 @@ function init(deps) {
                             } else {
                                 results.updates.skipped++;
                             }
-                            continue;
+                        } else {
+                            const timestamp = u.submittedAt || u.submittedat || Date.now();
+                            const status = u.status || 'pending';
+                            await db.run(`
+                                INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, status, signature, payer, submittedAt)
+                                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                            `, [u.mint, u.twitter, u.website, u.telegram, u.banner, u.description, status, sig, u.payer || 'unknown', timestamp]);
+                            results.updates.restored++;
                         }
 
-                        // INSERT NEW
-                        const timestamp = u.submittedAt || u.submittedat || Date.now();
-                        const status = u.status || 'pending';
+                        // --- SYNC LIVE TOKENS TABLE (Community Updates) ---
+                        // If this update was approved (restored or existing), ensure the main token table reflects the changes
+                        const status = u.status || (existing ? existing.status : 'pending');
+                        
+                        if (status === 'approved') {
+                            const token = await db.get('SELECT metadata, hasCommunityUpdate FROM tokens WHERE mint = $1', [u.mint]);
+                            if (token) {
+                                let meta = {};
+                                try { meta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata || {}; } catch(e){}
+                                
+                                meta.community = meta.community || {};
+                                let changed = false;
+                                
+                                const syncFields = ['twitter', 'website', 'telegram', 'banner', 'description'];
+                                
+                                for (const f of syncFields) {
+                                    // If main table is missing data, but update has it -> Sync it
+                                    if ((!meta.community[f] || meta.community[f] === "") && (u[f] && u[f] !== "")) {
+                                        meta.community[f] = u[f];
+                                        changed = true;
+                                    }
+                                }
 
-                        await db.run(`
-                            INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, status, signature, payer, submittedAt)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                        `, [
-                            u.mint, 
-                            u.twitter, 
-                            u.website, 
-                            u.telegram, 
-                            u.banner, 
-                            u.description, 
-                            status, 
-                            sig, 
-                            u.payer || 'unknown', 
-                            timestamp
-                        ]);
-                        results.updates.restored++;
+                                // If we modified metadata OR the flag is missing, update the token
+                                if (changed || !token.hasCommunityUpdate) {
+                                    await db.run(`
+                                        UPDATE tokens 
+                                        SET metadata = $1, hasCommunityUpdate = TRUE, updated_at = CURRENT_TIMESTAMP 
+                                        WHERE mint = $2
+                                    `, [JSON.stringify(meta), u.mint]);
+                                }
+                            }
+                        }
+
                     } catch (e) { console.error(`Update Restore Error: ${e.message}`); }
                 }
             }
 
-            // 2. Restore API Keys with Merge Logic
+            // 2. Restore API Keys with Usage Level (requests_limit)
             if (Array.isArray(api_keys)) {
                 for (const k of api_keys) {
                     try {
                         const existing = await db.get('SELECT * FROM api_keys WHERE key = $1', [k.key]);
                         if (existing) {
-                             // MERGE
-                            const fields = ['owner', 'tier']; 
+                             // MERGE - ADDED 'requests_limit' to sync fields
+                            const fields = ['owner', 'tier', 'requests_limit']; 
                             const sets = [];
                             const vals = [];
                             let idx = 1;
 
                             for(const f of fields) {
-                                if ((existing[f] === null || existing[f] === '') && (k[f])) {
+                                // Map camelCase input to snake_case DB column where needed
+                                const inputVal = k[f] || k[f.replace(/_([a-z])/g, g => g[1].toUpperCase())]; // requests_limit OR requestsLimit
+                                
+                                if ((existing[f] === null || existing[f] === '') && (inputVal !== undefined && inputVal !== null)) {
                                     sets.push(`${f} = $${idx++}`);
-                                    vals.push(k[f]);
+                                    vals.push(inputVal);
                                 }
                             }
                             
