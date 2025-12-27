@@ -2,7 +2,7 @@ const { Pool } = require('pg');
 const config = require('../config/env');
 const logger = require('./logger');
 const { getClient } = require('./redis');
-const { getHolderCountFromRPC } = require('./solana'); // NEW: Import RPC function
+const { getHolderCountFromRPC } = require('./solana'); 
 
 let primaryPool = null;
 let readPool = null; 
@@ -155,6 +155,12 @@ async function initDB() {
                     ALTER TABLE tokens ADD COLUMN IF NOT EXISTS holders INTEGER DEFAULT 0;
                 `);
                 await primaryPool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_updated_at ON tokens(updated_at ASC)`);
+                
+                // --- FIX: RESET STUCK TOKENS ---
+                // Reset the timer for any token that incorrectly has 0 holders so they update immediately
+                await primaryPool.query(`UPDATE tokens SET last_holder_check = 0 WHERE holders = 0`);
+                // logger.info("✅ Database: Reset holder check for tokens with 0 holders.");
+
             } catch (migErr) {
                 logger.warn(`Migration Warning (non-fatal): ${migErr.message}`);
             }
@@ -322,8 +328,7 @@ async function aggregateAndSaveToken(db, mint) {
             if (p5m !== null && p5m > 0) change5m = ((price - p5m) / p5m) * 100;
         }
 
-        // --- NEW: HOLDER CHECK LOGIC ---
-        // We only check if it's a new token (never checked) OR if 60 minutes have passed
+        // --- HOLDER CHECK LOGIC ---
         const now = Date.now();
         const oneHour = 60 * 60 * 1000;
         
@@ -338,6 +343,8 @@ async function aggregateAndSaveToken(db, mint) {
                 const count = await getHolderCountFromRPC(mint);
                 
                 // Only update if we got a valid number
+                // IMPORTANT: We check >= 0 because count can legally be 0, but if it is 0 due to error it will persist.
+                // However, the new solenoid.js fix ensures we don't falsely return 0 for Token2022.
                 if (typeof count === 'number') {
                     holderCount = count;
                     // Save history
@@ -353,17 +360,19 @@ async function aggregateAndSaveToken(db, mint) {
         }
 
         const updates = [];
-        const params = [totalLiq, totalVol, price, mint];
+        const params = [totalLiq, totalVol, price, mint, Date.now()]; 
         let query = `UPDATE tokens SET liquidity = $1, volume24h = $2, priceUsd = $3`;
         query += `, marketCap = ($3 * CAST(supply AS DOUBLE PRECISION) / POWER(10, COALESCE(decimals, 9)))`;
+        
+        // Explicitly update timestamp
+        query += `, timestamp = $5`;
 
-        let pIdx = 5;
+        let pIdx = 6;
 
         if (change24h !== null) { query += `, change24h = $${pIdx++}`; params.push(change24h); }
         if (change1h !== null) { query += `, change1h = $${pIdx++}`; params.push(change1h); }
         if (change5m !== null) { query += `, change5m = $${pIdx++}`; params.push(change5m); }
         
-        // NEW: Add Holders to update query
         if (holderCount !== null) { 
             query += `, holders = $${pIdx++}, last_holder_check = $${pIdx++}`; 
             params.push(holderCount); 

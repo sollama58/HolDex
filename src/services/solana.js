@@ -62,16 +62,22 @@ async function retryRPC(fn, retries = 3, delay = 1000) {
  */
 async function fetchAccountsForProgram(conn, programId, mintAddress) {
     try {
-        const filters = [
-            { dataSize: 165 }, 
-            { memcmp: { offset: 0, bytes: mintAddress } }
-        ];
+        const filters = [];
+        
+        // CRITICAL FIX: Only apply dataSize filter for Legacy Token Program (Fixed 165 bytes).
+        // Token-2022 accounts have variable sizes due to extensions, so we CANNOT filter by size.
+        if (programId.equals(TOKEN_PROGRAM_ID)) {
+            filters.push({ dataSize: 165 });
+        }
+
+        // Always filter by Mint Address (Offset 0 is standard for both programs)
+        filters.push({ memcmp: { offset: 0, bytes: mintAddress } });
 
         // Fetch just the Amount (offset 64, length 8) to verify balance > 0
         const accounts = await retryRPC(() => conn.getProgramAccounts(programId, {
             filters: filters,
             dataSlice: { offset: 64, length: 8 } 
-        }), 2, 500); // Fewer retries for sub-tasks
+        }), 2, 500); 
 
         let activeHolders = 0;
         for (const acc of accounts) {
@@ -82,11 +88,8 @@ async function fetchAccountsForProgram(conn, programId, mintAddress) {
         }
         return activeHolders;
     } catch (e) {
-        // Log detailed error for debugging
         if (e.message.includes('429')) {
              logger.warn(`⚠️ RPC Rate Limit (Holders Check): ${e.message}`);
-        } else {
-             // logger.debug(`RPC Check failed for ${programId.toString()}: ${e.message}`);
         }
         return 0;
     }
@@ -105,15 +108,11 @@ async function getHolderCountFromRPC(mintAddress) {
     let count = await fetchAccountsForProgram(conn, TOKEN_PROGRAM_ID, mintAddress);
 
     // 2. If Legacy returns 0, it MIGHT be a Token-2022 token. Check that.
+    // NOTE: Some tokens might have holders in BOTH if they are migrating, so strictly 
+    // speaking we should sum them, but usually it's one or the other.
     if (count === 0) {
         const count2022 = await fetchAccountsForProgram(conn, TOKEN_2022_PROGRAM_ID, mintAddress);
-        if (count2022 > 0) {
-            count = count2022;
-        }
-    } else {
-        // Edge Case: Hybrid tokens (rare, but possible to have accounts in both)
-        // We check 2022 anyway just in case, but only if the first one succeeded quickly
-        // Actually, for performance, if we found legacy holders, we assume it's a legacy token.
+        count += count2022;
     }
 
     return count;

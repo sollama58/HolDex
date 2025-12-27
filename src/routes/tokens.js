@@ -12,7 +12,7 @@ const { getClient } = require('../services/redis');
 const { enqueueTokenUpdate } = require('../services/queue'); 
 const { snapshotPools } = require('../indexer/tasks/snapshotter'); 
 const logger = require('../services/logger');
-// NEW: Import Cache Middleware
+// Cache Middleware
 const cacheControl = require('../middleware/httpCache');
 
 const router = express.Router();
@@ -279,10 +279,11 @@ function init(deps) {
                 if (!token) return { success: false, error: "Token not found" };
 
                 // 2. FRESHNESS CHECK (Just-in-Time Update)
-                // If the token data is older than 60 seconds, force a refresh of its pools
+                // If the token data is older than 5 MINUTES, force a refresh
                 // We use a memory lock (pendingRefreshes) to prevent RPC spam if multiple users view at once
                 const now = Date.now();
-                const isStale = !token.timestamp || (now - token.timestamp > 60000); // 60s Threshold
+                // FIX: Increased threshold from 60000 (1min) to 300000 (5min)
+                const isStale = !token.timestamp || (now - token.timestamp > 300000); 
 
                 if (isStale && pairs.length > 0 && !pendingRefreshes.has(mint)) {
                     pendingRefreshes.add(mint);
