@@ -140,11 +140,24 @@ async function initDB() {
                     updatedAt BIGINT
                 );
 
+                -- NEW: API KEYS TABLE
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    key TEXT PRIMARY KEY,
+                    owner TEXT, -- Name or Email of developer
+                    tier TEXT DEFAULT 'free', -- 'free', 'pro', 'enterprise'
+                    requests_limit INTEGER DEFAULT 1000, -- Daily limit
+                    requests_today INTEGER DEFAULT 0,
+                    last_reset BIGINT DEFAULT 0,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at BIGINT
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score DESC);
                 CREATE INDEX IF NOT EXISTS idx_tokens_timestamp ON tokens(timestamp DESC);
                 CREATE INDEX IF NOT EXISTS idx_pools_mint ON pools(mint);
                 CREATE INDEX IF NOT EXISTS idx_candles_pool_time ON candles_1m(pool_address, timestamp);
                 CREATE INDEX IF NOT EXISTS idx_holders_hist_mint ON holders_history(mint);
+                CREATE INDEX IF NOT EXISTS idx_api_keys_key ON api_keys(key);
             `);
 
             // --- AUTO-MIGRATIONS ---
@@ -157,9 +170,7 @@ async function initDB() {
                 await primaryPool.query(`CREATE INDEX IF NOT EXISTS idx_tokens_updated_at ON tokens(updated_at ASC)`);
                 
                 // --- FIX: RESET STUCK TOKENS ---
-                // Reset the timer for any token that incorrectly has 0 holders so they update immediately
                 await primaryPool.query(`UPDATE tokens SET last_holder_check = 0 WHERE holders = 0`);
-                // logger.info("✅ Database: Reset holder check for tokens with 0 holders.");
 
             } catch (migErr) {
                 logger.warn(`Migration Warning (non-fatal): ${migErr.message}`);
@@ -344,7 +355,6 @@ async function aggregateAndSaveToken(db, mint) {
                 
                 // Only update if we got a valid number
                 // IMPORTANT: We check >= 0 because count can legally be 0, but if it is 0 due to error it will persist.
-                // However, the new solenoid.js fix ensures we don't falsely return 0 for Token2022.
                 if (typeof count === 'number') {
                     holderCount = count;
                     // Save history

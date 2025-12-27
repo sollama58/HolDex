@@ -17,6 +17,7 @@
     <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/tweetnacl@1.0.3/nacl-fast.min.js"></script> <!-- Required for signing -->
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     
     <script>
@@ -269,8 +270,11 @@
             <div class="bg-[#0f0502] border border-[#7c2d12] rounded-xl p-8 relative overflow-hidden group hover:border-[#ea580c] transition-colors">
                 <div class="absolute top-4 right-4 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><i data-lucide="code" width="100" class="text-[#ea580c]"></i></div>
                 <h3 class="text-2xl font-bold text-white mb-2">Developers & API</h3>
-                <p class="text-[#9a3412] mb-6 max-w-2xl">HolDex exposes a robust public API. Build trading bots, analytics dashboards, or integrate our data into your dApp freely.</p>
-                <button onclick="toggleApiModal()" class="action-btn flex items-center gap-2"><i data-lucide="terminal" width="16"></i> View API Documentation</button>
+                <p class="text-[#9a3412] mb-6 max-w-2xl">HolDex exposes a robust public API. You can generate a free API key instantly using your wallet.</p>
+                <div class="flex gap-4">
+                    <button onclick="toggleApiModal()" class="action-btn flex items-center gap-2"><i data-lucide="file-text" width="16"></i> Documentation</button>
+                    <button onclick="requestApiKey()" class="action-btn flex items-center gap-2 bg-[#2a1005] border-[#22c55e] text-[#22c55e] hover:bg-green-900/20"><i data-lucide="key" width="16"></i> Get API Key</button>
+                </div>
             </div>
              <div class="border-t border-[#7c2d12] pt-8 flex justify-between items-center text-xs text-[#9a3412]"><div>&copy; 2025 HolDex Protocol. All rights reserved.</div><div class="font-mono">v2.5.0 (Stable)</div></div>
         </div>
@@ -433,6 +437,13 @@
             </div>
         </div>
 
+        <div class="bg-[#0f0502] border border-[#7c2d12] p-4 rounded-lg mb-6">
+            <h4 class="text-[#ea580c] font-bold mb-2 text-sm">Authentication</h4>
+            <p class="text-xs text-[#ffedd5] mb-2">Include your API Key in the request header:</p>
+            <div class="code-block text-xs py-2 px-3">x-api-key: YOUR_KEY_HERE</div>
+            <p class="text-[10px] text-[#9a3412] mt-2 italic">Free Tier Limit: 1,000 requests/day</p>
+        </div>
+
         <div class="space-y-8">
             <!-- ENDPOINT 1 -->
             <div>
@@ -548,6 +559,23 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         <h3 class="text-xl font-bold text-white mb-2 font-sans">Holder Growth</h3>
         <p class="text-xs text-[#9a3412] mb-6 font-mono">Daily snapshots</p>
         <div id="holder-chart-container" class="w-full h-64 bg-[#1a0a05] rounded-xl border border-[#7c2d12] overflow-hidden"></div>
+    </div>
+</div>
+
+<!-- NEW: GENERATED KEY MODAL -->
+<div id="key-modal" class="modal-overlay">
+    <div class="bg-[#2a1005] border-2 border-[#ea580c] rounded-2xl p-8 w-full max-w-md relative shadow-2xl text-center" onclick="event.stopPropagation()">
+        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="closeKeyModal()"><i data-lucide="x" width="24"></i></button>
+        <div class="w-12 h-12 bg-[#451a03] rounded-full flex items-center justify-center mx-auto mb-4 border border-[#ea580c] text-[#ea580c]"><i data-lucide="key" width="24"></i></div>
+        <h3 class="text-2xl font-bold text-white mb-2 font-sans">Your API Key</h3>
+        <p class="text-xs text-[#9a3412] mb-6">Keep this safe. It allows 1,000 reqs/day.</p>
+        
+        <div class="bg-[#0f0502] border border-[#7c2d12] p-4 rounded-lg mb-6 relative">
+            <div id="generated-key-display" class="font-mono text-[#fb923c] text-lg break-all">...</div>
+            <button onclick="copyKey()" class="absolute top-2 right-2 text-[#9a3412] hover:text-white"><i data-lucide="copy" width="16"></i></button>
+        </div>
+        
+        <button onclick="closeKeyModal()" class="action-btn w-full justify-center">Done</button>
     </div>
 </div>
 
@@ -892,6 +920,58 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             holderAreaSeries.setData(uniqueData);
             holderChart.timeScale().fitContent();
         }
+    }
+
+    // --- API KEY GENERATION LOGIC ---
+    async function requestApiKey() {
+        if (!walletAddress || !walletProvider) {
+            alert("Please connect your wallet first.");
+            openWalletModal();
+            return;
+        }
+
+        try {
+            const message = "Request HolDex API Key";
+            const encodedMessage = new TextEncoder().encode(message);
+            const signedMessage = await walletProvider.signMessage(encodedMessage, 'utf8');
+            
+            // Handle different wallet signature formats
+            let signatureBase64;
+            if (signedMessage.signature) {
+                // Phantom/Solflare often return object with signature property
+                signatureBase64 = window.buffer.Buffer.from(signedMessage.signature).toString('base64');
+            } else {
+                // Standard byte array
+                signatureBase64 = window.buffer.Buffer.from(signedMessage).toString('base64');
+            }
+
+            const res = await fetch(`${API_URL}/api/request-api-key`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ wallet: walletAddress, signature: signatureBase64 })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                document.getElementById('generated-key-display').innerText = data.key;
+                document.getElementById('key-modal').classList.add('open');
+            } else {
+                alert("Failed: " + data.error);
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Signature request failed or was rejected.");
+        }
+    }
+
+    function closeKeyModal() {
+        document.getElementById('key-modal').classList.remove('open');
+    }
+
+    function copyKey() {
+        const key = document.getElementById('generated-key-display').innerText;
+        navigator.clipboard.writeText(key);
+        alert("API Key copied to clipboard!");
     }
 
     // ... (Standard Helpers) ...

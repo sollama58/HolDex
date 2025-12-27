@@ -1,6 +1,8 @@
 const express = require('express');
 const axios = require('axios');
 const { PublicKey } = require('@solana/web3.js');
+const nacl = require('tweetnacl'); // NEW: For signature verification
+const bs58 = require('bs58');      // NEW: For signature verification
 const { isValidPubkey } = require('../utils/solana');
 const { smartCache, enableIndexing, aggregateAndSaveToken } = require('../services/database'); 
 const { findPoolsOnChain } = require('../services/pool_finder');
@@ -13,6 +15,7 @@ const { enqueueTokenUpdate } = require('../services/queue');
 const { snapshotPools } = require('../indexer/tasks/snapshotter'); 
 const logger = require('../services/logger');
 const cacheControl = require('../middleware/httpCache');
+const apiKeyAuth = require('../middleware/apiKeyAuth');
 
 const router = express.Router();
 const solanaConnection = getSolanaConnection();
@@ -152,7 +155,8 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "Transaction Failed at RPC" }); }
     });
 
-    router.get('/token/:mint/candles', cacheControl(30, 60), async (req, res) => {
+    // PUBLIC: Candle Chart (Cached + Optional API Key)
+    router.get('/token/:mint/candles', cacheControl(30, 60), apiKeyAuth(false), async (req, res) => {
         const { mint } = req.params;
         const { resolution = '5', from, to, poolAddress } = req.query; 
         try {
@@ -246,6 +250,43 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "Submission failed" }); }
     });
 
+    // --- NEW: PUBLIC API KEY GENERATION ---
+    router.post('/request-api-key', async (req, res) => {
+        const { wallet, signature } = req.body; // signature is base64 of message "Request HolDex API Key"
+        
+        try {
+            if (!wallet || !signature) return res.status(400).json({ success: false, error: "Wallet and Signature required" });
+            
+            // Verify Signature
+            const msg = new TextEncoder().encode("Request HolDex API Key");
+            const sigBytes = Buffer.from(signature, 'base64');
+            const pubBytes = new PublicKey(wallet).toBytes();
+            const verified = nacl.sign.detached.verify(msg, sigBytes, pubBytes);
+            
+            if (!verified) return res.status(403).json({ success: false, error: "Invalid Signature" });
+
+            // Check if key already exists for this wallet
+            const existing = await db.get('SELECT key FROM api_keys WHERE owner = $1', [wallet]);
+            if (existing) {
+                return res.json({ success: true, key: existing.key, message: "Existing Key Retrieved" });
+            }
+
+            // Generate New Key
+            const key = 'hx_' + require('crypto').randomBytes(16).toString('hex');
+            
+            await db.run(`
+                INSERT INTO api_keys (key, owner, tier, requests_limit, created_at)
+                VALUES ($1, $2, 'free', 1000, $3)
+            `, [key, wallet, Date.now()]);
+            
+            res.json({ success: true, key, message: "New API Key Generated" });
+
+        } catch (e) {
+            console.error(e);
+            res.status(500).json({ success: false, error: "Server Error" });
+        }
+    });
+
     // --- ADMIN ROUTES ---
     router.get('/admin/updates', requireAdmin, async (req, res) => { const { type } = req.query; try { let sql = `SELECT u.*, t.symbol as ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`; if (type === 'history') { sql += ` WHERE u.status != 'pending' ORDER BY u.submittedAt DESC LIMIT 50`; } else { sql += ` WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`; } const updates = await db.all(sql); res.json({ success: true, updates }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     router.post('/admin/approve-update', requireAdmin, async (req, res) => { const { id } = req.body; try { const request = await db.get(`SELECT * FROM token_updates WHERE id = $1`, [id]); if (!request) return res.status(404).json({ success: false, error: "Request not found" }); const token = await db.get(`SELECT metadata FROM tokens WHERE mint = $1`, [request.mint]); let currentMeta = {}; if (token && token.metadata) { try { currentMeta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata; } catch (e) {} } const newCommunity = { twitter: request.twitter, website: request.website, telegram: request.telegram, banner: request.banner, description: request.description }; currentMeta.community = { ...(currentMeta.community || {}), ...newCommunity }; const jsonStr = JSON.stringify(currentMeta); await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE, updated_at = CURRENT_TIMESTAMP WHERE mint = $2`, [jsonStr, request.mint]); await db.run(`UPDATE token_updates SET status = 'approved' WHERE id = $1`, [id]); await updateSingleToken({ db }, request.mint); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
@@ -255,9 +296,49 @@ function init(deps) {
     router.post('/admin/delete-token', requireAdmin, async (req, res) => { const { mint } = req.body; try { const pools = await db.all(`SELECT address FROM pools WHERE mint = $1`, [mint]); const poolAddresses = pools.map(p => p.address); if (poolAddresses.length > 0) { await db.run(`DELETE FROM candles_1m WHERE pool_address = ANY($1)`, [poolAddresses]); await db.run(`DELETE FROM active_trackers WHERE pool_address = ANY($1)`, [poolAddresses]); } await db.run(`DELETE FROM pools WHERE mint = $1`, [mint]); await db.run(`DELETE FROM k_scores WHERE mint = $1`, [mint]); await db.run(`DELETE FROM token_updates WHERE mint = $1`, [mint]); await db.run(`DELETE FROM holders_history WHERE mint = $1`, [mint]); await db.run(`DELETE FROM tokens WHERE mint = $1`, [mint]); const redis = getClient(); if (redis) { await redis.del(`token:detail:${mint}`); } res.json({ success: true, message: "Token and all history permanently deleted." }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => { const { mint } = req.body; try { const newScore = await updateSingleToken({ db }, mint); res.json({ success: true, message: `K-Score Updated: ${newScore}` }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
 
+    // --- API KEY ADMIN MANAGEMENT ---
+    router.get('/admin/keys', requireAdmin, async (req, res) => {
+        try {
+            const keys = await db.all('SELECT * FROM api_keys ORDER BY created_at DESC');
+            res.json({ success: true, keys });
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+    });
+
+    router.post('/admin/generate-key', requireAdmin, async (req, res) => {
+        const { owner, tier } = req.body;
+        if (!owner) return res.status(400).json({ success: false, error: "Owner name required" });
+        
+        try {
+            const key = 'hx_' + require('crypto').randomBytes(16).toString('hex');
+            const limit = tier === 'pro' ? 100000 : (tier === 'enterprise' ? 1000000 : 1000);
+            
+            await db.run(`
+                INSERT INTO api_keys (key, owner, tier, requests_limit, created_at)
+                VALUES ($1, $2, $3, $4, $5)
+            `, [key, owner, tier || 'free', limit, Date.now()]);
+            
+            res.json({ success: true, key, message: "Key Generated" });
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+    });
+
+    router.post('/admin/revoke-key', requireAdmin, async (req, res) => {
+        const { key } = req.body;
+        try {
+            await db.run('UPDATE api_keys SET is_active = FALSE WHERE key = $1', [key]);
+            res.json({ success: true });
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+    });
+
+    // NEW: DELETE KEY (Permanent)
+    router.post('/admin/delete-key', requireAdmin, async (req, res) => {
+        const { key } = req.body;
+        try {
+            await db.run('DELETE FROM api_keys WHERE key = $1', [key]);
+            res.json({ success: true });
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+    });
+
     // --- BACKUP & RESTORE ROUTES ---
-    
-    // BACKUP: Dump all token_updates to a JSON file
     router.get('/admin/backup/updates', requireAdmin, async (req, res) => {
         try {
             const updates = await db.all('SELECT * FROM token_updates ORDER BY submittedAt DESC');
@@ -269,7 +350,6 @@ function init(deps) {
         }
     });
 
-    // RESTORE: Import token_updates with Force-Indexing
     router.post('/admin/restore/updates', requireAdmin, async (req, res) => {
         const { updates } = req.body;
         if (!Array.isArray(updates)) {
@@ -282,11 +362,9 @@ function init(deps) {
 
         try {
             for (const u of updates) {
-                // Normalize keys (handle case sensitivity from JSON)
                 const signature = u.signature || u.Signature;
                 const mint = u.mint || u.Mint;
                 
-                // Fields with fallback
                 const twitter = u.twitter;
                 const website = u.website;
                 const telegram = u.telegram;
@@ -301,7 +379,6 @@ function init(deps) {
                     continue; 
                 }
 
-                // 1. RESTORE UPDATE RECORD
                 const existingUpdate = await db.get('SELECT id FROM token_updates WHERE signature = $1', [signature]);
                 
                 if (!existingUpdate) {
@@ -314,14 +391,11 @@ function init(deps) {
                     skippedCount++;
                 }
 
-                // 2. ENSURE TOKEN EXISTS (CRITICAL FIX)
                 let tokenRow = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
                 
                 if (!tokenRow) {
                     try {
-                        // logger.info(`Restoring: Token ${mint} missing from DB. Indexing from Chain...`);
                         await indexTokenOnChain(mint);
-                        // RE-FETCH after indexing to get the row
                         tokenRow = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
                         if (tokenRow) indexedCount++;
                     } catch (idxErr) {
@@ -329,8 +403,6 @@ function init(deps) {
                     }
                 }
 
-                // 3. IF APPROVED, SYNC METADATA TO TOKENS TABLE
-                // This ensures the website/twitter links appear immediately
                 if (tokenRow && status === 'approved') {
                     try {
                         let meta = {};
@@ -338,7 +410,6 @@ function init(deps) {
                             try { meta = typeof tokenRow.metadata === 'string' ? JSON.parse(tokenRow.metadata) : tokenRow.metadata; } catch (e) {}
                         }
                         
-                        // Merge restored data over existing data
                         meta.community = {
                             ...(meta.community || {}),
                             twitter: twitter || meta.community?.twitter,
@@ -369,7 +440,7 @@ function init(deps) {
     });
 
     // --- STANDARD PUBLIC ROUTES ---
-    router.get('/token/:mint', cacheControl(3, 5), async (req, res) => {
+    router.get('/token/:mint', cacheControl(3, 5), apiKeyAuth(false), async (req, res) => {
         const { mint } = req.params;
         const cacheKey = `token:detail:${mint}`;
         try {
@@ -445,7 +516,7 @@ function init(deps) {
         } catch(e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
-    router.get('/tokens', cacheControl(2, 5), async (req, res) => {
+    router.get('/tokens', cacheControl(2, 5), apiKeyAuth(false), async (req, res) => {
         const { search = '', sort = 'kscore', page = 1 } = req.query;
         try {
             const isGenericView = !search;

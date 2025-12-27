@@ -82,6 +82,7 @@
             <button onclick="switchTab('pending')" id="tab-pending" class="nav-tab active">Pending Queue</button>
             <button onclick="switchTab('history')" id="tab-history" class="nav-tab">History Log</button>
             <button onclick="switchTab('manage')" id="tab-manage" class="nav-tab">Manage Token</button>
+            <button onclick="switchTab('api')" id="tab-api" class="nav-tab">API Keys</button>
         </div>
 
         <!-- VIEW: LIST (Pending & History) -->
@@ -141,6 +142,26 @@
                 </div>
             </div>
         </div>
+
+        <!-- VIEW: API KEYS -->
+        <div id="view-api" class="hidden">
+            <div class="card mb-6">
+                <h3 class="text-lg font-bold text-white mb-4">Generate New API Key</h3>
+                <div class="flex gap-4">
+                    <input type="text" id="api-owner" class="form-input" placeholder="Owner Name (e.g. 'Trading Bot 1')">
+                    <select id="api-tier" class="form-input w-40">
+                        <option value="free">Free (1k)</option>
+                        <option value="pro">Pro (100k)</option>
+                        <option value="enterprise">Enterprise</option>
+                    </select>
+                    <button onclick="generateApiKey()" class="btn btn-green">Generate</button>
+                </div>
+            </div>
+            
+            <div id="api-key-list" class="space-y-2">
+                <!-- Keys populated here -->
+            </div>
+        </div>
     </div>
 
     <script>
@@ -152,7 +173,7 @@
             if (AUTH_KEY) {
                 document.getElementById('auth-modal').classList.remove('open');
                 document.getElementById('dashboard').classList.remove('hidden');
-                if (currentTab !== 'manage') fetchUpdates();
+                switchTab('pending'); // Load default
             }
             lucide.createIcons();
         }
@@ -175,15 +196,15 @@
             document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
             document.getElementById(`tab-${tab}`).classList.add('active');
 
-            const listView = document.getElementById('view-list');
-            const manageView = document.getElementById('view-manage');
+            ['view-list', 'view-manage', 'view-api'].forEach(id => document.getElementById(id).classList.add('hidden'));
 
             if (tab === 'manage') {
-                listView.classList.add('hidden');
-                manageView.classList.remove('hidden');
+                document.getElementById('view-manage').classList.remove('hidden');
+            } else if (tab === 'api') {
+                document.getElementById('view-api').classList.remove('hidden');
+                fetchApiKeys();
             } else {
-                manageView.classList.add('hidden');
-                listView.classList.remove('hidden');
+                document.getElementById('view-list').classList.remove('hidden');
                 fetchUpdates();
             }
         }
@@ -328,6 +349,81 @@
                 const data = await res.json();
                 if (data.success) alert(data.message); else alert("Error: " + data.error);
             } catch (e) { alert("Network Error"); }
+        }
+
+        // --- API KEY LOGIC ---
+        async function fetchApiKeys() {
+            const list = document.getElementById('api-key-list');
+            list.innerHTML = '<div class="text-center text-[#9a3412] py-4">Loading keys...</div>';
+            try {
+                const res = await fetch(`${API_URL}/api/admin/keys`, { headers: { 'x-admin-auth': AUTH_KEY } });
+                const data = await res.json();
+                if (data.success) {
+                    if (data.keys.length === 0) list.innerHTML = '<div class="text-center text-[#9a3412] py-4">No keys generated.</div>';
+                    else {
+                        list.innerHTML = data.keys.map(k => `
+                            <div class="card flex justify-between items-center ${!k.is_active ? 'opacity-50' : ''}">
+                                <div>
+                                    <div class="text-white font-bold">${k.owner} <span class="text-xs text-[#9a3412] border border-[#9a3412] px-1 rounded ml-2 uppercase">${k.tier}</span></div>
+                                    <div class="font-mono text-sm text-[#fb923c] mt-1 select-all">${k.key}</div>
+                                </div>
+                                <div class="text-right flex items-center gap-4">
+                                    <div class="text-xs text-[#9a3412] mb-1">Usage: ${k.requests_today}/${k.requests_limit}</div>
+                                    <div class="flex gap-2">
+                                        ${k.is_active ? `<button onclick="revokeKey('${k.key}')" class="text-orange-500 text-xs hover:text-orange-400">Revoke</button>` : `<span class="text-red-500 text-xs font-bold">REVOKED</span>`}
+                                        <button onclick="deleteKey('${k.key}')" class="text-red-500 text-xs hover:text-red-400 flex items-center gap-1"><i data-lucide="trash-2" width="12"></i></button>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('');
+                        lucide.createIcons();
+                    }
+                }
+            } catch(e) { alert("Failed to load keys"); }
+        }
+
+        async function generateApiKey() {
+            const owner = document.getElementById('api-owner').value;
+            const tier = document.getElementById('api-tier').value;
+            if(!owner) return alert("Owner Name Required");
+            
+            try {
+                const res = await fetch(`${API_URL}/api/admin/generate-key`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-admin-auth': AUTH_KEY },
+                    body: JSON.stringify({ owner, tier })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert(`Key Generated:\n\n${data.key}\n\nCopy this now!`);
+                    document.getElementById('api-owner').value = '';
+                    fetchApiKeys();
+                } else alert(data.error);
+            } catch(e) { alert("Error"); }
+        }
+
+        async function revokeKey(key) {
+            if(!confirm("Revoke this key? The user will lose access immediately.")) return;
+            try {
+                await fetch(`${API_URL}/api/admin/revoke-key`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-admin-auth': AUTH_KEY },
+                    body: JSON.stringify({ key })
+                });
+                fetchApiKeys();
+            } catch(e) { alert("Error"); }
+        }
+
+        async function deleteKey(key) {
+            if(!confirm("Permanently delete this key record?")) return;
+            try {
+                await fetch(`${API_URL}/api/admin/delete-key`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-admin-auth': AUTH_KEY },
+                    body: JSON.stringify({ key })
+                });
+                fetchApiKeys();
+            } catch(e) { alert("Error"); }
         }
 
         // --- BACKUP & RESTORE ---
