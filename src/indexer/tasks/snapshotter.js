@@ -157,9 +157,14 @@ async function processPoolBatch(db, connection, pools, redis) {
                          liquidityUsd = (realSol / 1e9) * quotePrice * 2;
                     }
                 }
-
-                if (priceUsd > 0) {
+                
+                // CRITICAL FIX: Ensure price is strictly a finite number.
+                // Infinite prices (div by zero) cause DB to store 'Infinity' which JSON stringifies to 'null', crashing the frontend.
+                if (Number.isFinite(priceUsd) && priceUsd > 0) {
                     success = true;
+                } else {
+                    priceUsd = 0;
+                    success = false;
                 }
             }
         } catch (err) {
