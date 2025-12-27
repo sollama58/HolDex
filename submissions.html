@@ -3,361 +3,298 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HolDex | Admin Portal</title>
+    <title>HolDex Admin | Submissions</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        body { background-color: #2a1005; color: #ffedd5; font-family: 'Comic Neue', cursive; min-height: 100vh; font-size: 14px; }
-        .form-input { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; padding: 12px; border-radius: 8px; width: 100%; font-family: 'JetBrains Mono'; outline: none; transition: border-color 0.2s; }
-        .form-input:focus { border-color: #ea580c; }
-        .action-btn { padding: 8px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: all 0.2s; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
-        .btn-green { background: rgba(34, 197, 94, 0.1); border: 1px solid #22c55e; color: #22c55e; }
-        .btn-green:hover { background: #22c55e; color: #000; }
-        .btn-red { background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; color: #ef4444; }
-        .btn-red:hover { background: #ef4444; color: #000; }
-        .btn-blue { background: rgba(59, 130, 246, 0.1); border: 1px solid #3b82f6; color: #3b82f6; }
-        .btn-blue:hover { background: #3b82f6; color: #000; }
-        .btn-orange { background: rgba(234, 88, 12, 0.1); border: 1px solid #ea580c; color: #ea580c; }
-        .btn-orange:hover { background: #ea580c; color: #000; }
-        .nav-tab { padding: 10px 20px; color: #9a3412; font-weight: bold; border-bottom: 2px solid transparent; cursor: pointer; }
-        .nav-tab.active { color: #ea580c; border-bottom-color: #ea580c; }
-        .hidden { display: none; }
-        .updates-table { width: 100%; border-collapse: separate; border-spacing: 0; }
-        .updates-table th { text-align: left; padding: 10px; color: #9a3412; border-bottom: 1px solid #7c2d12; font-size: 11px; text-transform: uppercase; }
-        .updates-table td { padding: 12px 10px; border-bottom: 1px solid rgba(124,45,18,0.3); vertical-align: top; }
-        .link-preview { font-size: 11px; color: #3b82f6; text-decoration: underline; word-break: break-all; }
-        .desc-preview { font-size: 11px; color: #fb923c; font-family: 'JetBrains Mono'; max-width: 200px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-        .hash-link { font-family: 'JetBrains Mono'; font-size: 10px; color: #fb923c; text-decoration: underline; }
-        .img-token { width: 40px; height: 40px; border-radius: 8px; border: 2px solid #7c2d12; object-fit: cover; background: #000; }
+        body { background-color: #0f0502; color: #ffedd5; font-family: 'JetBrains Mono', monospace; }
+        .card { background: #1a0a05; border: 1px solid #451a03; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+        .btn { padding: 8px 16px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: all 0.2s; }
+        .btn-green { background: #14532d; color: #4ade80; border: 1px solid #22c55e; }
+        .btn-green:hover { background: #166534; }
+        .btn-red { background: #450a0a; color: #fca5a5; border: 1px solid #ef4444; }
+        .btn-red:hover { background: #7f1d1d; }
+        .btn-blue { background: #1e3a8a; color: #93c5fd; border: 1px solid #3b82f6; }
+        .btn-blue:hover { background: #1e40af; }
+        .badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; }
+        .badge-pending { background: #422006; color: #fdba74; border: 1px solid #f97316; }
+        .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; z-index: 50; display: none; }
+        .modal.open { display: flex; }
     </style>
 </head>
-<body class="p-8">
+<body class="p-6 max-w-5xl mx-auto">
 
-    <div id="login-screen" class="max-w-md mx-auto mt-20 text-center">
-        <h1 class="text-4xl font-bold text-[#ea580c] mb-8 font-sans">Admin Access</h1>
-        <input type="password" id="admin-pass" class="form-input mb-4" placeholder="Enter Admin Password">
-        <button onclick="login()" class="w-full bg-[#ea580c] text-[#2a1005] font-bold py-3 rounded-lg hover:bg-[#fb923c]">Login</button>
-        <p id="login-error" class="text-red-500 mt-4 hidden">Invalid Password</p>
-    </div>
-
-    <div id="admin-panel" class="max-w-7xl mx-auto hidden">
-        <div class="flex justify-between items-center mb-4 border-b border-[#7c2d12] pb-4">
-            <h1 class="text-3xl font-bold text-white">Admin Control</h1>
-            <button onclick="logout()" class="text-[#9a3412] hover:text-[#fb923c]">Logout</button>
-        </div>
-
-        <div class="flex gap-4 mb-8">
-            <div id="tab-pending" class="nav-tab active" onclick="switchTab('pending')">Pending Updates</div>
-            <div id="tab-history" class="nav-tab" onclick="switchTab('history')">Request History</div>
-            <div id="tab-manage" class="nav-tab" onclick="switchTab('manage')">Manage Token</div>
-        </div>
-
-        <!-- PENDING UPDATES VIEW -->
-        <div id="view-pending" class="space-y-4">
-            <div id="updates-list" class="overflow-x-auto">
-                <div class="text-center py-20 text-[#9a3412]">Loading requests...</div>
-            </div>
-        </div>
-
-        <!-- HISTORY VIEW -->
-        <div id="view-history" class="space-y-4 hidden">
-            <div id="history-list" class="overflow-x-auto">
-                <div class="text-center py-20 text-[#9a3412]">Loading history...</div>
-            </div>
-        </div>
-
-        <!-- MANAGE TOKEN VIEW -->
-        <div id="view-manage" class="hidden">
-            <div class="bg-[#451a03] border border-[#7c2d12] rounded-xl p-8 max-w-2xl mx-auto">
-                <h3 class="text-xl font-bold text-white mb-6">Edit or Delete Token</h3>
-                
-                <div class="flex gap-4 mb-6">
-                    <input type="text" id="manage-mint" class="form-input" placeholder="Enter Token Mint Address...">
-                    <button onclick="loadToken()" class="action-btn btn-blue">Load</button>
-                </div>
-
-                <div id="manage-form" class="hidden space-y-4">
-                    <div class="grid grid-cols-2 gap-4">
-                         <div><label class="text-xs text-[#9a3412] uppercase font-bold">Ticker</label><input type="text" id="edit-ticker" class="form-input opacity-50" readonly></div>
-                         <div><label class="text-xs text-[#9a3412] uppercase font-bold">Current Holders</label><input type="text" id="edit-holders" class="form-input opacity-50" readonly value="0"></div>
-                    </div>
-                    <div><label class="text-xs text-[#9a3412] uppercase font-bold">Twitter</label><input type="text" id="edit-twitter" class="form-input"></div>
-                    <div><label class="text-xs text-[#9a3412] uppercase font-bold">Website</label><input type="text" id="edit-website" class="form-input"></div>
-                    <div><label class="text-xs text-[#9a3412] uppercase font-bold">Telegram</label><input type="text" id="edit-telegram" class="form-input"></div>
-                    <div><label class="text-xs text-[#9a3412] uppercase font-bold">Banner URL</label><input type="text" id="edit-banner" class="form-input"></div>
-                    <div>
-                        <label class="text-xs text-[#9a3412] uppercase font-bold">Description (Max 250)</label>
-                        <textarea id="edit-description" class="form-input h-24 resize-none" maxlength="250"></textarea>
-                    </div>
-
-                    <div class="border-t border-[#7c2d12] pt-4 mt-6">
-                        <div class="flex items-center justify-between mb-4">
-                            <span class="text-[#fb923c] font-bold">Manual K-Score Trigger</span>
-                            <button onclick="refreshKScore()" class="action-btn btn-orange flex items-center gap-2">
-                                <i data-lucide="zap" width="14"></i> Force K-Score Refresh
-                            </button>
-                        </div>
-                        <div class="flex flex-col gap-2 mt-8 pt-4 border-t border-[#7c2d12]">
-                            <div class="flex justify-between">
-                                <button onclick="deleteToken()" class="action-btn btn-red flex items-center gap-2">
-                                    <i data-lucide="trash-2" width="16"></i> Delete Token & History
-                                </button>
-                                <button onclick="saveToken()" class="action-btn btn-green flex items-center gap-2">
-                                    <i data-lucide="save" width="16"></i> Save Changes
-                                </button>
-                            </div>
-                            <p class="text-xs text-red-400 text-center mt-2 opacity-75">Warning: Deletion is permanent and removes all candles, pools, and history.</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
+    <div class="flex justify-between items-center mb-8 border-b border-[#451a03] pb-4">
+        <h1 class="text-2xl font-bold text-[#ea580c] flex items-center gap-2">
+            <i data-lucide="shield" width="24"></i> Admin Command
+        </h1>
+        <div class="flex gap-4">
+            <button onclick="logout()" class="text-[#9a3412] hover:text-[#ef4444] text-sm">Logout</button>
         </div>
     </div>
 
-<script>
-    const API_URL = 'https://asdev-backend.onrender.com';
-    let adminKey = '';
+    <!-- AUTH MODAL -->
+    <div id="auth-modal" class="modal open">
+        <div class="bg-[#1a0a05] border border-[#ea580c] p-8 rounded-xl w-full max-w-sm text-center">
+            <h2 class="text-xl font-bold text-white mb-4">Admin Access</h2>
+            <input type="password" id="admin-pass" placeholder="Enter Key..." class="w-full bg-[#0f0502] border border-[#451a03] p-3 rounded text-white mb-4 outline-none focus:border-[#ea580c]">
+            <button onclick="login()" class="w-full btn btn-green">Unlock Terminal</button>
+        </div>
+    </div>
 
-    function login() { const pass = document.getElementById('admin-pass').value; adminKey = pass; fetchUpdates(); }
-    
-    function switchTab(tab) { 
-        document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active')); 
-        document.getElementById(`tab-${tab}`).classList.add('active'); 
-        
-        document.getElementById('view-pending').classList.add('hidden');
-        document.getElementById('view-history').classList.add('hidden');
-        document.getElementById('view-manage').classList.add('hidden');
+    <div id="dashboard" class="hidden space-y-8">
+        <!-- STATS ROW -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="card text-center">
+                <div class="text-[#9a3412] text-xs uppercase mb-1">Pending</div>
+                <div class="text-2xl font-bold text-[#fb923c]" id="count-pending">0</div>
+            </div>
+            <div class="card text-center">
+                <div class="text-[#9a3412] text-xs uppercase mb-1">Total History</div>
+                <div class="text-2xl font-bold text-white" id="count-total">0</div>
+            </div>
+             <!-- NEW: DB TOOLS -->
+            <div class="card col-span-2 flex items-center justify-between">
+                <div>
+                    <div class="text-[#ea580c] font-bold mb-1"><i data-lucide="database" width="16" class="inline"></i> DB Tools</div>
+                    <div class="text-[10px] text-[#9a3412]">Backup & Restore Updates</div>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="downloadBackup()" class="btn btn-blue text-xs flex items-center gap-2"><i data-lucide="download" width="14"></i> Backup</button>
+                    <label class="btn btn-green text-xs flex items-center gap-2 cursor-pointer">
+                        <i data-lucide="upload" width="14"></i> Restore
+                        <input type="file" id="restore-file" accept=".json" class="hidden" onchange="handleRestore(this)">
+                    </label>
+                </div>
+            </div>
+        </div>
 
-        if (tab === 'pending') { 
-            document.getElementById('view-pending').classList.remove('hidden'); 
-            fetchUpdates(); 
-        } else if (tab === 'history') {
-            document.getElementById('view-history').classList.remove('hidden'); 
-            fetchHistory();
-        } else { 
-            document.getElementById('view-manage').classList.remove('hidden'); 
-        } 
-    }
+        <!-- TABS -->
+        <div class="flex gap-4 border-b border-[#451a03]">
+            <button onclick="switchTab('pending')" id="tab-pending" class="px-4 py-2 text-[#fb923c] border-b-2 border-[#ea580c]">Pending Queue</button>
+            <button onclick="switchTab('history')" id="tab-history" class="px-4 py-2 text-[#9a3412]">History Log</button>
+        </div>
 
-    // --- HELPER: RENDER TOKEN MEDIA (Video/Gif Support) ---
-    function renderTokenMedia(url, className, fallbackText = '?') {
-        const fallback = `https://placehold.co/80x80/2a1005/7c2d12?text=${fallbackText}`;
-        const safeUrl = url || fallback;
-        const isVideo = safeUrl.match(/\.(mp4|webm|mov)$/i);
-        
-        if (isVideo) {
-            return `<video src="${safeUrl}" class="${className}" autoplay loop muted playsinline poster="${fallback}"></video>`;
-        }
-        return `<img src="${safeUrl}" class="${className}" loading="lazy" onerror="this.onerror=null;this.src='${fallback}'">`;
-    }
+        <!-- CONTENT -->
+        <div id="list-container" class="space-y-4">
+            <!-- Items injected here -->
+            <div class="text-center py-12 text-[#9a3412]">Loading...</div>
+        </div>
+    </div>
 
-    // --- FETCH PENDING ---
-    async function fetchUpdates() { 
-        try { 
-            const res = await fetch(`${API_URL}/api/admin/updates`, { headers: { 'x-admin-auth': adminKey } }); 
-            const data = await res.json(); 
-            if (data.success) { 
-                document.getElementById('login-screen').classList.add('hidden'); 
-                document.getElementById('admin-panel').classList.remove('hidden'); 
-                renderUpdates(data.updates, 'updates-list', true); 
-            } else { 
-                document.getElementById('login-error').classList.remove('hidden'); 
-            } 
-        } catch (e) { alert("Connection Failed"); } 
-    }
+    <script>
+        const API_URL = 'https://asdev-backend.onrender.com';
+        let AUTH_KEY = localStorage.getItem('holdex_admin_key') || '';
+        let currentTab = 'pending';
 
-    // --- FETCH HISTORY ---
-    async function fetchHistory() { 
-        try { 
-            const res = await fetch(`${API_URL}/api/admin/updates?type=history`, { headers: { 'x-admin-auth': adminKey } }); 
-            const data = await res.json(); 
-            if (data.success) { 
-                renderUpdates(data.updates, 'history-list', false); 
+        function init() {
+            if (AUTH_KEY) {
+                document.getElementById('auth-modal').classList.remove('open');
+                document.getElementById('dashboard').classList.remove('hidden');
+                fetchUpdates();
             }
-        } catch (e) { console.error("History fetch failed"); } 
-    }
-
-    function renderUpdates(updates, elementId, isPending) {
-        const list = document.getElementById(elementId);
-        if (!updates.length) { list.innerHTML = `<div class="text-center py-20 text-[#9a3412]">No records found.</div>`; return; }
-        
-        let html = `
-        <table class="updates-table">
-            <thead>
-                <tr>
-                    <th width="200">Asset</th>
-                    <th>Payment Info</th>
-                    <th>Links</th>
-                    <th width="200">Description</th>
-                    <th width="150">Banner</th>
-                    <th width="200">${isPending ? 'Actions' : 'Status'}</th>
-                </tr>
-            </thead>
-            <tbody>
-        `;
-        
-        html += updates.map(u => {
-            const txLink = u.signature ? `<a href="https://solscan.io/tx/${u.signature}" target="_blank" class="hash-link">Tx: ${u.signature.substring(0,8)}...</a>` : '<span class="text-xs text-gray-500">No Tx</span>';
-            const payer = u.payer ? `<div class="text-[10px] text-[#9a3412]">By: ${u.payer.substring(0,6)}...</div>` : '';
-            const mediaHtml = renderTokenMedia(u.image, "img-token");
-            
-            let actionCol = '';
-            if (isPending) {
-                actionCol = `
-                    <div class="flex gap-2">
-                        <button onclick="handleAction(${u.id}, 'approve')" class="action-btn btn-green text-xs">Approve</button>
-                        <button onclick="handleAction(${u.id}, 'reject')" class="action-btn btn-red text-xs">Reject</button>
-                    </div>`;
-            } else {
-                const color = u.status === 'approved' ? 'text-green-500' : 'text-red-500';
-                actionCol = `<span class="${color} font-bold uppercase text-xs">${u.status}</span>`;
-            }
-
-            return `
-            <tr>
-                <td>
-                    <div class="flex items-center gap-3">
-                        ${mediaHtml}
-                        <div>
-                            <div class="font-bold text-white">${u.ticker}</div>
-                            <div class="text-xs text-[#9a3412] font-mono">${u.mint.substring(0,8)}...</div>
-                        </div>
-                    </div>
-                </td>
-                <td>
-                    <div class="flex flex-col">
-                        ${txLink}
-                        ${payer}
-                    </div>
-                </td>
-                <td>
-                    <div class="flex flex-col gap-1 text-xs">
-                        ${u.twitter ? `<a href="${u.twitter}" target="_blank" class="link-preview">Twitter</a>` : ''}
-                        ${u.website ? `<a href="${u.website}" target="_blank" class="link-preview">Website</a>` : ''}
-                        ${u.telegram ? `<a href="${u.telegram}" target="_blank" class="link-preview">Telegram</a>` : ''}
-                    </div>
-                </td>
-                <td>
-                    ${u.description ? `<div class="desc-preview" title="${u.description}">${u.description}</div>` : '<span class="text-[#9a3412]">-</span>'}
-                </td>
-                <td>
-                    ${u.banner ? `<a href="${u.banner}" target="_blank"><img src="${u.banner}" class="h-8 w-20 object-cover border border-[#7c2d12] rounded"></a>` : '<span class="text-[#9a3412]">-</span>'}
-                </td>
-                <td>${actionCol}</td>
-            </tr>
-        `}).join('');
-        html += `</tbody></table>`;
-        list.innerHTML = html;
-        lucide.createIcons();
-    }
-
-    async function handleAction(id, action) {
-        if (!confirm(`Are you sure you want to ${action}?`)) return;
-        try {
-            const res = await fetch(`${API_URL}/api/admin/${action}-update`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-admin-auth': adminKey },
-                body: JSON.stringify({ id })
-            });
-            const data = await res.json();
-            if (data.success) { fetchUpdates(); } else { alert(data.error); }
-        } catch (e) { alert("Network Error"); }
-    }
-
-    // --- MANAGE TOKEN LOGIC ---
-    async function loadToken() {
-        const mint = document.getElementById('manage-mint').value;
-        const btn = event.currentTarget;
-        const originalText = btn.innerHTML;
-        btn.innerText = 'Loading...';
-        btn.disabled = true;
-
-        try {
-            const res = await fetch(`${API_URL}/api/admin/token/${mint}`, { headers: { 'x-admin-auth': adminKey } });
-            const data = await res.json();
-            if (data.success) {
-                document.getElementById('manage-form').classList.remove('hidden');
-                document.getElementById('edit-ticker').value = data.token.ticker || 'N/A';
-                document.getElementById('edit-holders').value = (data.token.holders || 0).toLocaleString();
-                document.getElementById('edit-twitter').value = data.token.twitter || '';
-                document.getElementById('edit-website').value = data.token.website || '';
-                document.getElementById('edit-telegram').value = data.token.telegram || '';
-                document.getElementById('edit-banner').value = data.token.banner || '';
-                document.getElementById('edit-description').value = data.token.description || '';
-            } else { alert("Token not found"); document.getElementById('manage-form').classList.add('hidden'); }
-        } catch (e) { alert("Error loading token"); }
-        finally { btn.innerHTML = originalText; btn.disabled = false; }
-    }
-
-    async function saveToken() {
-        const mint = document.getElementById('manage-mint').value;
-        const twitter = document.getElementById('edit-twitter').value;
-        const website = document.getElementById('edit-website').value;
-        const telegram = document.getElementById('edit-telegram').value;
-        const banner = document.getElementById('edit-banner').value;
-        const description = document.getElementById('edit-description').value;
-        
-        try { 
-            await fetch(`${API_URL}/api/admin/update-token`, { 
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json', 'x-admin-auth': adminKey }, 
-                body: JSON.stringify({ mint, twitter, website, telegram, banner, description }) 
-            }); 
-            alert("Token Updated!"); 
-        } catch(e) { alert("Network Error"); }
-    }
-
-    async function deleteToken() {
-        if(!confirm("DANGER: This will delete the token and ALL associated data (Candles, Pools, History). This cannot be undone.")) return;
-        const mint = document.getElementById('manage-mint').value;
-        const btn = event.currentTarget;
-        const ogText = btn.innerHTML;
-        btn.innerHTML = `<i data-lucide="loader-2" class="animate-spin" width="16"></i> Deleting...`;
-        btn.disabled = true;
-
-        try { 
-            const res = await fetch(`${API_URL}/api/admin/delete-token`, { 
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json', 'x-admin-auth': adminKey }, 
-                body: JSON.stringify({ mint }) 
-            }); 
-            const data = await res.json();
-            if(data.success) {
-                alert("Token and all history permanently deleted."); 
-                document.getElementById('manage-form').classList.add('hidden');
-                document.getElementById('manage-mint').value = '';
-            } else {
-                alert("Delete Failed: " + data.error);
-            }
-        } catch(e) { 
-            alert("Network Error"); 
-        } finally {
-            btn.innerHTML = ogText;
-            btn.disabled = false;
             lucide.createIcons();
         }
-    }
 
-    async function refreshKScore() {
-        const mint = document.getElementById('manage-mint').value;
-        if (!mint) return;
-        const btn = event.currentTarget;
-        const originalText = btn.innerHTML;
-        btn.innerHTML = `<i data-lucide="loader-2" class="animate-spin" width="14"></i> Calculation...`;
-        btn.disabled = true;
-        try {
-            const res = await fetch(`${API_URL}/api/admin/refresh-kscore`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'x-admin-auth': adminKey },
-                body: JSON.stringify({ mint })
-            });
-            const data = await res.json();
-            if (data.success) alert(data.message); else alert("Error: " + data.error);
-        } catch (e) { alert("Network Error"); } finally { btn.innerHTML = originalText; btn.disabled = false; lucide.createIcons(); }
-    }
+        function login() {
+            const key = document.getElementById('admin-pass').value;
+            if (!key) return alert("Enter key");
+            AUTH_KEY = key;
+            localStorage.setItem('holdex_admin_key', key);
+            init();
+        }
 
-    function logout() { location.reload(); }
-</script>
+        function logout() {
+            localStorage.removeItem('holdex_admin_key');
+            location.reload();
+        }
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.getElementById('tab-pending').className = tab === 'pending' ? "px-4 py-2 text-[#fb923c] border-b-2 border-[#ea580c]" : "px-4 py-2 text-[#9a3412]";
+            document.getElementById('tab-history').className = tab === 'history' ? "px-4 py-2 text-[#fb923c] border-b-2 border-[#ea580c]" : "px-4 py-2 text-[#9a3412]";
+            fetchUpdates();
+        }
+
+        async function fetchUpdates() {
+            const container = document.getElementById('list-container');
+            container.innerHTML = '<div class="text-center py-12 text-[#ea580c] animate-pulse">Fetching Data...</div>';
+            
+            try {
+                const res = await fetch(`${API_URL}/api/admin/updates?type=${currentTab}`, {
+                    headers: { 'x-admin-auth': AUTH_KEY }
+                });
+                const data = await res.json();
+                
+                if (!data.success) {
+                    if (data.error === 'Unauthorized') {
+                        logout();
+                        return alert("Invalid Key");
+                    }
+                    return alert("Error: " + data.error);
+                }
+
+                renderList(data.updates);
+                
+                // Update stats mostly for visual
+                if (currentTab === 'pending') {
+                    document.getElementById('count-pending').innerText = data.updates.length;
+                }
+
+            } catch (e) {
+                container.innerHTML = `<div class="text-center text-red-500">Connection Error</div>`;
+            }
+        }
+
+        function renderList(items) {
+            const container = document.getElementById('list-container');
+            if (items.length === 0) {
+                container.innerHTML = '<div class="text-center py-12 text-[#9a3412]">No records found.</div>';
+                return;
+            }
+
+            container.innerHTML = items.map(item => `
+                <div class="card flex flex-col md:flex-row gap-6">
+                    <div class="w-32 h-32 bg-black border border-[#451a03] rounded shrink-0 overflow-hidden relative group">
+                        <img src="${item.image || 'https://placehold.co/100'}" class="w-full h-full object-cover opacity-50">
+                        <div class="absolute inset-0 flex items-center justify-center font-bold text-xs text-white bg-black/50">${item.ticker || '???'}</div>
+                    </div>
+                    
+                    <div class="flex-1 space-y-3">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <h3 class="font-bold text-white text-lg">${item.mint}</h3>
+                                <div class="text-xs text-[#9a3412] font-mono mt-1">
+                                    Submitted: ${new Date(Number(item.submittedat || item.submittedAt)).toLocaleString()}
+                                </div>
+                            </div>
+                            <span class="badge badge-pending">${item.status}</span>
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-2 text-xs">
+                            <div class="bg-[#0f0502] p-2 rounded border border-[#451a03]">
+                                <span class="text-[#9a3412]">Twitter:</span> <a href="${item.twitter}" target="_blank" class="text-[#fb923c] hover:underline truncate block">${item.twitter || '-'}</a>
+                            </div>
+                            <div class="bg-[#0f0502] p-2 rounded border border-[#451a03]">
+                                <span class="text-[#9a3412]">Web:</span> <a href="${item.website}" target="_blank" class="text-[#fb923c] hover:underline truncate block">${item.website || '-'}</a>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-[#0f0502] p-3 rounded border border-[#451a03] text-xs text-[#d1d5db]">
+                            <span class="text-[#9a3412] block mb-1">Description:</span>
+                            ${item.description || 'No description provided.'}
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col gap-2 justify-center min-w-[120px]">
+                        ${currentTab === 'pending' ? `
+                            <button onclick="approve(${item.id})" class="btn btn-green w-full">Approve</button>
+                            <button onclick="reject(${item.id})" class="btn btn-red w-full">Reject</button>
+                        ` : `
+                            <div class="text-center text-xs text-[#9a3412]">Action Taken</div>
+                        `}
+                    </div>
+                </div>
+            `).join('');
+            lucide.createIcons();
+        }
+
+        async function approve(id) {
+            if (!confirm("Approve this update? It will go live immediately.")) return;
+            try {
+                const res = await fetch(`${API_URL}/api/admin/approve-update`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-admin-auth': AUTH_KEY },
+                    body: JSON.stringify({ id })
+                });
+                const data = await res.json();
+                if (data.success) fetchUpdates();
+                else alert(data.error);
+            } catch (e) { alert("Network Error"); }
+        }
+
+        async function reject(id) {
+            if (!confirm("Reject this update?")) return;
+            try {
+                const res = await fetch(`${API_URL}/api/admin/reject-update`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-admin-auth': AUTH_KEY },
+                    body: JSON.stringify({ id })
+                });
+                const data = await res.json();
+                if (data.success) fetchUpdates();
+                else alert(data.error);
+            } catch (e) { alert("Network Error"); }
+        }
+
+        // --- NEW: BACKUP & RESTORE FUNCTIONS ---
+        
+        async function downloadBackup() {
+            try {
+                const res = await fetch(`${API_URL}/api/admin/backup/updates`, {
+                    headers: { 'x-admin-auth': AUTH_KEY }
+                });
+                
+                if (!res.ok) throw new Error("Backup Failed");
+                
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `holdex_updates_backup_${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            } catch (e) {
+                alert("Backup Error: " + e.message);
+            }
+        }
+
+        function handleRestore(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const json = JSON.parse(e.target.result);
+                    
+                    // Handle both direct array or wrapped object format
+                    const updates = Array.isArray(json) ? json : (json.data || []);
+                    
+                    if (updates.length === 0) return alert("No updates found in file.");
+                    
+                    if (!confirm(`Restore ${updates.length} updates? \n(Duplicates will be skipped)`)) {
+                        input.value = ''; // Reset
+                        return;
+                    }
+
+                    const res = await fetch(`${API_URL}/api/admin/restore/updates`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'x-admin-auth': AUTH_KEY },
+                        body: JSON.stringify({ updates })
+                    });
+                    
+                    const data = await res.json();
+                    if (data.success) {
+                        alert(data.message);
+                        fetchUpdates();
+                    } else {
+                        alert("Restore Failed: " + data.error);
+                    }
+                } catch (err) {
+                    alert("Invalid JSON File");
+                    console.error(err);
+                } finally {
+                    input.value = ''; // Reset input so same file can be selected again if needed
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        init();
+    </script>
 </body>
 </html>

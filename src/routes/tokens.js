@@ -12,7 +12,6 @@ const { getClient } = require('../services/redis');
 const { enqueueTokenUpdate } = require('../services/queue'); 
 const { snapshotPools } = require('../indexer/tasks/snapshotter'); 
 const logger = require('../services/logger');
-// Cache Middleware
 const cacheControl = require('../middleware/httpCache');
 
 const router = express.Router();
@@ -153,7 +152,6 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "Transaction Failed at RPC" }); }
     });
 
-    // CACHING: Candles can be cached for longer (30s) as 1m bars don't change often
     router.get('/token/:mint/candles', cacheControl(30, 60), async (req, res) => {
         const { mint } = req.params;
         const { resolution = '5', from, to, poolAddress } = req.query; 
@@ -248,7 +246,7 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "Submission failed" }); }
     });
 
-    // --- ADMIN ROUTES (Omitted for brevity, unchanged) ---
+    // --- ADMIN ROUTES ---
     router.get('/admin/updates', requireAdmin, async (req, res) => { const { type } = req.query; try { let sql = `SELECT u.*, t.symbol as ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`; if (type === 'history') { sql += ` WHERE u.status != 'pending' ORDER BY u.submittedAt DESC LIMIT 50`; } else { sql += ` WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`; } const updates = await db.all(sql); res.json({ success: true, updates }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     router.post('/admin/approve-update', requireAdmin, async (req, res) => { const { id } = req.body; try { const request = await db.get(`SELECT * FROM token_updates WHERE id = $1`, [id]); if (!request) return res.status(404).json({ success: false, error: "Request not found" }); const token = await db.get(`SELECT metadata FROM tokens WHERE mint = $1`, [request.mint]); let currentMeta = {}; if (token && token.metadata) { try { currentMeta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata; } catch (e) {} } const newCommunity = { twitter: request.twitter, website: request.website, telegram: request.telegram, banner: request.banner, description: request.description }; currentMeta.community = { ...(currentMeta.community || {}), ...newCommunity }; const jsonStr = JSON.stringify(currentMeta); await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE, updated_at = CURRENT_TIMESTAMP WHERE mint = $2`, [jsonStr, request.mint]); await db.run(`UPDATE token_updates SET status = 'approved' WHERE id = $1`, [id]); await updateSingleToken({ db }, request.mint); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     router.post('/admin/reject-update', requireAdmin, async (req, res) => { const { id } = req.body; try { await db.run(`UPDATE token_updates SET status = 'rejected' WHERE id = $1`, [id]); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
@@ -257,8 +255,74 @@ function init(deps) {
     router.post('/admin/delete-token', requireAdmin, async (req, res) => { const { mint } = req.body; try { const pools = await db.all(`SELECT address FROM pools WHERE mint = $1`, [mint]); const poolAddresses = pools.map(p => p.address); if (poolAddresses.length > 0) { await db.run(`DELETE FROM candles_1m WHERE pool_address = ANY($1)`, [poolAddresses]); await db.run(`DELETE FROM active_trackers WHERE pool_address = ANY($1)`, [poolAddresses]); } await db.run(`DELETE FROM pools WHERE mint = $1`, [mint]); await db.run(`DELETE FROM k_scores WHERE mint = $1`, [mint]); await db.run(`DELETE FROM token_updates WHERE mint = $1`, [mint]); await db.run(`DELETE FROM holders_history WHERE mint = $1`, [mint]); await db.run(`DELETE FROM tokens WHERE mint = $1`, [mint]); const redis = getClient(); if (redis) { await redis.del(`token:detail:${mint}`); } res.json({ success: true, message: "Token and all history permanently deleted." }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => { const { mint } = req.body; try { const newScore = await updateSingleToken({ db }, mint); res.json({ success: true, message: `K-Score Updated: ${newScore}` }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
 
+    // --- NEW: BACKUP & RESTORE ROUTES ---
+    
+    // BACKUP: Dump all token_updates to a JSON file
+    router.get('/admin/backup/updates', requireAdmin, async (req, res) => {
+        try {
+            const updates = await db.all('SELECT * FROM token_updates ORDER BY submittedAt DESC');
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Content-Disposition', `attachment; filename=holdex_updates_backup_${Date.now()}.json`);
+            res.json({ success: true, count: updates.length, timestamp: Date.now(), data: updates });
+        } catch (e) {
+            res.status(500).json({ success: false, error: e.message });
+        }
+    });
+
+    // RESTORE: Import token_updates from JSON (Merge Logic)
+    router.post('/admin/restore/updates', requireAdmin, async (req, res) => {
+        const { updates } = req.body;
+        if (!Array.isArray(updates)) {
+            return res.status(400).json({ success: false, error: "Invalid backup file format. Expected an array of updates." });
+        }
+
+        let restoredCount = 0;
+        let skippedCount = 0;
+
+        try {
+            for (const u of updates) {
+                // PG column names are often lowercase, handle both camelCase (JS) and lowercase (DB dump)
+                const signature = u.signature;
+                const mint = u.mint;
+                
+                // Use fallback for case-sensitivity issues
+                const twitter = u.twitter;
+                const website = u.website;
+                const telegram = u.telegram;
+                const banner = u.banner;
+                const description = u.description;
+                const submittedAt = u.submittedAt || u.submittedat || Date.now();
+                const status = u.status || 'pending';
+                const payer = u.payer;
+
+                if (!signature || !mint) {
+                    skippedCount++; 
+                    continue; // Invalid record
+                }
+
+                // Check duplicate by signature
+                const existing = await db.get('SELECT id FROM token_updates WHERE signature = $1', [signature]);
+                
+                if (existing) {
+                    skippedCount++;
+                    continue;
+                }
+
+                await db.run(`
+                    INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                `, [mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer]);
+                
+                restoredCount++;
+            }
+
+            res.json({ success: true, restored: restoredCount, skipped: skippedCount, message: `Restore Complete. Imported: ${restoredCount}, Skipped (Duplicates): ${skippedCount}` });
+        } catch (e) {
+            res.status(500).json({ success: false, error: e.message });
+        }
+    });
+
     // --- STANDARD PUBLIC ROUTES ---
-    // CACHING: Detail view cached for 3s (very hot)
     router.get('/token/:mint', cacheControl(3, 5), async (req, res) => {
         const { mint } = req.params;
         const cacheKey = `token:detail:${mint}`;
@@ -267,7 +331,6 @@ function init(deps) {
                 let token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
                 let pairs = await db.all('SELECT * FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC', [mint]);
                 
-                // 1. If Missing completely, index it
                 if (!token) {
                     try {
                         const indexed = await indexTokenOnChain(mint);
@@ -278,22 +341,16 @@ function init(deps) {
                 
                 if (!token) return { success: false, error: "Token not found" };
 
-                // 2. FRESHNESS CHECK (Just-in-Time Update)
-                // If the token data is older than 5 MINUTES, force a refresh
-                // We use a memory lock (pendingRefreshes) to prevent RPC spam if multiple users view at once
                 const now = Date.now();
-                // FIX: Increased threshold from 60000 (1min) to 300000 (5min)
                 const isStale = !token.timestamp || (now - token.timestamp > 300000); 
 
                 if (isStale && pairs.length > 0 && !pendingRefreshes.has(mint)) {
                     pendingRefreshes.add(mint);
                     try {
-                        // logger.info(`🔄 Lazy Refresh: Updating stale token ${mint}`);
                         const poolAddresses = pairs.map(p => p.address);
                         await snapshotPools(poolAddresses);
                         await aggregateAndSaveToken(db, mint);
 
-                        // Reload data after update
                         token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
                         pairs = await db.all('SELECT * FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC', [mint]);
                     } catch (err) {
@@ -304,8 +361,6 @@ function init(deps) {
                 }
 
                 let tokenData = { ...token };
-                
-                // Capitalization Safety
                 tokenData.marketCap = tokenData.marketCap || tokenData.marketcap || 0;
                 tokenData.priceUsd = tokenData.priceUsd || tokenData.priceusd || 0;
                 tokenData.volume24h = tokenData.volume24h || 0;
@@ -344,7 +399,6 @@ function init(deps) {
         } catch(e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
-    // CACHING: Main list cached for 2s
     router.get('/tokens', cacheControl(2, 5), async (req, res) => {
         const { search = '', sort = 'kscore', page = 1 } = req.query;
         try {
