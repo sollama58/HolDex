@@ -1,62 +1,96 @@
 const { getDB } = require('../services/database');
+const { getClient } = require('../services/redis');
 const logger = require('../services/logger');
 
+// Local memory cache to prevent slamming Redis/DB for key validation
+// Cache valid keys for 60 seconds
+const KEY_CACHE = new Map();
+
+/**
+ * @param {boolean} required - If true, blocks requests without valid keys.
+ */
 const apiKeyAuth = (required = true) => {
     return async (req, res, next) => {
-        // Allow OPTIONS requests (CORS preflight)
+        // 1. Allow Options/Preflight
         if (req.method === 'OPTIONS') return next();
 
-        // 1. Check for Key in Headers or Query
+        // 2. Extract Key
         const apiKey = req.headers['x-api-key'] || req.query.api_key;
 
-        // If not required and no key, proceed (rate limits might be handled by IP elsewhere)
-        if (!required && !apiKey) return next();
-
-        if (required && !apiKey) {
-            return res.status(401).json({ success: false, error: 'API Key Required. Header: x-api-key' });
+        // 3. Handle Missing Key
+        if (!apiKey) {
+            if (required) {
+                return res.status(401).json({ success: false, error: 'API Key Required (Header: x-api-key)' });
+            }
+            // If not required, attach 'anonymous' user and proceed to IP rate limiter (handled elsewhere)
+            req.apiUser = { owner: 'anonymous', tier: 'public' };
+            return next();
         }
 
         try {
-            const db = getDB();
-            
-            // 2. Validate Key
-            const keyRecord = await db.get('SELECT * FROM api_keys WHERE key = $1', [apiKey]);
-
-            if (!keyRecord) {
-                return res.status(403).json({ success: false, error: 'Invalid API Key' });
-            }
-
-            if (!keyRecord.is_active) {
-                return res.status(403).json({ success: false, error: 'API Key Revoked' });
-            }
-
-            // 3. Check Daily Limit
             const now = Date.now();
-            const oneDay = 24 * 60 * 60 * 1000;
-            let currentUsage = parseInt(keyRecord.requests_today || 0);
-            const lastReset = parseInt(keyRecord.last_reset || 0);
+            let keyData = KEY_CACHE.get(apiKey);
 
-            // Reset if day changed
-            if (now - lastReset > oneDay) {
-                currentUsage = 0;
-                await db.run('UPDATE api_keys SET requests_today = 0, last_reset = $1 WHERE key = $2', [now, apiKey]);
+            // 4. Validate Key (Cache -> DB)
+            if (!keyData || now > keyData.expiry) {
+                const db = getDB();
+                const record = await db.get('SELECT * FROM api_keys WHERE key = $1', [apiKey]);
+
+                if (!record) return res.status(403).json({ success: false, error: 'Invalid API Key' });
+                if (!record.is_active) return res.status(403).json({ success: false, error: 'API Key Revoked' });
+
+                keyData = { 
+                    ...record, 
+                    expiry: now + 60000 // Cache for 60s
+                };
+                KEY_CACHE.set(apiKey, keyData);
             }
 
-            if (currentUsage >= keyRecord.requests_limit) {
-                return res.status(429).json({ success: false, error: 'Daily API Limit Exceeded' });
+            // 5. Rate Limiting (Redis Optimized)
+            const redis = getClient();
+            if (redis) {
+                const dateStr = new Date().toISOString().split('T')[0];
+                const redisKey = `rate_limit:${apiKey}:${dateStr}`;
+
+                // Atomic Increment
+                const currentUsage = await redis.incr(redisKey);
+                
+                // Set expiry (24h) on first use of the day
+                if (currentUsage === 1) await redis.expire(redisKey, 86400);
+
+                // Add Headers
+                res.setHeader('X-RateLimit-Limit', keyData.requests_limit);
+                res.setHeader('X-RateLimit-Remaining', Math.max(0, keyData.requests_limit - currentUsage));
+
+                // Block if exceeded
+                if (currentUsage > keyData.requests_limit) {
+                    return res.status(429).json({ 
+                        success: false, 
+                        error: 'Daily API Limit Exceeded',
+                        tier: keyData.tier
+                    });
+                }
+
+                // Lazy Sync to Postgres (Every 20 requests)
+                if (currentUsage % 20 === 0) {
+                    const db = getDB();
+                    db.run('UPDATE api_keys SET requests_today = $1, last_reset = $2 WHERE key = $3', 
+                        [currentUsage, now, apiKey]).catch(err => logger.error(`DB Sync Error: ${err.message}`));
+                }
+            } else {
+                // FALLBACK: If Redis is down, we skip strict counting to keep API alive,
+                // or you can implement the DB logic here as a slow fallback.
+                logger.warn('Redis down: Skipping strict rate limit check');
             }
 
-            // 4. Increment Usage (Async - don't block response)
-            // We use SQL increment for atomicity
-            db.run('UPDATE api_keys SET requests_today = requests_today + 1 WHERE key = $1', [apiKey]).catch(e => logger.error(`API Usage Update Fail: ${e.message}`));
-
-            // Attach user info to request for downstream use
-            req.apiUser = { owner: keyRecord.owner, tier: keyRecord.tier };
-            
+            // 6. Attach Context
+            req.apiUser = { owner: keyData.owner, tier: keyData.tier };
             next();
 
         } catch (e) {
             logger.error(`Auth Middleware Error: ${e.message}`);
+            // Fail open for authorized users if system error, or fail closed? 
+            // Usually safer to fail closed 500.
             return res.status(500).json({ success: false, error: 'Internal Auth Error' });
         }
     };
