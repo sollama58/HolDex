@@ -83,6 +83,7 @@ async function indexTokenOnChain(mint) {
         ]);
 
         try {
+            // Optional queue trigger
             const queue = require('../services/queue');
             if (queue && queue.enqueueTokenUpdate) queue.enqueueTokenUpdate(mint);
         } catch (qErr) { /* ignore */ }
@@ -108,33 +109,22 @@ router.get('/tokens', async (req, res) => {
             `;
             const params = [`%${search}%`, limit, offset];
             
-            // CRITICAL FIX: Map frontend aliases to LOWERCASE DB columns for Postgres
+            // Safe sort columns - Maps frontend names to DB columns
             const safeSortMap = {
-                // Direct DB Columns (Lowercase)
                 'k_score': 'k_score',
                 'volume24h': 'volume24h',
                 'liquidity': 'liquidity', 
-                'marketcap': 'marketcap', 
+                'marketCap': 'marketcap', 
+                'mcap': 'marketcap', 
                 'created_at': 'created_at', 
+                'newest': 'created_at',
                 'change24h': 'change24h',
                 'change1h': 'change1h',
-                'change5m': 'change5m',
-
-                // Frontend Aliases (Mapped to Lowercase DB Columns)
-                'marketCap': 'marketcap', // Handle CamelCase input
-                'mcap': 'marketcap',      // Handle frontend shortcut
-                'volume': 'volume24h',
-                '24h': 'change24h',
-                '1h': 'change1h',
-                '5m': 'change5m',
-                'newest': 'created_at',
                 'age': 'created_at'
             };
             
-            // Default to 'k_score' if sort key is invalid
             const sortCol = safeSortMap[sort] || 'k_score';
             
-            // Use quoted identifier for sort column to prevent SQL injection, but rely on map for safety
             query += ` ORDER BY "${sortCol}" ${order === 'asc' ? 'ASC' : 'DESC'} LIMIT $2 OFFSET $3`;
 
             const rows = await db.all(query, params) || [];
@@ -146,7 +136,6 @@ router.get('/tokens', async (req, res) => {
                     symbol: r.symbol,
                     name: r.name,
                     image: r.image,
-                    // Robust field access handling lowercase from DB or camelCase from legacy
                     priceUsd: r.priceusd || r.priceUsd || 0,
                     marketCap: r.marketcap || r.marketCap || 0,
                     volume24h: r.volume24h || 0,
@@ -180,24 +169,18 @@ router.get('/token/:mint', async (req, res) => {
         await indexTokenOnChain(mint);
 
         const fetchAndValidate = async () => {
-            // Fetch token
             let token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
             
             if (!token) {
-                 // Try aggressive repair/fetch
                  const fresh = await fetchInitialMarketData(mint);
                  if (fresh) {
-                     // Create placeholder so we can return something
                      token = { ...fresh, mint, name: 'Loading...', symbol: 'LOAD' };
                  }
             }
 
             if (!token) return { success: false, error: "Token not found" };
 
-            // Fetch Pools
             const pairs = await db.all('SELECT * FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC', [mint]) || [];
-            
-            // Fetch History
             const holderHistory = await db.all('SELECT * FROM holders_history WHERE mint = $1 ORDER BY timestamp ASC', [mint]) || [];
 
             // --- DATA NORMALIZATION ---
@@ -209,12 +192,7 @@ router.get('/token/:mint', async (req, res) => {
             tokenData.priceUsd = tokenData.priceusd || tokenData.priceUsd || 0;
             tokenData.volume24h = tokenData.volume24h || 0;
             tokenData.liquidity = tokenData.liquidity || 0;
-            tokenData.change24h = tokenData.change24h || 0;
-            tokenData.change1h = tokenData.change1h || 0;
-            tokenData.change5m = tokenData.change5m || 0;
-            tokenData.hasCommunityUpdate = tokenData.hascommunityupdate || tokenData.hasCommunityUpdate;
-
-            // Use largest pool price if main token price is 0
+            
             if (pairs.length > 0 && tokenData.priceUsd === 0) {
                 if (pairs[0].price_usd > 0) tokenData.priceUsd = pairs[0].price_usd;
             }
@@ -253,7 +231,7 @@ router.get('/token/:mint', async (req, res) => {
     }
 });
 
-// Export Object with init() method matching index.js requirement
+// Export init function matching index.js requirement
 module.exports = {
     init: (deps) => {
         db = deps.db;

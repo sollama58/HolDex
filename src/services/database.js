@@ -10,6 +10,9 @@ let initPromise = null;
 
 const pendingRequests = new Map();
 
+/**
+ * Initialize Database Connection Pools and Schema
+ */
 async function initDB() {
     if (dbWrapper) return dbWrapper;
     if (initPromise) return initPromise;
@@ -74,7 +77,11 @@ async function initDB() {
                     k_score DOUBLE PRECISION DEFAULT 0,
                     hasCommunityUpdate BOOLEAN DEFAULT FALSE,
                     metadata TEXT,
-                    timestamp BIGINT
+                    timestamp BIGINT,
+                    risk_score DOUBLE PRECISION DEFAULT 0,
+                    dev_holding DOUBLE PRECISION DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS holders_history (
@@ -209,6 +216,9 @@ async function smartCache(key, ttlSeconds, fetchFn) {
     return fetchPromise;
 }
 
+/**
+ * Records a pool in the database and marks it for tracking
+ */
 async function enableIndexing(db, mint, poolData) {
     if (!poolData || !poolData.pairAddress) return;
 
@@ -258,6 +268,9 @@ async function enableIndexing(db, mint, poolData) {
     }
 }
 
+/**
+ * Aggregates data from all pools for a token and updates the main 'tokens' table
+ */
 async function aggregateAndSaveToken(db, mint) {
     try {
         const pools = await db.all(`SELECT * FROM pools WHERE mint = $1`, [mint]);
@@ -267,6 +280,7 @@ async function aggregateAndSaveToken(db, mint) {
         let totalVol = 0;
         let mainPool = pools[0]; 
         
+        // Find the most liquid pool to determine the reference price
         for (const p of pools) {
             const liq = parseFloat(p.liquidity_usd || 0);
             const vol = parseFloat(p.volume_24h || 0);
@@ -308,9 +322,10 @@ async function aggregateAndSaveToken(db, mint) {
             if (p5m !== null && p5m > 0) change5m = ((price - p5m) / p5m) * 100;
         }
 
-        const updates = [];
         const params = [totalLiq, totalVol, price, mint];
         let query = `UPDATE tokens SET liquidity = $1, volume24h = $2, priceUsd = $3`;
+        
+        // Calculate MarketCap dynamically in SQL based on new price
         query += `, marketCap = ($3 * CAST(supply AS DOUBLE PRECISION) / POWER(10, COALESCE(decimals, 9)))`;
 
         let pIdx = 5;
