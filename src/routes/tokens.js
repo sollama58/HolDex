@@ -79,6 +79,32 @@ function init(deps) {
             decimals = supplyInfo.value.decimals;
         } catch (e) {}
 
+        // --- FIX: Insert Token FIRST, before indexing pools ---
+        const marketData = await fetchInitialMarketData(mint);
+        const baseData = { name: meta?.name || 'Unknown', ticker: meta?.symbol || 'UNKNOWN', image: meta?.image || null };
+        const initialPrice = marketData?.priceUsd || 0;
+        const initialVol = marketData?.volume24h || 0;
+        const initialChange = marketData?.change24h || 0;
+        const initialChange1h = marketData?.change1h || 0;
+        const initialChange5m = marketData?.change5m || 0;
+        const initialMcap = marketData?.marketCap || 0;
+
+        // 1. CREATE TOKEN RECORD
+        await db.run(`
+            INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, change1h, change5m, timestamp)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            ON CONFLICT(mint) DO UPDATE SET
+            name = EXCLUDED.name,
+            symbol = EXCLUDED.symbol,
+            image = EXCLUDED.image,
+            decimals = EXCLUDED.decimals
+        `, [
+            mint, baseData.name, baseData.ticker, baseData.image, supply, decimals, 
+            initialPrice, 0, initialMcap, initialVol, initialChange,
+            initialChange1h, initialChange5m, Date.now()
+        ]);
+
+        // 2. NOW FIND POOLS (Foreign Key Satisfied)
         const pools = await findPoolsOnChain(mint);
         const poolAddresses = [];
 
@@ -96,29 +122,6 @@ function init(deps) {
                 reserve_b: pool.reserve_b
             });
         }
-
-        const marketData = await fetchInitialMarketData(mint);
-        const baseData = { name: meta?.name || 'Unknown', ticker: meta?.symbol || 'UNKNOWN', image: meta?.image || null };
-        const initialPrice = marketData?.priceUsd || 0;
-        const initialVol = marketData?.volume24h || 0;
-        const initialChange = marketData?.change24h || 0;
-        const initialChange1h = marketData?.change1h || 0;
-        const initialChange5m = marketData?.change5m || 0;
-        const initialMcap = marketData?.marketCap || 0;
-
-        await db.run(`
-            INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, change1h, change5m, timestamp)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-            ON CONFLICT(mint) DO UPDATE SET
-            name = EXCLUDED.name,
-            symbol = EXCLUDED.symbol,
-            image = EXCLUDED.image,
-            decimals = EXCLUDED.decimals
-        `, [
-            mint, baseData.name, baseData.ticker, baseData.image, supply, decimals, 
-            initialPrice, 0, initialMcap, initialVol, initialChange,
-            initialChange1h, initialChange5m, Date.now()
-        ]);
 
         await enqueueTokenUpdate(mint);
         if (poolAddresses.length > 0) {

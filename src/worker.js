@@ -28,22 +28,6 @@ async function processToken(mint) {
             decimals = supplyInfo.value.decimals;
         } catch (e) {}
 
-        const pools = await findPoolsOnChain(mint);
-
-        for (const pool of pools) {
-            await enableIndexing(db, mint, {
-                pairAddress: pool.pairAddress,
-                dexId: pool.dexId,
-                liquidity: pool.liquidity || { usd: 0 },
-                volume: pool.volume || { h24: 0 },
-                priceUsd: pool.priceUsd || 0,
-                baseToken: pool.baseToken, 
-                quoteToken: pool.quoteToken, 
-                reserve_a: pool.reserve_a,
-                reserve_b: pool.reserve_b
-            });
-        }
-
         const baseData = {
             name: meta?.name || 'Unknown',
             ticker: meta?.symbol || 'UNKNOWN',
@@ -53,6 +37,7 @@ async function processToken(mint) {
         const finalSupply = supply || '0';
         const finalDecimals = decimals || 9;
 
+        // --- FIX: Insert Token FIRST to satisfy Foreign Key ---
         await db.run(`
             INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, timestamp)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -71,6 +56,23 @@ async function processToken(mint) {
             0, 0, 0, 0, 0, 
             Date.now()
         ]);
+
+        // --- THEN Find and Index Pools ---
+        const pools = await findPoolsOnChain(mint);
+
+        for (const pool of pools) {
+            await enableIndexing(db, mint, {
+                pairAddress: pool.pairAddress,
+                dexId: pool.dexId,
+                liquidity: pool.liquidity || { usd: 0 },
+                volume: pool.volume || { h24: 0 },
+                priceUsd: pool.priceUsd || 0,
+                baseToken: pool.baseToken, 
+                quoteToken: pool.quoteToken, 
+                reserve_a: pool.reserve_a,
+                reserve_b: pool.reserve_b
+            });
+        }
 
         await aggregateAndSaveToken(db, mint);
         logger.info(`✅ Worker: Finished ${mint}`);
