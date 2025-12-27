@@ -172,14 +172,25 @@ function init(deps) {
     });
 
     router.post('/request-update', async (req, res) => {
-        const { mint, twitter, website, telegram, banner, description, signature, userPublicKey } = req.body;
+        const { mint, twitter, website, telegram, banner, description, signature, userPublicKey, ctoUser } = req.body;
         try {
             if (!mint || mint.length < 30) return res.status(400).json({ success: false, error: "Invalid Mint" });
+            
             try { await verifyPayment(signature, userPublicKey); } catch (payErr) { return res.status(402).json({ success: false, error: payErr.message }); }
+            
+            // Handle CTO Tag appending
+            let finalDescription = description || "";
+            if (ctoUser && typeof ctoUser === 'string' && ctoUser.trim().length > 0) {
+                // Strip @ just in case user added it, then re-add formatted
+                const cleanUser = ctoUser.replace(/^@/, '').trim();
+                finalDescription += `\n\n(CTO by: @${cleanUser})`;
+            }
+
             await db.run(`
                 INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
-            `, [mint, twitter, website, telegram, banner, description, Date.now(), signature, userPublicKey]);
+            `, [mint, twitter, website, telegram, banner, finalDescription, Date.now(), signature, userPublicKey]);
+            
             try { await indexTokenOnChain(mint); } catch (err) {}
             res.json({ success: true, message: "Update queued." });
         } catch (e) { res.status(500).json({ success: false, error: "Submission failed" }); }

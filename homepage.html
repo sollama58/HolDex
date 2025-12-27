@@ -316,7 +316,22 @@
             <form onsubmit="submitUpdate(event)">
                 <label class="form-label">Token Mint Address</label>
                 <div class="relative"><input type="text" id="update-mint" class="form-input" placeholder="Enter Solana Mint Address..." required onblur="fetchTokenForUpdate(this.value)"><div id="mint-check-spinner" class="absolute right-3 top-3 hidden"><i data-lucide="loader-2" class="animate-spin text-[#ea580c]" width="18"></i></div></div>
-                <div id="token-preview-info" class="mb-6 p-4 bg-[#451a03] border border-[#7c2d12] rounded-lg hidden flex items-center gap-4"><img id="update-token-img" src="" class="w-12 h-12 rounded-md object-cover bg-black"><div><div class="font-bold text-white" id="update-token-name">Token Name</div><div class="text-xs text-[#9a3412] font-mono" id="update-token-ticker">TICKER</div></div></div>
+                
+                <div id="token-preview-info" class="mb-6 p-4 bg-[#451a03] border border-[#7c2d12] rounded-lg hidden flex flex-col gap-2">
+                    <div class="flex items-center gap-4">
+                        <img id="update-token-img" src="" class="w-12 h-12 rounded-md object-cover bg-black">
+                        <div>
+                            <div class="font-bold text-white" id="update-token-name">Token Name</div>
+                            <div class="text-xs text-[#9a3412] font-mono" id="update-token-ticker">TICKER</div>
+                        </div>
+                    </div>
+                    <!-- NEW: CTO Warning & Input -->
+                    <div id="update-cto-warning" class="hidden mt-2 pt-2 border-t border-[#7c2d12]">
+                        <div class="text-[#ef4444] text-xs font-bold mb-2 flex items-center gap-1"><i data-lucide="alert-triangle" width="12"></i> Existing Data Found: You must tag yourself as CTO.</div>
+                        <input type="text" id="update-cto-user" class="form-input border-red-500" placeholder="Your X (Twitter) Username (e.g. @elonmusk)">
+                    </div>
+                </div>
+
                 <div class="grid grid-cols-2 gap-4"><div><label class="form-label">X (Twitter)</label><input type="url" id="update-twitter" class="form-input" placeholder="https://x.com/..."></div><div><label class="form-label">Telegram</label><input type="url" id="update-telegram" class="form-input" placeholder="https://t.me/..."></div></div>
                 <label class="form-label">Website</label><input type="url" id="update-website" class="form-input" placeholder="https://...">
                 <div class="mt-2"><label class="form-label">Description (Max 250 chars)</label><textarea id="update-description" class="form-input h-24 resize-none" maxlength="250" placeholder="Briefly describe your token project..."></textarea><div class="text-right text-[10px] text-[#9a3412] font-mono font-bold"><span id="char-count">0</span>/250</div></div>
@@ -1046,6 +1061,23 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     // ... (Standard Helpers) ...
     async function fetchFees() { try { const res = await fetch(`${API_URL}/api/config/fees`); const data = await res.json(); if (data.success) { feeConfig = data; const solEl = document.getElementById('fee-sol'); const tokEl = document.getElementById('fee-token'); if (solEl) solEl.innerText = `${data.solFee} SOL`; if (tokEl) tokEl.innerText = `${data.tokenFee.toLocaleString()} TOKENS`; } } catch (e) { console.error("Fee fetch failed", e); } }
     function sanitizeInput(str) { if(!str) return ''; const div = document.createElement('div'); div.innerText = str; return div.innerHTML; }
+    
+    // NEW: Client-Side URL Sanitizer
+    function sanitizeUrl(url) {
+        if (!url || typeof url !== 'string') return "";
+        url = url.trim();
+        // Force http/https protocol to prevent javascript: vectors
+        if (url.match(/^(http:\/\/|https:\/\/)/i)) {
+            return url;
+        }
+        // If it looks like a domain but missing protocol, prepend https://
+        if (url.match(/^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}/)) {
+            return `https://${url}`;
+        }
+        // If it doesn't look like a URL at all, return empty (effectively deleting bad input)
+        return ""; 
+    }
+
     function openWalletModal() { document.getElementById('wallet-modal').classList.add('open'); isWalletModalOpen = true; }
     function closeWalletModal() { document.getElementById('wallet-modal').classList.remove('open'); isWalletModalOpen = false; }
     async function connectProvider(providerName) { let provider = null; if (providerName === 'phantom' && window.solana && window.solana.isPhantom) provider = window.solana; else if (providerName === 'solflare' && window.solflare) provider = window.solflare; if (!provider) { alert(`${providerName} not found.`); return; } try { const resp = await provider.connect(); walletAddress = resp.publicKey.toString(); walletProvider = provider; closeWalletModal(); updateWalletUI(true); refreshBalances(); } catch (err) { console.error(err); alert("Connection failed."); } }
@@ -1087,10 +1119,39 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         if (!walletAddress || !walletProvider) { alert("Please connect wallet first"); return; } 
         const statusDiv = document.getElementById('update-status'); 
         const mint = document.getElementById('update-mint').value; 
-        const twitter = document.getElementById('update-twitter').value; 
-        const website = document.getElementById('update-website').value; 
-        const telegram = document.getElementById('update-telegram').value; 
-        const banner = document.getElementById('update-banner').value; 
+        
+        // NEW: Sanitize URLs Client-Side
+        const rawTwitter = document.getElementById('update-twitter').value;
+        const rawWebsite = document.getElementById('update-website').value;
+        const rawTelegram = document.getElementById('update-telegram').value;
+        const rawBanner = document.getElementById('update-banner').value;
+
+        const twitter = sanitizeUrl(rawTwitter);
+        const website = sanitizeUrl(rawWebsite);
+        const telegram = sanitizeUrl(rawTelegram);
+        const banner = sanitizeUrl(rawBanner);
+        
+        // NEW: CTO Username Check
+        let ctoUser = null;
+        if (currentUpdateTokenData && (currentUpdateTokenData.hasCommunityUpdate || currentUpdateTokenData.hascommunityupdate)) {
+            const rawCto = document.getElementById('update-cto-user').value;
+            if (!rawCto || rawCto.trim() === '') {
+                statusDiv.innerText = "❌ Error: CTO Username is required for existing tokens.";
+                statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500";
+                statusDiv.classList.remove('hidden');
+                return;
+            }
+            ctoUser = rawCto.trim();
+        }
+
+        // Validation check: If user typed something but sanitizeUrl made it empty, it was invalid.
+        if ((rawTwitter && !twitter) || (rawWebsite && !website) || (rawTelegram && !telegram) || (rawBanner && !banner)) {
+             statusDiv.innerText = "❌ Error: One or more URLs are invalid. Ensure they start with http:// or https://";
+             statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500";
+             statusDiv.classList.remove('hidden');
+             return;
+        }
+
         const descInput = document.getElementById('update-description'); 
         const description = descInput ? sanitizeInput(descInput.value.substring(0, 250)) : ''; 
 
@@ -1154,7 +1215,8 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             const signature = sendData.signature;
 
             statusDiv.innerText = "Verifying Payment..."; 
-            const payload = { mint, twitter, website, telegram, banner, description, signature, userPublicKey: walletAddress }; 
+            // UPDATED: Added ctoUser to payload
+            const payload = { mint, twitter, website, telegram, banner, description, signature, userPublicKey: walletAddress, ctoUser }; 
             const res = await fetch(`${API_URL}/api/request-update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); 
             const dataRes = await res.json(); 
             
@@ -1163,6 +1225,9 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
                 statusDiv.className = "mt-4 text-center text-sm font-mono text-green-500"; 
                 e.target.reset(); 
                 document.getElementById('char-count').innerText = "0"; 
+                // Hide CTO field after reset
+                document.getElementById('update-cto-warning').classList.add('hidden');
+                document.getElementById('token-preview-info').classList.add('hidden');
             } else { 
                 statusDiv.innerText = `❌ Verification Failed: ${dataRes.error}`; 
                 statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500"; 
@@ -1230,7 +1295,44 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         } 
     }
 
-    async function fetchTokenForUpdate(mint) { if (!mint || mint.length < 30) return; const spinner = document.getElementById('mint-check-spinner'); const infoBox = document.getElementById('token-preview-info'); if(spinner) spinner.classList.remove('hidden'); if(infoBox) infoBox.classList.add('hidden'); try { const res = await fetch(`${API_URL}/api/tokens?search=${mint}&limit=1`); const data = await res.json(); if (data.success && data.tokens.length > 0) { const token = data.tokens[0]; if (token.mint === mint) { currentUpdateTokenData = token; const img = document.getElementById('update-token-img'); const name = document.getElementById('update-token-name'); const tick = document.getElementById('update-token-ticker'); if(img) img.src = token.image || 'https://placehold.co/50'; if(name) name.innerText = token.name; if(tick) tick.innerText = token.ticker; if(infoBox) infoBox.classList.remove('hidden'); } } } catch (e) { console.error("Fetch failed", e); } finally { if(spinner) spinner.classList.add('hidden'); } }
+    async function fetchTokenForUpdate(mint) { 
+        if (!mint || mint.length < 30) return; 
+        const spinner = document.getElementById('mint-check-spinner'); 
+        const infoBox = document.getElementById('token-preview-info'); 
+        const ctoWarning = document.getElementById('update-cto-warning');
+        
+        if(spinner) spinner.classList.remove('hidden'); 
+        if(infoBox) infoBox.classList.add('hidden'); 
+        if(ctoWarning) ctoWarning.classList.add('hidden');
+
+        try { 
+            const res = await fetch(`${API_URL}/api/tokens?search=${mint}&limit=1`); 
+            const data = await res.json(); 
+            if (data.success && data.tokens.length > 0) { 
+                const token = data.tokens[0]; 
+                if (token.mint === mint) { 
+                    currentUpdateTokenData = token; 
+                    const img = document.getElementById('update-token-img'); 
+                    const name = document.getElementById('update-token-name'); 
+                    const tick = document.getElementById('update-token-ticker'); 
+                    if(img) img.src = token.image || 'https://placehold.co/50'; 
+                    if(name) name.innerText = token.name; 
+                    if(tick) tick.innerText = token.ticker; 
+                    if(infoBox) infoBox.classList.remove('hidden');
+                    
+                    // NEW: Show CTO field if token already has updates
+                    if (token.hasCommunityUpdate || token.hascommunityupdate) {
+                        ctoWarning.classList.remove('hidden');
+                    }
+                } 
+            } 
+        } catch (e) { 
+            console.error("Fetch failed", e); 
+        } finally { 
+            if(spinner) spinner.classList.add('hidden'); 
+        } 
+    }
+
     function openPreview() { if (!currentUpdateTokenData) { alert("Please enter a valid Mint Address first."); return; } const banner = document.getElementById('update-banner').value; const twitter = document.getElementById('update-twitter').value; const website = document.getElementById('update-website').value; const telegram = document.getElementById('update-telegram').value; const t = { ...currentUpdateTokenData, banner, twitter, website, telegram, hasCommunityUpdate: true }; const container = document.getElementById('preview-container'); let html = ''; if (t.banner) { html += `<div class="w-full h-48 md:h-64 rounded-xl border-2 border-[#7c2d12] shadow-lg relative overflow-hidden bg-black mb-6"><img src="${t.banner}" class="w-full h-full object-cover object-center" onerror="this.src='${FALLBACK_BANNER}'"><div class="absolute inset-0 bg-gradient-to-t from-[#2a1005] to-transparent opacity-80 pointer-events-none"></div></div>`; } let linksHtml = ''; if (t.twitter) linksHtml += `<a href="#" class="social-btn"><i data-lucide="twitter" width="20"></i></a>`; if (t.website) linksHtml += `<a href="#" class="social-btn"><i data-lucide="globe" width="20"></i></a>`; if (t.telegram) linksHtml += `<a href="#" class="social-btn"><i data-lucide="send" width="20"></i></a>`; const mediaHtml = renderTokenMedia(t.image, "w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black"); html += `<div class="flex flex-col md:flex-row gap-6 mb-8 items-start"><div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl">${mediaHtml}<div class="flex-1 min-w-0"><div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mb-1"><h2 class="text-3xl font-bold text-white tracking-tight font-mono">${t.ticker}</h2><span class="text-[#fb923c] text-sm bg-[#2a1005] px-3 py-1 rounded-lg border border-[#7c2d12]">${t.name}</span></div><div class="text-xs text-[#9a3412] font-mono">${t.mint}</div></div></div><div class="flex-1"></div><div class="flex flex-wrap gap-3">${linksHtml}</div></div><div class="text-center text-[#9a3412] font-mono text-xs mt-10">-- End of Preview --</div>`; if(container) container.innerHTML = html; lucide.createIcons(); document.getElementById('preview-modal').classList.add('open'); }
     function closePreview() { document.getElementById('preview-modal').classList.remove('open'); }
     function toggleInfoModal() { const modal = document.getElementById('info-modal'); isInfoModalOpen = !isInfoModalOpen; if (isInfoModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
