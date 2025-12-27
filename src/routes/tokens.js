@@ -25,6 +25,8 @@ async function fetchInitialMarketData(mint) {
     try {
         const url = `https://api.geckoterminal.com/api/v2/networks/solana/tokens/${mint}`;
         const res = await axios.get(url, { timeout: 3000 });
+        if (!res.data || !res.data.data) return null;
+
         const attrs = res.data.data.attributes;
         
         let holders = 0;
@@ -50,17 +52,17 @@ async function fetchInitialMarketData(mint) {
 // HELPER: Index Token On-Chain (If not exists)
 // -----------------------------------------------------------------------------
 async function indexTokenOnChain(mint) {
-    const existing = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
-    if (existing) return;
-
-    const marketData = await fetchInitialMarketData(mint);
-    
-    const initialPrice = marketData?.priceUsd || 0;
-    const initialMcap = marketData?.marketCap || 0;
-    const initialVol = marketData?.volume24h || 0;
-    const initialHolders = marketData?.holders || 0;
-
     try {
+        const existing = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
+        if (existing) return;
+
+        const marketData = await fetchInitialMarketData(mint);
+        
+        const initialPrice = marketData?.priceUsd || 0;
+        const initialMcap = marketData?.marketCap || 0;
+        const initialVol = marketData?.volume24h || 0;
+        const initialHolders = marketData?.holders || 0;
+
         await db.run(`
             INSERT INTO tokens (
                 mint, symbol, name, decimals, supply, 
@@ -81,8 +83,12 @@ async function indexTokenOnChain(mint) {
             initialHolders 
         ]);
 
-        const { enqueueTokenUpdate } = require('../services/queue');
-        if (enqueueTokenUpdate) enqueueTokenUpdate(mint);
+        try {
+            const { enqueueTokenUpdate } = require('../services/queue');
+            if (enqueueTokenUpdate) enqueueTokenUpdate(mint);
+        } catch (qErr) {
+            console.warn("Queue service not available:", qErr.message);
+        }
 
     } catch (err) {
         console.error(`Failed to index token ${mint}:`, err.message);
@@ -111,7 +117,7 @@ router.get('/tokens', async (req, res) => {
             query += ` ORDER BY "${safeSort}" ${order === 'asc' ? 'ASC' : 'DESC'} LIMIT $2`;
             params.push(limit);
 
-            const rows = await db.all(query, params);
+            const rows = await db.all(query, params) || [];
             
             return {
                 success: true,
@@ -147,11 +153,8 @@ router.get('/token/:mint', async (req, res) => {
     const cacheKey = `token_detail_${mint}`;
 
     try {
-        // 1. Initial Check / Index
         await indexTokenOnChain(mint);
 
-        // 2. DELAY LOOP: Wait for data readiness
-        // We bypass cache if data looks invalid to force a retry logic, then cache the result
         const fetchAndValidate = async () => {
             let token = null;
             let attempts = 0;
@@ -173,7 +176,7 @@ router.get('/token/:mint', async (req, res) => {
                         const hld = freshData.holders || token.holders || 0;
                         const prc = freshData.priceUsd || token.priceusd || 0;
                         
-                        // Update DB immediately and await
+                        // Update DB immediately
                         await db.run(`
                             UPDATE tokens 
                             SET marketCap = $1, holders = $2, priceUsd = $3, updated_at = CURRENT_TIMESTAMP 
@@ -192,7 +195,6 @@ router.get('/token/:mint', async (req, res) => {
                     }
                 }
 
-                // Wait 500ms before checking again
                 if (attempts < maxAttempts - 1) {
                     await delay(500);
                 }
@@ -203,16 +205,15 @@ router.get('/token/:mint', async (req, res) => {
             token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
             if (!token) return { success: false, error: "Token not found" };
 
-            // Fetch relations
-            const pairs = await db.all('SELECT * FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC', [mint]);
-            const holderHistory = await db.all('SELECT * FROM holders_history WHERE mint = $1 ORDER BY timestamp ASC', [mint]);
+            // Fetch relations with safety fallback
+            const pairs = await db.all('SELECT * FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC', [mint]) || [];
+            const holderHistory = await db.all('SELECT * FROM holders_history WHERE mint = $1 ORDER BY timestamp ASC', [mint]) || [];
 
             // --- DATA NORMALIZATION & SANITIZATION ---
             
             let tokenData = { ...token };
             if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
 
-            // Map DB lowercase to frontend camelCase
             tokenData.marketCap = tokenData.marketcap || tokenData.marketCap || 0;
             tokenData.holders = tokenData.holders || 0;
             tokenData.priceUsd = tokenData.priceusd || tokenData.priceUsd || 0;
@@ -223,12 +224,10 @@ router.get('/token/:mint', async (req, res) => {
             tokenData.change5m = tokenData.change5m || 0;
             tokenData.timestamp = tokenData.timestamp || 0;
 
-            // Patch price
             if (pairs.length > 0 && tokenData.priceUsd === 0) {
                 if (pairs[0].price_usd > 0) tokenData.priceUsd = pairs[0].price_usd;
             }
 
-            // Sanitize Pools Data
             const cleanPairs = pairs.map(p => ({
                 ...p,
                 price_usd: p.price_usd || 0,
@@ -236,18 +235,15 @@ router.get('/token/:mint', async (req, res) => {
                 volume_24h: p.volume_24h || 0
             }));
 
-            // Sanitize History for Charts
-            // FIX: Reverted to 'timestamp' and 'count' keys to maintain frontend compatibility
-            // FIX: Ensure values are never null to prevent "Value is null" error
+            // Fix for "Value is null" error: Ensure count is never null
             const cleanHolderHistory = holderHistory
                 .map(h => ({
                     timestamp: Number(h.timestamp), 
-                    count: h.count ? Number(h.count) : 0
+                    count: (h.count !== null && h.count !== undefined) ? Number(h.count) : 0
                 }))
-                .filter(h => h.timestamp > 0 && h.count !== null && h.count !== undefined)
+                .filter(h => h.timestamp > 0)
                 .sort((a, b) => a.timestamp - b.timestamp);
 
-            // If history is empty but we have current holders, fake a point
             if (cleanHolderHistory.length === 0 && tokenData.holders > 0) {
                 cleanHolderHistory.push({
                     timestamp: Date.now(),

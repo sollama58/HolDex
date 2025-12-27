@@ -7,7 +7,7 @@ let isRunning = false;
 const BATCH_SIZE = 5; 
 const BATCH_DELAY_MS = 2000; 
 
-// Helper: Safely parse numbers, returning 0 if invalid/null to prevent chart crashes
+// Helper: Safely parse numbers, returning 0 if invalid/null
 const parseSafeFloat = (val) => {
     if (val === undefined || val === null || val === 'null' || val === '') return 0;
     const num = parseFloat(val);
@@ -110,7 +110,6 @@ async function processSingleToken(db, t, now) {
                 maxLiquidity = liqUsd;
                 bestPrice = price;
                 
-                // Use safe parsing
                 bestChange24h = parseSafeFloat(attr.price_change_percentage?.h24);
                 bestChange1h = parseSafeFloat(attr.price_change_percentage?.h1);
                 bestChange5m = parseSafeFloat(attr.price_change_percentage?.m5);
@@ -166,7 +165,6 @@ async function processSingleToken(db, t, now) {
             finalParams.push(earliestPoolTime);
         }
 
-        // Always update changes now, they are safe 0s if missing
         updateParts.push(`change24h = $${idx++}`); finalParams.push(bestChange24h);
         updateParts.push(`change1h = $${idx++}`); finalParams.push(bestChange1h);
         updateParts.push(`change5m = $${idx++}`); finalParams.push(bestChange5m);
@@ -193,12 +191,11 @@ async function processSingleToken(db, t, now) {
 
         await db.run(finalQuery, finalParams);
 
-        // Broadcast Real-Time Update with SAFE values
         broadcastTokenUpdate(t.mint, {
             priceUsd: bestPrice || 0,
             marketCap: marketCap || 0,
             volume24h: totalVolume24h || 0,
-            change1h: bestChange1h, // Guaranteed number or 0 by parseSafeFloat
+            change1h: bestChange1h,
             change24h: bestChange24h, 
             holders: holderCount || 0,
             updatedAt: now

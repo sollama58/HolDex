@@ -3,7 +3,7 @@ const logger = require('./logger');
 
 /**
  * Fetches data from Solscan's Public API.
- * Uses the 'token/meta' endpoint which is often more reliable for holder counts than 'market/token'.
+ * Uses the 'token/meta' endpoint which is often more reliable for holder counts.
  */
 async function fetchSolscanData(mint) {
     try {
@@ -24,7 +24,6 @@ async function fetchSolscanData(mint) {
         
         if (res.data) {
             return {
-                // Solscan 'token/meta' returns 'holder' as an integer
                 holders: parseInt(res.data.holder || 0),
                 marketCap: parseFloat(res.data.marketCap || res.data.fdv || 0),
                 supply: res.data.supply || '0'
@@ -45,7 +44,7 @@ async function fetchSolscanData(mint) {
                 }
             }
         } catch (err2) {
-            // logger.debug(`Solscan Metadata Fetch Failed for ${mint}`);
+            // silent fail
         }
     }
     return null;
