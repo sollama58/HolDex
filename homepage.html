@@ -273,10 +273,29 @@
             <div class="bg-[#0f0502] border border-[#7c2d12] rounded-xl p-8 relative overflow-hidden group hover:border-[#ea580c] transition-colors">
                 <div class="absolute top-4 right-4 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><i data-lucide="code" width="100" class="text-[#ea580c]"></i></div>
                 <h3 class="text-2xl font-bold text-white mb-2">Developers & API</h3>
-                <p class="text-[#9a3412] mb-6 max-w-2xl">HolDex exposes a robust public API. You can generate a free API key instantly using your wallet.</p>
-                <div class="flex gap-4">
-                    <button onclick="toggleApiModal()" class="action-btn flex items-center gap-2"><i data-lucide="file-text" width="16"></i> Documentation</button>
-                    <button onclick="requestApiKey()" class="action-btn flex items-center gap-2 bg-[#2a1005] border-[#22c55e] text-[#22c55e] hover:bg-green-900/20"><i data-lucide="key" width="16"></i> Get API Key</button>
+                <p class="text-[#9a3412] mb-6 max-w-2xl">HolDex exposes a robust public API. Connect your wallet to manage your keys.</p>
+                
+                <!-- NEW: API KEY MANAGEMENT SECTION -->
+                <div id="api-section-unconnected">
+                    <div class="flex gap-4">
+                        <button onclick="toggleApiModal()" class="action-btn flex items-center gap-2"><i data-lucide="file-text" width="16"></i> Documentation</button>
+                        <button onclick="openWalletModal()" class="action-btn flex items-center gap-2 bg-[#2a1005] border-[#22c55e] text-[#22c55e] hover:bg-green-900/20"><i data-lucide="wallet" width="16"></i> Connect to Manage Keys</button>
+                    </div>
+                </div>
+
+                <div id="api-section-connected" class="hidden space-y-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <h4 class="text-[#fb923c] font-bold text-sm uppercase">Your API Keys</h4>
+                        <div class="flex gap-2">
+                            <button onclick="toggleApiModal()" class="text-xs text-[#9a3412] hover:text-[#fb923c] flex items-center gap-1 border border-[#7c2d12] px-2 py-1 rounded bg-[#2a1005]"><i data-lucide="file-text" width="12"></i> Docs</button>
+                            <button onclick="requestApiKey()" class="text-xs text-[#22c55e] border border-[#22c55e] px-2 py-1 rounded bg-[#2a1005] hover:bg-green-900/20 flex items-center gap-1"><i data-lucide="plus" width="12"></i> New Key</button>
+                        </div>
+                    </div>
+                    
+                    <div id="my-keys-list" class="space-y-2">
+                        <!-- Keys populated here -->
+                        <div class="text-center py-4 text-[#9a3412] text-xs font-mono">Loading keys...</div>
+                    </div>
                 </div>
             </div>
              <div class="border-t border-[#7c2d12] pt-8 flex justify-between items-center text-xs text-[#9a3412]"><div>&copy; 2025 HolDex Protocol. All rights reserved.</div><div class="font-mono">v2.5.0 (Stable)</div></div>
@@ -1095,12 +1114,79 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             if (data.success) {
                 document.getElementById('generated-key-display').innerText = data.key;
                 document.getElementById('key-modal').classList.add('open');
+                
+                // Refresh list if user is on the About page
+                fetchMyKeys();
             } else {
                 alert("Failed: " + data.error);
             }
         } catch (e) {
             console.error(e);
             alert("Signature request failed or was rejected.");
+        }
+    }
+
+    // NEW: FETCH MY KEYS LOGIC
+    async function fetchMyKeys() {
+        if (!walletAddress || !walletProvider) return;
+        
+        const listDiv = document.getElementById('my-keys-list');
+        if (!listDiv) return;
+        listDiv.innerHTML = '<div class="text-center py-4 text-[#9a3412] text-xs font-mono animate-pulse">Loading your keys... (Please sign to verify ownership)</div>';
+
+        try {
+            const message = "Request HolDex API Key";
+            const encodedMessage = new TextEncoder().encode(message);
+            const signedMessage = await walletProvider.signMessage(encodedMessage, 'utf8');
+            
+            let signatureBase64;
+            if (signedMessage.signature) {
+                signatureBase64 = window.buffer.Buffer.from(signedMessage.signature).toString('base64');
+            } else {
+                signatureBase64 = window.buffer.Buffer.from(signedMessage).toString('base64');
+            }
+
+            const res = await fetch(`${API_URL}/api/request-my-keys`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ wallet: walletAddress, signature: signatureBase64 })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                if (data.keys.length === 0) {
+                    listDiv.innerHTML = '<div class="text-center py-4 text-[#9a3412] text-xs font-mono">No API keys found. Generate one above!</div>';
+                    return;
+                }
+
+                listDiv.innerHTML = data.keys.map(k => {
+                    const usagePct = Math.min(100, (k.requests_today / k.requests_limit) * 100);
+                    const usageColor = usagePct > 90 ? 'bg-red-500' : (usagePct > 50 ? 'bg-yellow-500' : 'bg-green-500');
+                    const activeClass = k.is_active ? 'text-green-500' : 'text-red-500';
+                    const activeText = k.is_active ? 'Active' : 'Revoked';
+
+                    return `
+                        <div class="bg-[#0f0502] border border-[#7c2d12] rounded-lg p-4 flex flex-col gap-2">
+                            <div class="flex justify-between items-start">
+                                <div class="font-mono text-[#fb923c] text-xs break-all font-bold">${k.key}</div>
+                                <div class="text-[10px] uppercase font-bold tracking-wider ${activeClass}">${activeText}</div>
+                            </div>
+                            <div class="flex justify-between items-center text-[10px] text-[#9a3412] uppercase font-bold mt-1">
+                                <div>Tier: ${k.tier}</div>
+                                <div>Usage: ${k.requests_today} / ${k.requests_limit}</div>
+                            </div>
+                            <div class="w-full bg-[#2a1005] h-1.5 rounded-full mt-1 overflow-hidden">
+                                <div class="${usageColor} h-full rounded-full transition-all duration-500" style="width: ${usagePct}%"></div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                listDiv.innerHTML = `<div class="text-center py-4 text-red-500 text-xs font-mono">Failed to load keys: ${data.error}</div>`;
+            }
+        } catch (e) {
+            console.error(e);
+            listDiv.innerHTML = '<div class="text-center py-4 text-red-500 text-xs font-mono">Signature request failed.</div>';
         }
     }
 
@@ -1155,6 +1241,10 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         const footerBtn = document.getElementById('footer-connect-btn');
         const footerDisp = document.getElementById('footer-wallet-display');
         
+        // API Section Elements
+        const apiUnconnected = document.getElementById('api-section-unconnected');
+        const apiConnected = document.getElementById('api-section-connected');
+
         if (connected) { 
             const shortAddr = walletAddress.slice(0,4) + '...' + walletAddress.slice(-4); 
             if (discDiv) discDiv.classList.add('hidden'); 
@@ -1164,6 +1254,16 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             if (footerBtn) footerBtn.classList.add('hidden');
             if (footerDisp) footerDisp.classList.remove('hidden');
             if (footerDisp) footerDisp.classList.add('flex');
+            
+            // Show Connected API View
+            if (apiUnconnected) apiUnconnected.classList.add('hidden');
+            if (apiConnected) {
+                apiConnected.classList.remove('hidden');
+                // Trigger fetch ONLY if we are currently on the 'about' page to avoid annoying prompts elsewhere
+                if (window.location.hash === '#about') {
+                    fetchMyKeys();
+                }
+            }
         } else { 
             if (discDiv) discDiv.classList.remove('hidden'); 
             if (connDiv) connDiv.classList.add('hidden'); 
@@ -1171,6 +1271,10 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             if (footerBtn) footerBtn.classList.remove('hidden');
             if (footerDisp) footerDisp.classList.add('hidden');
             if (footerDisp) footerDisp.classList.remove('flex');
+            
+            // Show Unconnected API View
+            if (apiUnconnected) apiUnconnected.classList.remove('hidden');
+            if (apiConnected) apiConnected.classList.add('hidden');
         } 
         lucide.createIcons(); 
     }
@@ -1347,6 +1451,10 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         } else if (hash === '#about') { 
             document.getElementById('view-about').classList.add('active'); 
             document.querySelector('button[onclick="navigateTo(\'about\')"]').classList.add('active'); 
+            // Trigger key fetch if wallet connected
+            if (walletAddress) {
+                fetchMyKeys();
+            }
         } else if (hash === '#update') { 
             document.getElementById('view-update').classList.add('active'); 
             document.querySelector('button[onclick="navigateTo(\'update\')"]').classList.add('active'); 

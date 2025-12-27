@@ -14,8 +14,9 @@ const apiKeyAuth = (required = true) => {
         // 1. Allow Options/Preflight
         if (req.method === 'OPTIONS') return next();
 
-        // 2. Extract Key
-        const apiKey = req.headers['x-api-key'] || req.query.api_key;
+        // 2. Extract Key - STRICT HEADER ONLY
+        // We deprecate query params for security reasons (they get logged in server logs)
+        const apiKey = req.headers['x-api-key'];
 
         // 3. Handle Missing Key
         if (!apiKey) {
@@ -62,8 +63,13 @@ const apiKeyAuth = (required = true) => {
                 res.setHeader('X-RateLimit-Limit', keyData.requests_limit);
                 res.setHeader('X-RateLimit-Remaining', Math.max(0, keyData.requests_limit - currentUsage));
 
+                // Logging Usage (Sampled or Full?) 
+                // Full logging might be too heavy, but let's log debug for now.
+                // logger.debug(`API Key Usage [${keyData.owner}]: ${currentUsage}/${keyData.requests_limit}`);
+
                 // Block if exceeded
                 if (currentUsage > keyData.requests_limit) {
+                    logger.warn(`API Rate Limit Exceeded: ${keyData.owner} (${currentUsage})`);
                     return res.status(429).json({ 
                         success: false, 
                         error: 'Daily API Limit Exceeded',
