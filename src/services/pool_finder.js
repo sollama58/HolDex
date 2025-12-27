@@ -1,6 +1,7 @@
 const axios = require('axios');
 const { PublicKey } = require('@solana/web3.js');
-const { retryRPC, getSolanaConnection } = require('./solana');
+// Ensure we import the centralized connection getter
+const { getSolanaConnection } = require('./solana'); 
 const logger = require('./logger');
 
 // --- PROGRAM IDS ---
@@ -14,6 +15,18 @@ const LAYOUTS = {
     [PROG_ID_METEORA_AMM]: { name: 'Meteora', offA: 72, offB: 104 }, 
     [PROG_ID_RAYDIUM_CPMM]: { name: 'Raydium CPMM', offA: 168, offB: 200 } 
 };
+
+// Retry wrapper for RPC calls
+async function retryRPC(fn, retries = 3) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await fn();
+        } catch (e) {
+            if (i === retries - 1) throw e;
+            await new Promise(r => setTimeout(r, 1000 * (i + 1))); // Exponential backoff
+        }
+    }
+}
 
 async function findPoolsViaGeckoTerminal(mintAddress) {
     try {
@@ -54,12 +67,13 @@ async function enrichPoolsWithReserves(pools) {
     const targets = pools.filter(p => p.dexId !== 'pumpfun' && !p.reserve_a);
     if (targets.length === 0) return;
 
+    // Use the centralized connection that has the Helius RPC
     const connection = getSolanaConnection();
     
     // Process in batches
     for (let i = 0; i < targets.length; i += 50) {
         const batch = targets.slice(i, i + 50);
-        const pubkeys = batch.map(p => new PublicKey(p.pairAddress || p.address)); // Handle both property names
+        const pubkeys = batch.map(p => new PublicKey(p.pairAddress || p.address)); 
 
         try {
             const accounts = await retryRPC(() => connection.getMultipleAccountsInfo(pubkeys));
@@ -76,7 +90,6 @@ async function enrichPoolsWithReserves(pools) {
                         const reserveB = new PublicKey(acc.data.subarray(layout.offB, layout.offB + 32));
                         pool.reserve_a = reserveA.toBase58();
                         pool.reserve_b = reserveB.toBase58();
-                        // logger.info(`✅ Enriched ${layout.name} Reserves: ${pool.address}`);
                     } catch (parseErr) {}
                 } else if (pool.dexId === 'whirlpool' || owner === 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc') {
                     try {
@@ -101,6 +114,7 @@ async function findPumpFunCurve(mintAddress, results) {
         const [bondingCurve] = PublicKey.findProgramAddressSync([Buffer.from("bonding-curve"), mint.toBuffer()], pId);
         const [bondingCurveVault] = PublicKey.findProgramAddressSync([Buffer.from("bonding-curve"), mint.toBuffer(), Buffer.from("token-account")], pId);
 
+        // Use the centralized connection here as well
         const connection = getSolanaConnection();
         const info = await retryRPC(() => connection.getAccountInfo(bondingCurve));
         

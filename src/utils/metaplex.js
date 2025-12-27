@@ -1,6 +1,7 @@
 const axios = require('axios');
-const { Connection, PublicKey } = require('@solana/web3.js');
+const { PublicKey } = require('@solana/web3.js');
 const config = require('../config/env');
+const { getSolanaConnection } = require('../services/solana'); // Use centralized connection
 
 const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 
@@ -58,7 +59,8 @@ async function fetchTokenMetadata(mintAddress) {
 
     // 2. Fallback: Manual On-Chain Metaplex Parse (Reliable)
     try {
-        const connection = new Connection(config.SOLANA_RPC_URL);
+        // FIX: Use the shared connection which has the correct RPC_URL
+        const connection = getSolanaConnection(); 
         const mint = new PublicKey(mintAddress);
         const [pda] = PublicKey.findProgramAddressSync(
             [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
@@ -105,7 +107,7 @@ async function fetchTokenMetadata(mintAddress) {
             return metadata;
         }
     } catch (e) {
-        console.warn(`All metadata fetches failed for ${mintAddress}: ${e.message}`);
+        // console.warn(`All metadata fetches failed for ${mintAddress}: ${e.message}`);
     }
 
     return null; // Truly failed
