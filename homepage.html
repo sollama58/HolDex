@@ -1241,8 +1241,27 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         if (isHowItWorksModalOpen) modal.classList.add('open'); else modal.classList.remove('open');
     }
 
-    function toggleVerifiedFilter() { isVerifiedFilter = !isVerifiedFilter; const btn = document.getElementById('filter-verified'); if(btn) { if (isVerifiedFilter) btn.classList.add('active'); else btn.classList.remove('active'); } currentPage = 1; fetchList(); }
-    function toggleZeroVolFilter() { isZeroVolHidden = !isZeroVolHidden; const btn = document.getElementById('filter-zerovol'); if(btn) { if (isZeroVolHidden) btn.classList.add('active'); else btn.classList.remove('active'); } currentPage = 1; fetchList(); }
+    function toggleVerifiedFilter() { 
+        isVerifiedFilter = !isVerifiedFilter; 
+        const btn = document.getElementById('filter-verified'); 
+        if(btn) { 
+            if (isVerifiedFilter) btn.classList.add('active'); 
+            else btn.classList.remove('active'); 
+        } 
+        currentPage = 1; 
+        fetchList(); 
+    }
+
+    function toggleZeroVolFilter() { 
+        isZeroVolHidden = !isZeroVolHidden; 
+        const btn = document.getElementById('filter-zerovol'); 
+        if(btn) { 
+            if (isZeroVolHidden) btn.classList.add('active'); 
+            else btn.classList.remove('active'); 
+        } 
+        currentPage = 1; 
+        fetchList(); 
+    }
     
     window.handleSearch = (e) => { 
         searchQuery = e.target.value; 
@@ -1288,6 +1307,8 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             if(prev) prev.disabled = currentPage <= 1; 
             
             let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&search=${encodeURIComponent(searchQuery)}&limit=100&page=${currentPage}`; 
+            
+            // FIXED: Send filter to backend
             if (isVerifiedFilter) endpoint += '&filter=verified'; 
             
             const res = await fetch(endpoint); 
@@ -1319,7 +1340,9 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         if(!tbody) return; 
         
         let displayTokens = tokens; 
-        if (isVerifiedFilter) { displayTokens = displayTokens.filter(t => t.hasCommunityUpdate || t.hascommunityupdate); }
+        
+        // Client-side Zero Vol filter is fine as it doesn't affect pagination count significantly usually, 
+        // or can be done on backend if needed later. For now, we keep logic same.
         if (isZeroVolHidden) { displayTokens = displayTokens.filter(t => (t.volume24h || 0) > 0); } 
         
         if (displayTokens.length === 0) { 

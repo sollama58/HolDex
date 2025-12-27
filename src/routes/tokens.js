@@ -233,7 +233,7 @@ function init(deps) {
     // --- BACKUP & RESTORE ---
     router.get('/admin/backup/updates', requireAdmin, async (req, res) => { try { const updates = await db.all('SELECT * FROM token_updates ORDER BY submittedAt DESC'); const keys = await db.all('SELECT * FROM api_keys'); res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Disposition', `attachment; filename=holdex_full_backup_${Date.now()}.json`); res.json({ success: true, timestamp: Date.now(), updates: updates, api_keys: keys }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     
-    // RESTORE ROUTES - FULL SYNC ENABLED
+    // RESTORE ROUTES - FULL SYNC & K-SCORE TRIGGER ENABLED
     router.post('/admin/restore/updates', requireAdmin, async (req, res) => { 
         const { updates, api_keys } = req.body; 
         
@@ -246,6 +246,8 @@ function init(deps) {
             updates: { restored: 0, skipped: 0, merged: 0 },
             keys: { restored: 0, skipped: 0, merged: 0 }
         };
+
+        const affectedMints = new Set(); // TRACK MINTS FOR K-SCORE REFRESH
 
         try {
             // 1. Restore Updates with Merge Logic & TOKENS SYNC
@@ -273,6 +275,7 @@ function init(deps) {
                                 vals.push(existing.id);
                                 await db.run(`UPDATE token_updates SET ${sets.join(', ')} WHERE id = $${idx}`, vals);
                                 results.updates.merged++;
+                                affectedMints.add(u.mint);
                             } else {
                                 results.updates.skipped++;
                             }
@@ -284,10 +287,10 @@ function init(deps) {
                                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                             `, [u.mint, u.twitter, u.website, u.telegram, u.banner, u.description, status, sig, u.payer || 'unknown', timestamp]);
                             results.updates.restored++;
+                            affectedMints.add(u.mint);
                         }
 
                         // --- SYNC LIVE TOKENS TABLE (Community Updates) ---
-                        // If this update was approved (restored or existing), ensure the main token table reflects the changes
                         const status = u.status || (existing ? existing.status : 'pending');
                         
                         if (status === 'approved') {
@@ -302,20 +305,19 @@ function init(deps) {
                                 const syncFields = ['twitter', 'website', 'telegram', 'banner', 'description'];
                                 
                                 for (const f of syncFields) {
-                                    // If main table is missing data, but update has it -> Sync it
                                     if ((!meta.community[f] || meta.community[f] === "") && (u[f] && u[f] !== "")) {
                                         meta.community[f] = u[f];
                                         changed = true;
                                     }
                                 }
 
-                                // If we modified metadata OR the flag is missing, update the token
                                 if (changed || !token.hasCommunityUpdate) {
                                     await db.run(`
                                         UPDATE tokens 
                                         SET metadata = $1, hasCommunityUpdate = TRUE, updated_at = CURRENT_TIMESTAMP 
                                         WHERE mint = $2
                                     `, [JSON.stringify(meta), u.mint]);
+                                    affectedMints.add(u.mint);
                                 }
                             }
                         }
@@ -330,16 +332,14 @@ function init(deps) {
                     try {
                         const existing = await db.get('SELECT * FROM api_keys WHERE key = $1', [k.key]);
                         if (existing) {
-                             // MERGE - ADDED 'requests_limit' to sync fields
+                             // MERGE
                             const fields = ['owner', 'tier', 'requests_limit']; 
                             const sets = [];
                             const vals = [];
                             let idx = 1;
 
                             for(const f of fields) {
-                                // Map camelCase input to snake_case DB column where needed
-                                const inputVal = k[f] || k[f.replace(/_([a-z])/g, g => g[1].toUpperCase())]; // requests_limit OR requestsLimit
-                                
+                                const inputVal = k[f] || k[f.replace(/_([a-z])/g, g => g[1].toUpperCase())];
                                 if ((existing[f] === null || existing[f] === '') && (inputVal !== undefined && inputVal !== null)) {
                                     sets.push(`${f} = $${idx++}`);
                                     vals.push(inputVal);
@@ -371,6 +371,16 @@ function init(deps) {
                 }
             }
 
+            // 3. TRIGGER K-SCORE UPDATES
+            if (affectedMints.size > 0) {
+                // Run in background to not block response
+                (async () => {
+                    for (const mint of affectedMints) {
+                        await updateSingleToken({ db }, mint);
+                    }
+                })();
+            }
+
             res.json({ success: true, results, message: `Update Log: ${results.updates.restored} added, ${results.updates.merged} merged. Keys: ${results.keys.restored} added, ${results.keys.merged} merged.` });
 
         } catch (e) { 
@@ -378,7 +388,7 @@ function init(deps) {
         } 
     });
 
-    // --- PUBLIC ROUTES ---
+    // --- PUBLIC ROUTES (Cached + API Key) ---
     router.get('/token/:mint', cacheControl(3, 5), apiKeyAuth(false), async (req, res) => {
         const { mint } = req.params;
         const cacheKey = `token:detail:${mint}`;
@@ -389,6 +399,7 @@ function init(deps) {
                 
                 if (!token) {
                     try {
+                        // REFACTORED: Use the imported function
                         const indexed = await indexTokenOnChain(mint);
                         token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]); 
                         pairs = indexed.pairs || [];
@@ -397,6 +408,8 @@ function init(deps) {
                 
                 if (!token) return { success: false, error: "Token not found" };
 
+                // ... (Rest of existing logic: Stale check, holder history, etc.) ...
+                // Condensed for brevity as logic remains identical, just ensuring indexTokenOnChain is used
                 const now = Date.now();
                 const isStale = !token.timestamp || (now - token.timestamp > 300000); 
                 if (isStale && pairs.length > 0 && !pendingRefreshes.has(mint)) {
@@ -427,11 +440,12 @@ function init(deps) {
         } catch(e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
+    // FIXED: ADDED 'filter' query support
     router.get('/tokens', cacheControl(2, 5), apiKeyAuth(false), async (req, res) => {
-        const { search = '', sort = 'kscore', page = 1 } = req.query;
+        const { search = '', sort = 'kscore', page = 1, filter } = req.query;
         try {
-            const isGenericView = !search;
-            const cacheKey = `api:tokens:list:${sort}:${page}:${search}`;
+            const isGenericView = !search && !filter; // Only use cache if no search and no filter
+            const cacheKey = `api:tokens:list:${sort}:${page}:${search}:${filter}`;
             const redis = getClient(); 
             if (isGenericView && redis) { try { const cached = await redis.get(cacheKey); if (cached) { res.setHeader('X-Cache', 'HIT'); return res.json(JSON.parse(cached)); } } catch(e) {} }
 
@@ -457,8 +471,14 @@ function init(deps) {
                 else if (sort === '1h') orderBy = 'change1h DESC';
                 else if (sort === 'holders') orderBy = 'holders DESC'; 
 
+                let whereClause = '';
+                // FILTER: Only return tokens with community updates if requested
+                if (filter === 'verified') {
+                    whereClause = 'WHERE hasCommunityUpdate = TRUE';
+                }
+
                 const offset = (page - 1) * 100;
-                rows = await db.all(`SELECT * FROM tokens ORDER BY ${orderBy} LIMIT 100 OFFSET ${offset}`);
+                rows = await db.all(`SELECT * FROM tokens ${whereClause} ORDER BY ${orderBy} LIMIT 100 OFFSET ${offset}`);
             }
 
             const responsePayload = {
