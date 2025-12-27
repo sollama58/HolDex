@@ -1,14 +1,8 @@
 const axios = require('axios');
 
-// Try to load logger safely, fallback if missing to prevent crash
-let logger = { info: console.log, warn: console.warn, error: console.error, debug: () => {} };
-try {
-    const logService = require('./logger');
-    if (logService) logger = logService.default || logService;
-} catch (e) { /* ignore */ }
-
 /**
  * Fetches data from Solscan's Public API.
+ * Returns normalized object: { holders, marketCap, supply, priceUsd }
  */
 async function fetchSolscanData(mint) {
     try {
@@ -19,7 +13,7 @@ async function fetchSolscanData(mint) {
         ];
         const ua = agents[Math.floor(Math.random() * agents.length)];
 
-        // Primary: Token Meta Endpoint (Better for holders)
+        // Primary: Token Meta Endpoint
         const url = `https://public-api.solscan.io/token/meta?tokenAddress=${mint}`;
         
         const res = await axios.get(url, { 
@@ -55,5 +49,7 @@ async function fetchSolscanData(mint) {
     return null;
 }
 
-// Export as an object to be safe and standard
-module.exports = { fetchSolscanData };
+// --- HYBRID EXPORT (CRITICAL FOR PREVENTING CRASHES) ---
+// This allows require('...solscan')(mint) AND require('...solscan').fetchSolscanData(mint)
+module.exports = fetchSolscanData;
+module.exports.fetchSolscanData = fetchSolscanData;

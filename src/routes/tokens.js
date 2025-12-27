@@ -2,11 +2,11 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 
-// --- ROBUST IMPORT: Handle both "module.exports = db" and "module.exports = { db }" ---
+// --- ROBUST DB IMPORT ---
 let db;
 try {
     const dbModule = require('../services/database');
-    // If dbModule has a .db property, use it; otherwise assume the module IS the db
+    // Handle both module.exports = db and module.exports = { db }
     db = dbModule.db ? dbModule.db : dbModule;
 } catch (err) {
     console.error("CRITICAL: Failed to import database service in tokens.js", err);
@@ -15,7 +15,7 @@ try {
 // Helper for delay
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Simple in-memory cache helper
+// Simple in-memory cache
 const cache = new Map();
 async function smartCache(key, ttlSeconds, fetchFn) {
     if (cache.has(key)) {
@@ -27,9 +27,7 @@ async function smartCache(key, ttlSeconds, fetchFn) {
     return data;
 }
 
-// -----------------------------------------------------------------------------
-// HELPER: Fetch Initial Market Data (GeckoTerminal)
-// -----------------------------------------------------------------------------
+// Helper: Fetch Initial Market Data (GeckoTerminal)
 async function fetchInitialMarketData(mint) {
     try {
         const url = `https://api.geckoterminal.com/api/v2/networks/solana/tokens/${mint}`;
@@ -57,11 +55,9 @@ async function fetchInitialMarketData(mint) {
     }
 }
 
-// -----------------------------------------------------------------------------
-// HELPER: Index Token On-Chain (If not exists)
-// -----------------------------------------------------------------------------
+// Helper: Index Token On-Chain
 async function indexTokenOnChain(mint) {
-    if (!db) return; // Safety check
+    if (!db) return;
     try {
         const existing = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
         if (existing) return;
@@ -94,24 +90,19 @@ async function indexTokenOnChain(mint) {
         ]);
 
         try {
-            // Dynamic require to handle circular deps
             const queue = require('../services/queue');
             if (queue && queue.enqueueTokenUpdate) queue.enqueueTokenUpdate(mint);
-        } catch (qErr) {
-            console.warn("Queue service not available:", qErr.message);
-        }
+        } catch (qErr) { /* ignore */ }
 
     } catch (err) {
         console.error(`Failed to index token ${mint}:`, err.message);
     }
 }
 
-// -----------------------------------------------------------------------------
 // GET /tokens (List View)
-// -----------------------------------------------------------------------------
 router.get('/tokens', async (req, res) => {
     try {
-        if (!db) throw new Error("Database not connected");
+        if (!db) throw new Error("Database not initialized");
 
         const { sort = 'k_score', order = 'desc', limit = 50, search = '' } = req.query;
         const cacheKey = `tokens_${sort}_${order}_${limit}_${search}`;
@@ -122,10 +113,7 @@ router.get('/tokens', async (req, res) => {
                 WHERE (symbol ILIKE $1 OR name ILIKE $1 OR mint ILIKE $1)
             `;
             const params = [`%${search}%`];
-
-            const safeSort = ['k_score', 'volume24h', 'liquidity', 'marketCap', 'created_at', 'change24h'].includes(sort) 
-                ? sort 
-                : 'k_score';
+            const safeSort = ['k_score', 'volume24h', 'liquidity', 'marketCap', 'created_at', 'change24h'].includes(sort) ? sort : 'k_score';
             
             query += ` ORDER BY "${safeSort}" ${order === 'asc' ? 'ASC' : 'DESC'} LIMIT $2`;
             params.push(limit);
@@ -158,16 +146,13 @@ router.get('/tokens', async (req, res) => {
     }
 });
 
-// -----------------------------------------------------------------------------
-// GET /token/:mint (Detail View) - WITH DELAY & RETRY
-// -----------------------------------------------------------------------------
+// GET /token/:mint (Detail View)
 router.get('/token/:mint', async (req, res) => {
     const { mint } = req.params;
     const cacheKey = `token_detail_${mint}`;
 
     try {
-        if (!db) throw new Error("Database not connected");
-
+        if (!db) throw new Error("Database not initialized");
         await indexTokenOnChain(mint);
 
         const fetchAndValidate = async () => {
@@ -175,15 +160,14 @@ router.get('/token/:mint', async (req, res) => {
             let attempts = 0;
             const maxAttempts = 3;
 
+            // Retry loop to wait for data
             while (attempts < maxAttempts) {
                 token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
                 
-                // If we have valid critical data, break loop early
-                if (token && (token.holders > 0 || token.priceusd > 0)) {
-                    break;
-                }
+                // If we have valid critical data, break loop
+                if (token && (token.holders > 0 || token.priceusd > 0)) break;
                 
-                // If missing data, trigger live repair logic
+                // Live repair
                 if (token) {
                     const freshData = await fetchInitialMarketData(mint);
                     if (freshData) {
@@ -191,14 +175,12 @@ router.get('/token/:mint', async (req, res) => {
                         const hld = freshData.holders || token.holders || 0;
                         const prc = freshData.priceUsd || token.priceusd || 0;
                         
-                        // Update DB immediately
                         await db.run(`
                             UPDATE tokens 
                             SET marketCap = $1, holders = $2, priceUsd = $3, updated_at = CURRENT_TIMESTAMP 
                             WHERE mint = $4
                         `, [mcap, hld, prc, mint]);
 
-                        // Also push to history if we have holders
                         if (hld > 0) {
                             const today = Math.floor(Date.now() / (24 * 60 * 60 * 1000)) * (24 * 60 * 60 * 1000);
                             await db.run(`
@@ -210,22 +192,17 @@ router.get('/token/:mint', async (req, res) => {
                     }
                 }
 
-                if (attempts < maxAttempts - 1) {
-                    await delay(500);
-                }
+                if (attempts < maxAttempts - 1) await delay(500);
                 attempts++;
             }
             
-            // Final Fetch
             token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
             if (!token) return { success: false, error: "Token not found" };
 
-            // Fetch relations with safety fallback
             const pairs = await db.all('SELECT * FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC', [mint]) || [];
             const holderHistory = await db.all('SELECT * FROM holders_history WHERE mint = $1 ORDER BY timestamp ASC', [mint]) || [];
 
-            // --- DATA NORMALIZATION & SANITIZATION ---
-            
+            // --- DATA NORMALIZATION ---
             let tokenData = { ...token };
             if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
 
@@ -250,15 +227,17 @@ router.get('/token/:mint', async (req, res) => {
                 volume_24h: p.volume_24h || 0
             }));
 
-            // Fix for "Value is null" error: Ensure count is never null
+            // --- SANITIZE HISTORY (Fix for "Value is null" error) ---
             const cleanHolderHistory = holderHistory
                 .map(h => ({
                     timestamp: Number(h.timestamp), 
+                    // CRITICAL: Force count to be a number (0 if null/undefined)
                     count: (h.count !== null && h.count !== undefined) ? Number(h.count) : 0
                 }))
                 .filter(h => h.timestamp > 0)
                 .sort((a, b) => a.timestamp - b.timestamp);
 
+            // Add synthetic point if history empty but current exists
             if (cleanHolderHistory.length === 0 && tokenData.holders > 0) {
                 cleanHolderHistory.push({
                     timestamp: Date.now(),

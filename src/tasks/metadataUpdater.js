@@ -2,21 +2,28 @@ const axios = require('axios');
 const logger = require('../services/logger');
 const { broadcastTokenUpdate } = require('../services/socket'); 
 
-// Safe import for Solscan service
-let fetchSolscanData = async () => null;
+// --- SAFE SERVICE IMPORT ---
+let fetchSolscanData;
 try {
     const solService = require('../services/solscan');
-    // Handle { fetchSolscanData } or default export
-    fetchSolscanData = solService.fetchSolscanData || solService;
+    // Handle Hybrid Export: Prefer function direct, else property
+    if (typeof solService === 'function') {
+        fetchSolscanData = solService;
+    } else if (solService && typeof solService.fetchSolscanData === 'function') {
+        fetchSolscanData = solService.fetchSolscanData;
+    } else {
+        fetchSolscanData = async () => null; // No-op fallback
+    }
 } catch (e) {
-    logger.warn("MetadataUpdater: Solscan service import failed, using no-op.");
+    logger.warn("MetadataUpdater: Solscan service import failed.", e.message);
+    fetchSolscanData = async () => null;
 }
 
 let isRunning = false;
 const BATCH_SIZE = 5; 
 const BATCH_DELAY_MS = 2000; 
 
-// Helper: Safely parse numbers, returning 0 if invalid/null
+// Helper: Safely parse numbers
 const parseSafeFloat = (val) => {
     if (val === undefined || val === null || val === 'null' || val === '') return 0;
     const num = parseFloat(val);
@@ -52,7 +59,7 @@ async function processSingleToken(db, t, now) {
         const poolsData = await fetchGeckoTerminalData(t.mint);
         const tokenDetails = await fetchTokenDetails(t.mint);
         
-        // --- 1. HOLDER COUNT LOGIC ---
+        // --- HOLDER COUNT LOGIC ---
         let holderCount = 0;
         
         if (tokenDetails && tokenDetails.attributes && tokenDetails.attributes.holder_count) {
@@ -62,10 +69,8 @@ async function processSingleToken(db, t, now) {
         }
 
         if (!holderCount || holderCount === 0) {
-            const solscanData = await fetchSolscanData(t.mint);
-            if (solscanData && solscanData.holders > 0) {
-                holderCount = solscanData.holders;
-            }
+            const solData = await fetchSolscanData(t.mint);
+            if (solData && solData.holders > 0) holderCount = solData.holders;
         }
 
         if (!poolsData || poolsData.length === 0) {
@@ -135,6 +140,7 @@ async function processSingleToken(db, t, now) {
             `, [address, t.mint, dexId, price, liqUsd, vol24h, now, tokenA, tokenB]);
         }
         
+        // --- MARKET CAP & SUPPLY ---
         let marketCap = 0;
         let newSupply = 0;
         
@@ -152,12 +158,12 @@ async function processSingleToken(db, t, now) {
 
         if (marketCap === 0 && bestPrice > 0) {
             if (rawSupply === 0) rawSupply = 1000000000 * Math.pow(10, decimals); 
-
             const divisor = Math.pow(10, decimals);
             const supply = rawSupply / divisor;
             marketCap = supply * bestPrice;
         }
 
+        // --- BUILD UPDATE QUERY ---
         const finalParams = [totalVolume24h, marketCap, bestPrice, totalLiquidity];
         let updateParts = [
             "volume24h = $1", 
@@ -200,6 +206,7 @@ async function processSingleToken(db, t, now) {
 
         await db.run(finalQuery, finalParams);
 
+        // --- BROADCAST ---
         broadcastTokenUpdate(t.mint, {
             priceUsd: bestPrice || 0,
             marketCap: marketCap || 0,
