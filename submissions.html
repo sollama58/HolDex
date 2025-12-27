@@ -50,6 +50,29 @@
         </div>
     </div>
 
+    <!-- EDIT KEY MODAL -->
+    <div id="edit-key-modal" class="modal">
+        <div class="bg-[#1a0a05] border border-[#ea580c] p-8 rounded-xl w-full max-w-sm">
+            <h2 class="text-xl font-bold text-white mb-4">Edit API Key</h2>
+            <input type="hidden" id="edit-key-id">
+            
+            <label class="block text-xs text-[#9a3412] font-bold mb-1">Tier</label>
+            <select id="edit-key-tier" class="form-input mb-4">
+                <option value="free">Free</option>
+                <option value="pro">Pro</option>
+                <option value="enterprise">Enterprise</option>
+            </select>
+            
+            <label class="block text-xs text-[#9a3412] font-bold mb-1">Requests Limit</label>
+            <input type="number" id="edit-key-limit" class="form-input mb-6">
+            
+            <div class="flex gap-2">
+                <button onclick="saveKeyChanges()" class="w-full btn btn-green">Save</button>
+                <button onclick="closeEditKeyModal()" class="w-full btn btn-red">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <div id="dashboard" class="hidden space-y-8">
         <!-- STATS ROW -->
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -370,6 +393,7 @@
                                 <div class="text-right flex items-center gap-4">
                                     <div class="text-xs text-[#9a3412] mb-1">Usage: ${k.requests_today}/${k.requests_limit}</div>
                                     <div class="flex gap-2">
+                                        <button onclick="openEditKeyModal('${k.key}', '${k.tier}', '${k.requests_limit}')" class="text-blue-500 text-xs hover:text-blue-400 flex items-center gap-1"><i data-lucide="edit" width="12"></i> Edit</button>
                                         ${k.is_active ? `<button onclick="revokeKey('${k.key}')" class="text-orange-500 text-xs hover:text-orange-400">Revoke</button>` : `<span class="text-red-500 text-xs font-bold">REVOKED</span>`}
                                         <button onclick="deleteKey('${k.key}')" class="text-red-500 text-xs hover:text-red-400 flex items-center gap-1"><i data-lucide="trash-2" width="12"></i></button>
                                     </div>
@@ -400,6 +424,39 @@
                     fetchApiKeys();
                 } else alert(data.error);
             } catch(e) { alert("Error"); }
+        }
+
+        // --- NEW: EDIT KEY FUNCTIONS ---
+        function openEditKeyModal(key, tier, limit) {
+            document.getElementById('edit-key-id').value = key;
+            document.getElementById('edit-key-tier').value = tier;
+            document.getElementById('edit-key-limit').value = limit;
+            document.getElementById('edit-key-modal').classList.add('open');
+        }
+
+        function closeEditKeyModal() {
+            document.getElementById('edit-key-modal').classList.remove('open');
+        }
+
+        async function saveKeyChanges() {
+            const key = document.getElementById('edit-key-id').value;
+            const tier = document.getElementById('edit-key-tier').value;
+            const limit = document.getElementById('edit-key-limit').value;
+
+            try {
+                const res = await fetch(`${API_URL}/api/admin/update-key`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-admin-auth': AUTH_KEY },
+                    body: JSON.stringify({ key, tier, limit })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    closeEditKeyModal();
+                    fetchApiKeys();
+                } else {
+                    alert(data.error);
+                }
+            } catch(e) { alert("Error saving changes"); }
         }
 
         async function revokeKey(key) {

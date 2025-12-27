@@ -1,8 +1,8 @@
 const express = require('express');
 const axios = require('axios');
 const { PublicKey } = require('@solana/web3.js');
-const nacl = require('tweetnacl'); // NEW: For signature verification
-const bs58 = require('bs58');      // NEW: For signature verification
+const nacl = require('tweetnacl'); 
+const bs58 = require('bs58');      
 const { isValidPubkey } = require('../utils/solana');
 const { smartCache, enableIndexing, aggregateAndSaveToken } = require('../services/database'); 
 const { findPoolsOnChain } = require('../services/pool_finder');
@@ -252,12 +252,11 @@ function init(deps) {
 
     // --- NEW: PUBLIC API KEY GENERATION ---
     router.post('/request-api-key', async (req, res) => {
-        const { wallet, signature } = req.body; // signature is base64 of message "Request HolDex API Key"
+        const { wallet, signature } = req.body; 
         
         try {
             if (!wallet || !signature) return res.status(400).json({ success: false, error: "Wallet and Signature required" });
             
-            // Verify Signature
             const msg = new TextEncoder().encode("Request HolDex API Key");
             const sigBytes = Buffer.from(signature, 'base64');
             const pubBytes = new PublicKey(wallet).toBytes();
@@ -265,13 +264,11 @@ function init(deps) {
             
             if (!verified) return res.status(403).json({ success: false, error: "Invalid Signature" });
 
-            // Check if key already exists for this wallet
             const existing = await db.get('SELECT key FROM api_keys WHERE owner = $1', [wallet]);
             if (existing) {
                 return res.json({ success: true, key: existing.key, message: "Existing Key Retrieved" });
             }
 
-            // Generate New Key
             const key = 'hx_' + require('crypto').randomBytes(16).toString('hex');
             
             await db.run(`
@@ -321,6 +318,22 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
+    // NEW: UPDATE KEY (Tier/Limit)
+    router.post('/admin/update-key', requireAdmin, async (req, res) => {
+        const { key, tier, limit } = req.body;
+        try {
+            if (!key) return res.status(400).json({ success: false, error: "Key required" });
+            
+            await db.run(`
+                UPDATE api_keys 
+                SET tier = $1, requests_limit = $2
+                WHERE key = $3
+            `, [tier, parseInt(limit), key]);
+            
+            res.json({ success: true, message: "Key Updated" });
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+    });
+
     router.post('/admin/revoke-key', requireAdmin, async (req, res) => {
         const { key } = req.body;
         try {
@@ -329,7 +342,6 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
-    // NEW: DELETE KEY (Permanent)
     router.post('/admin/delete-key', requireAdmin, async (req, res) => {
         const { key } = req.body;
         try {
