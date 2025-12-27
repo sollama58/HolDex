@@ -349,7 +349,7 @@
         }
 
         async function deleteToken() {
-            if(!confirm("DANGER: This will delete the token and ALL associated data. This cannot be undone.")) return;
+            if(!confirm("DANGER: This will delete the token and ALL associated data (Pools, Candles, Updates). This cannot be undone.")) return;
             const mint = document.getElementById('manage-mint').value;
             try { 
                 const res = await fetch(`${API_URL}/api/admin/delete-token`, { 
@@ -357,7 +357,7 @@
                     body: JSON.stringify({ mint }) 
                 }); 
                 const data = await res.json();
-                if(data.success) { alert("Token deleted."); document.getElementById('manage-form').classList.add('hidden'); document.getElementById('manage-mint').value = ''; } 
+                if(data.success) { alert("Token deleted successfully."); document.getElementById('manage-form').classList.add('hidden'); document.getElementById('manage-mint').value = ''; } 
                 else { alert("Delete Failed: " + data.error); }
             } catch(e) { alert("Network Error"); }
         }
@@ -495,22 +495,49 @@
             } catch (e) { alert("Backup Error: " + e.message); }
         }
 
+        // FIXED: Improved JSON parsing to handle various backup formats
         function handleRestore(input) {
             const file = input.files[0]; if (!file) return;
             const reader = new FileReader();
             reader.onload = async (e) => {
                 try {
                     const json = JSON.parse(e.target.result);
-                    const updates = Array.isArray(json) ? json : (json.data || []);
-                    if (updates.length === 0) return alert("No updates found.");
-                    if (!confirm(`Restore ${updates.length} updates? (Duplicates skipped)`)) { input.value = ''; return; }
+                    
+                    // Robust extraction: Handle { updates: [...] } OR [ ... ] OR { data: [...] }
+                    const updates = json.updates || (Array.isArray(json) ? json : json.data) || [];
+                    
+                    if (!updates || updates.length === 0) return alert("No valid update records found in this backup file.");
+                    
+                    if (!confirm(`Found ${updates.length} updates.\n\nRestore them now?\n(Duplicates will be safely skipped)`)) { 
+                        input.value = ''; 
+                        return; 
+                    }
+                    
+                    // Show Loading
+                    const container = document.getElementById('list-container');
+                    if(container) container.innerHTML = '<div class="text-center py-12 text-[#ea580c] animate-pulse">Restoring Updates from Backup...</div>';
+                    
                     const res = await fetch(`${API_URL}/api/admin/restore/updates`, {
-                        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-admin-auth': AUTH_KEY },
+                        method: 'POST', 
+                        headers: { 'Content-Type': 'application/json', 'x-admin-auth': AUTH_KEY },
                         body: JSON.stringify({ updates })
                     });
+                    
                     const data = await res.json();
-                    if (data.success) { alert(data.message); fetchUpdates(); } else { alert("Restore Failed: " + data.error); }
-                } catch (err) { alert("Invalid JSON"); } finally { input.value = ''; }
+                    
+                    if (data.success) { 
+                        alert(data.message); 
+                        fetchUpdates(); 
+                    } else { 
+                        alert("Restore Failed: " + data.error); 
+                        fetchUpdates(); // Refresh anyway
+                    }
+                } catch (err) { 
+                    alert("Invalid JSON File"); 
+                    console.error(err);
+                } finally { 
+                    input.value = ''; 
+                }
             };
             reader.readAsText(file);
         }

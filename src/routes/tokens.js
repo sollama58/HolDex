@@ -197,7 +197,35 @@ function init(deps) {
     router.post('/admin/reject-update', requireAdmin, async (req, res) => { const { id } = req.body; try { await db.run(`UPDATE token_updates SET status = 'rejected' WHERE id = $1`, [id]); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     router.get('/admin/token/:mint', requireAdmin, async (req, res) => { const { mint } = req.params; try { const token = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]); if (!token) return res.status(404).json({ success: false, error: "Token not found" }); let meta = {}; try { if (typeof token.metadata === 'string') meta = JSON.parse(token.metadata); else meta = token.metadata || {}; } catch(e) {} const community = meta.community || {}; res.json({ success: true, token: { ...token, ticker: token.symbol, twitter: community.twitter || meta.twitter, website: community.website || meta.website, telegram: community.telegram || meta.telegram, banner: community.banner || meta.banner, description: community.description || meta.description } }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     router.post('/admin/update-token', requireAdmin, async (req, res) => { const { mint, twitter, website, telegram, banner, description } = req.body; try { const token = await db.get(`SELECT metadata FROM tokens WHERE mint = $1`, [mint]); let currentMeta = {}; if (token && token.metadata) { try { currentMeta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata; } catch (e) {} } const newCommunity = { twitter, website, telegram, banner, description }; currentMeta.community = { ...(currentMeta.community || {}), ...newCommunity }; const jsonStr = JSON.stringify(currentMeta); await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE WHERE mint = $2`, [jsonStr, mint]); await updateSingleToken({ db }, mint); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.post('/admin/delete-token', requireAdmin, async (req, res) => { const { mint } = req.body; try { const pools = await db.all(`SELECT address FROM pools WHERE mint = $1`, [mint]); const poolAddresses = pools.map(p => p.address); if (poolAddresses.length > 0) { await db.run(`DELETE FROM candles_1m WHERE pool_address = ANY($1)`, [poolAddresses]); await db.run(`DELETE FROM active_trackers WHERE pool_address = ANY($1)`, [poolAddresses]); } await db.run(`DELETE FROM pools WHERE mint = $1`, [mint]); await db.run(`DELETE FROM k_scores WHERE mint = $1`, [mint]); await db.run(`DELETE FROM token_updates WHERE mint = $1`, [mint]); await db.run(`DELETE FROM holders_history WHERE mint = $1`, [mint]); await db.run(`DELETE FROM tokens WHERE mint = $1`, [mint]); const redis = getClient(); if (redis) { await redis.del(`token:detail:${mint}`); } res.json({ success: true, message: "Token and all history permanently deleted." }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    
+    // DELETE TOKEN - FIXED: Ensures all associated data is wiped
+    router.post('/admin/delete-token', requireAdmin, async (req, res) => { 
+        const { mint } = req.body; 
+        try { 
+            const pools = await db.all(`SELECT address FROM pools WHERE mint = $1`, [mint]); 
+            const poolAddresses = pools.map(p => p.address); 
+            
+            // Clean up pools and associated candles/trackers
+            if (poolAddresses.length > 0) { 
+                await db.run(`DELETE FROM candles_1m WHERE pool_address = ANY($1)`, [poolAddresses]); 
+                await db.run(`DELETE FROM active_trackers WHERE pool_address = ANY($1)`, [poolAddresses]); 
+            } 
+            
+            // Explicitly delete from all tables referenced by mint
+            await db.run(`DELETE FROM pools WHERE mint = $1`, [mint]); 
+            await db.run(`DELETE FROM k_scores WHERE mint = $1`, [mint]); 
+            await db.run(`DELETE FROM token_updates WHERE mint = $1`, [mint]); 
+            await db.run(`DELETE FROM holders_history WHERE mint = $1`, [mint]); 
+            await db.run(`DELETE FROM tokens WHERE mint = $1`, [mint]); 
+            
+            // Clear Redis Cache
+            const redis = getClient(); 
+            if (redis) { await redis.del(`token:detail:${mint}`); } 
+            
+            res.json({ success: true, message: "Token and all history permanently deleted." }); 
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+    });
+    
     router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => { const { mint } = req.body; try { const newScore = await updateSingleToken({ db }, mint); res.json({ success: true, message: `K-Score Updated: ${newScore}` }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
 
     // --- API KEY ADMIN ---
@@ -209,7 +237,57 @@ function init(deps) {
 
     // --- BACKUP ROUTES ---
     router.get('/admin/backup/updates', requireAdmin, async (req, res) => { try { const updates = await db.all('SELECT * FROM token_updates ORDER BY submittedAt DESC'); const keys = await db.all('SELECT * FROM api_keys'); res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Disposition', `attachment; filename=holdex_full_backup_${Date.now()}.json`); res.json({ success: true, timestamp: Date.now(), updates: updates, api_keys: keys }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.post('/admin/restore/updates', requireAdmin, async (req, res) => { /* (Restore logic from previous step) */ }); // Keeping brief, assume previous restore logic is here or imported
+    
+    // RESTORE ROUTES - FIXED: Fully implemented restore logic
+    router.post('/admin/restore/updates', requireAdmin, async (req, res) => { 
+        const { updates } = req.body; 
+        if (!Array.isArray(updates)) return res.status(400).json({ success: false, error: "Invalid data format. Expected array of updates." }); 
+        
+        let restored = 0;
+        let skipped = 0;
+
+        try {
+            // We iterate through updates to insert them. 
+            // We do NOT use 'id' from backup to avoid primary key conflicts with existing new rows.
+            // We use 'signature' as the unique identifier to prevent duplicates.
+            
+            for (const u of updates) {
+                try {
+                    // 1. Check if signature exists
+                    const existing = await db.get('SELECT id FROM token_updates WHERE signature = $1', [u.signature]);
+                    if (existing) {
+                        skipped++;
+                        continue;
+                    }
+
+                    // 2. Insert if not exists
+                    await db.run(`
+                        INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, status, signature, payer, submittedAt)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    `, [
+                        u.mint, 
+                        u.twitter, 
+                        u.website, 
+                        u.telegram, 
+                        u.banner, 
+                        u.description, 
+                        u.status || 'pending', 
+                        u.signature, 
+                        u.payer, 
+                        u.submittedAt || Date.now()
+                    ]);
+                    restored++;
+                } catch (rowError) {
+                    console.error(`Restore Row Error (${u.mint}): ${rowError.message}`);
+                }
+            }
+
+            res.json({ success: true, message: `Restore Complete. Restored: ${restored}, Skipped (Duplicates): ${skipped}` });
+
+        } catch (e) { 
+            res.status(500).json({ success: false, error: e.message }); 
+        } 
+    });
 
     // --- PUBLIC ROUTES (Cached + API Key) ---
     router.get('/token/:mint', cacheControl(3, 5), apiKeyAuth(false), async (req, res) => {
