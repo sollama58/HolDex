@@ -2,6 +2,7 @@ const axios = require('axios');
 const logger = require('../services/logger');
 const { broadcastTokenUpdate } = require('../services/socket'); 
 const { getHolderCountFromRPC } = require('../services/solana');
+const config = require('../config/env');
 
 let isRunning = false;
 
@@ -57,12 +58,12 @@ async function processSingleToken(db, t, now) {
         }
 
         // Strategy B: RPC Direct Check (Expensive - Limited to once per 24h)
+        // MEMORY FIX: Only run this if explicitly enabled in ENV
         const lastCheck = parseInt(t.last_holder_check || 0);
         const msSinceCheck = now - lastCheck;
         const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-        // Only hit RPC if we didn't get fresh data from Gecko AND it's been > 24h
-        if (!foundNewData && msSinceCheck > ONE_DAY_MS) {
+        if (config.ENABLE_RPC_HOLDER_CHECK && !foundNewData && msSinceCheck > ONE_DAY_MS) {
             // logger.info(`🔍 RPC Holder Scan for ${t.mint} (Last check: ${Math.floor(msSinceCheck / 3600000)}h ago)`);
             try {
                 const rpcHolders = await getHolderCountFromRPC(t.mint);
@@ -181,8 +182,13 @@ async function processSingleToken(db, t, now) {
             if (bestChange1h !== null) { updateParts.push(`change1h = $${idx++}`); finalParams.push(bestChange1h); }
             if (bestChange5m !== null) { updateParts.push(`change5m = $${idx++}`); finalParams.push(bestChange5m); }
             
+            // FIX: Only update timestamp if it's missing (0) or if we found an OLDER timestamp (earlier creation).
+            // Never overwrite an old timestamp with a newer one.
             if (earliestPoolTime && earliestPoolTime > 0) {
-                updateParts.push(`timestamp = $${idx++}`); finalParams.push(earliestPoolTime);
+                const currentTs = parseInt(t.timestamp) || 0;
+                if (currentTs === 0 || earliestPoolTime < currentTs) {
+                    updateParts.push(`timestamp = $${idx++}`); finalParams.push(earliestPoolTime);
+                }
             }
         }
         
@@ -243,8 +249,9 @@ async function updateMetadata(deps) {
     try {
         // Fetch tokens that haven't been updated recently or need holder checks
         // OOM FIX: Reduced LIMIT from 75 to 25 to reduce working set size
+        // AGE FIX: Added 'timestamp' to selection to perform comparisons
         let tokens = await db.all(`
-            SELECT mint, supply, decimals, holders, last_holder_check 
+            SELECT mint, supply, decimals, holders, last_holder_check, timestamp 
             FROM tokens 
             ORDER BY liquidity DESC, updated_at ASC 
             LIMIT 25
