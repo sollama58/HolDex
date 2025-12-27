@@ -108,20 +108,33 @@ router.get('/tokens', async (req, res) => {
             `;
             const params = [`%${search}%`, limit, offset];
             
-            // Safe sort columns
+            // CRITICAL FIX: Map frontend aliases to LOWERCASE DB columns for Postgres
             const safeSortMap = {
+                // Direct DB Columns (Lowercase)
                 'k_score': 'k_score',
                 'volume24h': 'volume24h',
                 'liquidity': 'liquidity', 
-                'marketCap': 'marketCap', 
+                'marketcap': 'marketcap', 
                 'created_at': 'created_at', 
-                'newest': 'created_at',
                 'change24h': 'change24h',
+                'change1h': 'change1h',
+                'change5m': 'change5m',
+
+                // Frontend Aliases (Mapped to Lowercase DB Columns)
+                'marketCap': 'marketcap', // Handle CamelCase input
+                'mcap': 'marketcap',      // Handle frontend shortcut
+                'volume': 'volume24h',
+                '24h': 'change24h',
+                '1h': 'change1h',
+                '5m': 'change5m',
+                'newest': 'created_at',
                 'age': 'created_at'
             };
             
+            // Default to 'k_score' if sort key is invalid
             const sortCol = safeSortMap[sort] || 'k_score';
             
+            // Use quoted identifier for sort column to prevent SQL injection, but rely on map for safety
             query += ` ORDER BY "${sortCol}" ${order === 'asc' ? 'ASC' : 'DESC'} LIMIT $2 OFFSET $3`;
 
             const rows = await db.all(query, params) || [];
@@ -133,6 +146,7 @@ router.get('/tokens', async (req, res) => {
                     symbol: r.symbol,
                     name: r.name,
                     image: r.image,
+                    // Robust field access handling lowercase from DB or camelCase from legacy
                     priceUsd: r.priceusd || r.priceUsd || 0,
                     marketCap: r.marketcap || r.marketCap || 0,
                     volume24h: r.volume24h || 0,
@@ -151,7 +165,7 @@ router.get('/tokens', async (req, res) => {
 
         res.json(result);
     } catch (e) {
-        console.error(e);
+        console.error("API Error:", e);
         res.status(500).json({ success: false, error: e.message });
     }
 });
@@ -166,50 +180,24 @@ router.get('/token/:mint', async (req, res) => {
         await indexTokenOnChain(mint);
 
         const fetchAndValidate = async () => {
-            let token = null;
-            let attempts = 0;
-            const maxAttempts = 3;
-
-            // Retry loop to wait for data
-            while (attempts < maxAttempts) {
-                token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
-                
-                // If we have valid critical data, break loop
-                if (token && (token.holders > 0 || token.priceusd > 0)) break;
-                
-                // Live repair
-                if (token) {
-                    const freshData = await fetchInitialMarketData(mint);
-                    if (freshData) {
-                        const mcap = freshData.marketCap || token.marketcap || 0;
-                        const hld = freshData.holders || token.holders || 0;
-                        const prc = freshData.priceUsd || token.priceusd || 0;
-                        
-                        await db.run(`
-                            UPDATE tokens 
-                            SET marketCap = $1, holders = $2, priceUsd = $3, updated_at = CURRENT_TIMESTAMP 
-                            WHERE mint = $4
-                        `, [mcap, hld, prc, mint]);
-
-                        if (hld > 0) {
-                            const today = Math.floor(Date.now() / (24 * 60 * 60 * 1000)) * (24 * 60 * 60 * 1000);
-                            await db.run(`
-                                INSERT INTO holders_history (mint, count, timestamp)
-                                VALUES ($1, $2, $3)
-                                ON CONFLICT(mint, timestamp) DO UPDATE SET count = EXCLUDED.count
-                            `, [mint, hld, today]);
-                        }
-                    }
-                }
-
-                if (attempts < maxAttempts - 1) await delay(500);
-                attempts++;
-            }
+            // Fetch token
+            let token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
             
-            token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+            if (!token) {
+                 // Try aggressive repair/fetch
+                 const fresh = await fetchInitialMarketData(mint);
+                 if (fresh) {
+                     // Create placeholder so we can return something
+                     token = { ...fresh, mint, name: 'Loading...', symbol: 'LOAD' };
+                 }
+            }
+
             if (!token) return { success: false, error: "Token not found" };
 
+            // Fetch Pools
             const pairs = await db.all('SELECT * FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC', [mint]) || [];
+            
+            // Fetch History
             const holderHistory = await db.all('SELECT * FROM holders_history WHERE mint = $1 ORDER BY timestamp ASC', [mint]) || [];
 
             // --- DATA NORMALIZATION ---
@@ -224,8 +212,9 @@ router.get('/token/:mint', async (req, res) => {
             tokenData.change24h = tokenData.change24h || 0;
             tokenData.change1h = tokenData.change1h || 0;
             tokenData.change5m = tokenData.change5m || 0;
-            tokenData.timestamp = tokenData.timestamp || 0;
+            tokenData.hasCommunityUpdate = tokenData.hascommunityupdate || tokenData.hasCommunityUpdate;
 
+            // Use largest pool price if main token price is 0
             if (pairs.length > 0 && tokenData.priceUsd === 0) {
                 if (pairs[0].price_usd > 0) tokenData.priceUsd = pairs[0].price_usd;
             }
@@ -237,23 +226,13 @@ router.get('/token/:mint', async (req, res) => {
                 volume_24h: p.volume_24h || 0
             }));
 
-            // --- SANITIZE HISTORY (Fix for "Value is null" error) ---
             const cleanHolderHistory = holderHistory
                 .map(h => ({
                     timestamp: Number(h.timestamp), 
-                    // CRITICAL: Force count to be a number (0 if null/undefined)
                     count: (h.count !== null && h.count !== undefined) ? Number(h.count) : 0
                 }))
                 .filter(h => h.timestamp > 0)
                 .sort((a, b) => a.timestamp - b.timestamp);
-
-            // Add synthetic point if history empty but current exists
-            if (cleanHolderHistory.length === 0 && tokenData.holders > 0) {
-                cleanHolderHistory.push({
-                    timestamp: Date.now(),
-                    count: tokenData.holders
-                });
-            }
 
             return { 
                 success: true, 
@@ -265,7 +244,7 @@ router.get('/token/:mint', async (req, res) => {
             };
         };
 
-        const result = await smartCache(cacheKey, 5, fetchAndValidate);
+        const result = await smartCache(cacheKey, 3, fetchAndValidate);
         res.json(result);
 
     } catch (e) {

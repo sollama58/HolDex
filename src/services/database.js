@@ -4,7 +4,7 @@ const logger = require('./logger');
 const { getClient } = require('./redis');
 
 let primaryPool = null;
-let readPool = null; // New Read Replica Pool
+let readPool = null;
 let dbWrapper = null;
 let initPromise = null;
 
@@ -50,11 +50,11 @@ async function initDB() {
                 readClient.release();
                 logger.info(`✅ Database: Read Replica Connected.`);
             } else {
-                readPool = primaryPool; // Fallback to primary if no replica
+                readPool = primaryPool; // Fallback to primary
                 logger.info(`ℹ️ Database: No Read Replica configured. Using Primary for reads.`);
             }
 
-            // Schema Creation (Only on Primary)
+            // Schema Creation (Idempotent)
             await primaryPool.query(`
                 CREATE TABLE IF NOT EXISTS tokens (
                     mint TEXT PRIMARY KEY,
@@ -151,15 +151,15 @@ async function initDB() {
                     return (isSelect ? readPool : primaryPool).query(text, params);
                 },
                 get: async (text, params) => { 
-                    const res = await readPool.query(text, params); // Always read
+                    const res = await readPool.query(text, params); 
                     return res.rows[0]; 
                 },
                 all: async (text, params) => { 
-                    const res = await readPool.query(text, params); // Always read
+                    const res = await readPool.query(text, params); 
                     return res.rows; 
                 },
                 run: async (text, params) => { 
-                    const res = await primaryPool.query(text, params); // Always write
+                    const res = await primaryPool.query(text, params); 
                     return { rowCount: res.rowCount }; 
                 }
             };
