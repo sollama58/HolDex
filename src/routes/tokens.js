@@ -318,7 +318,7 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
-    // NEW: UPDATE KEY (Tier/Limit)
+    // UPDATE KEY (Tier/Limit)
     router.post('/admin/update-key', requireAdmin, async (req, res) => {
         const { key, tier, limit } = req.body;
         try {
@@ -342,6 +342,7 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
+    // DELETE KEY (Permanent)
     router.post('/admin/delete-key', requireAdmin, async (req, res) => {
         const { key } = req.body;
         try {
@@ -350,33 +351,59 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
-    // --- BACKUP & RESTORE ROUTES ---
+    // --- UPDATED BACKUP & RESTORE ROUTES ---
+    
+    // BACKUP: Dump UPDATES + KEYS to JSON
     router.get('/admin/backup/updates', requireAdmin, async (req, res) => {
         try {
             const updates = await db.all('SELECT * FROM token_updates ORDER BY submittedAt DESC');
+            const keys = await db.all('SELECT * FROM api_keys'); // NEW
+            
             res.setHeader('Content-Type', 'application/json');
-            res.setHeader('Content-Disposition', `attachment; filename=holdex_updates_backup_${Date.now()}.json`);
-            res.json({ success: true, count: updates.length, timestamp: Date.now(), data: updates });
+            res.setHeader('Content-Disposition', `attachment; filename=holdex_full_backup_${Date.now()}.json`);
+            
+            // Return Combined Object
+            res.json({ 
+                success: true, 
+                timestamp: Date.now(), 
+                updates: updates, 
+                api_keys: keys 
+            });
         } catch (e) {
             res.status(500).json({ success: false, error: e.message });
         }
     });
 
+    // RESTORE: Import UPDATES + KEYS
     router.post('/admin/restore/updates', requireAdmin, async (req, res) => {
-        const { updates } = req.body;
-        if (!Array.isArray(updates)) {
-            return res.status(400).json({ success: false, error: "Invalid backup file format. Expected an array of updates." });
+        const payload = req.body;
+        
+        // Handle Legacy Format (Array of updates) or New Format (Object with updates and api_keys)
+        let updates = [];
+        let keys = [];
+        
+        if (Array.isArray(payload)) {
+            updates = payload; // Legacy format
+        } else if (payload.updates) {
+            updates = payload.updates;
+            keys = payload.api_keys || [];
+        } else if (payload.data && Array.isArray(payload.data)) {
+             updates = payload.data; // Older legacy
+        } else if (Array.isArray(payload.updates)) { // Explicit structure
+             updates = payload.updates;
+             keys = payload.api_keys || [];
         }
 
         let restoredCount = 0;
         let skippedCount = 0;
         let indexedCount = 0;
+        let keysRestored = 0;
 
         try {
+            // 1. RESTORE UPDATES (Existing Logic)
             for (const u of updates) {
                 const signature = u.signature || u.Signature;
                 const mint = u.mint || u.Mint;
-                
                 const twitter = u.twitter;
                 const website = u.website;
                 const telegram = u.telegram;
@@ -386,10 +413,7 @@ function init(deps) {
                 const status = u.status || 'pending';
                 const payer = u.payer;
 
-                if (!signature || !mint) {
-                    skippedCount++; 
-                    continue; 
-                }
+                if (!signature || !mint) { skippedCount++; continue; }
 
                 const existingUpdate = await db.get('SELECT id FROM token_updates WHERE signature = $1', [signature]);
                 
@@ -410,17 +434,13 @@ function init(deps) {
                         await indexTokenOnChain(mint);
                         tokenRow = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
                         if (tokenRow) indexedCount++;
-                    } catch (idxErr) {
-                        logger.warn(`Failed to auto-index token ${mint} during restore: ${idxErr.message}`);
-                    }
+                    } catch (idxErr) { }
                 }
 
                 if (tokenRow && status === 'approved') {
                     try {
                         let meta = {};
-                        if (tokenRow.metadata) {
-                            try { meta = typeof tokenRow.metadata === 'string' ? JSON.parse(tokenRow.metadata) : tokenRow.metadata; } catch (e) {}
-                        }
+                        if (tokenRow.metadata) { try { meta = typeof tokenRow.metadata === 'string' ? JSON.parse(tokenRow.metadata) : tokenRow.metadata; } catch (e) {} }
                         
                         meta.community = {
                             ...(meta.community || {}),
@@ -430,12 +450,30 @@ function init(deps) {
                             banner: banner || meta.community?.banner,
                             description: description || meta.community?.description
                         };
-                        
                         const jsonStr = JSON.stringify(meta);
                         await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE WHERE mint = $2`, [jsonStr, mint]);
-                    } catch (syncErr) {
-                        logger.warn(`Failed to sync metadata for ${mint}: ${syncErr.message}`);
-                    }
+                    } catch (syncErr) { }
+                }
+            }
+
+            // 2. RESTORE API KEYS (New Logic)
+            for (const k of keys) {
+                const existingKey = await db.get('SELECT key FROM api_keys WHERE key = $1', [k.key]);
+                if (!existingKey) {
+                    await db.run(`
+                        INSERT INTO api_keys (key, owner, tier, requests_limit, requests_today, last_reset, is_active, created_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    `, [
+                        k.key, 
+                        k.owner, 
+                        k.tier || 'free', 
+                        k.requests_limit || 1000, 
+                        k.requests_today || 0,
+                        k.last_reset || 0,
+                        k.is_active !== undefined ? k.is_active : true,
+                        k.created_at || Date.now()
+                    ]);
+                    keysRestored++;
                 }
             }
 
@@ -444,7 +482,8 @@ function init(deps) {
                 restored: restoredCount, 
                 skipped: skippedCount, 
                 indexed: indexedCount,
-                message: `Restore Complete. Imported: ${restoredCount}, Skipped: ${skippedCount}, Auto-Indexed Tokens: ${indexedCount}` 
+                keys_restored: keysRestored,
+                message: `Restore Complete. Updates: ${restoredCount}, API Keys: ${keysRestored}, Indexed Tokens: ${indexedCount}` 
             });
         } catch (e) {
             res.status(500).json({ success: false, error: e.message });
