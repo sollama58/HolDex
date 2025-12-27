@@ -12,6 +12,8 @@ const { getClient } = require('../services/redis');
 const { enqueueTokenUpdate } = require('../services/queue'); 
 const { snapshotPools } = require('../indexer/tasks/snapshotter'); 
 const logger = require('../services/logger');
+// NEW: Import Cache Middleware
+const cacheControl = require('../middleware/httpCache');
 
 const router = express.Router();
 const solanaConnection = getSolanaConnection();
@@ -151,7 +153,8 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "Transaction Failed at RPC" }); }
     });
 
-    router.get('/token/:mint/candles', async (req, res) => {
+    // CACHING: Candles can be cached for longer (30s) as 1m bars don't change often
+    router.get('/token/:mint/candles', cacheControl(30, 60), async (req, res) => {
         const { mint } = req.params;
         const { resolution = '5', from, to, poolAddress } = req.query; 
         try {
@@ -255,7 +258,8 @@ function init(deps) {
     router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => { const { mint } = req.body; try { const newScore = await updateSingleToken({ db }, mint); res.json({ success: true, message: `K-Score Updated: ${newScore}` }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
 
     // --- STANDARD PUBLIC ROUTES ---
-    router.get('/token/:mint', async (req, res) => {
+    // CACHING: Detail view cached for 3s (very hot)
+    router.get('/token/:mint', cacheControl(3, 5), async (req, res) => {
         const { mint } = req.params;
         const cacheKey = `token:detail:${mint}`;
         try {
@@ -339,7 +343,8 @@ function init(deps) {
         } catch(e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
-    router.get('/tokens', async (req, res) => {
+    // CACHING: Main list cached for 2s
+    router.get('/tokens', cacheControl(2, 5), async (req, res) => {
         const { search = '', sort = 'kscore', page = 1 } = req.query;
         try {
             const isGenericView = !search;
