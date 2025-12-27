@@ -30,10 +30,10 @@ async function initDB() {
 
             primaryPool.on('error', (err) => logger.error(`Unexpected error on Primary DB: ${err.message}`));
 
-            logger.info(`📦 Database: Connecting to Primary...`);
+            logger.info(`🔌 Database: Connecting to Primary...`);
             const client = await primaryPool.connect();
             client.release();
-            logger.info(`📦 Database: Primary Connection Successful.`);
+            logger.info(`✅ Database: Primary Connection Successful.`);
 
             // 2. Read Replica Connection (Optional)
             if (process.env.READ_DATABASE_URL) {
@@ -48,10 +48,10 @@ async function initDB() {
                 
                 const readClient = await readPool.connect();
                 readClient.release();
-                logger.info(`📦 Database: Read Replica Connected.`);
+                logger.info(`✅ Database: Read Replica Connected.`);
             } else {
                 readPool = primaryPool; // Fallback to primary if no replica
-                logger.info(`📦 Database: No Read Replica configured. Using Primary for reads.`);
+                logger.info(`ℹ️ Database: No Read Replica configured. Using Primary for reads.`);
             }
 
             // Schema Creation (Only on Primary)

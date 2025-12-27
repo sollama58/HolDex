@@ -1,55 +1,65 @@
-const axios = require('axios');
+const { Connection } = require('@solana/web3.js');
+const config = require('../config/env');
+const logger = require('./logger');
+
+let connection = null;
 
 /**
- * Fetches data from Solscan's Public API.
- * Returns normalized object: { holders, marketCap, supply, priceUsd }
+ * Returns a singleton Solana Connection instance.
+ * Automatically selects Helius or Standard RPC from config.
  */
-async function fetchSolscanData(mint) {
-    try {
-        const agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Safari/605.1.15',
-            'Mozilla/5.0 (Linux; Android 10; SM-G960U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.181 Mobile Safari/537.36'
-        ];
-        const ua = agents[Math.floor(Math.random() * agents.length)];
+function getSolanaConnection() {
+    if (connection) return connection;
 
-        // Primary: Token Meta Endpoint
-        const url = `https://public-api.solscan.io/token/meta?tokenAddress=${mint}`;
-        
-        const res = await axios.get(url, { 
-            timeout: 5000,
-            headers: { 'User-Agent': ua }
-        });
-        
-        if (res.data) {
-            return {
-                holders: parseInt(res.data.holder || 0),
-                marketCap: parseFloat(res.data.marketCap || res.data.fdv || 0),
-                supply: res.data.supply || '0'
-            };
-        }
-    } catch (e) {
-        // Fallback: Market Endpoint
-        try {
-            if (e.response && e.response.status !== 404) {
-                const url2 = `https://public-api.solscan.io/market/token/${mint}`;
-                const res2 = await axios.get(url2, { timeout: 3000, headers: { 'User-Agent': ua } });
-                if (res2.data) {
-                    return {
-                        holders: parseInt(res2.data.holderCount || res2.data.holder || 0),
-                        marketCap: parseFloat(res2.data.marketCapFD || res2.data.marketCap || 0),
-                        priceUsd: parseFloat(res2.data.priceUsd || 0)
-                    };
-                }
-            }
-        } catch (err2) {
-            // silent fail
-        }
-    }
-    return null;
+    // config/env.js already handles the logic of constructing the URL
+    // based on HELIUS_API_KEY presence, so we can trust SOLANA_RPC_URL.
+    const rpcUrl = config.SOLANA_RPC_URL;
+    
+    // Derive WebSocket URL
+    const wsUrl = config.HELIUS_API_KEY
+        ? `wss://mainnet.helius-rpc.com/?api-key=${config.HELIUS_API_KEY}`
+        : rpcUrl.replace('http', 'ws');
+
+    // logger.info(`🔌 Solana Service: Connecting to RPC...`);
+
+    connection = new Connection(rpcUrl, {
+        commitment: 'confirmed',
+        wsEndpoint: wsUrl,
+        confirmTransactionInitialTimeout: 60000,
+        disableRetryOnRateLimit: false,
+    });
+
+    return connection;
 }
 
-// --- HYBRID EXPORT (CRITICAL FOR PREVENTING CRASHES) ---
-// This allows require('...solscan')(mint) AND require('...solscan').fetchSolscanData(mint)
-module.exports = fetchSolscanData;
-module.exports.fetchSolscanData = fetchSolscanData;
+/**
+ * Retries a Solana RPC call with exponential backoff.
+ * @param {Function} fn - Function to execute (receives connection as arg)
+ * @param {number} retries - Max retries
+ * @param {number} delay - Initial delay in ms
+ */
+async function retryRPC(fn, retries = 3, delay = 1000) {
+    const conn = getSolanaConnection();
+    try {
+        return await fn(conn);
+    } catch (err) {
+        if (retries <= 0) throw err;
+        
+        // Check for specific retryable errors
+        const msg = err.message.toLowerCase();
+        const isRetryable = msg.includes('429') || 
+                           msg.includes('timeout') || 
+                           msg.includes('network') ||
+                           msg.includes('econnreset');
+                           
+        if (!isRetryable && retries < 2) throw err; // Fail fast on non-network errors
+
+        await new Promise(r => setTimeout(r, delay));
+        return retryRPC(fn, retries - 1, delay * 2);
+    }
+}
+
+module.exports = {
+    getSolanaConnection,
+    retryRPC
+};

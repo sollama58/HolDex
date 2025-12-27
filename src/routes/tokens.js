@@ -2,15 +2,8 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 
-// --- ROBUST DB IMPORT ---
-let db;
-try {
-    const dbModule = require('../services/database');
-    // Handle both module.exports = db and module.exports = { db }
-    db = dbModule.db ? dbModule.db : dbModule;
-} catch (err) {
-    console.error("CRITICAL: Failed to import database service in tokens.js", err);
-}
+// Database reference injected via init()
+let db = null;
 
 // Helper for delay
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -104,19 +97,32 @@ router.get('/tokens', async (req, res) => {
     try {
         if (!db) throw new Error("Database not initialized");
 
-        const { sort = 'k_score', order = 'desc', limit = 50, search = '' } = req.query;
-        const cacheKey = `tokens_${sort}_${order}_${limit}_${search}`;
+        const { sort = 'k_score', order = 'desc', limit = 50, search = '', page = 1 } = req.query;
+        const offset = (page - 1) * limit;
+        const cacheKey = `tokens_${sort}_${order}_${limit}_${offset}_${search}`;
 
-        const result = await smartCache(cacheKey, 10, async () => {
+        const result = await smartCache(cacheKey, 5, async () => {
             let query = `
                 SELECT * FROM tokens 
                 WHERE (symbol ILIKE $1 OR name ILIKE $1 OR mint ILIKE $1)
             `;
-            const params = [`%${search}%`];
-            const safeSort = ['k_score', 'volume24h', 'liquidity', 'marketCap', 'created_at', 'change24h'].includes(sort) ? sort : 'k_score';
+            const params = [`%${search}%`, limit, offset];
             
-            query += ` ORDER BY "${safeSort}" ${order === 'asc' ? 'ASC' : 'DESC'} LIMIT $2`;
-            params.push(limit);
+            // Safe sort columns
+            const safeSortMap = {
+                'k_score': 'k_score',
+                'volume24h': 'volume24h',
+                'liquidity': 'liquidity', 
+                'marketCap': 'marketCap', 
+                'created_at': 'created_at', 
+                'newest': 'created_at',
+                'change24h': 'change24h',
+                'age': 'created_at'
+            };
+            
+            const sortCol = safeSortMap[sort] || 'k_score';
+            
+            query += ` ORDER BY "${sortCol}" ${order === 'asc' ? 'ASC' : 'DESC'} LIMIT $2 OFFSET $3`;
 
             const rows = await db.all(query, params) || [];
             
@@ -126,15 +132,19 @@ router.get('/tokens', async (req, res) => {
                     mint: r.mint,
                     symbol: r.symbol,
                     name: r.name,
+                    image: r.image,
                     priceUsd: r.priceusd || r.priceUsd || 0,
                     marketCap: r.marketcap || r.marketCap || 0,
                     volume24h: r.volume24h || 0,
                     liquidity: r.liquidity || 0,
                     change24h: r.change24h || 0,
+                    change1h: r.change1h || 0,
+                    change5m: r.change5m || 0,
                     holders: r.holders || 0,
                     k_score: r.k_score || 0,
                     risk_score: r.risk_score || 0,
-                    timestamp: r.timestamp 
+                    timestamp: r.timestamp,
+                    hasCommunityUpdate: r.hascommunityupdate || r.hasCommunityUpdate
                 }))
             };
         });
@@ -264,4 +274,10 @@ router.get('/token/:mint', async (req, res) => {
     }
 });
 
-module.exports = router;
+// Export Object with init() method matching index.js requirement
+module.exports = {
+    init: (deps) => {
+        db = deps.db;
+        return router;
+    }
+};
