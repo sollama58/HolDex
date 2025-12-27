@@ -106,7 +106,7 @@
         .action-btn:active { transform: translate(2px, 2px); box-shadow: 0 0 0; }
         .back-btn { background: #2a1005; border: 2px solid #7c2d12; color: #9a3412; padding: 10px 16px; border-radius: 8px; font-weight: 700; transition: all 0.2s; }
         .back-btn:hover { border-color: #ea580c; color: #ea580c; }
-        .sort-header { position: relative; }
+        .sort-header { position: relative; user-select: none; }
         .sort-header:active { transform: translateY(1px); }
         .table-scroll-container { max-height: 70vh; overflow-y: auto; border-radius: 0 0 16px 16px; }
         .form-input { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; padding: 12px; border-radius: 8px; width: 100%; font-family: 'JetBrains Mono'; margin-bottom: 16px; outline: none; transition: border-color 0.2s; }
@@ -202,15 +202,15 @@
                 <table class="holdex-table">
                     <thead>
                         <tr>
-                            <th width="30%" class="sort-header" onclick="setSort('newest')">Asset <i data-lucide="arrow-down-up" width="10" class="inline opacity-50 ml-1"></i></th>
-                            <th class="sort-header text-[#ea580c] border-b-[#ea580c] border-b-2" onclick="setSort('kscore')">K-Score</th>
-                            <th class="hidden md:table-cell sort-header" onclick="setSort('5m')">5m</th>
-                            <th class="hidden md:table-cell sort-header" onclick="setSort('1h')">1h</th>
-                            <th class="sort-header" onclick="setSort('24h')">24h</th>
-                            <th class="sort-header" onclick="setSort('mcap')">Mkt Cap</th>
-                            <th class="hidden md:table-cell sort-header" onclick="setSort('holders')">Holders</th>
-                            <th class="sort-header" onclick="setSort('volume')">Vol (24h)</th> 
-                            <th class="hidden md:table-cell sort-header" onclick="setSort('age')">Age</th>
+                            <th width="30%" class="sort-header" data-sort="newest" onclick="setSort('newest')">Asset <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
+                            <th class="sort-header text-[#ea580c] border-b-[#ea580c] border-b-2" data-sort="kscore" onclick="setSort('kscore')">K-Score <i data-lucide="arrow-down" width="12" class="sort-icon inline ml-1"></i></th>
+                            <th class="hidden md:table-cell sort-header" data-sort="5m" onclick="setSort('5m')">5m <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
+                            <th class="hidden md:table-cell sort-header" data-sort="1h" onclick="setSort('1h')">1h <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
+                            <th class="sort-header" data-sort="24h" onclick="setSort('24h')">24h <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
+                            <th class="sort-header" data-sort="mcap" onclick="setSort('mcap')">Mkt Cap <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
+                            <th class="hidden md:table-cell sort-header" data-sort="holders" onclick="setSort('holders')">Holders <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
+                            <th class="sort-header" data-sort="volume" onclick="setSort('volume')">Vol (24h) <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th> 
+                            <th class="hidden md:table-cell sort-header" data-sort="age" onclick="setSort('age')">Age <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
                         </tr>
                     </thead>
                     <tbody id="table-body">
@@ -636,6 +636,7 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     // We removed client-side RPC ENDPOINTS. All traffic now proxies through backend.
 
     let currentSort = 'kscore'; 
+    let currentDirection = 'desc'; // NEW: Track sorting direction
     let searchQuery = '';
     let pollingInterval;
     let detailPollingInterval; 
@@ -1277,19 +1278,51 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     window.toggleApiModal = () => { const modal = document.getElementById('api-docs-modal'); isApiModalOpen = !isApiModalOpen; if (isApiModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
     window.toggleLpModal = () => { const modal = document.getElementById('lp-modal'); isLpModalOpen = !isLpModalOpen; if (isLpModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
     
-    // NEW: SET SORT FUNCTION
+    // UPDATED: SET SORT FUNCTION
     window.setSort = (sort) => {
-        currentSort = sort;
+        // Toggle direction if clicking same sort
+        if (currentSort === sort) {
+            currentDirection = currentDirection === 'desc' ? 'asc' : 'desc';
+        } else {
+            currentSort = sort;
+            currentDirection = 'desc'; // Default to desc for new sort
+        }
+        
         currentPage = 1;
-        // Update visual sort indicators
+        
+        // Update UI
         document.querySelectorAll('.sort-header').forEach(th => {
-            const onclickVal = th.getAttribute('onclick') || '';
-            if (onclickVal.includes(`'${sort}'`)) {
+            const thSort = th.getAttribute('data-sort');
+            const icon = th.querySelector('.sort-icon');
+            
+            // Reset base styles
+            th.classList.remove('text-[#ea580c]', 'border-b-[#ea580c]', 'border-b-2');
+            
+            if (icon) {
+                // Reset icon to neutral state
+                icon.classList.add('opacity-30');
+                icon.classList.remove('opacity-100', 'text-[#ea580c]');
+                icon.setAttribute('data-lucide', 'arrow-down-up');
+            }
+
+            // Apply active styles
+            if (thSort === currentSort) {
                 th.classList.add('text-[#ea580c]', 'border-b-[#ea580c]', 'border-b-2');
-            } else {
-                th.classList.remove('text-[#ea580c]', 'border-b-[#ea580c]', 'border-b-2');
+                if (icon) {
+                    icon.classList.remove('opacity-30');
+                    icon.classList.add('opacity-100');
+                    // Update arrow direction
+                    if (currentDirection === 'asc') {
+                        icon.setAttribute('data-lucide', 'arrow-up');
+                    } else {
+                        icon.setAttribute('data-lucide', 'arrow-down');
+                    }
+                }
             }
         });
+        
+        // Re-render icons
+        lucide.createIcons();
         fetchList();
     }
 
@@ -1306,7 +1339,7 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             if(pDisplay) pDisplay.innerText = `Page ${currentPage}`; 
             if(prev) prev.disabled = currentPage <= 1; 
             
-            let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&search=${encodeURIComponent(searchQuery)}&limit=100&page=${currentPage}`; 
+            let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&direction=${currentDirection}&search=${encodeURIComponent(searchQuery)}&limit=100&page=${currentPage}`; 
             
             // FIXED: Send filter to backend
             if (isVerifiedFilter) endpoint += '&filter=verified'; 
