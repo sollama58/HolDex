@@ -495,7 +495,7 @@
             } catch (e) { alert("Backup Error: " + e.message); }
         }
 
-        // FIXED: Improved JSON parsing to handle various backup formats
+        // FIXED: Handles extraction of both updates and keys
         function handleRestore(input) {
             const file = input.files[0]; if (!file) return;
             const reader = new FileReader();
@@ -503,24 +503,25 @@
                 try {
                     const json = JSON.parse(e.target.result);
                     
-                    // Robust extraction: Handle { updates: [...] } OR [ ... ] OR { data: [...] }
+                    // Extract Arrays
                     const updates = json.updates || (Array.isArray(json) ? json : json.data) || [];
+                    const keys = json.api_keys || [];
                     
-                    if (!updates || updates.length === 0) return alert("No valid update records found in this backup file.");
+                    if (updates.length === 0 && keys.length === 0) return alert("No valid records found.");
                     
-                    if (!confirm(`Found ${updates.length} updates.\n\nRestore them now?\n(Duplicates will be safely skipped)`)) { 
+                    if (!confirm(`Found:\n- ${updates.length} Updates\n- ${keys.length} API Keys\n\nRestore them now?`)) { 
                         input.value = ''; 
                         return; 
                     }
                     
                     // Show Loading
                     const container = document.getElementById('list-container');
-                    if(container) container.innerHTML = '<div class="text-center py-12 text-[#ea580c] animate-pulse">Restoring Updates from Backup...</div>';
+                    if(container) container.innerHTML = '<div class="text-center py-12 text-[#ea580c] animate-pulse">Restoring Backup...</div>';
                     
                     const res = await fetch(`${API_URL}/api/admin/restore/updates`, {
                         method: 'POST', 
                         headers: { 'Content-Type': 'application/json', 'x-admin-auth': AUTH_KEY },
-                        body: JSON.stringify({ updates })
+                        body: JSON.stringify({ updates, api_keys: keys })
                     });
                     
                     const data = await res.json();
@@ -530,7 +531,7 @@
                         fetchUpdates(); 
                     } else { 
                         alert("Restore Failed: " + data.error); 
-                        fetchUpdates(); // Refresh anyway
+                        fetchUpdates(); 
                     }
                 } catch (err) { 
                     alert("Invalid JSON File"); 

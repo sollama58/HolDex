@@ -1,5 +1,5 @@
 const express = require('express');
-const axios = require('axios'); // Still needed for candles? No, candles logic is here.
+const axios = require('axios');
 const { PublicKey } = require('@solana/web3.js');
 const nacl = require('tweetnacl'); 
 const bs58 = require('bs58');      
@@ -15,7 +15,7 @@ const { snapshotPools } = require('../indexer/tasks/snapshotter');
 const logger = require('../services/logger');
 const cacheControl = require('../middleware/httpCache');
 const apiKeyAuth = require('../middleware/apiKeyAuth');
-const { indexTokenOnChain } = require('../services/indexer'); // NEW IMPORT
+const { indexTokenOnChain } = require('../services/indexer');
 
 const router = express.Router();
 const solanaConnection = getSolanaConnection();
@@ -33,7 +33,7 @@ const requireAdmin = (req, res, next) => {
 function init(deps) {
     const { db } = deps;
 
-    // --- HELPER FUNCTIONS (Candles only now) ---
+    // --- HELPER FUNCTIONS ---
     async function fetchExternalCandles(poolAddress, resolution) {
         try {
             let timeframe = 'minute';
@@ -57,8 +57,6 @@ function init(deps) {
         if (existing) throw new Error("Transaction signature already used");
         return true; 
     }
-
-    // indexTokenOnChain MOVED TO services/indexer.js
 
     // --- PROXY ROUTES ---
     router.get('/proxy/blockhash', async (req, res) => {
@@ -173,7 +171,7 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "Submission failed" }); }
     });
 
-    // --- NEW: PUBLIC API KEY GENERATION ---
+    // --- API KEY GENERATION ---
     router.post('/request-api-key', async (req, res) => {
         const { wallet, signature } = req.body; 
         try {
@@ -198,27 +196,24 @@ function init(deps) {
     router.get('/admin/token/:mint', requireAdmin, async (req, res) => { const { mint } = req.params; try { const token = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]); if (!token) return res.status(404).json({ success: false, error: "Token not found" }); let meta = {}; try { if (typeof token.metadata === 'string') meta = JSON.parse(token.metadata); else meta = token.metadata || {}; } catch(e) {} const community = meta.community || {}; res.json({ success: true, token: { ...token, ticker: token.symbol, twitter: community.twitter || meta.twitter, website: community.website || meta.website, telegram: community.telegram || meta.telegram, banner: community.banner || meta.banner, description: community.description || meta.description } }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     router.post('/admin/update-token', requireAdmin, async (req, res) => { const { mint, twitter, website, telegram, banner, description } = req.body; try { const token = await db.get(`SELECT metadata FROM tokens WHERE mint = $1`, [mint]); let currentMeta = {}; if (token && token.metadata) { try { currentMeta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata; } catch (e) {} } const newCommunity = { twitter, website, telegram, banner, description }; currentMeta.community = { ...(currentMeta.community || {}), ...newCommunity }; const jsonStr = JSON.stringify(currentMeta); await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE WHERE mint = $2`, [jsonStr, mint]); await updateSingleToken({ db }, mint); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     
-    // DELETE TOKEN - FIXED: Ensures all associated data is wiped
+    // DELETE TOKEN
     router.post('/admin/delete-token', requireAdmin, async (req, res) => { 
         const { mint } = req.body; 
         try { 
             const pools = await db.all(`SELECT address FROM pools WHERE mint = $1`, [mint]); 
             const poolAddresses = pools.map(p => p.address); 
             
-            // Clean up pools and associated candles/trackers
             if (poolAddresses.length > 0) { 
                 await db.run(`DELETE FROM candles_1m WHERE pool_address = ANY($1)`, [poolAddresses]); 
                 await db.run(`DELETE FROM active_trackers WHERE pool_address = ANY($1)`, [poolAddresses]); 
             } 
             
-            // Explicitly delete from all tables referenced by mint
             await db.run(`DELETE FROM pools WHERE mint = $1`, [mint]); 
             await db.run(`DELETE FROM k_scores WHERE mint = $1`, [mint]); 
             await db.run(`DELETE FROM token_updates WHERE mint = $1`, [mint]); 
             await db.run(`DELETE FROM holders_history WHERE mint = $1`, [mint]); 
             await db.run(`DELETE FROM tokens WHERE mint = $1`, [mint]); 
             
-            // Clear Redis Cache
             const redis = getClient(); 
             if (redis) { await redis.del(`token:detail:${mint}`); } 
             
@@ -235,61 +230,93 @@ function init(deps) {
     router.post('/admin/revoke-key', requireAdmin, async (req, res) => { const { key } = req.body; try { await db.run('UPDATE api_keys SET is_active = FALSE WHERE key = $1', [key]); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     router.post('/admin/delete-key', requireAdmin, async (req, res) => { const { key } = req.body; try { await db.run('DELETE FROM api_keys WHERE key = $1', [key]); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
 
-    // --- BACKUP ROUTES ---
+    // --- BACKUP & RESTORE ---
     router.get('/admin/backup/updates', requireAdmin, async (req, res) => { try { const updates = await db.all('SELECT * FROM token_updates ORDER BY submittedAt DESC'); const keys = await db.all('SELECT * FROM api_keys'); res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Disposition', `attachment; filename=holdex_full_backup_${Date.now()}.json`); res.json({ success: true, timestamp: Date.now(), updates: updates, api_keys: keys }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     
-    // RESTORE ROUTES - FIXED: Fully implemented restore logic
+    // RESTORE ROUTES - FIXED: Handle lowercase keys & API Keys
     router.post('/admin/restore/updates', requireAdmin, async (req, res) => { 
-        const { updates } = req.body; 
-        if (!Array.isArray(updates)) return res.status(400).json({ success: false, error: "Invalid data format. Expected array of updates." }); 
+        const { updates, api_keys } = req.body; 
         
-        let restored = 0;
-        let skipped = 0;
+        // Validation
+        if (!Array.isArray(updates) && !Array.isArray(api_keys)) {
+             return res.status(400).json({ success: false, error: "Invalid data format." }); 
+        }
+        
+        const results = {
+            updates: { restored: 0, skipped: 0 },
+            keys: { restored: 0, skipped: 0 }
+        };
 
         try {
-            // We iterate through updates to insert them. 
-            // We do NOT use 'id' from backup to avoid primary key conflicts with existing new rows.
-            // We use 'signature' as the unique identifier to prevent duplicates.
-            
-            for (const u of updates) {
-                try {
-                    // 1. Check if signature exists
-                    const existing = await db.get('SELECT id FROM token_updates WHERE signature = $1', [u.signature]);
-                    if (existing) {
-                        skipped++;
-                        continue;
-                    }
+            // 1. Restore Updates
+            if (Array.isArray(updates)) {
+                for (const u of updates) {
+                    try {
+                        // FIX: Check signature uniqueness
+                        const sig = u.signature || u.txId || 'manual_' + Date.now();
+                        const existing = await db.get('SELECT id FROM token_updates WHERE signature = $1', [sig]);
+                        if (existing) {
+                            results.updates.skipped++;
+                            continue;
+                        }
 
-                    // 2. Insert if not exists
-                    await db.run(`
-                        INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, status, signature, payer, submittedAt)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                    `, [
-                        u.mint, 
-                        u.twitter, 
-                        u.website, 
-                        u.telegram, 
-                        u.banner, 
-                        u.description, 
-                        u.status || 'pending', 
-                        u.signature, 
-                        u.payer, 
-                        u.submittedAt || Date.now()
-                    ]);
-                    restored++;
-                } catch (rowError) {
-                    console.error(`Restore Row Error (${u.mint}): ${rowError.message}`);
+                        // FIX: Handle lowercase keys from DB dumps (submittedat vs submittedAt)
+                        const timestamp = u.submittedAt || u.submittedat || Date.now();
+                        const status = u.status || 'pending';
+
+                        await db.run(`
+                            INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, status, signature, payer, submittedAt)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                        `, [
+                            u.mint, 
+                            u.twitter, 
+                            u.website, 
+                            u.telegram, 
+                            u.banner, 
+                            u.description, 
+                            status, 
+                            sig, 
+                            u.payer || 'unknown', 
+                            timestamp
+                        ]);
+                        results.updates.restored++;
+                    } catch (e) { console.error(`Update Restore Error: ${e.message}`); }
                 }
             }
 
-            res.json({ success: true, message: `Restore Complete. Restored: ${restored}, Skipped (Duplicates): ${skipped}` });
+            // 2. Restore API Keys
+            if (Array.isArray(api_keys)) {
+                for (const k of api_keys) {
+                    try {
+                        const existing = await db.get('SELECT key FROM api_keys WHERE key = $1', [k.key]);
+                        if (existing) {
+                            results.keys.skipped++;
+                            continue;
+                        }
+                        
+                        // FIX: Handle lowercase keys
+                        const createdAt = k.created_at || k.createdAt || Date.now();
+                        const limit = k.requests_limit || k.requestsLimit || 1000;
+                        const active = (k.is_active !== undefined) ? k.is_active : true;
+
+                        await db.run(`
+                            INSERT INTO api_keys (key, owner, tier, requests_limit, is_active, created_at)
+                            VALUES ($1, $2, $3, $4, $5, $6)
+                        `, [k.key, k.owner || 'Restored User', k.tier || 'free', limit, active, createdAt]);
+                        
+                        results.keys.restored++;
+                    } catch (e) { console.error(`Key Restore Error: ${e.message}`); }
+                }
+            }
+
+            res.json({ success: true, results, message: `Restored: ${results.updates.restored} updates, ${results.keys.restored} keys.` });
 
         } catch (e) { 
             res.status(500).json({ success: false, error: e.message }); 
         } 
     });
 
-    // --- PUBLIC ROUTES (Cached + API Key) ---
+    // --- PUBLIC ROUTES ---
     router.get('/token/:mint', cacheControl(3, 5), apiKeyAuth(false), async (req, res) => {
         const { mint } = req.params;
         const cacheKey = `token:detail:${mint}`;
@@ -300,7 +327,6 @@ function init(deps) {
                 
                 if (!token) {
                     try {
-                        // REFACTORED: Use the imported function
                         const indexed = await indexTokenOnChain(mint);
                         token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]); 
                         pairs = indexed.pairs || [];
@@ -309,8 +335,6 @@ function init(deps) {
                 
                 if (!token) return { success: false, error: "Token not found" };
 
-                // ... (Rest of existing logic: Stale check, holder history, etc.) ...
-                // Condensed for brevity as logic remains identical, just ensuring indexTokenOnChain is used
                 const now = Date.now();
                 const isStale = !token.timestamp || (now - token.timestamp > 300000); 
                 if (isStale && pairs.length > 0 && !pendingRefreshes.has(mint)) {
@@ -355,7 +379,6 @@ function init(deps) {
             if (search.length > 0) {
                 if (isAddressSearch) {
                     rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
-                    // REFACTORED: Use imported indexer
                     if (rows.length === 0) { await indexTokenOnChain(search); rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]); }
                 } else {
                     rows = await db.all(`SELECT * FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) LIMIT 50`, [`%${search}%`]);
@@ -363,7 +386,6 @@ function init(deps) {
             } else {
                 let orderBy = 'k_score DESC';
                 if (sort === 'newest') orderBy = 'timestamp DESC';
-                // ... (Sort logic identical to previous) ...
                 else if (sort === 'age') orderBy = 'timestamp ASC'; 
                 else if (sort === 'mcap') orderBy = 'marketCap DESC';
                 else if (sort === 'volume') orderBy = 'volume24h DESC';
