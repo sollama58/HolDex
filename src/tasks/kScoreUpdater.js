@@ -3,12 +3,22 @@ const { analyzeTokenHolders } = require('../services/solana');
 /**
  * PURE FUNCTION: Calculates K-Score
  * * Logic:
+ * 0. PREREQUISITE: Token MUST have a community update.
  * 1. Volume & Liquidity Baseline
  * 2. Deep Analysis: Top 20 Holder behavior (Hold Time)
  * 3. Trend Analysis: Holder count growth over 24h
- * 4. Community Verification
  */
 async function calculateDeepScore(db, token) {
+    // --- 0. ELIGIBILITY CHECK ---
+    // If checking casing, 'pg' driver usually returns lowercase column names.
+    const hasUpdate = token.hascommunityupdate === true || token.hasCommunityUpdate === true;
+
+    if (!hasUpdate) {
+        // Not eligible for a score calculation. Return base skepticism.
+        // We return 10 (instead of 0) to avoid "broken" looking UI, but it's a low score.
+        return 10; 
+    }
+
     let score = 10; // Base Score
     const now = Date.now();
 
@@ -70,8 +80,8 @@ async function calculateDeepScore(db, token) {
     // Wash Trading Penalty: High Volume + Zero Hold Time = Bot
     if (token.volume24h > 1000000 && avgHoldHours < 1) score -= 20;
 
-    // D. Community Verification
-    if (token.hascommunityupdate) score += 15;
+    // D. Community Verification (Guaranteed true if we got here, but adding bonus)
+    score += 15;
 
     // Final Clamp 1-99
     return Math.min(Math.max(Math.floor(score), 1), 99);

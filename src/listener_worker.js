@@ -1,5 +1,6 @@
 require('dotenv').config();
 const { initDB, getDB } = require('./services/database');
+const { initRedis } = require('./services/redis');
 const logger = require('./services/logger');
 
 // --- TASKS ---
@@ -30,19 +31,24 @@ async function runKScoreLoop(db) {
     while (true) {
         try {
             // STRATEGY: 
-            // 1. Prioritize Hot Tokens (Volume > $10k) that haven't updated in 2 hours.
-            // 2. Then Warm Tokens (Volume > $500) that haven't updated in 12 hours.
+            // 1. FILTER: ONLY tokens with Community Updates are eligible.
+            // 2. Prioritize Hot Tokens (Volume > $10k) that haven't updated in 2 hours.
+            // 3. Then Warm Tokens (Volume > $500) that haven't updated in 12 hours.
             
             const now = Date.now();
             const staleHighPriority = now - HIGH_PRIORITY_AGE_MS;
             const staleLowPriority = now - LOW_PRIORITY_AGE_MS;
 
+            // Updated Query: Added `hasCommunityUpdate = TRUE` constraint
             const token = await db.get(`
                 SELECT * FROM tokens 
                 WHERE 
-                    (volume24h > 10000 AND last_k_score_update < $1)
-                    OR 
-                    (volume24h <= 10000 AND volume24h > 500 AND last_k_score_update < $2)
+                    hasCommunityUpdate = TRUE
+                    AND (
+                        (volume24h > 10000 AND last_k_score_update < $1)
+                        OR 
+                        (volume24h <= 10000 AND volume24h > 500 AND last_k_score_update < $2)
+                    )
                 ORDER BY volume24h DESC
                 LIMIT 1
             `, [staleHighPriority, staleLowPriority]);
@@ -68,7 +74,7 @@ async function runKScoreLoop(db) {
                 await new Promise(r => setTimeout(r, RATE_LIMIT_DELAY_MS));
 
             } else {
-                // No work to do? Sleep longer to save CPU.
+                // No eligible tokens found? Sleep longer to save CPU.
                 await new Promise(r => setTimeout(r, 30000));
             }
 
@@ -84,10 +90,12 @@ async function startListenerWorker() {
     logger.info("🎧 LISTENER WORKER: Initializing Core Services...");
     
     try {
+        // 1. Initialize Infrastructure
         await initDB();
+        await initRedis();
         const db = getDB();
 
-        // 1. Start the Indexer (Volume/Candles/Snapshots)
+        // 2. Start the Indexer (Volume/Candles/Snapshots)
         if (indexerService && typeof indexerService.start === 'function') {
             logger.info("📊 LISTENER: Starting Token Indexer...");
             indexerService.start();
@@ -95,7 +103,7 @@ async function startListenerWorker() {
             logger.info("ℹ️ LISTENER: No Indexer service 'start' function found.");
         }
 
-        // 2. Start New Token Listener (Ingestion from Solana)
+        // 3. Start New Token Listener (Ingestion from Solana)
         if (newTokenListener && typeof newTokenListener.startNewTokenListener === 'function') {
             logger.info("🛰️ LISTENER: Starting New Token Discovery...");
             newTokenListener.startNewTokenListener();
@@ -103,7 +111,7 @@ async function startListenerWorker() {
             logger.warn("⚠️ LISTENER: newTokenListener module missing startNewTokenListener function.");
         }
 
-        // 3. Start Grower Scanner (Checks for pending tokens hitting mcap thresholds)
+        // 4. Start Grower Scanner (Checks for pending tokens hitting mcap thresholds)
         if (growerScanner && typeof growerScanner.start === 'function') {
             logger.info("🌱 LISTENER: Starting Grower Scanner...");
             growerScanner.start({ db });
@@ -111,7 +119,7 @@ async function startListenerWorker() {
             logger.warn("⚠️ LISTENER: Grower Scanner module missing start function.");
         }
 
-        // 4. Start K-Score Analysis Loop (Heavy Background Task)
+        // 5. Start K-Score Analysis Loop (Heavy Background Task)
         runKScoreLoop(db).catch(err => {
             logger.error(`❌ LISTENER FATAL: K-Score Loop died: ${err.message}`);
         });

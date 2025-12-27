@@ -5,6 +5,7 @@ const { findPoolsOnChain } = require('./services/pool_finder');
 const { fetchTokenMetadata } = require('./utils/metaplex');
 const { getSolanaConnection } = require('./services/solana');
 const { PublicKey } = require('@solana/web3.js');
+const { initRedis } = require('./services/redis');
 const logger = require('./services/logger');
 const metadataUpdater = require('./tasks/metadataUpdater'); 
 
