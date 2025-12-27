@@ -7,8 +7,6 @@ const { getSolanaConnection } = require('./services/solana');
 const { PublicKey } = require('@solana/web3.js');
 const logger = require('./services/logger');
 const metadataUpdater = require('./tasks/metadataUpdater'); 
-// CHANGED: Replaced backfillTokens with growerScanner
-const growerScanner = require('./tasks/growerScanner');
 
 const QUEUE_KEY = 'token_queue';
 let isRunning = false;
@@ -110,14 +108,9 @@ async function startWorker() {
 
         logger.info("🛠️ Worker: Starting Services...");
 
-        // 1. Start Metadata Updater
+        // Start Metadata Updater
         metadataUpdater.start({ db });
         logger.info("🛠️ Worker: Metadata Updater Started.");
-
-        // 2. Start Grower Scanner (Replaces AutoSeeder)
-        // Watches 'pending_growers' list for tokens that cross 20k mcap
-        growerScanner.start({ db });
-        logger.info("🛠️ Worker: Grower Scanner Started.");
 
         logger.info("🛠️ Worker: Listening for token queue jobs...");
 

@@ -1,8 +1,13 @@
 /**
- * Grower Scanner Task (Optimized)
+ * Grower Scanner Task
  * -------------------
- * Scans 'pending_growers' Redis set for tokens that grew > $10k MCAP.
- * Pruning Rule: If > 10 minutes old AND < $10k mcap, drop it.
+ * Scans 'pending_growers' Redis set for tokens that were initially skipped 
+ * due to low market cap.
+ * * Logic:
+ * - Checks MCAP via GeckoTerminal.
+ * - Promotion: If MCAP >= $10,000 -> Add to DB & Index.
+ * - Pruning: If Token Age > 10 Minutes AND MCAP < $10,000 -> Drop from list.
+ * - Safety: Hard stop at 24 hours.
  */
 const axios = require('axios');
 const { getClient } = require('../services/redis');
@@ -11,11 +16,11 @@ const { indexTokenOnChain } = require('../services/indexer');
 const logger = require('../services/logger');
 
 const PENDING_KEY = 'pending_growers';
-const MIN_MCAP_USD = 10000; // Target Threshold
+const MIN_MCAP_USD = 10000;         // Threshold to be added to main DB
 const PRUNE_AGE_MS = 10 * 60 * 1000; // 10 Minutes
-const MAX_AGE_MS = 24 * 60 * 60 * 1000; // Hard Stop: 24 hours (Safety net)
+const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 Hours (Safety Net)
 
-// Capacity: 50 tokens * 12 runs/hour = 600 checks/hour
+// Capacity: 50 tokens per cycle to handle volume
 const BATCH_SIZE = 50; 
 
 let isRunning = false;
@@ -48,6 +53,7 @@ async function scanGrowers(deps) {
     }
 
     try {
+        // Randomly pick members to check so we cycle through the list
         const members = await redis.srandmember(PENDING_KEY, BATCH_SIZE);
         
         if (!members || members.length === 0) {
@@ -62,6 +68,7 @@ async function scanGrowers(deps) {
             try {
                 data = JSON.parse(memberStr);
             } catch (e) {
+                // Remove corrupted data
                 await redis.srem(PENDING_KEY, memberStr);
                 continue;
             }
@@ -86,13 +93,17 @@ async function scanGrowers(deps) {
                 if (mcap >= MIN_MCAP_USD) {
                     logger.info(`🚀 GROWER PROMOTED: ${mint} (MCAP: $${mcap.toFixed(0)})`);
                     
+                    // Add to tokens table
                     await db.run(`
                         INSERT INTO tokens (mint, name, symbol, timestamp, k_score, marketCap) 
                         VALUES ($1, 'Growth Discovery', 'GROW', $2, 60, $3) 
                         ON CONFLICT (mint) DO NOTHING
                     `, [mint, Date.now(), mcap]);
 
+                    // Trigger full indexing
                     await indexTokenOnChain(mint);
+                    
+                    // Remove from pending list
                     await redis.srem(PENDING_KEY, memberStr);
                 } 
                 // 2. Prune Logic (Too old & too small)
@@ -119,6 +130,7 @@ async function scanGrowers(deps) {
 
 function start(deps) {
     logger.info("🟢 Grower Scanner Started (5m interval).");
+    // Run every 5 minutes
     setInterval(() => scanGrowers(deps), 5 * 60 * 1000);
     // Initial delay to let server settle
     setTimeout(() => scanGrowers(deps), 15000);
