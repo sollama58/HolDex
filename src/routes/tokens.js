@@ -181,11 +181,33 @@ function init(deps) {
             const pubBytes = new PublicKey(wallet).toBytes();
             const verified = nacl.sign.detached.verify(msg, sigBytes, pubBytes);
             if (!verified) return res.status(403).json({ success: false, error: "Invalid Signature" });
-            const existing = await db.get('SELECT key FROM api_keys WHERE owner = $1', [wallet]);
-            if (existing) return res.json({ success: true, key: existing.key, message: "Existing Key Retrieved" });
+            
+            const existing = await db.get('SELECT key, tier, requests_limit FROM api_keys WHERE owner = $1', [wallet]);
+            
+            // FIXED: Return tier and limit for existing keys
+            if (existing) {
+                return res.json({ 
+                    success: true, 
+                    key: existing.key, 
+                    tier: existing.tier,
+                    requests_limit: existing.requests_limit,
+                    message: "Existing Key Retrieved" 
+                });
+            }
+            
             const key = 'hx_' + require('crypto').randomBytes(16).toString('hex');
-            await db.run(`INSERT INTO api_keys (key, owner, tier, requests_limit, created_at) VALUES ($1, $2, 'free', 1000, $3)`, [key, wallet, Date.now()]);
-            res.json({ success: true, key, message: "New API Key Generated" });
+            const defaultLimit = 1000;
+            const defaultTier = 'free';
+            
+            await db.run(`INSERT INTO api_keys (key, owner, tier, requests_limit, created_at) VALUES ($1, $2, $3, $4, $5)`, [key, wallet, defaultTier, defaultLimit, Date.now()]);
+            
+            res.json({ 
+                success: true, 
+                key, 
+                tier: defaultTier,
+                requests_limit: defaultLimit,
+                message: "New API Key Generated" 
+            });
         } catch (e) { console.error(e); res.status(500).json({ success: false, error: "Server Error" }); }
     });
 
@@ -226,9 +248,34 @@ function init(deps) {
     // --- API KEY ADMIN ---
     router.get('/admin/keys', requireAdmin, async (req, res) => { try { const keys = await db.all('SELECT * FROM api_keys ORDER BY created_at DESC'); res.json({ success: true, keys }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     router.post('/admin/generate-key', requireAdmin, async (req, res) => { const { owner, tier } = req.body; if (!owner) return res.status(400).json({ success: false, error: "Owner name required" }); try { const key = 'hx_' + require('crypto').randomBytes(16).toString('hex'); const limit = tier === 'pro' ? 100000 : (tier === 'enterprise' ? 1000000 : 1000); await db.run(`INSERT INTO api_keys (key, owner, tier, requests_limit, created_at) VALUES ($1, $2, $3, $4, $5)`, [key, owner, tier || 'free', limit, Date.now()]); res.json({ success: true, key, message: "Key Generated" }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.post('/admin/update-key', requireAdmin, async (req, res) => { const { key, tier, limit } = req.body; try { if (!key) return res.status(400).json({ success: false, error: "Key required" }); await db.run(`UPDATE api_keys SET tier = $1, requests_limit = $2 WHERE key = $3`, [tier, parseInt(limit), key]); res.json({ success: true, message: "Key Updated" }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.post('/admin/revoke-key', requireAdmin, async (req, res) => { const { key } = req.body; try { await db.run('UPDATE api_keys SET is_active = FALSE WHERE key = $1', [key]); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.post('/admin/delete-key', requireAdmin, async (req, res) => { const { key } = req.body; try { await db.run('DELETE FROM api_keys WHERE key = $1', [key]); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    
+    // KEY MANAGEMENT ROUTES - FIXED
+    router.post('/admin/update-key', requireAdmin, async (req, res) => { 
+        const { key, tier, limit } = req.body; 
+        try { 
+            if (!key) return res.status(400).json({ success: false, error: "Key required" }); 
+            // Now allows updating tier/limit properly
+            await db.run(`UPDATE api_keys SET tier = $1, requests_limit = $2 WHERE key = $3`, [tier, parseInt(limit), key]); 
+            res.json({ success: true, message: "Key Updated Successfully" }); 
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+    });
+
+    router.post('/admin/revoke-key', requireAdmin, async (req, res) => { 
+        const { key } = req.body; 
+        try { 
+            // Toggle active state if needed, or just set to FALSE
+            await db.run('UPDATE api_keys SET is_active = FALSE WHERE key = $1', [key]); 
+            res.json({ success: true, message: "Key Revoked" }); 
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+    });
+
+    router.post('/admin/delete-key', requireAdmin, async (req, res) => { 
+        const { key } = req.body; 
+        try { 
+            await db.run('DELETE FROM api_keys WHERE key = $1', [key]); 
+            res.json({ success: true, message: "Key Deleted" }); 
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+    });
 
     // --- BACKUP & RESTORE ---
     router.get('/admin/backup/updates', requireAdmin, async (req, res) => { try { const updates = await db.all('SELECT * FROM token_updates ORDER BY submittedAt DESC'); const keys = await db.all('SELECT * FROM api_keys'); res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Disposition', `attachment; filename=holdex_full_backup_${Date.now()}.json`); res.json({ success: true, timestamp: Date.now(), updates: updates, api_keys: keys }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
