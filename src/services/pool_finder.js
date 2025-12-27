@@ -56,6 +56,7 @@ async function enrichPoolsWithReserves(pools) {
     if (targets.length === 0) return;
 
     // Use the centralized connection that has the Helius RPC
+    // FIX: Ensure this is called as a function
     const connection = getSolanaConnection();
     
     // Process in batches

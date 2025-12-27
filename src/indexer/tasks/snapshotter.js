@@ -76,7 +76,11 @@ async function processPoolBatch(db, connection, pools, redis) {
 
     let accounts = [];
     try { 
-        accounts = await retryRPC((conn) => conn.getMultipleAccountsInfo(keysToFetch));
+        // FIX: Ensure 'connection' object is used, not 'conn' from callback argument if it wasn't passed correctly
+        // But here we rely on 'connection' being a valid object passed into processPoolBatch
+        if (!connection) throw new Error("Connection object is undefined in processPoolBatch");
+        
+        accounts = await retryRPC(() => connection.getMultipleAccountsInfo(keysToFetch));
     } catch (e) {
         logger.warn(`Batch RPC Failed for ${pools.length} pools: ${e.message}`);
         return;
@@ -158,8 +162,6 @@ async function processPoolBatch(db, connection, pools, redis) {
                     }
                 }
                 
-                // CRITICAL FIX: Ensure price is strictly a finite number.
-                // Infinite prices (div by zero) cause DB to store 'Infinity' which JSON stringifies to 'null', crashing the frontend.
                 if (Number.isFinite(priceUsd) && priceUsd > 0) {
                     success = true;
                 } else {
@@ -199,7 +201,7 @@ async function processPoolBatch(db, connection, pools, redis) {
             }).catch(() => {});
         }
 
-        if (success && priceUsd > 0) { // Safety check: Never insert 0 price candles
+        if (success && priceUsd > 0) { 
             affectedMints.add(p.mint);
             
             updates.push(db.query(`UPDATE pools SET price_usd = $1, liquidity_usd = $2 WHERE address = $3`, [priceUsd, liquidityUsd, p.address]));
@@ -226,7 +228,9 @@ async function processPoolBatch(db, connection, pools, redis) {
 async function runSnapshotCycle() {
     try {
         const db = getDB();
+        // FIX: Ensure getSolanaConnection() is called to get the instance
         const connection = getSolanaConnection(); 
+        
         await updateSolPrice(db);
         
         const res = await db.query(`
@@ -261,6 +265,7 @@ function startSnapshotter() {
 async function snapshotPools(poolAddresses) {
     if (!poolAddresses.length) return;
     const db = getDB();
+    // FIX: Ensure getSolanaConnection() is called here too
     const connection = getSolanaConnection();
     await updateSolPrice(db);
     const res = await db.query(`

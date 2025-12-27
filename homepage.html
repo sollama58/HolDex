@@ -14,7 +14,6 @@
 
     <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
-    <!-- NEW: Socket.IO Client -->
     <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
@@ -205,7 +204,6 @@
                             <th class="hidden md:table-cell sort-header" onclick="setSort('1h')">1h</th>
                             <th class="sort-header" onclick="setSort('24h')">24h</th>
                             <th class="sort-header" onclick="setSort('mcap')">Mkt Cap</th>
-                            <!-- NEW: Holders Column -->
                             <th class="hidden md:table-cell sort-header" onclick="setSort('holders')">Holders</th>
                             <th class="sort-header" onclick="setSort('volume')">Vol (24h)</th> 
                             <th class="hidden md:table-cell sort-header" onclick="setSort('age')">Age</th>
@@ -234,7 +232,7 @@
         </div>
     </div>
 
-    <!-- ABOUT VIEW (UPDATED) -->
+    <!-- ABOUT VIEW -->
     <div id="view-about" class="view-section px-4 md:px-0">
         <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 md:p-12 shadow-2xl max-w-5xl mx-auto space-y-12">
             <div class="flex items-center gap-6 border-b-2 border-[#7c2d12] pb-8">
@@ -1025,7 +1023,19 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         const cls = val > 0 ? 'pill-green' : (val < 0 ? 'pill-red' : 'text-gray-400'); 
         return `<span class="pill ${cls}">${val > 0 ? '+' : ''}${val.toFixed(2)}%</span>`; 
     };
-    const timeAgo = (ts) => { if (!ts) return ''; const seconds = Math.floor((Date.now() - ts) / 1000); return seconds < 60 ? `${seconds}s ago` : (seconds < 3600 ? `${Math.floor(seconds/60)}m ago` : `${Math.floor(seconds/3600)}h ago`); };
+    
+    // UPDATED: Age Formatter
+    const timeAgo = (ts) => {
+        if (!ts) return '';
+        const diff = Date.now() - ts;
+        const seconds = Math.floor(diff / 1000);
+        
+        if (seconds < 60) return `${seconds}s ago`;
+        if (seconds < 3600) return `${Math.floor(seconds/60)}m ago`;
+        if (seconds < 86400) return `${Math.floor(seconds/3600)}h ago`;
+        return `${Math.floor(seconds/86400)}d ago`;
+    };
+
     function renderTokenMedia(url, className, fallbackText = '?') { const fallback = `https://placehold.co/80x80/2a1005/7c2d12?text=${fallbackText}`; const safeUrl = url || fallback; const isVideo = safeUrl.match(/\.(mp4|webm|mov)$/i); if (isVideo) { return `<video src="${safeUrl}" class="${className}" autoplay loop muted playsinline poster="${fallback}"></video>`; } return `<img src="${safeUrl}" class="${className}" loading="lazy" onerror="this.onerror=null;this.src='${fallback}'">`; }
     function navigateTo(path) { window.location.hash = path; }
     function handleRoute() { 
