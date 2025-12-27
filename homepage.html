@@ -294,7 +294,9 @@
                     
                     <div id="my-keys-list" class="space-y-2">
                         <!-- Keys populated here -->
-                        <div class="text-center py-4 text-[#9a3412] text-xs font-mono">Loading keys...</div>
+                        <div class="text-center py-4 text-[#9a3412] text-xs font-mono">
+                            <button onclick="fetchMyKeys()" class="text-[#ea580c] underline hover:text-[#fb923c] font-bold">Sign to Reveal My Keys</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1275,10 +1277,10 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             if (apiUnconnected) apiUnconnected.classList.add('hidden');
             if (apiConnected) {
                 apiConnected.classList.remove('hidden');
-                // Trigger fetch ONLY if we are currently on the 'about' page to avoid annoying prompts elsewhere
-                if (window.location.hash === '#about') {
-                    fetchMyKeys();
-                }
+                // REMOVED AUTO FETCH: Trigger fetch ONLY if we are currently on the 'about' page to avoid annoying prompts elsewhere
+                // if (window.location.hash === '#about') {
+                //    fetchMyKeys();
+                // }
             }
         } else { 
             if (discDiv) discDiv.classList.remove('hidden'); 
@@ -1468,9 +1470,7 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             document.getElementById('view-about').classList.add('active'); 
             document.querySelector('button[onclick="navigateTo(\'about\')"]').classList.add('active'); 
             // Trigger key fetch if wallet connected
-            if (walletAddress) {
-                fetchMyKeys();
-            }
+            // REMOVED AUTO FETCH: if (walletAddress) { fetchMyKeys(); }
         } else if (hash === '#update') { 
             document.getElementById('view-update').classList.add('active'); 
             document.querySelector('button[onclick="navigateTo(\'update\')"]').classList.add('active'); 
