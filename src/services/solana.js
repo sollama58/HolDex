@@ -9,15 +9,45 @@ let connection;
  */
 function getSolanaConnection() {
     if (!connection) {
-        if (!config.RPC_URL) {
-            logger.warn("⚠️ RPC_URL is missing in config/env.js, using default public RPC.");
+        // Prioritize SOLANA_RPC_URL, fallback to RPC_URL, then default
+        const rpcUrl = config.SOLANA_RPC_URL || config.RPC_URL || 'https://api.mainnet-beta.solana.com';
+        
+        if (rpcUrl.includes('helius')) {
+            logger.info(`🔌 RPC: Connected to Helius via config.`);
+        } else if (rpcUrl.includes('mainnet-beta')) {
+            logger.warn(`⚠️ RPC: Using Public Solana Endpoint (Rate Limits Likely).`);
+        } else {
+            logger.info(`🔌 RPC: Connected to Custom Endpoint.`);
         }
-        connection = new Connection(config.RPC_URL || 'https://api.mainnet-beta.solana.com', {
+
+        connection = new Connection(rpcUrl, {
             commitment: 'confirmed',
             confirmTransactionInitialTimeout: 60000
         });
     }
     return connection;
+}
+
+/**
+ * Generic retry wrapper for RPC calls.
+ * @param {Function} fn - Async function to retry
+ * @param {number} retries - Number of retries (default 3)
+ * @param {number} delay - Base delay in ms (default 1000)
+ */
+async function retryRPC(fn, retries = 3, delay = 1000) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await fn();
+        } catch (e) {
+            if (i === retries - 1) throw e; // Throw on last failure
+            
+            // Check for specific RPC errors to handle smarter
+            const isRateLimit = e.message && (e.message.includes('429') || e.message.includes('Too Many Requests'));
+            const waitTime = isRateLimit ? delay * 2 * (i + 1) : delay * (i + 1); // Aggressive backoff for 429
+            
+            await new Promise(r => setTimeout(r, waitTime));
+        }
+    }
 }
 
 /**
@@ -38,19 +68,22 @@ async function getHolderCountFromRPC(mintAddress) {
         ];
 
         // Fetch only keys (dataSlice length 0) to save bandwidth
-        const accounts = await conn.getProgramAccounts(TOKEN_PROGRAM_ID, {
+        // Wrapped in retryRPC for resilience
+        const accounts = await retryRPC(() => conn.getProgramAccounts(TOKEN_PROGRAM_ID, {
             filters: filters,
             dataSlice: { offset: 0, length: 0 }
-        });
+        }));
 
         return accounts.length;
     } catch (e) {
         // Suppress errors for now to prevent log spam if RPC limits are hit
+        // logger.debug(`RPC Holder Check failed: ${e.message}`);
         return 0;
     }
 }
 
 module.exports = { 
     getSolanaConnection, 
-    getHolderCountFromRPC 
+    getHolderCountFromRPC,
+    retryRPC 
 };

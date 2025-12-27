@@ -1,7 +1,7 @@
 const axios = require('axios');
 const { PublicKey } = require('@solana/web3.js');
-// Ensure we import the centralized connection getter
-const { getSolanaConnection } = require('./solana'); 
+// Import retryRPC and connection getter from centralized service
+const { getSolanaConnection, retryRPC } = require('./solana'); 
 const logger = require('./logger');
 
 // --- PROGRAM IDS ---
@@ -15,18 +15,6 @@ const LAYOUTS = {
     [PROG_ID_METEORA_AMM]: { name: 'Meteora', offA: 72, offB: 104 }, 
     [PROG_ID_RAYDIUM_CPMM]: { name: 'Raydium CPMM', offA: 168, offB: 200 } 
 };
-
-// Retry wrapper for RPC calls
-async function retryRPC(fn, retries = 3) {
-    for (let i = 0; i < retries; i++) {
-        try {
-            return await fn();
-        } catch (e) {
-            if (i === retries - 1) throw e;
-            await new Promise(r => setTimeout(r, 1000 * (i + 1))); // Exponential backoff
-        }
-    }
-}
 
 async function findPoolsViaGeckoTerminal(mintAddress) {
     try {
@@ -76,6 +64,7 @@ async function enrichPoolsWithReserves(pools) {
         const pubkeys = batch.map(p => new PublicKey(p.pairAddress || p.address)); 
 
         try {
+            // Now using the imported retryRPC correctly
             const accounts = await retryRPC(() => connection.getMultipleAccountsInfo(pubkeys));
             
             accounts.forEach((acc, idx) => {
@@ -114,7 +103,6 @@ async function findPumpFunCurve(mintAddress, results) {
         const [bondingCurve] = PublicKey.findProgramAddressSync([Buffer.from("bonding-curve"), mint.toBuffer()], pId);
         const [bondingCurveVault] = PublicKey.findProgramAddressSync([Buffer.from("bonding-curve"), mint.toBuffer(), Buffer.from("token-account")], pId);
 
-        // Use the centralized connection here as well
         const connection = getSolanaConnection();
         const info = await retryRPC(() => connection.getAccountInfo(bondingCurve));
         
