@@ -1,92 +1,80 @@
-const { logger } = require('../services');
+const { analyzeTokenHolders } = require('../services/solana');
 
-const INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 Hours
+/**
+ * PURE FUNCTION: Calculates K-Score
+ * * Logic:
+ * 1. Volume & Liquidity Baseline
+ * 2. Deep Analysis: Top 20 Holder behavior (Hold Time)
+ * 3. Trend Analysis: Holder count growth over 24h
+ * 4. Community Verification
+ */
+async function calculateDeepScore(db, token) {
+    let score = 10; // Base Score
+    const now = Date.now();
 
-async function updateKScore(deps) {
-    const { db } = deps;
-    logger.info("🧠 K-Score Updater: Starting Cycle...");
+    // 1. Get LP Addresses to exclude from "Holder" analysis
+    // We don't want to calculate the 'hold time' of the Raydium Pool itself.
+    const pools = await db.all(`SELECT address, reserve_a, reserve_b FROM pools WHERE mint = $1`, [token.mint]);
+    const excludeList = [];
+    pools.forEach(p => {
+        if (p.address) excludeList.push(p.address);
+        if (p.reserve_a) excludeList.push(p.reserve_a);
+        if (p.reserve_b) excludeList.push(p.reserve_b);
+    });
 
-    try {
-        // FIX: Replaced "hasCommunityUpdate = 1" with "hasCommunityUpdate = TRUE"
-        // In PostgreSQL, booleans must be compared with boolean literals
-        const tokens = await db.all(`
-            SELECT * FROM tokens 
-            WHERE hasCommunityUpdate = TRUE 
-            OR volume24h > 5000
-        `);
-
-        if (!tokens || tokens.length === 0) {
-            logger.info("🧠 K-Score: No eligible tokens found.");
-            return;
-        }
-
-        logger.info(`🧠 K-Score: Analyzing ${tokens.length} tokens...`);
-
-        for (const token of tokens) {
-            try {
-                // Simple heuristic score calculation since Helius dependency was removed/simplified
-                let score = 50; // Base Score
-
-                // Volume Boost
-                if (token.volume24h > 100000) score += 20;
-                else if (token.volume24h > 10000) score += 10;
-
-                // Liquidity Boost
-                if (token.liquidity > 50000) score += 20;
-                else if (token.liquidity > 5000) score += 10;
-
-                // Community Update Boost
-                // FIX: Check for boolean true, not integer 1
-                if (token.hascommunityupdate === true || token.hasCommunityUpdate === true) score += 10;
-
-                // Cap at 99
-                score = Math.min(score, 99);
-
-                await db.run(
-                    `UPDATE tokens SET k_score = $1 WHERE mint = $2`, 
-                    [score, token.mint]
-                );
-            } catch (err) {
-                logger.warn(`Failed to update K-Score for ${token.mint}: ${err.message}`);
-            }
-        }
-        
-        logger.info("🧠 K-Score Updater: Cycle Complete.");
-
-    } catch (err) {
-        logger.error(`K-Score Cycle Error: ${err.message}`, { stack: err.stack });
+    // 2. Heavy Analysis (RPC Call)
+    // Only run if we have valid pools to exclude (implies token is somewhat valid)
+    let avgHoldHours = 0;
+    if (excludeList.length > 0) {
+        // analyzeTokenHolders checks the ATAs, so filtering is handled by the account type.
+        const analysis = await analyzeTokenHolders(token.mint, excludeList);
+        avgHoldHours = analysis.avgHoldHours || 0;
     }
-}
 
-async function updateSingleToken(deps, mint) {
-    // Helper for immediate updates (e.g. via Admin API)
-    const { db } = deps;
-    try {
-        // Recalculate based on current DB stats
-        const token = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]);
-        if (!token) return 0;
+    // 3. Holder Trend (SQL Only)
+    let holderGrowthPct = 0;
+    const yesterday = now - (24 * 60 * 60 * 1000);
+    const historyRow = await db.get(`
+        SELECT count FROM holders_history 
+        WHERE mint = $1 AND timestamp <= $2 
+        ORDER BY timestamp DESC LIMIT 1
+    `, [token.mint, yesterday]);
 
-        let score = 50;
-        if (token.volume24h > 100000) score += 20;
-        else if (token.volume24h > 10000) score += 10;
-
-        if (token.liquidity > 50000) score += 20;
-        else if (token.liquidity > 5000) score += 10;
-
-        if (token.hascommunityupdate === true) score += 10;
-
-        score = Math.min(score, 99);
-
-        await db.run(`UPDATE tokens SET k_score = $1 WHERE mint = $2`, [score, mint]);
-        return score;
-    } catch (e) {
-        return 0;
+    // Trend Logic:
+    // - If we have history > 0, calculate growth.
+    // - If history is missing, assume 0% growth (Neutral).
+    if (historyRow && historyRow.count > 0 && token.holders > 0) {
+        holderGrowthPct = ((token.holders - historyRow.count) / historyRow.count) * 100;
     }
+
+    // --- SCORING RULES ---
+    
+    // A. Hold Time (The "Diamond Hand" Factor)
+    if (avgHoldHours > 168) score += 40;     // > 1 Week
+    else if (avgHoldHours > 72) score += 30; // > 3 Days
+    else if (avgHoldHours > 24) score += 20; // > 1 Day
+    else if (avgHoldHours > 6) score += 10;  // > 6 Hours
+    else if (avgHoldHours < 1) score -= 5;   // < 1 Hour (Flipper/Bot)
+
+    // B. Trend (The "Viral" Factor)
+    if (holderGrowthPct > 20) score += 30;     
+    else if (holderGrowthPct > 5) score += 20; 
+    else if (holderGrowthPct > 0) score += 5;  
+    else if (holderGrowthPct === 0 && token.holders > 100) score += 5; 
+    else if (holderGrowthPct < -5) score -= 15;
+
+    // C. Liquidity / Volume Sanity
+    if (token.liquidity > 50000) score += 10;
+    else if (token.liquidity < 1000) score -= 20;
+
+    // Wash Trading Penalty: High Volume + Zero Hold Time = Bot
+    if (token.volume24h > 1000000 && avgHoldHours < 1) score -= 20;
+
+    // D. Community Verification
+    if (token.hascommunityupdate) score += 15;
+
+    // Final Clamp 1-99
+    return Math.min(Math.max(Math.floor(score), 1), 99);
 }
 
-function start(deps) {
-    updateKScore(deps); // Run immediately on start
-    setInterval(() => updateKScore(deps), INTERVAL_MS);
-}
-
-module.exports = { start, updateSingleToken };
+module.exports = { calculateDeepScore };

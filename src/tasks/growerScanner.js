@@ -1,13 +1,9 @@
 /**
  * Grower Scanner Task
  * -------------------
- * Scans 'pending_growers' Redis set for tokens that were initially skipped 
- * due to low market cap.
- * * Logic:
+ * Scans 'pending_growers' Redis set.
  * - Checks MCAP via GeckoTerminal.
- * - Promotion: If MCAP >= $10,000 -> Add to DB & Index.
- * - Pruning: If Token Age > 10 Minutes AND MCAP < $10,000 -> Drop from list.
- * - Safety: Hard stop at 24 hours.
+ * - Promotion: If MCAP >= $10,000 -> Add to DB.
  */
 const axios = require('axios');
 const { getClient } = require('../services/redis');
@@ -16,11 +12,10 @@ const { indexTokenOnChain } = require('../services/indexer');
 const logger = require('../services/logger');
 
 const PENDING_KEY = 'pending_growers';
-const MIN_MCAP_USD = 10000;         // Threshold to be added to main DB
+const MIN_MCAP_USD = 10000;         
 const PRUNE_AGE_MS = 10 * 60 * 1000; // 10 Minutes
-const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 Hours (Safety Net)
+const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 Hours
 
-// Capacity: 50 tokens per cycle to handle volume
 const BATCH_SIZE = 50; 
 
 let isRunning = false;
@@ -53,7 +48,6 @@ async function scanGrowers(deps) {
     }
 
     try {
-        // Randomly pick members to check so we cycle through the list
         const members = await redis.srandmember(PENDING_KEY, BATCH_SIZE);
         
         if (!members || members.length === 0) {
@@ -68,7 +62,6 @@ async function scanGrowers(deps) {
             try {
                 data = JSON.parse(memberStr);
             } catch (e) {
-                // Remove corrupted data
                 await redis.srem(PENDING_KEY, memberStr);
                 continue;
             }
@@ -77,46 +70,37 @@ async function scanGrowers(deps) {
             const now = Date.now();
             const age = now - addedAt;
 
-            // Safety Net: Hard Prune (24h)
             if (age > MAX_AGE_MS) {
                 await redis.srem(PENDING_KEY, memberStr);
                 continue;
             }
 
             try {
-                // Throttle: 200ms wait before request to smooth load
                 await new Promise(r => setTimeout(r, 200));
 
                 const mcap = await checkMarketCap(mint);
 
-                // 1. Promotion Logic (Grown enough)
                 if (mcap >= MIN_MCAP_USD) {
                     logger.info(`🚀 GROWER PROMOTED: ${mint} (MCAP: $${mcap.toFixed(0)})`);
                     
-                    // Add to tokens table
+                    // FIXED: Initial Score lowered to 15 (Better than new, but still skeptical)
                     await db.run(`
                         INSERT INTO tokens (mint, name, symbol, timestamp, k_score, marketCap) 
-                        VALUES ($1, 'Growth Discovery', 'GROW', $2, 60, $3) 
+                        VALUES ($1, 'Growth Discovery', 'GROW', $2, 15, $3) 
                         ON CONFLICT (mint) DO NOTHING
                     `, [mint, Date.now(), mcap]);
 
-                    // Trigger full indexing
                     await indexTokenOnChain(mint);
-                    
-                    // Remove from pending list
                     await redis.srem(PENDING_KEY, memberStr);
                 } 
-                // 2. Prune Logic (Too old & too small)
-                // If token is older than 10 mins AND hasn't reached $10k, drop it.
                 else if (age > PRUNE_AGE_MS && mcap < MIN_MCAP_USD) {
-                    // logger.debug(`🗑️ Pruned failed grower: ${mint} (Age: ${(age/60000).toFixed(1)}m, Mcap: $${mcap})`);
                     await redis.srem(PENDING_KEY, memberStr);
                 }
                 
             } catch (err) {
                 if (err.message === 'RATE_LIMIT') {
                     logger.warn("⚠️ Grower Scanner Rate Limited. Pausing batch.");
-                    break; // Stop immediate batch, resume next interval
+                    break; 
                 }
             }
         }
@@ -130,9 +114,7 @@ async function scanGrowers(deps) {
 
 function start(deps) {
     logger.info("🟢 Grower Scanner Started (5m interval).");
-    // Run every 5 minutes
     setInterval(() => scanGrowers(deps), 5 * 60 * 1000);
-    // Initial delay to let server settle
     setTimeout(() => scanGrowers(deps), 15000);
 }
 

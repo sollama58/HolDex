@@ -4,80 +4,48 @@ const logger = require('./logger');
 
 let connection;
 
-// Program IDs
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
 
-/**
- * Returns the singleton Solana Connection instance.
- */
 function getSolanaConnection() {
     if (!connection) {
-        // Prioritize SOLANA_RPC_URL, fallback to RPC_URL, then default
         const rpcUrl = config.SOLANA_RPC_URL || config.RPC_URL || 'https://api.mainnet-beta.solana.com';
-        
-        if (rpcUrl.includes('helius')) {
-            logger.info(`🔌 RPC: Connected to Helius via config.`);
-        } else if (rpcUrl.includes('mainnet-beta')) {
-            logger.warn(`⚠️ RPC: Using Public Solana Endpoint (Rate Limits Likely).`);
-        } else {
-            logger.info(`🔌 RPC: Connected to Custom Endpoint.`);
-        }
+        // Rate limit mitigation for public endpoints
+        const confirmTimeout = rpcUrl.includes('mainnet-beta') ? 120000 : 60000;
 
         connection = new Connection(rpcUrl, {
             commitment: 'confirmed',
-            confirmTransactionInitialTimeout: 60000
+            confirmTransactionInitialTimeout: confirmTimeout
         });
     }
     return connection;
 }
 
-/**
- * Generic retry wrapper for RPC calls.
- * @param {Function} fn - Async function to retry
- * @param {number} retries - Number of retries (default 3)
- * @param {number} delay - Base delay in ms (default 1000)
- */
 async function retryRPC(fn, retries = 3, delay = 1000) {
     for (let i = 0; i < retries; i++) {
         try {
             return await fn();
         } catch (e) {
-            // Don't retry if it's a 400 Bad Request (Invalid input)
-            if (e.message && e.message.includes('400')) throw e;
-
-            // Don't retry "Too many accounts" errors - they will never succeed
-            if (e.message && (e.message.includes('Too many accounts') || e.message.includes('Size limit'))) throw e;
-
-            if (i === retries - 1) throw e; // Throw on last failure
+            // Permanent errors
+            if (e.message && (e.message.includes('400') || e.message.includes('Invalid param'))) throw e;
+            // RPC Specific Load errors
+            const isRateLimit = e.message && (e.message.includes('429') || e.message.includes('Too Many Requests') || e.message.includes('Busy'));
             
-            // Check for specific RPC errors to handle smarter
-            const isRateLimit = e.message && (e.message.includes('429') || e.message.includes('Too Many Requests'));
-            const waitTime = isRateLimit ? delay * 2 * (i + 1) : delay * (i + 1); // Aggressive backoff for 429
+            if (i === retries - 1) throw e; 
             
+            // Exponential backoff
+            const waitTime = isRateLimit ? delay * 3 * (i + 1) : delay * (i + 1);
             await new Promise(r => setTimeout(r, waitTime));
         }
     }
 }
 
-/**
- * Helper to fetch accounts for a specific program ID.
- */
 async function fetchAccountsForProgram(conn, programId, mintAddress) {
     try {
         const filters = [];
-        
-        // CRITICAL FIX: Only apply dataSize filter for Legacy Token Program (Fixed 165 bytes).
-        // Token-2022 accounts have variable sizes due to extensions, so we CANNOT filter by size.
-        if (programId.equals(TOKEN_PROGRAM_ID)) {
-            filters.push({ dataSize: 165 });
-        }
-
-        // Always filter by Mint Address (Offset 0 is standard for both programs)
+        if (programId.equals(TOKEN_PROGRAM_ID)) filters.push({ dataSize: 165 });
         filters.push({ memcmp: { offset: 0, bytes: mintAddress } });
 
-        // Fetch just the Amount (offset 64, length 8) to verify balance > 0
-        // NOTE: This can still return a massive array for tokens with 100k+ holders
         let accounts = await retryRPC(() => conn.getProgramAccounts(programId, {
             filters: filters,
             dataSlice: { offset: 64, length: 8 } 
@@ -92,56 +60,102 @@ async function fetchAccountsForProgram(conn, programId, mintAddress) {
                 }
             }
         }
-        
-        // OOM FIX: Explicitly nullify the large array immediately after use
         accounts = null;
-        
         return activeHolders;
     } catch (e) {
-        // Specific handling for "Too many accounts"
         if (e.message.includes('Too many accounts') || e.message.includes('Size limit')) {
-            logger.info(`ℹ️ Token ${mintAddress} has too many holders to scan via standard RPC. Skipping count.`);
-            return 0; // Return 0 (or a high placeholder like 999999 if preferred)
+            return 0; 
         }
-        
-        if (e.message.includes('429')) {
-             logger.warn(`⚠️ RPC Rate Limit (Holders Check): ${e.message}`);
-        } else {
-             // If we hit an OOM or other error here, log it but don't crash
-             logger.warn(`⚠️ RPC Holder Check Error: ${e.message}`);
-        }
+        logger.warn(`⚠️ RPC Holder Check Error: ${e.message}`);
         return 0;
     }
 }
 
-/**
- * Fetches the number of holders directly from the RPC.
- * CHECKS BOTH LEGACY TOKEN PROGRAM AND TOKEN-2022 PROGRAM.
- */
 async function getHolderCountFromRPC(mintAddress) {
     if (!mintAddress) return 0;
-    
-    // Sanitize input
     const cleanMint = mintAddress.trim();
-    
     const conn = getSolanaConnection();
-
-    // 1. Check Legacy Token Program first (Most common)
     let count = await fetchAccountsForProgram(conn, TOKEN_PROGRAM_ID, cleanMint);
-
-    // 2. If Legacy returns 0, it MIGHT be a Token-2022 token. Check that.
-    // NOTE: Some tokens might have holders in BOTH if they are migrating, so strictly 
-    // speaking we should sum them, but usually it's one or the other.
     if (count === 0) {
         const count2022 = await fetchAccountsForProgram(conn, TOKEN_2022_PROGRAM_ID, cleanMint);
         count += count2022;
     }
-
     return count;
+}
+
+/**
+ * Optimized Deep Analysis
+ * Strategy: Check Top 20 holders. Only look back 50 transactions.
+ * Note: 'topAccounts' returns Token Accounts (ATAs). Transactions on these
+ * accounts are inherently filtered to this token only.
+ */
+async function analyzeTokenHolders(mintAddress, excludeAddresses = []) {
+    const conn = getSolanaConnection();
+    try {
+        const mint = new PublicKey(mintAddress);
+        
+        // 1. Get Top 20 Token Accounts
+        const largest = await retryRPC(() => conn.getTokenLargestAccounts(mint), 2, 2000);
+        
+        if (!largest || !largest.value || largest.value.length === 0) {
+            return { avgHoldHours: 0 };
+        }
+
+        const topAccounts = largest.value;
+        const nowSec = Math.floor(Date.now() / 1000);
+        let totalDuration = 0;
+        let validSamples = 0;
+        
+        const excludeSet = new Set(excludeAddresses.map(a => a ? a.toString() : ''));
+
+        // 2. Iterate Top Holders
+        for (const acc of topAccounts) {
+            // Limit to checking 15 accounts to save RPC/Time
+            if (validSamples >= 15) break; 
+
+            if (excludeSet.has(acc.address.toString())) continue;
+
+            try {
+                const pubkey = new PublicKey(acc.address);
+                
+                // SUSTAINABILITY FIX: Limit to 50 signatures. 
+                // We check the specific Token Account, so these are ONLY relevant token txs.
+                // If the 50th tx is > 24h ago, we consider them a "Diamond Hand".
+                const signatures = await retryRPC(() => conn.getSignaturesForAddress(pubkey, { limit: 50 }), 2, 1000);
+                
+                if (signatures.length > 0) {
+                    // The last item is the oldest in this batch
+                    const oldestTx = signatures[signatures.length - 1];
+                    const txTime = oldestTx.blockTime || nowSec;
+                    const durationSeconds = nowSec - txTime;
+                    
+                    totalDuration += durationSeconds;
+                    validSamples++;
+                } else {
+                    // No transactions found in history? Likely a genesis mint or extremely old.
+                    // Assume holding for at least 24h (safe default).
+                    totalDuration += (24 * 3600);
+                    validSamples++;
+                }
+            } catch (err) {
+               // checking individual accounts can fail (e.g. if closed), ignore.
+            }
+        }
+
+        if (validSamples === 0) return { avgHoldHours: 0 };
+
+        const avgSeconds = totalDuration / validSamples;
+        return { avgHoldHours: avgSeconds / 3600 };
+
+    } catch (e) {
+        logger.error(`Deep Analysis Failed for ${mintAddress}: ${e.message}`);
+        return { avgHoldHours: 0 };
+    }
 }
 
 module.exports = { 
     getSolanaConnection, 
-    getHolderCountFromRPC,
-    retryRPC 
+    analyzeTokenHolders,
+    retryRPC,
+    getHolderCountFromRPC
 };
