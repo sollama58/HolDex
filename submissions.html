@@ -258,7 +258,8 @@
             if (items.length === 0) { container.innerHTML = '<div class="text-center py-12 text-[#9a3412]">No records found.</div>'; return; }
 
             container.innerHTML = items.map(item => `
-                <div class="card flex flex-col md:flex-row gap-6">
+                <div class="card flex flex-col md:flex-row gap-6 relative overflow-hidden">
+                    ${item.hasCommunityUpdate ? '<div class="absolute top-0 right-0 bg-red-900/50 text-red-400 text-[10px] font-bold px-2 py-1 border-l border-b border-red-500 rounded-bl-lg">⚠️ OVERWRITE WARNING</div>' : ''}
                     <div class="w-32 h-32 bg-black border border-[#451a03] rounded shrink-0 overflow-hidden relative group">
                         <img src="${item.image || 'https://placehold.co/100'}" class="w-full h-full object-cover opacity-50">
                         <div class="absolute inset-0 flex items-center justify-center font-bold text-xs text-white bg-black/50">${item.ticker || '???'}</div>
@@ -266,7 +267,10 @@
                     <div class="flex-1 space-y-3">
                         <div class="flex justify-between items-start">
                             <div>
-                                <h3 class="font-bold text-white text-lg">${item.mint}</h3>
+                                <h3 class="font-bold text-white text-lg flex items-center gap-2">
+                                    ${item.mint}
+                                    ${item.hasCommunityUpdate ? '<span class="text-[10px] bg-red-900 text-red-200 px-1.5 py-0.5 rounded border border-red-500">HAS DATA</span>' : ''}
+                                </h3>
                                 <div class="text-xs text-[#9a3412] font-mono mt-1">Submitted: ${new Date(Number(item.submittedat || item.submittedAt)).toLocaleString()}</div>
                             </div>
                             <span class="badge badge-pending">${item.status}</span>
@@ -277,6 +281,12 @@
                         </div>
                         <div class="bg-[#0f0502] p-3 rounded border border-[#451a03] text-xs text-[#d1d5db]"><span class="text-[#9a3412] block mb-1">Description:</span>${item.description || 'No description provided.'}</div>
                         ${item.banner ? `<div class="text-xs text-[#9a3412] mt-2">Banner: <a href="${item.banner}" target="_blank" class="text-blue-400 underline">View Image</a></div>` : ''}
+                        
+                        ${item.hasCommunityUpdate ? `
+                            <div class="bg-red-900/10 border border-red-900/50 p-2 rounded text-[10px] text-red-400 mt-2">
+                                <strong>⚠️ CAUTION:</strong> This token already has community data. Approving this will <u>overwrite</u> existing links.
+                            </div>
+                        ` : ''}
                     </div>
                     <div class="flex flex-col gap-2 justify-center min-w-[120px]">
                         ${currentTab === 'pending' ? `

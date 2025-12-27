@@ -34,6 +34,20 @@ function init(deps) {
     const { db } = deps;
 
     // --- HELPER FUNCTIONS ---
+    function sanitizeUrl(url) {
+        if (!url || typeof url !== 'string') return "";
+        url = url.trim();
+        // Force http/https protocol to prevent javascript: vectors
+        if (url.match(/^(http:\/\/|https:\/\/)/i)) {
+            return url;
+        }
+        // If it looks like a domain but missing protocol, prepend https://
+        if (url.match(/^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}/)) {
+            return `https://${url}`;
+        }
+        return ""; 
+    }
+
     async function fetchExternalCandles(poolAddress, resolution) {
         try {
             let timeframe = 'minute';
@@ -184,7 +198,6 @@ function init(deps) {
             
             const existing = await db.get('SELECT key, tier, requests_limit FROM api_keys WHERE owner = $1', [wallet]);
             
-            // FIXED: Return tier and limit for existing keys
             if (existing) {
                 return res.json({ 
                     success: true, 
@@ -212,11 +225,84 @@ function init(deps) {
     });
 
     // --- ADMIN ROUTES ---
-    router.get('/admin/updates', requireAdmin, async (req, res) => { const { type } = req.query; try { let sql = `SELECT u.*, t.symbol as ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`; if (type === 'history') { sql += ` WHERE u.status != 'pending' ORDER BY u.submittedAt DESC LIMIT 50`; } else { sql += ` WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`; } const updates = await db.all(sql); res.json({ success: true, updates }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.post('/admin/approve-update', requireAdmin, async (req, res) => { const { id } = req.body; try { const request = await db.get(`SELECT * FROM token_updates WHERE id = $1`, [id]); if (!request) return res.status(404).json({ success: false, error: "Request not found" }); const token = await db.get(`SELECT metadata FROM tokens WHERE mint = $1`, [request.mint]); let currentMeta = {}; if (token && token.metadata) { try { currentMeta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata; } catch (e) {} } const newCommunity = { twitter: request.twitter, website: request.website, telegram: request.telegram, banner: request.banner, description: request.description }; currentMeta.community = { ...(currentMeta.community || {}), ...newCommunity }; const jsonStr = JSON.stringify(currentMeta); await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE, updated_at = CURRENT_TIMESTAMP WHERE mint = $2`, [jsonStr, request.mint]); await db.run(`UPDATE token_updates SET status = 'approved' WHERE id = $1`, [id]); await updateSingleToken({ db }, request.mint); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    router.get('/admin/updates', requireAdmin, async (req, res) => { 
+        const { type } = req.query; 
+        try { 
+            // UPDATED: Select hasCommunityUpdate from tokens table to warn admin of overwrite
+            let sql = `
+                SELECT u.*, t.symbol as ticker, t.image, 
+                       CASE WHEN t.hasCommunityUpdate = TRUE THEN TRUE ELSE FALSE END as "hasCommunityUpdate"
+                FROM token_updates u 
+                LEFT JOIN tokens t ON u.mint = t.mint
+            `; 
+            if (type === 'history') { 
+                sql += ` WHERE u.status != 'pending' ORDER BY u.submittedAt DESC LIMIT 50`; 
+            } else { 
+                sql += ` WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`; 
+            } 
+            const updates = await db.all(sql); 
+            res.json({ success: true, updates }); 
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+    });
+
+    router.post('/admin/approve-update', requireAdmin, async (req, res) => { 
+        const { id } = req.body; 
+        try { 
+            const request = await db.get(`SELECT * FROM token_updates WHERE id = $1`, [id]); 
+            if (!request) return res.status(404).json({ success: false, error: "Request not found" }); 
+            const token = await db.get(`SELECT metadata FROM tokens WHERE mint = $1`, [request.mint]); 
+            let currentMeta = {}; 
+            if (token && token.metadata) { 
+                try { currentMeta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata; } catch (e) {} 
+            } 
+            
+            // UPDATED: Sanitize URLs before saving
+            const newCommunity = { 
+                twitter: sanitizeUrl(request.twitter), 
+                website: sanitizeUrl(request.website), 
+                telegram: sanitizeUrl(request.telegram), 
+                banner: sanitizeUrl(request.banner), 
+                description: request.description // Description usually text, handled by frontend/db escaping
+            }; 
+            
+            currentMeta.community = { ...(currentMeta.community || {}), ...newCommunity }; 
+            const jsonStr = JSON.stringify(currentMeta); 
+            
+            await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE, updated_at = CURRENT_TIMESTAMP WHERE mint = $2`, [jsonStr, request.mint]); 
+            await db.run(`UPDATE token_updates SET status = 'approved' WHERE id = $1`, [id]); 
+            await updateSingleToken({ db }, request.mint); 
+            res.json({ success: true }); 
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+    });
+
     router.post('/admin/reject-update', requireAdmin, async (req, res) => { const { id } = req.body; try { await db.run(`UPDATE token_updates SET status = 'rejected' WHERE id = $1`, [id]); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     router.get('/admin/token/:mint', requireAdmin, async (req, res) => { const { mint } = req.params; try { const token = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]); if (!token) return res.status(404).json({ success: false, error: "Token not found" }); let meta = {}; try { if (typeof token.metadata === 'string') meta = JSON.parse(token.metadata); else meta = token.metadata || {}; } catch(e) {} const community = meta.community || {}; res.json({ success: true, token: { ...token, ticker: token.symbol, twitter: community.twitter || meta.twitter, website: community.website || meta.website, telegram: community.telegram || meta.telegram, banner: community.banner || meta.banner, description: community.description || meta.description } }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.post('/admin/update-token', requireAdmin, async (req, res) => { const { mint, twitter, website, telegram, banner, description } = req.body; try { const token = await db.get(`SELECT metadata FROM tokens WHERE mint = $1`, [mint]); let currentMeta = {}; if (token && token.metadata) { try { currentMeta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata; } catch (e) {} } const newCommunity = { twitter, website, telegram, banner, description }; currentMeta.community = { ...(currentMeta.community || {}), ...newCommunity }; const jsonStr = JSON.stringify(currentMeta); await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE WHERE mint = $2`, [jsonStr, mint]); await updateSingleToken({ db }, mint); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    
+    router.post('/admin/update-token', requireAdmin, async (req, res) => { 
+        const { mint, twitter, website, telegram, banner, description } = req.body; 
+        try { 
+            const token = await db.get(`SELECT metadata FROM tokens WHERE mint = $1`, [mint]); 
+            let currentMeta = {}; 
+            if (token && token.metadata) { 
+                try { currentMeta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata; } catch (e) {} 
+            } 
+            
+            // UPDATED: Sanitize URLs here as well
+            const newCommunity = { 
+                twitter: sanitizeUrl(twitter), 
+                website: sanitizeUrl(website), 
+                telegram: sanitizeUrl(telegram), 
+                banner: sanitizeUrl(banner), 
+                description: description 
+            }; 
+            
+            currentMeta.community = { ...(currentMeta.community || {}), ...newCommunity }; 
+            const jsonStr = JSON.stringify(currentMeta); 
+            await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE WHERE mint = $2`, [jsonStr, mint]); 
+            await updateSingleToken({ db }, mint); 
+            res.json({ success: true }); 
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+    });
     
     // DELETE TOKEN
     router.post('/admin/delete-token', requireAdmin, async (req, res) => { 
@@ -247,7 +333,7 @@ function init(deps) {
 
     // --- API KEY ADMIN ---
     router.get('/admin/keys', requireAdmin, async (req, res) => { try { const keys = await db.all('SELECT * FROM api_keys ORDER BY created_at DESC'); res.json({ success: true, keys }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.post('/admin/generate-key', requireAdmin, async (req, res) => { const { owner, tier } = req.body; if (!owner) return res.status(400).json({ success: false, error: "Owner name required" }); try { const key = 'hx_' + require('crypto').randomBytes(16).toString('hex'); const limit = tier === 'pro' ? 100000 : (tier === 'enterprise' ? 1000000 : 1000); await db.run(`INSERT INTO api_keys (key, owner, tier, requests_limit, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) VALUES ($1, $2, $3, $4, $5, $6)`, [key, owner, tier || 'free', limit, Date.now()]); res.json({ success: true, key, message: "Key Generated" }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    router.post('/admin/generate-key', requireAdmin, async (req, res) => { const { owner, tier } = req.body; if (!owner) return res.status(400).json({ success: false, error: "Owner name required" }); try { const key = 'hx_' + require('crypto').randomBytes(16).toString('hex'); const limit = tier === 'pro' ? 100000 : (tier === 'enterprise' ? 1000000 : 1000); await db.run(`INSERT INTO api_keys (key, owner, tier, requests_limit, created_at) VALUES ($1, $2, $3, $4, $5)`, [key, owner, tier || 'free', limit, Date.now()]); res.json({ success: true, key, message: "Key Generated" }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     
     // KEY MANAGEMENT ROUTES - FIXED
     router.post('/admin/update-key', requireAdmin, async (req, res) => { 
@@ -468,8 +554,6 @@ function init(deps) {
                 
                 if (!token) return { success: false, error: "Token not found" };
 
-                // ... (Rest of existing logic: Stale check, holder history, etc.) ...
-                // Condensed for brevity as logic remains identical, just ensuring indexTokenOnChain is used
                 const now = Date.now();
                 const isStale = !token.timestamp || (now - token.timestamp > 300000); 
                 if (isStale && pairs.length > 0 && !pendingRefreshes.has(mint)) {
