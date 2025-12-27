@@ -6,11 +6,12 @@ const { fetchTokenMetadata } = require('./utils/metaplex');
 const { getSolanaConnection } = require('./services/solana');
 const { PublicKey } = require('@solana/web3.js');
 const logger = require('./services/logger');
-const metadataUpdater = require('./tasks/metadataUpdater'); // Import Metadata Updater
+const metadataUpdater = require('./tasks/metadataUpdater'); 
 
 const QUEUE_KEY = 'token_queue';
 let isRunning = false;
 
+// OPTIMIZATION: Explicitly nullify large objects to help GC
 async function processToken(mint) {
     const db = getDB();
     const connection = getSolanaConnection();
@@ -18,7 +19,7 @@ async function processToken(mint) {
     logger.info(`⚙️ Worker: Processing ${mint}...`);
 
     try {
-        const meta = await fetchTokenMetadata(mint);
+        let meta = await fetchTokenMetadata(mint);
         
         let supply = '1000000000';
         let decimals = 9;
@@ -33,11 +34,13 @@ async function processToken(mint) {
             ticker: meta?.symbol || 'UNKNOWN',
             image: meta?.image || null,
         };
+        
+        // Release meta object
+        meta = null;
 
         const finalSupply = supply || '0';
         const finalDecimals = decimals || 9;
 
-        // --- FIX: Insert Token FIRST to satisfy Foreign Key ---
         await db.run(`
             INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, timestamp)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -57,22 +60,26 @@ async function processToken(mint) {
             Date.now()
         ]);
 
-        // --- THEN Find and Index Pools ---
-        const pools = await findPoolsOnChain(mint);
+        let pools = await findPoolsOnChain(mint);
 
-        for (const pool of pools) {
-            await enableIndexing(db, mint, {
-                pairAddress: pool.pairAddress,
-                dexId: pool.dexId,
-                liquidity: pool.liquidity || { usd: 0 },
-                volume: pool.volume || { h24: 0 },
-                priceUsd: pool.priceUsd || 0,
-                baseToken: pool.baseToken, 
-                quoteToken: pool.quoteToken, 
-                reserve_a: pool.reserve_a,
-                reserve_b: pool.reserve_b
-            });
+        if (pools && pools.length > 0) {
+            for (const pool of pools) {
+                await enableIndexing(db, mint, {
+                    pairAddress: pool.pairAddress,
+                    dexId: pool.dexId,
+                    liquidity: pool.liquidity || { usd: 0 },
+                    volume: pool.volume || { h24: 0 },
+                    priceUsd: pool.priceUsd || 0,
+                    baseToken: pool.baseToken, 
+                    quoteToken: pool.quoteToken, 
+                    reserve_a: pool.reserve_a,
+                    reserve_b: pool.reserve_b
+                });
+            }
         }
+        
+        // Release pools array
+        pools = null;
 
         await aggregateAndSaveToken(db, mint);
         logger.info(`✅ Worker: Finished ${mint}`);
@@ -101,22 +108,27 @@ async function startWorker() {
 
         logger.info("🛠️ Worker: Starting Services...");
 
-        // 1. Start Metadata Updater (GeckoTerminal Sync)
-        // This runs in the background within the worker process
+        // Start Metadata Updater
         metadataUpdater.start({ db });
         logger.info("🛠️ Worker: Metadata Updater Started.");
 
         logger.info("🛠️ Worker: Listening for token queue jobs...");
 
-        // 2. Start Token Queue Processor
         const runLoop = async () => {
             if (!isRunning) return;
             try {
+                // OPTIMIZATION: Process one item at a time to control memory pressure
                 const item = await redis.rpop(QUEUE_KEY);
                 if (item) {
                     await processToken(item);
-                    setTimeout(runLoop, 100); 
+                    
+                    // Small delay to allow GC to run if needed
+                    if (global.gc) {
+                        try { global.gc(); } catch (e) {}
+                    }
+                    setTimeout(runLoop, 50); 
                 } else {
+                    // Backoff when empty
                     setTimeout(runLoop, 2000); 
                 }
             } catch (err) {
@@ -133,7 +145,6 @@ async function startWorker() {
     }
 }
 
-// AUTO-START if run directly (node src/worker.js)
 if (require.main === module) {
     startWorker();
 }

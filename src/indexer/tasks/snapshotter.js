@@ -8,7 +8,6 @@ const { enrichPoolsWithReserves } = require('../../services/pool_finder');
 
 const stateCache = new Map();
 
-// Known Quote Tokens
 const QUOTE_TOKENS = {
     'So11111111111111111111111111111111111111112': { decimals: 9, symbol: 'SOL' },
     'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': { decimals: 6, symbol: 'USDC' },
@@ -16,7 +15,7 @@ const QUOTE_TOKENS = {
 };
 
 let solPriceCache = 0; 
-let isCycleRunning = false; // LOCKING MECHANISM
+let isCycleRunning = false; 
 
 async function updateSolPrice(db) {
     try {
@@ -70,7 +69,6 @@ async function processPoolBatch(db, connection, pools, redis) {
     });
 
     if (keysToFetch.length === 0) {
-        // Just update last_check so we don't get stuck
         for (const p of pools) await db.query(`UPDATE active_trackers SET last_check = $1 WHERE pool_address = $2`, [now, p.address]);
         return;
     }
@@ -88,7 +86,6 @@ async function processPoolBatch(db, connection, pools, redis) {
     const trackerUpdates = [];
     
     for (const p of pools) {
-        // Update last_check to NOW so it won't be picked up again for 5 minutes
         trackerUpdates.push(db.query(`UPDATE active_trackers SET last_check = $1 WHERE pool_address = $2`, [now, p.address]));
 
         const task = poolMap.get(p.address);
@@ -112,8 +109,8 @@ async function processPoolBatch(db, connection, pools, redis) {
             if (task.type === 'pumpfun') {
                 const acc = accounts[task.idx];
                 if (acc) {
-                    reserveA = Number(acc.data.readBigUInt64LE(8));  // Virtual Token
-                    reserveB = Number(acc.data.readBigUInt64LE(16)); // Virtual SOL
+                    reserveA = Number(acc.data.readBigUInt64LE(8));
+                    reserveB = Number(acc.data.readBigUInt64LE(16));
                     decA = 6; 
                     decB = 9; 
                 }
@@ -168,16 +165,12 @@ async function processPoolBatch(db, connection, pools, redis) {
                     success = false;
                 }
             }
-        } catch (err) {
-            // logger.error(`Math Error ${p.address}: ${err.message}`);
-        }
+        } catch (err) {}
 
         // --- VOLUME TRACKING (ASYNC) ---
-        // Keeps checking volume even if price is stale, but respects the loop batching
         const volKey = `vol_last_check:${p.address}`;
         const lastCheck = stateCache.get(volKey) || 0;
         
-        // Only run volume check if > 2 mins passed (separate from price check)
         if (now - lastCheck > 120000) { 
             stateCache.set(volKey, now);
             const sigKey = `vol_sig:${p.address}`;
@@ -219,15 +212,21 @@ async function processPoolBatch(db, connection, pools, redis) {
         }
     }
     
+    // Explicitly nullify large objects
+    accounts = null;
+    
     await Promise.allSettled([...updates, ...trackerUpdates]);
 
     if (affectedMints.size > 0) {
         for (const mint of affectedMints) await aggregateAndSaveToken(db, mint);
     }
+    
+    // Clean up sets/maps
+    affectedMints.clear();
+    poolMap.clear();
 }
 
 async function runSnapshotCycle() {
-    // PREVENT OVERLAP
     if (isCycleRunning) {
         logger.warn("⚠️ Snapshotter: Previous cycle still running. Skipping.");
         return;
@@ -240,8 +239,6 @@ async function runSnapshotCycle() {
         
         await updateSolPrice(db);
         
-        // SMART POLLING: Only fetch pools that haven't been checked in 5 minutes (300000ms)
-        // We do NOT filter by volume, so 0 volume pools are included.
         const staleThreshold = Date.now() - 300000;
 
         const res = await db.query(`
@@ -254,19 +251,28 @@ async function runSnapshotCycle() {
             LIMIT 200
         `, [staleThreshold]);
         
-        const pools = res.rows;
+        let pools = res.rows;
 
         if (pools.length > 0) {
-            // logger.info(`⏱️ Snapshotter: Refreshing ${pools.length} stale pools...`);
             for (let i = 0; i < pools.length; i += 50) {
                 await processPoolBatch(db, connection, pools.slice(i, i + 50), null);
+                // Pause to let event loop/GC run
                 await new Promise(r => setTimeout(r, 200)); 
             }
         }
+        
+        // Release pools array
+        pools = null;
+
     } catch (e) {
         logger.error(`Snapshot Cycle Error: ${e.message}`);
     } finally {
         isCycleRunning = false;
+        
+        // Optional: Force GC if available (run with --expose-gc)
+        if (global.gc) {
+            try { global.gc(); } catch (e) {}
+        }
     }
 }
 
@@ -274,7 +280,7 @@ function startSnapshotter() {
     setTimeout(() => {
         logger.info("🟢 Snapshotter Engine Started (Smart Polling 5m)");
         runSnapshotCycle();
-        setInterval(runSnapshotCycle, 30000); // Run cycle every 30s to pick up next batch
+        setInterval(runSnapshotCycle, 30000); 
     }, 5000);
 }
 

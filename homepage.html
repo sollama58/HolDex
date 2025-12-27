@@ -17,7 +17,7 @@
     <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <script src="https://unpkg.com/tweetnacl@1.0.3/nacl-fast.min.js"></script> <!-- Required for signing -->
+    <script src="https://unpkg.com/tweetnacl@1.0.3/nacl-fast.min.js"></script> 
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     
     <script>
@@ -52,12 +52,14 @@
         .pill { padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono'; }
         .pill-green { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4); }
         .pill-red { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
-        .search-container { position: relative; width: 100%; }
+        .search-container { position: relative; width: 100%; display: flex; align-items: center; gap: 8px; }
         .search-box { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; padding: 10px 36px 10px 16px; border-radius: 8px; outline: none; width: 100%; font-family: 'JetBrains Mono'; transition: border-color 0.2s; }
         .search-box:focus { border-color: #ea580c; }
         .search-box::placeholder { color: #9a3412; }
-        .clear-search { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #9a3412; cursor: pointer; display: none; }
+        .clear-search { position: absolute; right: 46px; top: 50%; transform: translateY(-50%); color: #9a3412; cursor: pointer; display: none; }
         .clear-search:hover { color: #ea580c; }
+        .info-toggle { color: #9a3412; cursor: pointer; transition: color 0.2s; }
+        .info-toggle:hover { color: #fb923c; }
         .nav-btn { background: transparent; color: #9a3412; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 800; transition: all 0.2s; border: 2px solid transparent; }
         .nav-btn:hover { color: #fb923c; }
         .nav-btn.active { background: #451a03; color: #ea580c; border-color: #7c2d12; box-shadow: 0 4px 0 #2a1005; }
@@ -176,8 +178,9 @@
                 <i data-lucide="bar-chart-2" width="16"></i> Hide 0 Vol
             </button>
             <div class="relative w-full md:w-auto search-container">
-                <input type="text" id="search" placeholder="Search..." class="search-box" onkeyup="handleSearch(event)">
+                <input type="text" id="search" placeholder="Search..." class="search-box">
                 <i id="clear-search-btn" data-lucide="x" width="16" class="clear-search" onclick="clearSearch()"></i>
+                <i id="help-btn" data-lucide="help-circle" width="18" class="info-toggle" onclick="toggleHowItWorksModal()" title="How are tokens added?"></i>
             </div>
             <button id="manual-refresh" onclick="handleManualRefresh()" class="refresh-btn" title="Refresh Data">
                 <i data-lucide="refresh-cw" width="18"></i>
@@ -425,6 +428,51 @@
     </div>
 </footer>
 
+<!-- NEW: HOW IT WORKS MODAL -->
+<div id="how-it-works-modal" class="modal-overlay" onclick="toggleHowItWorksModal()">
+    <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-6 w-full max-w-lg shadow-2xl relative" onclick="event.stopPropagation()">
+        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleHowItWorksModal()"><i data-lucide="x" width="24"></i></button>
+        
+        <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 bg-[#451a03] rounded-lg border border-[#7c2d12] text-[#ea580c]"><i data-lucide="info" width="24"></i></div>
+            <div>
+                <h3 class="text-xl font-bold text-white font-sans">How HolDex Works</h3>
+            </div>
+        </div>
+
+        <div class="space-y-6 text-sm text-[#ffedd5]">
+            <div class="flex gap-4">
+                <div class="mt-1 text-[#22c55e]"><i data-lucide="radar" width="20"></i></div>
+                <div>
+                    <h4 class="font-bold text-white mb-1">Automatic Discovery</h4>
+                    <p class="text-[#9a3412]">Our backend listens to the Solana blockchain in real-time. New tokens created on <strong>Pump.fun</strong> or <strong>Raydium</strong> are automatically detected.</p>
+                    <p class="text-[#fb923c] mt-2 font-mono text-xs border border-[#ea580c] p-1 rounded inline-block bg-[#451a03]">Minimum Market Cap Required: $20,000 USD</p>
+                </div>
+            </div>
+
+            <div class="flex gap-4">
+                <div class="mt-1 text-[#3b82f6]"><i data-lucide="search" width="20"></i></div>
+                <div>
+                    <h4 class="font-bold text-white mb-1">Instant Search</h4>
+                    <p class="text-[#9a3412]">Searching for a Token Address (CA) will instantly pull its data from the chain, even if our listener missed it (ignores mcap limit).</p>
+                </div>
+            </div>
+
+            <div class="flex gap-4">
+                <div class="mt-1 text-[#ea580c]"><i data-lucide="shield-check" width="20"></i></div>
+                <div>
+                    <h4 class="font-bold text-white mb-1">Community Verification</h4>
+                    <p class="text-[#9a3412]">Project owners can submit social links and banners via the <strong>Update</strong> tab. These submissions are manually reviewed by our team to ensure safety.</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="mt-8 flex justify-end">
+             <button onclick="toggleHowItWorksModal()" class="action-btn text-xs">Got it</button>
+        </div>
+    </div>
+</div>
+
 <!-- API DOCUMENTATION MODAL (UPDATED) -->
 <div id="api-docs-modal" class="modal-overlay" onclick="toggleApiModal()">
     <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto relative shadow-2xl" onclick="event.stopPropagation()">
@@ -596,6 +644,7 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     let isApiModalOpen = false;
     let isLpModalOpen = false;
     let isWalletModalOpen = false;
+    let isHowItWorksModalOpen = false; // NEW
     let currentPage = 1;
     let isVerifiedFilter = false;
     let isZeroVolHidden = true; 
@@ -626,6 +675,17 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
 
     // SOCKET.IO CLIENT
     let socket = null;
+
+    // NEW: Debounce function for search
+    const debounce = (func, delay) => {
+        let timeoutId;
+        return (...args) => {
+            clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => {
+                func.apply(null, args);
+            }, delay);
+        };
+    };
 
     window.onload = async () => { 
         handleRoute(); 
@@ -660,6 +720,14 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         if(descInput && charCount) { 
             descInput.addEventListener('input', () => { charCount.innerText = descInput.value.length; }); 
         } 
+
+        // Attach Debounced Search
+        const searchInput = document.getElementById('search');
+        if (searchInput) {
+            searchInput.addEventListener('input', debounce((e) => {
+                handleSearch(e);
+            }, 500)); // 500ms delay for responsiveness
+        }
     };
     
     window.addEventListener('hashchange', handleRoute);
@@ -1165,9 +1233,25 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     function openPreview() { if (!currentUpdateTokenData) { alert("Please enter a valid Mint Address first."); return; } const banner = document.getElementById('update-banner').value; const twitter = document.getElementById('update-twitter').value; const website = document.getElementById('update-website').value; const telegram = document.getElementById('update-telegram').value; const t = { ...currentUpdateTokenData, banner, twitter, website, telegram, hasCommunityUpdate: true }; const container = document.getElementById('preview-container'); let html = ''; if (t.banner) { html += `<div class="w-full h-48 md:h-64 rounded-xl border-2 border-[#7c2d12] shadow-lg relative overflow-hidden bg-black mb-6"><img src="${t.banner}" class="w-full h-full object-cover object-center" onerror="this.src='${FALLBACK_BANNER}'"><div class="absolute inset-0 bg-gradient-to-t from-[#2a1005] to-transparent opacity-80 pointer-events-none"></div></div>`; } let linksHtml = ''; if (t.twitter) linksHtml += `<a href="#" class="social-btn"><i data-lucide="twitter" width="20"></i></a>`; if (t.website) linksHtml += `<a href="#" class="social-btn"><i data-lucide="globe" width="20"></i></a>`; if (t.telegram) linksHtml += `<a href="#" class="social-btn"><i data-lucide="send" width="20"></i></a>`; const mediaHtml = renderTokenMedia(t.image, "w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black"); html += `<div class="flex flex-col md:flex-row gap-6 mb-8 items-start"><div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl">${mediaHtml}<div class="flex-1 min-w-0"><div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mb-1"><h2 class="text-3xl font-bold text-white tracking-tight font-mono">${t.ticker}</h2><span class="text-[#fb923c] text-sm bg-[#2a1005] px-3 py-1 rounded-lg border border-[#7c2d12]">${t.name}</span></div><div class="text-xs text-[#9a3412] font-mono">${t.mint}</div></div></div><div class="flex-1"></div><div class="flex flex-wrap gap-3">${linksHtml}</div></div><div class="text-center text-[#9a3412] font-mono text-xs mt-10">-- End of Preview --</div>`; if(container) container.innerHTML = html; lucide.createIcons(); document.getElementById('preview-modal').classList.add('open'); }
     function closePreview() { document.getElementById('preview-modal').classList.remove('open'); }
     function toggleInfoModal() { const modal = document.getElementById('info-modal'); isInfoModalOpen = !isInfoModalOpen; if (isInfoModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
+    
+    // NEW: How it Works Modal Toggle
+    function toggleHowItWorksModal() {
+        const modal = document.getElementById('how-it-works-modal');
+        isHowItWorksModalOpen = !isHowItWorksModalOpen;
+        if (isHowItWorksModalOpen) modal.classList.add('open'); else modal.classList.remove('open');
+    }
+
     function toggleVerifiedFilter() { isVerifiedFilter = !isVerifiedFilter; const btn = document.getElementById('filter-verified'); if(btn) { if (isVerifiedFilter) btn.classList.add('active'); else btn.classList.remove('active'); } currentPage = 1; fetchList(); }
     function toggleZeroVolFilter() { isZeroVolHidden = !isZeroVolHidden; const btn = document.getElementById('filter-zerovol'); if(btn) { if (isZeroVolHidden) btn.classList.add('active'); else btn.classList.remove('active'); } currentPage = 1; fetchList(); }
-    window.handleSearch = (e) => { searchQuery = e.target.value; const clearBtn = document.getElementById('clear-search-btn'); if (searchQuery.length > 0) { clearBtn.style.display = 'block'; } else { clearBtn.style.display = 'none'; } currentPage = 1; clearTimeout(window.searchTimeout); window.searchTimeout = setTimeout(fetchList, 1000); };
+    
+    window.handleSearch = (e) => { 
+        searchQuery = e.target.value; 
+        const clearBtn = document.getElementById('clear-search-btn'); 
+        if (searchQuery.length > 0) { clearBtn.style.display = 'block'; } else { clearBtn.style.display = 'none'; } 
+        currentPage = 1; 
+        fetchList(); 
+    };
+    
     window.clearSearch = () => { const input = document.getElementById('search'); input.value = ''; searchQuery = ''; document.getElementById('clear-search-btn').style.display = 'none'; currentPage = 1; fetchList(); };
     window.copyMint = () => { const el = document.getElementById('detail-mint'); if(el) navigator.clipboard.writeText(el.innerText); };
     window.handleManualRefresh = () => { fetchList(); };
