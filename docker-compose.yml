@@ -1,65 +1,80 @@
 version: '3.8'
 
 services:
+  # LOAD BALANCER (Entry Point)
+  nginx:
+    image: nginx:latest
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+    networks:
+      - holdex-network
+
+  # API SERVER (Scaled x 3)
   api:
     build: .
-    ports:
-      - "3000:3000"
+    restart: always
     environment:
       - PORT=3000
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
-      - SOLANA_RPC_URL=${SOLANA_RPC_URL}
-      - HELIUS_API_KEY=${HELIUS_API_KEY}
+      - DATABASE_URL=postgres://user:password@db:5432/holdex
+      - REDIS_URL=redis://redis:6379
+      # ... Ensure your other ENV vars are here or use env_file
     depends_on:
-      - redis
       - db
-    restart: always
+      - redis
+    networks:
+      - holdex-network
+    # In production, you scale this: docker-compose up --scale api=3
 
+  # WORKER (Background Jobs)
   worker:
     build: .
-    command: npm run start:worker
-    environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
-      - SOLANA_RPC_URL=${SOLANA_RPC_URL}
-      - HELIUS_API_KEY=${HELIUS_API_KEY}
-    depends_on:
-      - redis
-      - db
+    command: node src/worker.js
     restart: always
-
-  indexer:
-    build: .
-    command: npm run start:indexer
     environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=${REDIS_URL}
-      - SOLANA_RPC_URL=${SOLANA_RPC_URL}
-      - HELIUS_API_KEY=${HELIUS_API_KEY}
+      - DATABASE_URL=postgres://user:password@db:5432/holdex
+      - REDIS_URL=redis://redis:6379
     depends_on:
-      - redis
       - db
-    restart: always
+      - redis
+    networks:
+      - holdex-network
 
-  redis:
-    image: redis:alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-
+  # TIMESCALE DB (Replaces Standard Postgres)
   db:
-    image: postgres:15-alpine
+    image: timescale/timescaledb:latest-pg15
+    restart: always
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_DB: holdex
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - holdex-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d holdex"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # REDIS (Message Broker)
+  redis:
+    image: redis:alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - holdex-network
+
+networks:
+  holdex-network:
+    driver: bridge
 
 volumes:
-  redis_data:
   postgres_data:

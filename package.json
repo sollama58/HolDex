@@ -1,35 +1,38 @@
 {
   "name": "holdex-backend",
-  "version": "2.5.0",
-  "description": "HolDex Backend - High Velocity Solana Explorer",
+  "version": "1.0.0",
+  "description": "Solana Token Indexer and API with WebSocket support",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "start:worker": "node src/worker.js",
     "dev": "nodemon src/index.js",
-    "init-db": "node src/scripts/reset_and_init_final.js",
-    "seed": "node src/scripts/seed_data.js",
-    "fix-schema": "node src/scripts/fix_schema.js",
-    "backfill": "node src/indexer/scripts/backfill.js"
+    "worker": "node src/worker.js",
+    "indexer": "node src/indexer/index.js",
+    "migrate:timescale": "node src/scripts/migrate_timescaledb.js",
+    "optimize:db": "node src/scripts/optimize_db.js",
+    "prune:data": "node src/scripts/prune_data.js",
+    "seed": "node src/scripts/seed_data.js"
   },
   "dependencies": {
-    "@solana/web3.js": "^1.91.0",
-    "axios": "^1.6.8",
+    "@socket.io/redis-adapter": "^8.2.1",
+    "@solana/spl-token": "^0.3.9",
+    "@solana/web3.js": "^1.87.6",
+    "axios": "^1.6.2",
     "bs58": "^5.0.0",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2",
-    "express-rate-limit": "^7.2.0",
-    "helmet": "^7.1.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
     "ioredis": "^5.3.2",
     "pg": "^8.11.3",
-    "socket.io": "^4.7.5",
-    "winston": "^3.13.0"
+    "redis": "^4.6.10",
+    "socket.io": "^4.7.2",
+    "winston": "^3.11.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0"
+    "nodemon": "^3.0.1"
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "license": "MIT"
 }

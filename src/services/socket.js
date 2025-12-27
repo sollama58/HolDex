@@ -1,63 +1,65 @@
 const { Server } = require('socket.io');
+const { createAdapter } = require('@socket.io/redis-adapter');
+const { createClient } = require('redis');
+const config = require('../config/env');
 const logger = require('./logger');
 
-let io = null;
+let io;
 
-function initSocket(httpServer, corsOrigins) {
-    if (io) return io;
-
-    const allowedOrigins = corsOrigins;
-    // Helper to match logic in main app
-    const isAllowed = (origin) => {
-        if (!origin) return true;
-        if (allowedOrigins === '*' || (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin))) return true;
-        if (origin.includes('localhost') || origin.includes('alonisthe.dev')) return true;
-        return false;
-    };
-
-    io = new Server(httpServer, {
+async function initSocket(server) {
+    io = new Server(server, {
         cors: {
-            origin: (origin, callback) => {
-                if (isAllowed(origin)) callback(null, true);
-                else callback(new Error('Not allowed by CORS'));
-            },
+            origin: "*", 
             methods: ["GET", "POST"]
         },
-        path: '/socket.io'
+        transports: ['websocket', 'polling'] 
     });
 
-    io.on('connection', (socket) => {
-        // logger.info(`🔌 Socket Connected: ${socket.id}`);
+    // --- REDIS ADAPTER SETUP ---
+    // This allows multiple API instances to talk to each other
+    try {
+        const pubClient = createClient({ url: config.REDIS_URL || 'redis://redis:6379' });
+        const subClient = pubClient.duplicate();
 
-        // Room Management for Token Subscriptions
+        await pubClient.connect();
+        await subClient.connect();
+
+        io.adapter(createAdapter(pubClient, subClient));
+        logger.info("🔌 Socket.io: Redis Adapter Connected");
+    } catch (e) {
+        logger.error("❌ Socket.io: Failed to connect to Redis adapter", e);
+        // Fallback to memory adapter if Redis fails
+    }
+
+    io.on('connection', (socket) => {
+        // logger.info(`Socket Connected: ${socket.id}`);
+        
+        // Allow clients to subscribe to specific tokens (rooms)
         socket.on('subscribe', (mint) => {
-            if (mint && typeof mint === 'string') {
-                socket.join(`token:${mint}`);
-                // logger.info(`Socket ${socket.id} joined token:${mint}`);
-            }
+            if(mint) socket.join(mint);
         });
 
         socket.on('unsubscribe', (mint) => {
-            if (mint) socket.leave(`token:${mint}`);
-        });
-
-        socket.on('disconnect', () => {
-            // logger.info(`Socket Disconnected: ${socket.id}`);
+            if(mint) socket.leave(mint);
         });
     });
 
-    logger.info("📡 WebSocket Server Initialized");
     return io;
 }
 
 function getIO() {
+    if (!io) {
+        throw new Error("Socket.io not initialized!");
+    }
     return io;
 }
 
 // Helper to broadcast updates
-function broadcastTokenUpdate(mint, data) {
-    if (!io) return;
-    io.to(`token:${mint}`).emit('update', data);
+// With the Redis adapter, this works even if the user is connected to a different server instance
+function broadcastPriceUpdate(mint, data) {
+    if (io) {
+        io.to(mint).emit('price-update', data);
+    }
 }
 
-module.exports = { initSocket, getIO, broadcastTokenUpdate };
+module.exports = { initSocket, getIO, broadcastPriceUpdate };
