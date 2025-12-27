@@ -1,7 +1,7 @@
 const axios = require('axios');
 const logger = require('../services/logger');
 const { broadcastTokenUpdate } = require('../services/socket'); 
-const { fetchSolscanData } = require('../services/solscan'); 
+const { getHolderCountFromRPC } = require('../services/solana');
 
 let isRunning = false;
 const BATCH_SIZE = 5; 
@@ -39,7 +39,7 @@ async function processSingleToken(db, t, now) {
         // --- 1. HOLDER COUNT LOGIC ---
         let holderCount = 0;
         
-        // Try GeckoTerminal first
+        // Strategy A: GeckoTerminal (Attributes)
         if (tokenDetails && tokenDetails.attributes) {
             if (tokenDetails.attributes.holder_count) {
                 holderCount = parseInt(tokenDetails.attributes.holder_count);
@@ -48,13 +48,11 @@ async function processSingleToken(db, t, now) {
             }
         }
 
-        // Fallback to Solscan
+        // Strategy B: Direct RPC Scan (Helius/Solana)
+        // Only run if Gecko failed or returned 0
         if (!holderCount || holderCount === 0) {
-            const solscanData = await fetchSolscanData(t.mint);
-            if (solscanData && solscanData.holders > 0) {
-                holderCount = solscanData.holders;
-                // logger.info(`✅ Found holders via Solscan for ${t.mint}: ${holderCount}`);
-            }
+            // logger.debug(`Fetching RPC holders for ${t.mint}...`);
+            holderCount = await getHolderCountFromRPC(t.mint);
         }
 
         // --- 2. PREPARE DATA ---
@@ -168,7 +166,7 @@ async function processSingleToken(db, t, now) {
             }
         }
         
-        // Always attempt to update holders if we found them
+        // Always attempt to update holders if we found them (via Gecko or RPC)
         if (holderCount > 0) {
             updateParts.push(`holders = $${idx++}`);
             finalParams.push(holderCount);
@@ -229,10 +227,6 @@ async function updateMetadata(deps) {
             ORDER BY liquidity DESC, updated_at ASC 
             LIMIT 75
         `);
-        
-        if (tokens.length > 0) {
-            // logger.info(`🔄 Metadata: Syncing ${tokens.length} tokens (Gecko/Solscan)...`);
-        }
         
         for (let i = 0; i < tokens.length; i += BATCH_SIZE) {
             const batch = tokens.slice(i, i + BATCH_SIZE);

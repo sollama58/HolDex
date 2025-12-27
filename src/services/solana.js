@@ -1,61 +1,64 @@
-const { Connection } = require('@solana/web3.js');
+const { Connection, PublicKey } = require('@solana/web3.js');
 const config = require('../config/env');
 const logger = require('./logger');
 
-// STRICT SINGLE RPC POLICY
-// We only use the URL defined in config (which prioritizes HELIUS_API_KEY)
-const RPC_URL = config.SOLANA_RPC_URL;
-
-let connectionInstance = null;
-
-function createConnection(url) {
-    logger.info(`🔌 Connecting to Primary RPC: [${url}]`);
-    
-    return new Connection(url, {
-        commitment: 'confirmed',
-        confirmTransactionInitialTimeout: 60000,
-        disableRetryOnRateLimit: true, // We handle retries manually
-    });
-}
+let connection;
 
 function getSolanaConnection() {
-    if (!connectionInstance) {
-        connectionInstance = createConnection(RPC_URL);
+    if (!connection) {
+        // Use the configured RPC URL (likely Helius/QuickNode based on your env)
+        connection = new Connection(config.RPC_URL, {
+            commitment: 'confirmed',
+            confirmTransactionInitialTimeout: 60000
+        });
     }
-    return connectionInstance;
+    return connection;
 }
 
-function getRpcUrl() {
-    return RPC_URL;
-}
-
-function rotateConnection() {
-    // Since we are strictly using Helius, "rotation" just means 
-    // re-instantiating the connection to clear internal state.
-    logger.warn(`⚠️  Refreshing RPC Connection State...`);
-    connectionInstance = createConnection(RPC_URL);
-    return connectionInstance;
-}
-
-async function retryRPC(fn, retries = 3, delay = 1000) {
+/**
+ * Fetches the number of holders directly from the RPC.
+ * Uses getProgramAccounts with filters to be lightweight (dataSlice).
+ * Recommended to use with a paid RPC (Helius/QuickNode) as public RPCs may 429 this.
+ */
+async function getHolderCountFromRPC(mintAddress) {
     try {
         const conn = getSolanaConnection();
-        if (!conn) throw new Error("Connection initialization failed");
-        return await fn(conn);
-    } catch (err) {
-        if (retries <= 0) {
-            throw err;
-        }
+        const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+        
+        // Filter: Data Size = 165 (Standard Token Account) AND Mint = mintAddress
+        const filters = [
+            { dataSize: 165 }, 
+            { memcmp: { offset: 0, bytes: mintAddress } }
+        ];
 
-        // Simple exponential backoff on the SAME endpoint
-        await new Promise(r => setTimeout(r, delay));
-        return retryRPC(fn, retries - 1, delay * 2);
+        // Fetch only keys (dataSlice length 0) to save massive bandwidth
+        const accounts = await conn.getProgramAccounts(TOKEN_PROGRAM_ID, {
+            filters: filters,
+            dataSlice: { offset: 0, length: 0 }
+        });
+
+        return accounts.length;
+    } catch (e) {
+        // It's common for public RPCs to block getProgramAccounts
+        // logger.warn(`RPC Holder Count failed for ${mintAddress}: ${e.message}`);
+        return 0;
+    }
+}
+
+/**
+ * Validates a Solana public key
+ */
+function isValidPubkey(str) {
+    try {
+        new PublicKey(str);
+        return true;
+    } catch (e) {
+        return false;
     }
 }
 
 module.exports = { 
-    getSolanaConnection,
-    getRpcUrl,
-    rotateConnection,
-    retryRPC
+    getSolanaConnection, 
+    isValidPubkey,
+    getHolderCountFromRPC 
 };
