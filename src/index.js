@@ -31,8 +31,18 @@ const allowedOrigins = config.CORS_ORIGINS;
 const corsOptions = {
     origin: function (origin, callback) {
         if (!origin) return callback(null, true);
+        
+        // Check Config
         const isConfigAllowed = allowedOrigins === '*' || (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin));
-        const isDomainAllowed = origin.includes('alonisthe.dev') || origin.includes('localhost') || origin.includes('127.0.0.1'); 
+        
+        // Check Domain Whitelist
+        // ADDED: .squarespace.com to fix your frontend error
+        const isDomainAllowed = 
+            origin.includes('alonisthe.dev') || 
+            origin.includes('localhost') || 
+            origin.includes('127.0.0.1') ||
+            origin.includes('.squarespace.com') ||
+            origin.includes('squarespace.com');
 
         if (isConfigAllowed || isDomainAllowed) {
             return callback(null, true);

@@ -10,12 +10,10 @@ const { analyzeTokenHolders } = require('../services/solana');
  */
 async function calculateDeepScore(db, token) {
     // --- 0. ELIGIBILITY CHECK ---
-    // If checking casing, 'pg' driver usually returns lowercase column names.
     const hasUpdate = token.hascommunityupdate === true || token.hasCommunityUpdate === true;
 
     if (!hasUpdate) {
         // Not eligible for a score calculation. Return base skepticism.
-        // We return 10 (instead of 0) to avoid "broken" looking UI, but it's a low score.
         return 10; 
     }
 
@@ -23,7 +21,6 @@ async function calculateDeepScore(db, token) {
     const now = Date.now();
 
     // 1. Get LP Addresses to exclude from "Holder" analysis
-    // We don't want to calculate the 'hold time' of the Raydium Pool itself.
     const pools = await db.all(`SELECT address, reserve_a, reserve_b FROM pools WHERE mint = $1`, [token.mint]);
     const excludeList = [];
     pools.forEach(p => {
@@ -33,10 +30,8 @@ async function calculateDeepScore(db, token) {
     });
 
     // 2. Heavy Analysis (RPC Call)
-    // Only run if we have valid pools to exclude (implies token is somewhat valid)
     let avgHoldHours = 0;
     if (excludeList.length > 0) {
-        // analyzeTokenHolders checks the ATAs, so filtering is handled by the account type.
         const analysis = await analyzeTokenHolders(token.mint, excludeList);
         avgHoldHours = analysis.avgHoldHours || 0;
     }
@@ -50,41 +45,61 @@ async function calculateDeepScore(db, token) {
         ORDER BY timestamp DESC LIMIT 1
     `, [token.mint, yesterday]);
 
-    // Trend Logic:
-    // - If we have history > 0, calculate growth.
-    // - If history is missing, assume 0% growth (Neutral).
     if (historyRow && historyRow.count > 0 && token.holders > 0) {
         holderGrowthPct = ((token.holders - historyRow.count) / historyRow.count) * 100;
     }
 
     // --- SCORING RULES ---
     
-    // A. Hold Time (The "Diamond Hand" Factor)
-    if (avgHoldHours > 168) score += 40;     // > 1 Week
-    else if (avgHoldHours > 72) score += 30; // > 3 Days
-    else if (avgHoldHours > 24) score += 20; // > 1 Day
-    else if (avgHoldHours > 6) score += 10;  // > 6 Hours
-    else if (avgHoldHours < 1) score -= 5;   // < 1 Hour (Flipper/Bot)
+    // A. Hold Time
+    if (avgHoldHours > 168) score += 40;     
+    else if (avgHoldHours > 72) score += 30; 
+    else if (avgHoldHours > 24) score += 20; 
+    else if (avgHoldHours > 6) score += 10;  
+    else if (avgHoldHours < 1) score -= 5;   
 
-    // B. Trend (The "Viral" Factor)
+    // B. Trend
     if (holderGrowthPct > 20) score += 30;     
     else if (holderGrowthPct > 5) score += 20; 
     else if (holderGrowthPct > 0) score += 5;  
     else if (holderGrowthPct === 0 && token.holders > 100) score += 5; 
     else if (holderGrowthPct < -5) score -= 15;
 
-    // C. Liquidity / Volume Sanity
+    // C. Liquidity / Volume
     if (token.liquidity > 50000) score += 10;
     else if (token.liquidity < 1000) score -= 20;
 
-    // Wash Trading Penalty: High Volume + Zero Hold Time = Bot
     if (token.volume24h > 1000000 && avgHoldHours < 1) score -= 20;
 
-    // D. Community Verification (Guaranteed true if we got here, but adding bonus)
+    // D. Community (Bonus)
     score += 15;
 
-    // Final Clamp 1-99
     return Math.min(Math.max(Math.floor(score), 1), 99);
 }
 
-module.exports = { calculateDeepScore };
+/**
+ * Helper function for API Routes to manually refresh a single token
+ */
+async function updateSingleToken(deps, mint) {
+    const { db } = deps;
+    try {
+        const token = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]);
+        if (!token) throw new Error("Token not found");
+
+        // Perform calculation
+        const score = await calculateDeepScore(db, token);
+
+        await db.run(`
+            UPDATE tokens 
+            SET k_score = $1, last_k_score_update = $2 
+            WHERE mint = $3
+        `, [score, Date.now(), mint]);
+        
+        return score;
+    } catch (e) {
+        // Allow the route to catch the error
+        throw e;
+    }
+}
+
+module.exports = { calculateDeepScore, updateSingleToken };
