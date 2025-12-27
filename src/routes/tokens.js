@@ -271,8 +271,6 @@ function init(deps) {
                 let tokenData = { ...token };
                 
                 // --- FIX: CAPITALIZATION MAPPING ---
-                // PostgreSQL returns lowercase columns (marketcap, priceusd, etc)
-                // Frontend expects camelCase (marketCap, priceUsd)
                 tokenData.marketCap = tokenData.marketCap || tokenData.marketcap || 0;
                 tokenData.priceUsd = tokenData.priceUsd || tokenData.priceusd || 0;
                 tokenData.volume24h = tokenData.volume24h || 0;
@@ -281,7 +279,6 @@ function init(deps) {
                 
                 if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
                 
-                // Merge JSON metadata
                 if (tokenData.metadata) {
                     try {
                         const meta = typeof tokenData.metadata === 'string' ? JSON.parse(tokenData.metadata) : tokenData.metadata;
@@ -336,12 +333,14 @@ function init(deps) {
             } else {
                 let orderBy = 'k_score DESC';
                 if (sort === 'newest') orderBy = 'timestamp DESC';
+                else if (sort === 'age') orderBy = 'timestamp ASC'; // ADDED: Age Sort
                 else if (sort === 'mcap') orderBy = 'marketCap DESC';
                 else if (sort === 'volume') orderBy = 'volume24h DESC';
                 else if (sort === '24h') orderBy = 'change24h DESC';
                 else if (sort === 'liquidity') orderBy = 'liquidity DESC';
                 else if (sort === '5m') orderBy = 'change5m DESC';
                 else if (sort === '1h') orderBy = 'change1h DESC';
+                else if (sort === 'holders') orderBy = 'holders DESC'; // ADDED: Holders Sort
 
                 const offset = (page - 1) * 100;
                 rows = await db.all(`SELECT * FROM tokens ORDER BY ${orderBy} LIMIT 100 OFFSET ${offset}`);
@@ -362,7 +361,7 @@ function init(deps) {
                     change1h: r.change1h || 0,
                     change5m: r.change5m || 0,
                     liquidity: r.liquidity || 0,
-                    holders: r.holders || 0, // NEW
+                    holders: r.holders || 0, 
                     hasCommunityUpdate: r.hasCommunityUpdate || r.hascommunityupdate || false,
                     timestamp: parseInt(r.timestamp),
                     kScore: r.k_score || 0

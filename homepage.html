@@ -199,18 +199,20 @@
                 <table class="holdex-table">
                     <thead>
                         <tr>
-                            <th width="40%" class="sort-header" onclick="setSort('newest')">Asset <i data-lucide="arrow-down-up" width="10" class="inline opacity-50 ml-1"></i></th>
+                            <th width="30%" class="sort-header" onclick="setSort('newest')">Asset <i data-lucide="arrow-down-up" width="10" class="inline opacity-50 ml-1"></i></th>
                             <th class="sort-header text-[#ea580c] border-b-[#ea580c] border-b-2" onclick="setSort('kscore')">K-Score</th>
                             <th class="hidden md:table-cell sort-header" onclick="setSort('5m')">5m</th>
                             <th class="hidden md:table-cell sort-header" onclick="setSort('1h')">1h</th>
                             <th class="sort-header" onclick="setSort('24h')">24h</th>
                             <th class="sort-header" onclick="setSort('mcap')">Mkt Cap</th>
+                            <!-- NEW: Holders Column -->
+                            <th class="hidden md:table-cell sort-header" onclick="setSort('holders')">Holders</th>
                             <th class="sort-header" onclick="setSort('volume')">Vol (24h)</th> 
                             <th class="hidden md:table-cell sort-header" onclick="setSort('age')">Age</th>
                         </tr>
                     </thead>
                     <tbody id="table-body">
-                        <tr><td colspan="8" class="text-center py-20 text-orange-700 font-mono animate-pulse">Scanning Solana Mempool...</td></tr>
+                        <tr><td colspan="9" class="text-center py-20 text-orange-700 font-mono animate-pulse">Scanning Solana Mempool...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -1072,6 +1074,22 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     window.handleManualRefresh = () => { fetchList(); };
     window.toggleApiModal = () => { const modal = document.getElementById('api-docs-modal'); isApiModalOpen = !isApiModalOpen; if (isApiModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
     window.toggleLpModal = () => { const modal = document.getElementById('lp-modal'); isLpModalOpen = !isLpModalOpen; if (isLpModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
+    
+    // NEW: SET SORT FUNCTION
+    window.setSort = (sort) => {
+        currentSort = sort;
+        currentPage = 1;
+        // Update visual sort indicators
+        document.querySelectorAll('.sort-header').forEach(th => {
+            const onclickVal = th.getAttribute('onclick') || '';
+            if (onclickVal.includes(`'${sort}'`)) {
+                th.classList.add('text-[#ea580c]', 'border-b-[#ea580c]', 'border-b-2');
+            } else {
+                th.classList.remove('text-[#ea580c]', 'border-b-[#ea580c]', 'border-b-2');
+            }
+        });
+        fetchList();
+    }
 
     // FETCH LIST
     async function fetchList() { 
@@ -1144,7 +1162,7 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
             } 
             
             const mediaHtml = renderTokenMedia(t.image, "img-token group-hover:border-[#ea580c] transition"); 
-            return ` <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group"> <td><div class="flex items-center gap-3">${mediaHtml}<div class="flex flex-col min-w-0"><div class="flex items-center gap-2"><span class="font-bold text-white text-sm group-hover:text-[#ea580c] transition truncate font-sans tracking-wide">${t.ticker}</span>${isVerified ? '<span title="Verified Community Update" class="verified-badge"><i data-lucide="check" width="12"></i></span>' : ''}</div><span class="text-[10px] text-[#9a3412] truncate max-w-[120px] md:max-w-[200px] font-mono group-hover:text-[#fb923c]">${t.name}</span></div></div></td> <td class="text-right text-[#fb923c] font-mono font-bold">${kScoreDisplay}</td> <td class="hidden md:table-cell text-right">${formatPct(chg5m)}</td> <td class="hidden md:table-cell text-right">${formatPct(chg1h)}</td> <td class="text-right">${formatPct(chg24h)}</td> <td class="text-right font-mono text-[#fb923c] font-bold">${formatCompact(mcap)}</td> <td class="text-right font-mono text-[#22c55e]">${formatCompact(vol)}</td> <td class="hidden md:table-cell text-right text-xs text-[#9a3412] font-mono">${timeAgo(t.timestamp)}</td> </tr> `;
+            return ` <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group"> <td><div class="flex items-center gap-3">${mediaHtml}<div class="flex flex-col min-w-0"><div class="flex items-center gap-2"><span class="font-bold text-white text-sm group-hover:text-[#ea580c] transition truncate font-sans tracking-wide">${t.ticker}</span>${isVerified ? '<span title="Verified Community Update" class="verified-badge"><i data-lucide="check" width="12"></i></span>' : ''}</div><span class="text-[10px] text-[#9a3412] truncate max-w-[120px] md:max-w-[200px] font-mono group-hover:text-[#fb923c]">${t.name}</span></div></div></td> <td class="text-right text-[#fb923c] font-mono font-bold">${kScoreDisplay}</td> <td class="hidden md:table-cell text-right">${formatPct(chg5m)}</td> <td class="hidden md:table-cell text-right">${formatPct(chg1h)}</td> <td class="text-right">${formatPct(chg24h)}</td> <td class="text-right font-mono text-[#fb923c] font-bold">${formatCompact(mcap)}</td> <td class="hidden md:table-cell text-right font-mono text-[#fb923c]">${(t.holders || 0).toLocaleString()}</td> <td class="text-right font-mono text-[#22c55e]">${formatCompact(vol)}</td> <td class="hidden md:table-cell text-right text-xs text-[#9a3412] font-mono">${timeAgo(t.timestamp)}</td> </tr> `;
         }).join(''); 
         lucide.createIcons(); 
     }
