@@ -28,7 +28,7 @@ const requireAdmin = (req, res, next) => {
 function init(deps) {
     const { db } = deps;
 
-    // ... (Helper functions omitted for brevity, logic remains similar)
+    // --- HELPER FUNCTIONS ---
     async function fetchExternalCandles(poolAddress, resolution) {
         try {
             let timeframe = 'minute';
@@ -79,7 +79,6 @@ function init(deps) {
             decimals = supplyInfo.value.decimals;
         } catch (e) {}
 
-        // --- FIX: Insert Token FIRST, before indexing pools ---
         const marketData = await fetchInitialMarketData(mint);
         const baseData = { name: meta?.name || 'Unknown', ticker: meta?.symbol || 'UNKNOWN', image: meta?.image || null };
         const initialPrice = marketData?.priceUsd || 0;
@@ -89,7 +88,7 @@ function init(deps) {
         const initialChange5m = marketData?.change5m || 0;
         const initialMcap = marketData?.marketCap || 0;
 
-        // 1. CREATE TOKEN RECORD
+        // 1. CREATE TOKEN RECORD FIRST
         await db.run(`
             INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, change1h, change5m, timestamp)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
@@ -104,7 +103,7 @@ function init(deps) {
             initialChange1h, initialChange5m, Date.now()
         ]);
 
-        // 2. NOW FIND POOLS (Foreign Key Satisfied)
+        // 2. THEN FIND POOLS
         const pools = await findPoolsOnChain(mint);
         const poolAddresses = [];
 
@@ -243,14 +242,153 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: "Submission failed" }); }
     });
 
-    // --- ADMIN ROUTES OMITTED FOR BREVITY (Unchanged) ---
-    router.get('/admin/updates', requireAdmin, async (req, res) => { const { type } = req.query; try { let sql = `SELECT u.*, t.symbol as ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`; if (type === 'history') { sql += ` WHERE u.status != 'pending' ORDER BY u.submittedAt DESC LIMIT 50`; } else { sql += ` WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`; } const updates = await db.all(sql); res.json({ success: true, updates }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.post('/admin/approve-update', requireAdmin, async (req, res) => { const { id } = req.body; try { const request = await db.get(`SELECT * FROM token_updates WHERE id = $1`, [id]); if (!request) return res.status(404).json({ success: false, error: "Request not found" }); const meta = { twitter: request.twitter, website: request.website, telegram: request.telegram, banner: request.banner, description: request.description }; await db.run(`UPDATE tokens SET metadata = jsonb_set(COALESCE(metadata, '{}'), '{community}', $1), hasCommunityUpdate = TRUE, updated_at = CURRENT_TIMESTAMP WHERE mint = $2`, [JSON.stringify(meta), request.mint]); await db.run(`UPDATE token_updates SET status = 'approved' WHERE id = $1`, [id]); await updateSingleToken({ db }, request.mint); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.post('/admin/reject-update', requireAdmin, async (req, res) => { const { id } = req.body; try { await db.run(`UPDATE token_updates SET status = 'rejected' WHERE id = $1`, [id]); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.get('/admin/token/:mint', requireAdmin, async (req, res) => { const { mint } = req.params; try { const token = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]); if (!token) return res.status(404).json({ success: false, error: "Token not found" }); let meta = {}; try { if (typeof token.metadata === 'string') meta = JSON.parse(token.metadata); else meta = token.metadata || {}; } catch(e) {} const community = meta.community || {}; res.json({ success: true, token: { ...token, ticker: token.symbol, twitter: community.twitter || meta.twitter, website: community.website || meta.website, telegram: community.telegram || meta.telegram, banner: community.banner || meta.banner, description: community.description || meta.description } }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.post('/admin/update-token', requireAdmin, async (req, res) => { const { mint, twitter, website, telegram, banner, description } = req.body; try { const meta = { twitter, website, telegram, banner, description }; await db.run(`UPDATE tokens SET metadata = jsonb_set(COALESCE(metadata, '{}'), '{community}', $1), hasCommunityUpdate = TRUE WHERE mint = $2`, [JSON.stringify(meta), mint]); await updateSingleToken({ db }, mint); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.post('/admin/delete-token', requireAdmin, async (req, res) => { const { mint } = req.body; try { const pools = await db.all(`SELECT address FROM pools WHERE mint = $1`, [mint]); const poolAddresses = pools.map(p => p.address); if (poolAddresses.length > 0) { await db.run(`DELETE FROM candles_1m WHERE pool_address = ANY($1)`, [poolAddresses]); await db.run(`DELETE FROM active_trackers WHERE pool_address = ANY($1)`, [poolAddresses]); } await db.run(`DELETE FROM pools WHERE mint = $1`, [mint]); await db.run(`DELETE FROM k_scores WHERE mint = $1`, [mint]); await db.run(`DELETE FROM token_updates WHERE mint = $1`, [mint]); await db.run(`DELETE FROM tokens WHERE mint = $1`, [mint]); const redis = getClient(); if (redis) { await redis.del(`token:detail:${mint}`); } res.json({ success: true, message: "Token and all history permanently deleted." }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => { const { mint } = req.body; try { const newScore = await updateSingleToken({ db }, mint); res.json({ success: true, message: `K-Score Updated: ${newScore}` }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    // --- ADMIN ROUTES ---
+
+    // 1. Get Updates
+    router.get('/admin/updates', requireAdmin, async (req, res) => { 
+        const { type } = req.query; 
+        try { 
+            let sql = `SELECT u.*, t.symbol as ticker, t.image FROM token_updates u LEFT JOIN tokens t ON u.mint = t.mint`; 
+            if (type === 'history') { sql += ` WHERE u.status != 'pending' ORDER BY u.submittedAt DESC LIMIT 50`; } 
+            else { sql += ` WHERE u.status = 'pending' ORDER BY u.submittedAt ASC`; } 
+            const updates = await db.all(sql); 
+            res.json({ success: true, updates }); 
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+    });
+
+    // 2. Approve Update (FIXED for TEXT/JSONB Compatibility)
+    router.post('/admin/approve-update', requireAdmin, async (req, res) => { 
+        const { id } = req.body; 
+        try { 
+            const request = await db.get(`SELECT * FROM token_updates WHERE id = $1`, [id]); 
+            if (!request) return res.status(404).json({ success: false, error: "Request not found" }); 
+
+            // Handle metadata merge in JS to support both TEXT and JSONB columns
+            const token = await db.get(`SELECT metadata FROM tokens WHERE mint = $1`, [request.mint]);
+            let currentMeta = {};
+            if (token && token.metadata) {
+                try {
+                    currentMeta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata;
+                } catch (e) {}
+            }
+
+            const newCommunity = { 
+                twitter: request.twitter, 
+                website: request.website, 
+                telegram: request.telegram, 
+                banner: request.banner, 
+                description: request.description 
+            };
+            
+            currentMeta.community = { ...(currentMeta.community || {}), ...newCommunity };
+            const jsonStr = JSON.stringify(currentMeta);
+
+            await db.run(`
+                UPDATE tokens 
+                SET metadata = $1, hasCommunityUpdate = TRUE, updated_at = CURRENT_TIMESTAMP 
+                WHERE mint = $2
+            `, [jsonStr, request.mint]); 
+
+            await db.run(`UPDATE token_updates SET status = 'approved' WHERE id = $1`, [id]); 
+            await updateSingleToken({ db }, request.mint); 
+            res.json({ success: true }); 
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+    });
+
+    // 3. Reject Update
+    router.post('/admin/reject-update', requireAdmin, async (req, res) => { 
+        const { id } = req.body; 
+        try { 
+            await db.run(`UPDATE token_updates SET status = 'rejected' WHERE id = $1`, [id]); 
+            res.json({ success: true }); 
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+    });
+
+    // 4. Get Token Details
+    router.get('/admin/token/:mint', requireAdmin, async (req, res) => { 
+        const { mint } = req.params; 
+        try { 
+            const token = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]); 
+            if (!token) return res.status(404).json({ success: false, error: "Token not found" }); 
+            let meta = {}; 
+            try { 
+                if (typeof token.metadata === 'string') meta = JSON.parse(token.metadata); 
+                else meta = token.metadata || {}; 
+            } catch(e) {} 
+            const community = meta.community || {}; 
+            res.json({ 
+                success: true, 
+                token: { 
+                    ...token, 
+                    ticker: token.symbol, 
+                    twitter: community.twitter || meta.twitter, 
+                    website: community.website || meta.website, 
+                    telegram: community.telegram || meta.telegram, 
+                    banner: community.banner || meta.banner, 
+                    description: community.description || meta.description 
+                } 
+            }); 
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+    });
+
+    // 5. Update Token (Manual) (FIXED for TEXT/JSONB Compatibility)
+    router.post('/admin/update-token', requireAdmin, async (req, res) => { 
+        const { mint, twitter, website, telegram, banner, description } = req.body; 
+        try { 
+            const token = await db.get(`SELECT metadata FROM tokens WHERE mint = $1`, [mint]);
+            let currentMeta = {};
+            if (token && token.metadata) {
+                try {
+                    currentMeta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata;
+                } catch (e) {}
+            }
+
+            const newCommunity = { twitter, website, telegram, banner, description };
+            currentMeta.community = { ...(currentMeta.community || {}), ...newCommunity };
+            const jsonStr = JSON.stringify(currentMeta);
+
+            await db.run(`
+                UPDATE tokens 
+                SET metadata = $1, hasCommunityUpdate = TRUE 
+                WHERE mint = $2
+            `, [jsonStr, mint]); 
+
+            await updateSingleToken({ db }, mint); 
+            res.json({ success: true }); 
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+    });
+
+    // 6. Delete Token (FIXED to include holders_history)
+    router.post('/admin/delete-token', requireAdmin, async (req, res) => { 
+        const { mint } = req.body; 
+        try { 
+            const pools = await db.all(`SELECT address FROM pools WHERE mint = $1`, [mint]); 
+            const poolAddresses = pools.map(p => p.address); 
+            if (poolAddresses.length > 0) { 
+                await db.run(`DELETE FROM candles_1m WHERE pool_address = ANY($1)`, [poolAddresses]); 
+                await db.run(`DELETE FROM active_trackers WHERE pool_address = ANY($1)`, [poolAddresses]); 
+            } 
+            await db.run(`DELETE FROM pools WHERE mint = $1`, [mint]); 
+            await db.run(`DELETE FROM k_scores WHERE mint = $1`, [mint]); 
+            await db.run(`DELETE FROM token_updates WHERE mint = $1`, [mint]); 
+            await db.run(`DELETE FROM holders_history WHERE mint = $1`, [mint]); // Added
+            await db.run(`DELETE FROM tokens WHERE mint = $1`, [mint]); 
+            
+            const redis = getClient(); 
+            if (redis) { await redis.del(`token:detail:${mint}`); } 
+            
+            res.json({ success: true, message: "Token and all history permanently deleted." }); 
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+    });
+
+    // 7. Refresh K-Score
+    router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => { 
+        const { mint } = req.body; 
+        try { 
+            const newScore = await updateSingleToken({ db }, mint); 
+            res.json({ success: true, message: `K-Score Updated: ${newScore}` }); 
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+    });
 
     // --- STANDARD PUBLIC ROUTES ---
     router.get('/token/:mint', async (req, res) => {
@@ -336,14 +474,14 @@ function init(deps) {
             } else {
                 let orderBy = 'k_score DESC';
                 if (sort === 'newest') orderBy = 'timestamp DESC';
-                else if (sort === 'age') orderBy = 'timestamp ASC'; // ADDED: Age Sort
+                else if (sort === 'age') orderBy = 'timestamp ASC'; 
                 else if (sort === 'mcap') orderBy = 'marketCap DESC';
                 else if (sort === 'volume') orderBy = 'volume24h DESC';
                 else if (sort === '24h') orderBy = 'change24h DESC';
                 else if (sort === 'liquidity') orderBy = 'liquidity DESC';
                 else if (sort === '5m') orderBy = 'change5m DESC';
                 else if (sort === '1h') orderBy = 'change1h DESC';
-                else if (sort === 'holders') orderBy = 'holders DESC'; // ADDED: Holders Sort
+                else if (sort === 'holders') orderBy = 'holders DESC'; 
 
                 const offset = (page - 1) * 100;
                 rows = await db.all(`SELECT * FROM tokens ORDER BY ${orderBy} LIMIT 100 OFFSET ${offset}`);
