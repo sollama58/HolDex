@@ -233,7 +233,7 @@ function init(deps) {
     // --- BACKUP & RESTORE ---
     router.get('/admin/backup/updates', requireAdmin, async (req, res) => { try { const updates = await db.all('SELECT * FROM token_updates ORDER BY submittedAt DESC'); const keys = await db.all('SELECT * FROM api_keys'); res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Disposition', `attachment; filename=holdex_full_backup_${Date.now()}.json`); res.json({ success: true, timestamp: Date.now(), updates: updates, api_keys: keys }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     
-    // RESTORE ROUTES - FULL SYNC & K-SCORE TRIGGER ENABLED
+    // RESTORE ROUTES - FULL SYNC, AUTO-INDEX & K-SCORE TRIGGER ENABLED
     router.post('/admin/restore/updates', requireAdmin, async (req, res) => { 
         const { updates, api_keys } = req.body; 
         
@@ -254,6 +254,19 @@ function init(deps) {
             if (Array.isArray(updates)) {
                 for (const u of updates) {
                     try {
+                        // AUTO-INDEX: If token is missing, index it first
+                        if (u.mint) {
+                            const tokenExists = await db.get('SELECT mint FROM tokens WHERE mint = $1', [u.mint]);
+                            if (!tokenExists) {
+                                try {
+                                    await indexTokenOnChain(u.mint);
+                                } catch (idxErr) {
+                                    console.error(`Auto-index failed for restored token ${u.mint}: ${idxErr.message}`);
+                                    // Continue anyway to restore the update record
+                                }
+                            }
+                        }
+
                         const sig = u.signature || u.txId || 'manual_' + Date.now();
                         const existing = await db.get('SELECT * FROM token_updates WHERE signature = $1', [sig]);
                         
