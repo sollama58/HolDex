@@ -4,7 +4,7 @@ const logger = require('./logger');
 const { getClient } = require('./redis');
 
 let primaryPool = null;
-let readPool = null; // New Read Replica Pool
+let readPool = null; 
 let dbWrapper = null;
 let initPromise = null;
 
@@ -55,7 +55,7 @@ async function initDB() {
             }
 
             // Schema Creation (Only on Primary)
-            // Added last_holder_check column
+            // Added updated_at column
             await primaryPool.query(`
                 CREATE TABLE IF NOT EXISTS tokens (
                     mint TEXT PRIMARY KEY,
@@ -73,6 +73,7 @@ async function initDB() {
                     change5m DOUBLE PRECISION,
                     holders INTEGER DEFAULT 0,
                     last_holder_check BIGINT DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     k_score DOUBLE PRECISION DEFAULT 0,
                     hasCommunityUpdate BOOLEAN DEFAULT FALSE,
                     metadata TEXT,
@@ -141,6 +142,7 @@ async function initDB() {
 
                 CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score DESC);
                 CREATE INDEX IF NOT EXISTS idx_tokens_timestamp ON tokens(timestamp DESC);
+                CREATE INDEX IF NOT EXISTS idx_tokens_updated_at ON tokens(updated_at ASC);
                 CREATE INDEX IF NOT EXISTS idx_pools_mint ON pools(mint);
                 CREATE INDEX IF NOT EXISTS idx_candles_pool_time ON candles_1m(pool_address, timestamp);
                 CREATE INDEX IF NOT EXISTS idx_holders_hist_mint ON holders_history(mint);
