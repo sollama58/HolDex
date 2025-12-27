@@ -4,13 +4,13 @@ const cors = require('cors');
 const helmet = require('helmet');
 const http = require('http'); 
 const rateLimit = require('express-rate-limit');
-const compression = require('compression'); // NEW: Gzip support
+const compression = require('compression'); 
 const config = require('./config/env');
 const logger = require('./services/logger');
 const { initDB, getDB } = require('./services/database');
 const { connectRedis } = require('./services/redis');
 const { startSnapshotter } = require('./indexer/tasks/snapshotter'); 
-const { startNewTokenListener } = require('./tasks/newTokenListener'); 
+// REMOVED: const { startNewTokenListener } = require('./services/new_token_listener'); 
 const { initSocket } = require('./services/socket'); 
 const tokensRoutes = require('./routes/tokens');
 
@@ -23,9 +23,6 @@ app.use(helmet({
     contentSecurityPolicy: false,
 }));
 
-// NEW: COMPRESSION MIDDLEWARE
-// Compresses JSON responses, typically reducing size by 70-80%
-// This is crucial for large token lists.
 app.use(compression());
 
 // CORS CONFIGURATION
@@ -35,7 +32,6 @@ const corsOptions = {
     origin: function (origin, callback) {
         if (!origin) return callback(null, true);
         const isConfigAllowed = allowedOrigins === '*' || (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin));
-        // Allow dev domains explicitly just in case config is missing them
         const isDomainAllowed = origin.includes('alonisthe.dev') || origin.includes('localhost') || origin.includes('127.0.0.1'); 
 
         if (isConfigAllowed || isDomainAllowed) {
@@ -47,7 +43,7 @@ const corsOptions = {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-auth', 'x-requested-with', 'Accept']
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-auth', 'x-requested-with', 'Accept', 'x-api-key']
 };
 
 app.options('*', cors(corsOptions));
@@ -55,7 +51,6 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: '100kb' }));
 
 // RATE LIMITING
-// Note: Nginx will handle high-level rate limiting, but this protects the app logic
 app.set('trust proxy', 1);
 const limiter = rateLimit({
     windowMs: 1 * 60 * 1000, 
@@ -80,14 +75,15 @@ async function startServer() {
         // Start WebSocket Server
         initSocket(server, allowedOrigins);
 
-        // Start Background Tasks
+        // Start Background Tasks (Snapshotter remains here for now, or move to worker too)
         startSnapshotter();
-        startNewTokenListener().catch(e => logger.error(`Listener Start Error: ${e.message}`));
+        
+        // REMOVED: startNewTokenListener().catch(...) 
+        // This is now handled by the separate 'listener' worker on Render.
 
         // Initialize Routes
         app.use('/api', tokensRoutes.init({ db: getDB() }));
 
-        // Global Error Handler
         app.use((err, req, res, next) => {
             logger.error(`🔥 Unhandled Server Error: ${err.message}`);
             logger.error(err.stack);
