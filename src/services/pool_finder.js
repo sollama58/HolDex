@@ -1,6 +1,5 @@
 const axios = require('axios');
 const { PublicKey } = require('@solana/web3.js');
-// Import retryRPC and connection getter from centralized service
 const { getSolanaConnection, retryRPC } = require('./solana'); 
 const logger = require('./logger');
 
@@ -16,7 +15,17 @@ const LAYOUTS = {
     [PROG_ID_RAYDIUM_CPMM]: { name: 'Raydium CPMM', offA: 168, offB: 200 } 
 };
 
-async function findPoolsViaGeckoTerminal(mintAddress) {
+// Simple in-memory rate limit lock
+let geckoRateLimitedUntil = 0;
+
+async function findPoolsViaGeckoTerminal(mintAddress, retries = 3) {
+    // 1. Check Global Lock
+    if (Date.now() < geckoRateLimitedUntil) {
+        // If locked, wait or skip. For discovery, we wait a bit then fail to prevent blockage.
+        await new Promise(r => setTimeout(r, 2000)); 
+        if (Date.now() < geckoRateLimitedUntil) return []; // Still locked
+    }
+
     try {
         const url = `https://api.geckoterminal.com/api/v2/networks/solana/tokens/${mintAddress}/pools?page=1`;
         const response = await axios.get(url, { timeout: 10000 });
@@ -42,7 +51,21 @@ async function findPoolsViaGeckoTerminal(mintAddress) {
         });
 
     } catch (e) {
-        if (e.response && e.response.status !== 404) {
+        if (e.response && e.response.status === 429) {
+            // RATE LIMIT HIT
+            const retryAfter = parseInt(e.response.headers['retry-after'] || '10');
+            const waitTime = (retryAfter + 2) * 1000; // Add buffer
+            
+            logger.warn(`⚠️ GeckoTerminal 429. Backing off for ${retryAfter}s...`);
+            
+            // Set global lock
+            geckoRateLimitedUntil = Date.now() + waitTime;
+
+            if (retries > 0) {
+                await new Promise(r => setTimeout(r, waitTime));
+                return findPoolsViaGeckoTerminal(mintAddress, retries - 1);
+            }
+        } else if (e.response && e.response.status !== 404) {
              logger.warn(`GeckoTerminal Lookup Failed: ${e.message}`);
         }
         return [];
@@ -55,8 +78,6 @@ async function enrichPoolsWithReserves(pools) {
     const targets = pools.filter(p => p.dexId !== 'pumpfun' && !p.reserve_a);
     if (targets.length === 0) return;
 
-    // Use the centralized connection that has the Helius RPC
-    // FIX: Ensure this is called as a function
     const connection = getSolanaConnection();
     
     // Process in batches
@@ -65,7 +86,6 @@ async function enrichPoolsWithReserves(pools) {
         const pubkeys = batch.map(p => new PublicKey(p.pairAddress || p.address)); 
 
         try {
-            // Now using the imported retryRPC correctly
             const accounts = await retryRPC(() => connection.getMultipleAccountsInfo(pubkeys));
             
             accounts.forEach((acc, idx) => {
