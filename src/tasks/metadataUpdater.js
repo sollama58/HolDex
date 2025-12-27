@@ -36,24 +36,39 @@ async function processSingleToken(db, t, now) {
         const poolsData = await fetchGeckoTerminalData(t.mint);
         const tokenDetails = await fetchTokenDetails(t.mint);
         
-        // --- 1. HOLDER COUNT LOGIC ---
-        let holderCount = 0;
-        
-        // Strategy A: GeckoTerminal (Attributes)
+        // --- 1. HOLDER COUNT LOGIC (OPTIMIZED) ---
+        let holderCount = t.holders || 0;
+        let foundNewData = false;
+        let didCheckRpc = false;
+
+        // Strategy A: GeckoTerminal (Free/Cheap)
+        // If Gecko gives us data, we use it and consider it "checked"
         if (tokenDetails && tokenDetails.attributes) {
-            if (tokenDetails.attributes.holder_count) {
-                holderCount = parseInt(tokenDetails.attributes.holder_count);
-            } else if (tokenDetails.attributes.holders_count) {
-                holderCount = parseInt(tokenDetails.attributes.holders_count);
+            if (tokenDetails.attributes.holder_count || tokenDetails.attributes.holders_count) {
+                const geckoHolders = parseInt(tokenDetails.attributes.holder_count || tokenDetails.attributes.holders_count);
+                if (geckoHolders > 0) {
+                    holderCount = geckoHolders;
+                    foundNewData = true;
+                }
             }
         }
 
-        // Strategy B: Direct RPC Scan (Fallback)
-        if (!holderCount || holderCount === 0) {
+        // Strategy B: RPC Direct Check (Expensive - Limited to once per 24h)
+        const lastCheck = parseInt(t.last_holder_check || 0);
+        const msSinceCheck = now - lastCheck;
+        const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+        // Only hit RPC if we didn't get fresh data from Gecko AND it's been > 24h
+        if (!foundNewData && msSinceCheck > ONE_DAY_MS) {
+            // logger.info(`🔍 RPC Holder Scan for ${t.mint} (Last check: ${Math.floor(msSinceCheck / 3600000)}h ago)`);
             try {
-                holderCount = await getHolderCountFromRPC(t.mint);
-            } catch (rpcErr) {
-                holderCount = 0;
+                const rpcHolders = await getHolderCountFromRPC(t.mint);
+                if (rpcHolders > 0) {
+                    holderCount = rpcHolders;
+                }
+                didCheckRpc = true; // Mark as checked so we update timestamp
+            } catch (e) {
+                // Ignore RPC errors, try again next cycle or wait
             }
         }
 
@@ -164,9 +179,14 @@ async function processSingleToken(db, t, now) {
             }
         }
         
-        if (holderCount > 0) {
+        // Update Holders if we found new data OR if we performed a valid RPC check (even if result was same)
+        if (foundNewData || didCheckRpc) {
             updateParts.push(`holders = $${idx++}`);
             finalParams.push(holderCount);
+            
+            // Update the check timestamp so we don't spam RPC
+            updateParts.push(`last_holder_check = $${idx++}`);
+            finalParams.push(now);
 
             const today = Math.floor(now / (24 * 60 * 60 * 1000)) * (24 * 60 * 60 * 1000);
             await db.run(`
@@ -184,6 +204,7 @@ async function processSingleToken(db, t, now) {
             await db.run(finalQuery, finalParams);
         }
 
+        // Broadcast (Always broadcast current state)
         if (poolsData && poolsData.length > 0) {
             broadcastTokenUpdate(t.mint, {
                 priceUsd: bestPrice,
@@ -213,8 +234,9 @@ async function updateMetadata(deps) {
     const now = Date.now();
 
     try {
+        // Fetch last_holder_check and holders in the query
         const tokens = await db.all(`
-            SELECT mint, supply, decimals 
+            SELECT mint, supply, decimals, holders, last_holder_check 
             FROM tokens 
             ORDER BY liquidity DESC, updated_at ASC 
             LIMIT 75
