@@ -21,8 +21,18 @@ function createConnection() {
     let wsUrl = config.SOLANA_WSS_URL;
 
     // PRIORITY 2: Auto-Derive for known providers if not set
-    if (!wsUrl && (rpcUrl.includes('helius') || rpcUrl.includes('quicknode') || rpcUrl.includes('alchemy'))) {
-         wsUrl = rpcUrl.replace('https://', 'wss://').replace('http://', 'ws://');
+    if (!wsUrl) {
+        if (rpcUrl.includes('helius') || rpcUrl.includes('quicknode') || rpcUrl.includes('alchemy')) {
+             wsUrl = rpcUrl.replace('https://', 'wss://').replace('http://', 'ws://');
+        }
+    }
+
+    // --- CRITICAL CHECK ---
+    // If we are intended to be a Listener, we MUST have a WSS URL.
+    // If we don't, we log a loud error.
+    if (!wsUrl && process.env.SERVICE_TYPE === 'listener') {
+        logger.error("❌ FATAL: No WebSocket URL found! Listeners will not work.");
+        logger.error("   -> Set SOLANA_WSS_URL in your environment.");
     }
 
     const confirmTimeout = 60000;
