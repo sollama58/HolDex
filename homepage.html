@@ -1225,6 +1225,32 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
         if (isKScoreModalOpen) modal.classList.add('open'); else modal.classList.remove('open');
     }
 
+    // NEW: Share Token Function
+    function shareToken() {
+        if (!currentMint) return;
+        const url = `https://holdex.io/token/${currentMint}`;
+        navigator.clipboard.writeText(url).then(() => {
+            const btn = document.getElementById('share-btn');
+            const originalHTML = btn.innerHTML;
+            
+            // Show feedback
+            btn.innerHTML = `<i data-lucide="check" width="16"></i> Copied!`;
+            btn.classList.remove('bg-[#191e29]', 'border-[#c7f284]', 'text-[#c7f284]');
+            btn.classList.add('bg-green-900/30', 'border-green-500', 'text-green-500');
+            lucide.createIcons();
+
+            setTimeout(() => {
+                btn.innerHTML = originalHTML;
+                btn.classList.add('bg-[#191e29]', 'border-[#c7f284]', 'text-[#c7f284]');
+                btn.classList.remove('bg-green-900/30', 'border-green-500', 'text-green-500');
+                lucide.createIcons();
+            }, 2000);
+        }).catch(err => {
+            console.error('Failed to copy: ', err);
+            alert("Could not copy link to clipboard");
+        });
+    }
+
     // ... (Standard Helpers) ...
     async function fetchFees() { try { const res = await fetch(`${API_URL}/api/config/fees`); const data = await res.json(); if (data.success) { feeConfig = data; const solEl = document.getElementById('fee-sol'); const tokEl = document.getElementById('fee-token'); if (solEl) solEl.innerText = `${data.solFee} SOL`; if (tokEl) tokEl.innerText = `${data.tokenFee.toLocaleString()} TOKENS`; } } catch (e) { console.error("Fee fetch failed", e); } }
     function sanitizeInput(str) { if(!str) return ''; const div = document.createElement('div'); div.innerText = str; return div.innerHTML; }
@@ -1757,6 +1783,9 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
                         if(actionsDiv) {
                             let linksHtml = `<a href="https://jup.ag/swap?sell=So11111111111111111111111111111111111111112&buy=${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow bg-[#191e29] border-[#c7f284] text-[#c7f284] hover:bg-[#c7f284] hover:text-[#000]">Jupiter Swap</a>`;
                             linksHtml += `<a href="https://solscan.io/token/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><i data-lucide="search" width="16"></i> Solscan</a>`;
+                            // NEW: SHARE BUTTON
+                            linksHtml += `<button id="share-btn" onclick="shareToken()" class="action-btn flex items-center justify-center gap-2 flex-grow"><i data-lucide="share-2" width="16"></i> Share</button>`;
+                            
                             if (isVerified) { linksHtml += `<div class="flex items-center px-4 py-2 bg-green-900/30 border border-green-500 text-green-500 rounded-xl font-bold uppercase text-xs tracking-wider h-14"><i data-lucide="shield-check" width="18" class="mr-2"></i> VERIFIED</div>`; }
                             if (t.twitter) linksHtml += `<a href="${t.twitter}" target="_blank" class="social-btn-lg"><i data-lucide="twitter" width="24"></i></a>`;
                             if (t.website) linksHtml += `<a href="${t.website}" target="_blank" class="social-btn-lg"><i data-lucide="globe" width="24"></i></a>`;
