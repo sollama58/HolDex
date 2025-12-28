@@ -9,15 +9,17 @@ const RAYDIUM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFS
 const PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5DkzonjNwu78hRvfCKubJ14M5uBEwF6P');
 const PENDING_KEY = 'pending_growers'; 
 
+// Known System Addresses to Ignore
 const IGNORED_MINTS = new Set([
-    'So11111111111111111111111111111111111111112', 
-    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 
-    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
-    '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R', 
-    '5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1',
-    'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', 
-    '11111111111111111111111111111111',             
-    'SysvarRent111111111111111111111111111111111',  
+    'So11111111111111111111111111111111111111112', // Wrapped SOL
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
+    '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R', // Raydium Authority
+    '5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1', // Raydium Authority
+    'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', // Token Program
+    '11111111111111111111111111111111',             // System Program
+    'SysvarRent111111111111111111111111111111111',  // Rent
+    'Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1', // Pump Authority
 ]);
 
 const processedSigs = new Set();
@@ -30,6 +32,8 @@ function isIgnored(mint) {
     if (!mint) return true;
     const m = mint.toString().trim();
     if (IGNORED_MINTS.has(m)) return true;
+    // Basic format check (base58 length ~32-44 chars)
+    if (m.length < 30 || m.length > 45) return true;
     return false;
 }
 
@@ -55,47 +59,79 @@ async function processNewPoolTx(signature, connection, db, source) {
             await new Promise(r => setTimeout(r, 2000));
         }
 
-        if (!tx || !tx.meta || tx.meta.err) return;
+        if (!tx || !tx.meta || tx.meta.err) {
+            // logger.debug(`⚠️ Failed to fetch TX ${signature}`); // Too noisy for prod
+            return;
+        }
 
         const candidateMints = new Set();
 
+        // STRATEGY A: Post Token Balances (The Gold Standard)
         if (tx.meta.postTokenBalances && tx.meta.postTokenBalances.length > 0) {
             tx.meta.postTokenBalances.forEach(bal => {
                 if (bal.mint && !isIgnored(bal.mint)) candidateMints.add(bal.mint);
             });
         }
 
-        if (source === 'Pump.fun' && candidateMints.size === 0 && tx.transaction.message.accountKeys) {
+        // STRATEGY B: Pump.fun "Create" Specific (Account Keys)
+        // In a "Create" instruction, the Mint is a Signer (index 1 or 2 usually).
+        // It is also Writable.
+        if (source === 'Pump.fun' && candidateMints.size === 0) {
              const keys = tx.transaction.message.accountKeys;
              const keyList = Array.isArray(keys) ? keys : (keys.staticAccountKeys || []);
 
              keyList.forEach((keyObj, index) => {
-                 if (index === 0) return;
+                 if (index === 0) return; // Skip Payer
+                 
                  const pubkey = keyObj.pubkey ? keyObj.pubkey.toString() : keyObj.toString();
                  const isSigner = keyObj.signer || (typeof keyObj === 'object' && keyObj.signer);
-                 if (isSigner && !isIgnored(pubkey)) candidateMints.add(pubkey);
+                 const isWritable = keyObj.writable || (typeof keyObj === 'object' && keyObj.writable);
+
+                 // Pump Mint is always a Signer AND Writable during creation
+                 if (isSigner && isWritable && !isIgnored(pubkey)) {
+                      candidateMints.add(pubkey);
+                 }
              });
         }
 
-        // --- CRITICAL REDIS CHECK ---
+        // STRATEGY C: Inner Instructions (Deep Scan)
+        // Sometimes Raydium/Pump initialization happens via CPI.
+        if (candidateMints.size === 0 && tx.meta.innerInstructions) {
+             tx.meta.innerInstructions.forEach(inner => {
+                 inner.instructions.forEach(inst => {
+                     if (inst.program === 'spl-token' && inst.parsed && inst.parsed.type === 'initializeMint') {
+                         const mint = inst.parsed.info.mint;
+                         if (mint && !isIgnored(mint)) candidateMints.add(mint);
+                     }
+                 });
+             });
+        }
+
         const redis = getClient();
         if (!redis) {
-             logger.error(`❌ Listener Error: Redis is NULL. Cannot queue ${candidateMints.size} candidate(s).`);
+             logger.error(`❌ FATAL: Redis disconnected in Listener loop.`);
              return;
+        }
+
+        if (candidateMints.size === 0) {
+            // Uncomment for deep debugging if needed
+            // logger.warn(`⚠️ No mints found in ${source} TX: ${signature}`);
+            return;
         }
 
         for (const mint of candidateMints) {
             if (isIgnored(mint)) continue;
             
-            // 2. ADD TO PENDING LIST (Redis)
             const data = JSON.stringify({ mint, addedAt: Date.now(), source });
             
             try {
                 const added = await redis.sadd(PENDING_KEY, data);
                 if (added) {
+                    // CONSOLE BLOCK FOR VISIBILITY
                     console.log(`\n--------------------------------------------------`);
                     logger.info(`🌱 [PENDING LIST] Added: ${mint}`);
                     logger.info(`   📝 Source: ${source}`);
+                    logger.info(`   🔗 Tx: ${signature}`);
                     console.log(`--------------------------------------------------\n`);
                 }
             } catch (redisErr) {
@@ -147,7 +183,6 @@ async function setupSubscriptions(connection, db) {
 }
 
 async function startNewTokenListener() {
-    // --- VERIFY INFRASTRUCTURE ---
     const redis = getClient();
     if (!redis) {
         logger.error("❌ FATAL: Listener started but Redis is NOT connected. Retrying in 5s...");
