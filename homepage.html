@@ -440,6 +440,7 @@
                             <h2 id="detail-ticker" class="text-2xl font-bold text-white tracking-tight truncate font-mono">TICKER</h2>
                             <div class="flex items-center gap-2 mt-1 flex-wrap">
                                 <span id="detail-name" class="text-[#fb923c] text-xs px-2 py-0.5 rounded border border-[#7c2d12] truncate max-w-[120px]">Name</span>
+                                <span id="detail-verified" class="hidden ml-2 px-2 py-0.5 rounded bg-green-900/30 border border-green-500/30 text-green-500 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1"><i data-lucide="shield-check" width="10"></i> Community Updated</span>
                                 <span id="detail-mint" class="hidden"></span>
                                 <i data-lucide="copy" width="12" class="text-[#9a3412] cursor-pointer" onclick="copyMint()"></i>
                             </div>
@@ -908,8 +909,10 @@
         } 
         
         tbody.innerHTML = displayTokens.map(t => { 
-            const score = t.kScore || 0; 
-            const isVerified = t.hasCommunityUpdate; 
+            // Handle both camelCase and snake_case for verification status
+            const isVerified = t.hasCommunityUpdate || t.has_community_update; 
+            const score = t.kScore || t.k_score || 0;
+            
             const kScoreDisplay = isVerified ? (score > 0 ? `<span class="text-[#ea580c]">${score}</span>` : `<span class="animate-pulse">⏳</span>`) : '<span class="text-gray-600">🔒</span>'; 
             const formatPct = (v) => (v !== undefined && v !== null) ? `<span class="pill ${v>0?'pill-green':'pill-red'}">${v.toFixed(1)}%</span>` : '-';
             const formatVal = (v) => v ? '$'+ new Intl.NumberFormat('en',{notation:'compact'}).format(v) : '-';
@@ -960,6 +963,9 @@
         document.getElementById('detail-controls').classList.remove('hidden');
         
         currentMint = mint;
+        currentHolderHistory = []; // Reset history
+        cleanupHolderChart();      // Destroy previous chart instance
+        
         if(socket) socket.emit('subscribe', mint);
 
         const loadingDiv = document.getElementById('detail-loading');
@@ -1202,21 +1208,28 @@
     
     function initHolderChart() {
         if (holderChart) {
-            // Already created, verify size?
+            // Already created, just verify size and update data if needed
+            const container = document.getElementById('holder-chart-container');
+            if(container) {
+                const rect = container.getBoundingClientRect();
+                if(rect.width > 0 && rect.height > 0) {
+                    holderChart.applyOptions({ width: rect.width, height: rect.height });
+                }
+            }
+            updateHolderChartData();
             return;
         }
         
         const container = document.getElementById('holder-chart-container');
         if(!container) return;
         
-        // IMPORTANT: Ensure container has size.
         const rect = container.getBoundingClientRect();
         if(rect.width === 0) {
             setTimeout(initHolderChart, 50);
             return;
         }
         
-        container.innerHTML = ''; // Reset
+        container.innerHTML = ''; 
         
         holderChart = LightweightCharts.createChart(container, {
             width: rect.width,
@@ -1234,19 +1247,57 @@
             lineWidth: 2
         });
         
-        if (currentHolderHistory.length > 0) {
-            const data = currentHolderHistory.map(h => ({
-                time: Math.floor(new Date(h.timestamp).getTime() / 1000), // Convert to UNIX
-                value: h.count
-            })).sort((a,b) => a.time - b.time);
+        updateHolderChartData();
+    }
+
+    function updateHolderChartData() {
+        if (!holderAreaSeries || !currentHolderHistory || currentHolderHistory.length === 0) return;
+
+        try {
+            const data = currentHolderHistory.map(h => {
+                let ts = h.timestamp;
+                let timeVal;
+                // Parse timestamp robustly
+                if (String(ts).match(/^\d+$/)) ts = parseInt(ts);
+                
+                if (typeof ts === 'number') {
+                    // Assume MS if > year 2000 in seconds (~946mil) * 1000
+                    if (ts > 946684800000) timeVal = Math.floor(ts / 1000);
+                    else timeVal = ts;
+                } else {
+                    timeVal = Math.floor(new Date(ts).getTime() / 1000);
+                }
+                
+                return { time: timeVal, value: parseInt(h.count) };
+            })
+            .filter(x => !isNaN(x.time) && !isNaN(x.value))
+            .sort((a,b) => a.time - b.time);
             
-            // Dedup
-            const unique = []; const times = new Set();
-            data.forEach(c => { if(!times.has(c.time)){ times.add(c.time); unique.push(c); }});
+            // Deduplicate by time to prevent LWCharts errors
+            const unique = []; 
+            const seen = new Set();
+            data.forEach(c => { 
+                if(!seen.has(c.time)){ 
+                    seen.add(c.time); 
+                    unique.push(c); 
+                }
+            });
             
             holderAreaSeries.setData(unique);
             holderChart.timeScale().fitContent();
+        } catch(e) {
+            console.error("Holder Chart Error:", e);
         }
+    }
+
+    function cleanupHolderChart() { 
+        if (holderChart) { 
+            holderChart.remove(); 
+            holderChart = null; 
+            holderAreaSeries = null; 
+        } 
+        const container = document.getElementById('holder-chart-container');
+        if (container) container.innerHTML = ''; 
     }
 
     // --- UPDATES & WALLET ---
@@ -1493,7 +1544,7 @@
     window.toggleHowItWorksModal = () => toggleModal('how-it-works-modal'); window.closePreview = () => toggleModal('preview-modal');
     window.toggleKScoreModal = () => toggleModal('kscore-modal'); window.toggleInfoModal = () => toggleModal('info-modal');
     
-        // --- NEW FUNCTIONS: Apps & Share ---
+    // --- NEW FUNCTIONS: Apps & Share ---
     window.toggleAppsModal = () => toggleModal('apps-modal');
     window.shareToken = () => {
         const url = window.location.href;
@@ -1548,7 +1599,17 @@
     const formatPct = (val) => { if (val === undefined || val === null || isNaN(val)) return `<span class="text-[#9a3412]">-</span>`; const cls = val > 0 ? 'pill-green' : (val < 0 ? 'pill-red' : 'text-gray-400'); return `<span class="pill ${cls}">${val > 0 ? '+' : ''}${val.toFixed(2)}%</span>`; };
 
     function cleanupChart() { if (chartInstance) { chartInstance.remove(); chartInstance = null; candleSeries = null; } document.getElementById('tv-chart').innerHTML = ''; }
-    function cleanupHolderChart() { if (holderChart) { holderChart.remove(); holderChart = null; holderAreaSeries = null; } document.getElementById('holder-chart-container').innerHTML = ''; }
+    
+    // Updated cleanup function
+    function cleanupHolderChart() { 
+        if (holderChart) { 
+            holderChart.remove(); 
+            holderChart = null; 
+            holderAreaSeries = null; 
+        } 
+        const container = document.getElementById('holder-chart-container');
+        if (container) container.innerHTML = ''; 
+    }
 
 </script>
 </body>
