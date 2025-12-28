@@ -4,124 +4,118 @@ const { indexTokenOnChain } = require('../services/indexer');
 const logger = require('../services/logger');
 const { PublicKey } = require('@solana/web3.js');
 
-// Raydium Liquidity Pool V4 Program ID
-const RAYDIUM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
+// --- CONSTANTS ---
 
-// Pump.fun Bonding Curve Program ID
+const RAYDIUM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
 const PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5DkzonjNwu78hRvfCKubJ14M5uBEwF6P');
 
-const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+// Explicit Blocklist of known tokens to NEVER index as "New"
+// Includes SOL, USDC, USDT, Raydium Authority, Pump Authority, etc.
+const IGNORED_MINTS = new Set([
+    'So11111111111111111111111111111111111111112', // Wrapped SOL
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
+    '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R', // Raydium V4 Authority
+    '5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1', // Raydium V4 Authority
+    'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', // Token Program
+    '11111111111111111111111111111111',             // System Program
+    'SysvarRent111111111111111111111111111111111',  // Rent
+]);
 
-// Minimum time between processing the same signature (deduplication)
 const processedSigs = new Set();
 
 /**
+ * Helper to check if a mint is on the ignore list.
+ */
+function isIgnored(mint) {
+    if (!mint) return true;
+    const m = mint.toString().trim();
+    if (IGNORED_MINTS.has(m)) return true;
+    if (m === RAYDIUM_PROGRAM_ID.toString()) return true;
+    if (m === PUMP_PROGRAM_ID.toString()) return true;
+    return false;
+}
+
+/**
  * Processes a detected transaction to identify and ingest new tokens.
- * @param {string} signature - The transaction signature
- * @param {Connection} connection - Solana connection object
- * @param {object} db - Database instance
- * @param {string} source - 'Raydium' or 'Pump.fun'
  */
 async function processNewPoolTx(signature, connection, db, source) {
     if (processedSigs.has(signature)) return;
     processedSigs.add(signature);
     
-    // Clear set periodically to prevent memory leak
     if (processedSigs.size > 10000) processedSigs.clear();
 
     try {
-        // Step 1: Aggressive Retry Loop
-        // 'onLogs' is faster than the RPC indexing. We must wait for the node to catch up.
-        // Increased to 10 retries x 2s = ~20 seconds max wait.
+        // Wait for RPC indexing
+        await new Promise(r => setTimeout(r, 2000));
+
         let tx = null;
         for (let i = 0; i < 10; i++) {
             tx = await connection.getParsedTransaction(signature, {
                 maxSupportedTransactionVersion: 0,
                 commitment: 'confirmed'
             });
-            
             if (tx && tx.meta && !tx.meta.err) break;
-            
-            // logger.debug(`⏳ Listener: Waiting for ${signature} to be indexed (Attempt ${i+1}/10)...`);
             await new Promise(r => setTimeout(r, 2000));
         }
 
-        if (!tx || !tx.meta || tx.meta.err) {
-            // logger.warn(`⚠️ Listener: Could not fetch tx ${signature} after 20s. Skipping.`);
-            return;
-        }
+        if (!tx || !tx.meta || tx.meta.err) return;
 
         const candidateMints = new Set();
-        
-        // Common tokens to ignore
-        const knownMints = new Set([
-            'So11111111111111111111111111111111111111112', // Wrapped SOL
-            'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
-            'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
-        ]);
 
-        // STRATEGY A: Post Token Balances (Most Accurate)
-        // Look for any mint in postTokenBalances that isn't a known stable/SOL
+        // --- STRATEGY A: Post Token Balances (Preferred) ---
+        // Inspect token balances to find new mints.
         if (tx.meta.postTokenBalances && tx.meta.postTokenBalances.length > 0) {
             tx.meta.postTokenBalances.forEach(bal => {
-                if (bal.mint && !knownMints.has(bal.mint)) {
+                if (bal.mint && !isIgnored(bal.mint)) {
                     candidateMints.add(bal.mint);
                 }
             });
         }
 
-        // STRATEGY B: Account Key Parsing (Fallback)
-        // If Strategy A failed (empty balances), scan Account Keys.
-        // The new Mint address MUST be a "Signer" in the creation transaction (and usually Writable).
-        // We skip the Fee Payer (index 0).
-        if (candidateMints.size === 0 && tx.transaction.message.accountKeys) {
+        // --- STRATEGY B: Account Key Signers (Fallback) ---
+        // ONLY use this for Pump.fun. 
+        // WARNING: Do NOT use for Raydium. In Raydium Init, the mint is NOT a signer.
+        // The Signer is the User (Fee Payer). If we enable this for Raydium, we will index Users as Tokens.
+        if (source === 'Pump.fun' && candidateMints.size === 0 && tx.transaction.message.accountKeys) {
              const keys = tx.transaction.message.accountKeys;
-             
-             // Handle both Versioned (object) and Legacy (array) key formats
              const keyList = Array.isArray(keys) ? keys : keys.staticAccountKeys;
 
              keyList.forEach((keyObj, index) => {
-                 // Skip Fee Payer (index 0)
+                 // Skip Fee Payer (Index 0 is always fee payer)
                  if (index === 0) return;
 
-                 // In parsed transactions, keys might be objects with .pubkey or just Pubkeys
                  const pubkey = keyObj.pubkey ? keyObj.pubkey.toString() : keyObj.toString();
-                 const isSigner = keyObj.signer || connection._isSigner(keyObj, index); // helper logic if available, else rely on prop
+                 const isSigner = keyObj.signer || connection._isSigner(keyObj, index);
                  
-                 // If it is a Signer and NOT a known mint/program, it might be the new mint
-                 if (keyObj.signer && !knownMints.has(pubkey)) {
-                      // Filter out Programs (checking if it looks like a program ID is hard, 
-                      // but usually mints don't look like common program IDs).
-                      // For now, we add it. The indexer will verify if it's actually a token later.
+                 // Pump.fun 'Create' requires Mint to be a Signer
+                 if (isSigner && !isIgnored(pubkey)) {
                       candidateMints.add(pubkey);
                  }
              });
         }
 
-        if (candidateMints.size === 0) {
-            // logger.debug(`❌ Listener: No candidate mints found in ${signature}`);
-            return;
-        }
+        if (candidateMints.size === 0) return;
 
-        // Process found candidates
+        // Process Candidates
         for (const mint of candidateMints) {
-            // Filter out obviously invalid strings or programs
-            if (mint === RAYDIUM_PROGRAM_ID.toString() || mint === PUMP_PROGRAM_ID.toString()) continue;
-            
-            // Check DB
+            // Final Safety Check
+            if (isIgnored(mint)) {
+                // logger.debug(`🛡️ Filtered ignored mint: ${mint}`);
+                continue;
+            }
+
             const exists = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
             
             if (!exists) {
                 logger.info(`✨ Discovery [${source}]: Found new token ${mint} (Tx: ${signature})`);
                 
-                // Insert into DB
                 await db.run(`
                     INSERT INTO tokens (mint, name, symbol, timestamp, k_score, marketCap, hasCommunityUpdate) 
                     VALUES ($1, 'New Discovery', 'NEW', $2, 10, 0, FALSE) 
                     ON CONFLICT (mint) DO NOTHING
                 `, [mint, Date.now()]);
                 
-                // Trigger Indexing
                 indexTokenOnChain(mint).catch(e => 
                     logger.warn(`Indexing failed for ${mint}: ${e.message}`)
                 );
@@ -130,22 +124,18 @@ async function processNewPoolTx(signature, connection, db, source) {
 
     } catch (e) {
         if (!e.message.includes('429')) {
-            logger.error(`Listener Error processing ${signature} (${source}): ${e.message}`);
+            logger.error(`Listener Error ${signature}: ${e.message}`);
         }
     }
 }
 
-/**
- * Main entry point for the Token Listener service.
- * Subscribes to Solana Logs for Raydium and Pump.fun programs.
- */
 async function startNewTokenListener() {
     const connection = getSolanaConnection();
     const db = getDB();
     
-    logger.info("📡 Listener: Monitoring Raydium & Pump.fun for new pools...");
+    logger.info("📡 Listener: Monitoring Raydium & Pump.fun...");
 
-    // 1. Listen for Raydium V4 "Initialize2"
+    // 1. Raydium Listener
     try {
         connection.onLogs(
             RAYDIUM_PROGRAM_ID,
@@ -158,12 +148,12 @@ async function startNewTokenListener() {
             },
             "confirmed"
         );
-        logger.info("✅ Listener: Subscribed to Raydium V4");
+        logger.info("✅ Listener: Raydium V4 Active");
     } catch (e) {
         logger.error(`Raydium Listener Error: ${e.message}`);
     }
 
-    // 2. Listen for Pump.fun "Create"
+    // 2. Pump.fun Listener
     try {
         connection.onLogs(
             PUMP_PROGRAM_ID,
@@ -176,7 +166,7 @@ async function startNewTokenListener() {
             },
             "confirmed"
         );
-        logger.info("✅ Listener: Subscribed to Pump.fun");
+        logger.info("✅ Listener: Pump.fun Active");
     } catch (e) {
         logger.error(`Pump.fun Listener Error: ${e.message}`);
     }
