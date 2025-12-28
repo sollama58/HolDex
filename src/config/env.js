@@ -2,7 +2,6 @@ require('dotenv').config();
 
 // Helper to parse comma-separated lists
 const parseCors = (val) => {
-    // Default allowed origins (Production Frontend & Dev)
     const defaults = [
         'https://www.alonisthe.dev', 
         'https://alonisthe.dev',
@@ -13,12 +12,8 @@ const parseCors = (val) => {
     ];
 
     if (val === '*') return '*';
-    
-    // If no specific env var is set, use defaults
     if (!val || val.trim() === '') return defaults;
 
-    // Parse env var and merge with defaults
-    // Handles spaces after commas gracefully
     const envOrigins = val.split(',').map(origin => origin.trim()).filter(o => o.length > 0);
     const combined = [...defaults];
     
@@ -48,9 +43,11 @@ module.exports = {
     DATABASE_URL: process.env.DATABASE_URL || 'postgresql://user:password@localhost:5432/holdex',
     REDIS_URL: process.env.REDIS_URL || 'redis://redis:6379',
     
-    // EXPORT BOTH NAMES TO PREVENT MISMATCHES
+    // RPC & WSS CONFIG
     SOLANA_RPC_URL: rpcUrl,
-    RPC_URL: rpcUrl, 
+    RPC_URL: rpcUrl,
+    // NEW: Explicit WSS URL Support
+    SOLANA_WSS_URL: process.env.SOLANA_WSS_URL,
     
     // CORS Configuration
     CORS_ORIGINS: parseCors(process.env.CORS_ORIGINS),
@@ -67,6 +64,5 @@ module.exports = {
     FEE_TOKEN_MINT: process.env.FEE_TOKEN_MINT || '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump',
     
     // --- MEMORY PROTECTION ---
-    // CHANGED: Default to TRUE (Enable checks) unless explicitly disabled
     ENABLE_RPC_HOLDER_CHECK: process.env.ENABLE_RPC_HOLDER_CHECK !== 'false'
 };
