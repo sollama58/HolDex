@@ -13,11 +13,6 @@ const IGNORED_MINTS = new Set([
     'So11111111111111111111111111111111111111112', 
     'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 
     'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
-    '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R', 
-    '5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1',
-    'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', 
-    '11111111111111111111111111111111',             
-    'SysvarRent111111111111111111111111111111111',  
     'Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1',
 ]);
 
@@ -26,6 +21,7 @@ let subscriptionIds = [];
 let lastLogTime = Date.now();
 let watchdogInterval = null;
 let currentConnection = null;
+let debugLogCounter = 0;
 
 function isIgnored(mint) {
     if (!mint) return true;
@@ -41,9 +37,7 @@ async function processNewPoolTx(signature, connection, db, source) {
     if (processedSigs.size > 10000) processedSigs.clear();
 
     lastLogTime = Date.now();
-    
-    // DEBUG LOG: Signal Received
-    logger.info(`🔍 [${source}] Signal Detected: ${signature}`);
+    logger.info(`🔍 [${source}] MATCH FOUND: ${signature}`);
 
     try {
         await new Promise(r => setTimeout(r, 2000));
@@ -55,32 +49,21 @@ async function processNewPoolTx(signature, connection, db, source) {
                     maxSupportedTransactionVersion: 0,
                     commitment: 'confirmed'
                 });
-            } catch (err) {
-                 logger.warn(`   ⚠️ RPC Error fetching ${signature}: ${err.message}`);
-            }
+            } catch (err) {}
             if (tx && tx.meta && !tx.meta.err) break;
             await new Promise(r => setTimeout(r, 1500));
         }
 
-        if (!tx) {
-            logger.warn(`   ❌ Failed to fetch TX body for ${signature} (gave up).`);
-            return;
-        }
-        if (tx.meta && tx.meta.err) {
-            // logger.warn(`   ❌ TX Reverted/Failed on-chain: ${signature}`);
-            return;
-        }
+        if (!tx) return;
 
         const candidateMints = new Set();
 
-        // STRATEGY A: Post Token Balances
         if (tx.meta.postTokenBalances && tx.meta.postTokenBalances.length > 0) {
             tx.meta.postTokenBalances.forEach(bal => {
                 if (bal.mint && !isIgnored(bal.mint)) candidateMints.add(bal.mint);
             });
         }
 
-        // STRATEGY B: Pump.fun "Create" Specific
         if (source === 'Pump.fun' && candidateMints.size === 0) {
              const keys = tx.transaction.message.accountKeys;
              const keyList = Array.isArray(keys) ? keys : (keys.staticAccountKeys || []);
@@ -97,51 +80,25 @@ async function processNewPoolTx(signature, connection, db, source) {
              });
         }
 
-        // STRATEGY C: Inner Instructions
-        if (candidateMints.size === 0 && tx.meta.innerInstructions) {
-             tx.meta.innerInstructions.forEach(inner => {
-                 inner.instructions.forEach(inst => {
-                     if (inst.program === 'spl-token' && inst.parsed && inst.parsed.type === 'initializeMint') {
-                         const mint = inst.parsed.info.mint;
-                         if (mint && !isIgnored(mint)) candidateMints.add(mint);
-                     }
-                 });
-             });
-        }
-
-        if (candidateMints.size === 0) {
-            logger.warn(`   ⚠️ ANALYZED TX ${signature} BUT FOUND 0 MINTS.`);
-            return;
-        }
-
         const redis = getClient();
-        if (!redis) {
-             logger.error(`   ❌ Redis Disconnected! Cannot queue mints.`);
-             return;
-        }
+        if (!redis) return;
 
         for (const mint of candidateMints) {
             if (isIgnored(mint)) continue;
             
             const data = JSON.stringify({ mint, addedAt: Date.now(), source });
+            const added = await redis.sadd(PENDING_KEY, data);
             
-            try {
-                const added = await redis.sadd(PENDING_KEY, data);
-                if (added) {
-                    console.log(`\n--------------------------------------------------`);
-                    logger.info(`🌱 [PENDING LIST] Added: ${mint}`);
-                    logger.info(`   📝 Source: ${source}`);
-                    logger.info(`   🔗 Tx: ${signature}`);
-                    console.log(`--------------------------------------------------\n`);
-                } else {
-                    // logger.info(`   (Duplicate skipped: ${mint})`);
-                }
-            } catch (redisErr) {
-                logger.error(`   ❌ Redis Write Failed: ${redisErr.message}`);
+            if (added) {
+                console.log(`\n--------------------------------------------------`);
+                logger.info(`🌱 [PENDING LIST] Added: ${mint}`);
+                logger.info(`   📝 Source: ${source}`);
+                logger.info(`   🔗 Tx: ${signature}`);
+                console.log(`--------------------------------------------------\n`);
             }
         }
     } catch (e) {
-        if (e.message && !e.message.includes('429')) logger.error(`Listener Error ${signature}: ${e.message}`);
+        // Suppress benign errors
     }
 }
 
@@ -159,7 +116,11 @@ async function setupSubscriptions(connection, db) {
             async (logs, ctx) => {
                 lastLogTime = Date.now();
                 if (logs.err) return;
-                const isInit = logs.logs.some(l => l.includes('InitializeInstruction2') || l.includes('initialize2'));
+                const isInit = logs.logs.some(l => 
+                    l.includes('InitializeInstruction2') || 
+                    l.includes('initialize2') ||
+                    l.includes('InitializeMint')
+                );
                 if (isInit) await processNewPoolTx(logs.signature, connection, db, 'Raydium');
             },
             "confirmed"
@@ -174,7 +135,20 @@ async function setupSubscriptions(connection, db) {
             async (logs, ctx) => {
                 lastLogTime = Date.now();
                 if (logs.err) return;
-                const isCreate = logs.logs.some(l => l.includes('Instruction: Create') || l.includes('Program log: Instruction: Create'));
+
+                debugLogCounter++;
+                // DEBUG: Print sample logs periodically
+                if (debugLogCounter % 50 === 0) {
+                    console.log(`🔍 [PUMP LOG SAMPLE ${debugLogCounter}]:`, JSON.stringify(logs.logs[0] || "No log content"));
+                }
+
+                const isCreate = logs.logs.some(l => 
+                    l.includes('Instruction: Create') || 
+                    l.includes('Create') || 
+                    l.includes('InitializeMint') || 
+                    l.includes('MintTo')
+                );
+
                 if (isCreate) await processNewPoolTx(logs.signature, connection, db, 'Pump.fun');
             },
             "confirmed"
@@ -187,29 +161,44 @@ async function setupSubscriptions(connection, db) {
 async function startNewTokenListener() {
     const redis = getClient();
     if (!redis) {
-        logger.error("❌ FATAL: Listener started but Redis is NOT connected. Retrying in 5s...");
-        setTimeout(startNewTokenListener, 5000);
+        logger.warn("Redis not ready, retrying in 2s...");
+        setTimeout(startNewTokenListener, 2000);
         return;
-    } else {
-        logger.info("✅ Listener: Redis Connection Verified.");
-    }
+    } 
+    logger.info("✅ Listener: Redis Verified.");
 
     const db = getDB();
+    
+    // FORCE NEW CONNECTION
+    // We intentionally create a fresh connection object here to avoid sharing with the HTTP pool
+    // which might cause weird socket closures.
     currentConnection = getSolanaConnection(true); 
+    
+    // Explicitly log the endpoint being used for verification
+    logger.info(`🔌 Listener Connection Endpoint: ${currentConnection.rpcEndpoint}`);
+
     await setupSubscriptions(currentConnection, db);
 
     if (watchdogInterval) clearInterval(watchdogInterval);
     watchdogInterval = setInterval(async () => {
         const timeSinceLastLog = Date.now() - lastLogTime;
-        if (timeSinceLastLog > 120000) { 
-            logger.warn(`⚠️ LISTENERS DEAD? No logs for ${(timeSinceLastLog / 60000).toFixed(1)} mins. Reconnecting...`);
+        const mins = (timeSinceLastLog / 60000).toFixed(1);
+        
+        if (timeSinceLastLog > 120000) { // 2 mins
+            logger.warn(`⚠️ LISTENERS DEAD? No logs for ${mins} mins. Reconnecting...`);
             try {
+                // Kill old connection
+                try { 
+                    subscriptionIds.forEach(id => currentConnection.removeOnLogsListener(id)); 
+                } catch(e) {}
+                
+                // New Connection
                 currentConnection = getSolanaConnection(true); 
                 await setupSubscriptions(currentConnection, db);
                 lastLogTime = Date.now();
             } catch (err) { logger.error(`❌ Reconnection Failed: ${err.message}`); }
         } else {
-            logger.info(`💓 Listener Alive. Last log: ${(timeSinceLastLog / 60000).toFixed(1)} mins ago.`);
+            logger.info(`💓 Listener Alive. Last log: ${mins} mins ago.`);
         }
     }, 60000);
 }
