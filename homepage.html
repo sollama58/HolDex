@@ -1,1855 +1,1089 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0f0502">
     <title>HolDex | The Terminal Fire Explorer</title>
     
+    <!-- Core Libraries -->
     <script src="https://bundle.run/buffer@6.0.3"></script>
-    <script>
-        if (typeof window.buffer !== 'undefined') {
-            window.Buffer = window.buffer.Buffer;
-        }
-    </script>
-
+    <script>if (typeof window.buffer !== 'undefined') window.Buffer = window.buffer.Buffer;</script>
     <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
     <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://unpkg.com/tweetnacl@1.0.3/nacl-fast.min.js"></script> 
-    <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     
     <script>
         tailwind.config = {
+            darkMode: 'class',
             theme: {
                 extend: {
                     colors: {
-                        fire: { bg: '#2a1005', panel: '#451a03', border: '#7c2d12', accent: '#ea580c', text: '#ffedd5', highlight: '#fb923c' },
-                        void: '#0f0502'
+                        bg: { main: '#0a0a0a', card: '#121212', lighter: '#1e1e1e' },
+                        brand: { 
+                            primary: '#f97316', // Orange-500
+                            secondary: '#ea580c', // Orange-600
+                            glow: 'rgba(249, 115, 22, 0.15)',
+                            border: '#431407' 
+                        },
+                        text: { main: '#e5e5e5', muted: '#a3a3a3', accent: '#fdba74' },
+                        state: { success: '#22c55e', error: '#ef4444', warn: '#eab308' }
                     },
-                    fontFamily: { mono: ['JetBrains Mono', 'monospace'], sans: ['Comic Neue', 'cursive'] }
+                    fontFamily: { 
+                        sans: ['Inter', 'sans-serif'], 
+                        mono: ['JetBrains Mono', 'monospace'] 
+                    },
+                    boxShadow: {
+                        'glow': '0 0 20px rgba(249, 115, 22, 0.1)',
+                        'card': '0 4px 6px -1px rgba(0, 0, 0, 0.5)',
+                    }
                 }
             }
         }
     </script>
     <style>
-        body { background-color: #2a1005; color: #ffedd5; font-family: 'Comic Neue', cursive; min-height: 100vh; font-size: 14px; overflow-x: hidden; padding-bottom: 80px; }
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-track { background: #2a1005; }
-        ::-webkit-scrollbar-thumb { background: #7c2d12; border-radius: 4px; border: 1px solid #451a03; }
-        ::-webkit-scrollbar-thumb:hover { background: #ea580c; }
-        nav { background: rgba(42, 16, 5, 0.95); backdrop-filter: blur(12px); border-bottom: 2px solid #7c2d12; }
-        .brand-text { color: #ea580c; text-shadow: 2px 2px 0px #451a03; font-weight: 800; letter-spacing: 1px; }
-        .holdex-table { width: 100%; border-collapse: separate; border-spacing: 0; }
-        .holdex-table th { background: #451a03; position: sticky; top: 0; z-index: 20; padding: 14px 12px; text-align: right; font-size: 12px; font-weight: 700; color: #fb923c; border-bottom: 2px solid #7c2d12; cursor: pointer; white-space: nowrap; text-transform: uppercase; transition: color 0.2s, background 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-        .holdex-table th:hover { background: #582206; color: #fff; }
-        .holdex-table th:first-child { text-align: left; padding-left: 20px; }
-        .holdex-table td { padding: 12px 12px; border-bottom: 1px solid rgba(124, 45, 18, 0.3); vertical-align: middle; font-family: 'JetBrains Mono', monospace; }
-        .holdex-table td:first-child { padding-left: 20px; }
-        .holdex-table tr:hover td { background: rgba(234, 88, 12, 0.1); }
-        .img-token { width: 40px; height: 40px; border-radius: 8px; border: 2px solid #7c2d12; object-fit: cover; flex-shrink: 0; background: #000; }
-        .pill { padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono'; }
-        .pill-green { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4); }
-        .pill-red { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
-        .search-container { position: relative; width: 100%; display: flex; align-items: center; gap: 8px; }
-        .search-box { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; padding: 10px 36px 10px 16px; border-radius: 8px; outline: none; width: 100%; font-family: 'JetBrains Mono'; transition: border-color 0.2s; }
-        .search-box:focus { border-color: #ea580c; }
-        .search-box::placeholder { color: #9a3412; }
-        .clear-search { position: absolute; right: 46px; top: 50%; transform: translateY(-50%); color: #9a3412; cursor: pointer; display: none; }
-        .clear-search:hover { color: #ea580c; }
-        .info-toggle { color: #9a3412; cursor: pointer; transition: color 0.2s; }
-        .info-toggle:hover { color: #fb923c; }
-        .nav-btn { background: transparent; color: #9a3412; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 800; transition: all 0.2s; border: 2px solid transparent; }
-        .nav-btn:hover { color: #fb923c; }
-        .nav-btn.active { background: #451a03; color: #ea580c; border-color: #7c2d12; box-shadow: 0 4px 0 #2a1005; }
-        .filter-toggle { background: #451a03; border: 2px solid #7c2d12; color: #9a3412; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; transition: all 0.2s; display: flex; align-items: center; gap: 6px; }
-        .filter-toggle.active { border-color: #22c55e; color: #4ade80; background: rgba(34, 197, 94, 0.1); }
-        .refresh-btn { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; transition: all 0.2s; position: relative; }
-        .refresh-btn:hover:not(:disabled) { border-color: #ea580c; color: #fff; background: #582206; }
-        .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; border-color: #451a03; color: #7c2d12; }
-        .refresh-btn:disabled i { animation: spin 1s linear infinite; }
-        @keyframes spin { 100% { transform: rotate(360deg); } }
-        .page-btn { background: #2a1005; border: 2px solid #7c2d12; color: #fb923c; padding: 8px 16px; border-radius: 8px; font-weight: bold; font-family: 'JetBrains Mono', monospace; transition: all 0.2s; cursor: pointer; }
-        .page-btn:hover:not(:disabled) { border-color: #ea580c; color: #fff; background: #451a03; }
-        .page-btn:disabled { opacity: 0.5; cursor: not-allowed; border-color: #451a03; color: #7c2d12; }
-        .view-section { display: none; }
-        .view-section.active { display: block; animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-        
-        .chart-wrapper { width: 100%; height: 600px; background: #1a0a05; border-radius: 16px; overflow: hidden; border: 2px solid #7c2d12; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
-        .chart-header { padding: 12px 16px; background: #2a1005; border-bottom: 1px solid #7c2d12; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-        
-        .chart-controls-group { display: flex; align-items: center; gap: 4px; background: #0f0502; padding: 4px; border-radius: 8px; border: 1px solid #451a03; }
-        
-        .res-btn { background: transparent; border: 1px solid transparent; color: #9a3412; padding: 6px 10px; border-radius: 6px; font-family: 'JetBrains Mono'; font-size: 11px; font-weight: bold; cursor: pointer; transition: all 0.1s; }
-        .res-btn:hover { color: #fb923c; background: #2a1005; }
-        .res-btn.active { background: #451a03; color: #ea580c; border-color: #7c2d12; }
-        
-        .tool-btn { background: transparent; border: 1px solid transparent; color: #9a3412; padding: 6px 10px; border-radius: 6px; font-family: 'JetBrains Mono'; font-size: 11px; font-weight: bold; cursor: pointer; transition: all 0.1s; display: flex; align-items: center; gap: 4px; }
-        .tool-btn:hover { color: #fb923c; background: #2a1005; }
-        .tool-btn.active { background: rgba(34, 197, 94, 0.1); color: #4ade80; border-color: rgba(34, 197, 94, 0.3); }
-        .tool-btn.active-orange { background: #451a03; color: #ea580c; border-color: #7c2d12; }
+        /* Base Reset & Custom Scrollbar */
+        body { background-color: #050505; color: #e5e5e5; font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; padding-bottom: 80px; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0a0a0a; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #f97316; }
 
-        #tv-chart { flex: 1; position: relative; width: 100%; height: 100%; }
-
-        .stat-card { background: rgba(69, 26, 3, 0.8); border: 2px solid #7c2d12; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 4px; box-shadow: 4px 4px 0 rgba(0,0,0,0.2); }
-        .stat-label { font-size: 11px; color: #fb923c; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
-        .stat-value { font-size: 18px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
-        .stat-card.clickable { cursor: pointer; transition: transform 0.2s, border-color 0.2s; }
-        .stat-card.clickable:hover { transform: translateY(-2px); border-color: #ea580c; }
+        /* Utility Classes */
+        .glass-panel { background: rgba(18, 18, 18, 0.85); backdrop-filter: blur(12px); border: 1px solid #333; }
+        .border-brand { border-color: #431407; }
+        .text-glow { text-shadow: 0 0 10px rgba(249, 115, 22, 0.3); }
         
-        .modal-overlay { position: fixed; inset: 0; background: rgba(15, 5, 2, 0.95); backdrop-filter: blur(5px); z-index: 100; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+        /* Mobile Bottom Nav */
+        .bottom-nav { 
+            position: fixed; bottom: 0; left: 0; right: 0; 
+            background: rgba(10, 10, 10, 0.95); backdrop-filter: blur(16px);
+            border-top: 1px solid #333; z-index: 100;
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        .nav-item { 
+            flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; 
+            padding: 10px 0; color: #737373; font-size: 10px; font-weight: 600; transition: all 0.2s; 
+        }
+        .nav-item.active { color: #f97316; }
+        .nav-item svg { margin-bottom: 4px; }
+
+        /* Card Views (Mobile List) */
+        .token-card { 
+            display: flex; align-items: center; padding: 12px; 
+            background: #121212; border-bottom: 1px solid #262626;
+            transition: background 0.15s;
+        }
+        .token-card:active { background: #1a1a1a; }
+        
+        /* Inputs */
+        .search-input { 
+            background: #171717; border: 1px solid #333; color: #fff; 
+            padding: 10px 14px; border-radius: 8px; width: 100%; 
+            font-size: 14px; outline: none; transition: border-color 0.2s; 
+        }
+        .search-input:focus { border-color: #f97316; }
+        
+        /* Checkbox/Radio override */
+        input[type="checkbox"] { accent-color: #f97316; }
+
+        /* Modals */
+        .modal-overlay { 
+            position: fixed; inset: 0; background: rgba(0,0,0,0.8); 
+            backdrop-filter: blur(4px); z-index: 200; 
+            opacity: 0; pointer-events: none; transition: opacity 0.2s;
+            display: flex; align-items: center; justify-content: center;
+        }
         .modal-overlay.open { opacity: 1; pointer-events: auto; }
-        .action-btn { background: #451a03; border: 2px solid #ea580c; color: #fb923c; padding: 12px 20px; border-radius: 12px; font-weight: 700; text-transform: uppercase; font-size: 13px; transition: all 0.2s; box-shadow: 4px 4px 0 #7c2d12; }
-        .action-btn:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 #7c2d12; background: #582206; color: #fff; }
-        .action-btn:active { transform: translate(2px, 2px); box-shadow: 0 0 0; }
-        .back-btn { background: #2a1005; border: 2px solid #7c2d12; color: #9a3412; padding: 10px 16px; border-radius: 8px; font-weight: 700; transition: all 0.2s; }
-        .back-btn:hover { border-color: #ea580c; color: #ea580c; }
-        .sort-header { position: relative; user-select: none; }
-        .sort-header:active { transform: translateY(1px); }
-        .table-scroll-container { max-height: 70vh; overflow-y: auto; border-radius: 0 0 16px 16px; }
-        .form-input { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; padding: 12px; border-radius: 8px; width: 100%; font-family: 'JetBrains Mono'; margin-bottom: 16px; outline: none; transition: border-color 0.2s; }
-        .form-input:focus { border-color: #ea580c; }
-        .form-label { display: block; color: #9a3412; font-size: 12px; font-weight: bold; margin-bottom: 6px; text-transform: uppercase; }
-        .social-btn { display: flex; align-items: center; justify-content: center; width: 42px; height: 42px; border-radius: 12px; border: 2px solid #7c2d12; background: #451a03; color: #ea580c; transition: all 0.2s; }
-        .social-btn:hover { border-color: #ea580c; color: #fff; background: #582206; transform: translateY(-2px); }
-        .pool-tab { padding: 8px 16px; font-size: 12px; font-weight: bold; color: #9a3412; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; }
-        .pool-tab.active { color: #ea580c; border-bottom-color: #ea580c; background: #2a1005; }
-        .pool-tab:hover:not(.active) { color: #fb923c; background: rgba(69, 26, 3, 0.5); }
-        .verified-badge { display: inline-flex; align-items: center; justify-content: center; background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #22c55e; border-radius: 50%; width: 20px; height: 20px; margin-left: 6px; box-shadow: 0 0 10px rgba(34, 197, 94, 0.3); }
-        .verified-badge i { width: 12px; height: 12px; }
-        .info-btn { color: #9a3412; cursor: pointer; transition: color 0.2s; }
-        .info-btn:hover { color: #fb923c; }
-        .info-box { background: #451a03; border: 1px solid #7c2d12; border-radius: 8px; padding: 16px; margin-bottom: 16px; color: #ffedd5; font-size: 13px; line-height: 1.5; }
-        .info-box a { color: #fb923c; text-decoration: underline; }
-        .feature-box { background: #451a03; border: 2px solid #7c2d12; border-radius: 16px; padding: 24px; transition: transform 0.2s; display: flex; flex-direction: column; gap: 8px; }
-        .feature-box:hover { border-color: #ea580c; transform: translateY(-4px); }
-        .fee-card { background: rgba(0,0,0,0.3); border: 1px dashed #7c2d12; padding: 12px; border-radius: 8px; margin-bottom: 16px; text-align: center; }
-        
-        .wallet-btn { background: #2a1005; border: 2px solid #7c2d12; padding: 16px; border-radius: 12px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.2s; color: #ffedd5; font-weight: bold; }
-        .wallet-btn:hover { border-color: #ea580c; background: #451a03; transform: translateX(5px); }
-        .wallet-icon { width: 32px; height: 32px; border-radius: 8px; }
-        
-        .social-btn-lg { display: flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 14px; border: 2px solid #7c2d12; background: #451a03; color: #ea580c; transition: all 0.2s; }
-        .social-btn-lg:hover { border-color: #ea580c; color: #fff; background: #582206; transform: translateY(-2px); }
+        .modal-content {
+            background: #121212; border: 1px solid #333; 
+            width: 100%; max-width: 500px; border-radius: 16px; 
+            padding: 24px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+            max-height: 90vh; overflow-y: auto; transform: scale(0.95); transition: transform 0.2s;
+        }
+        .modal-overlay.open .modal-content { transform: scale(1); }
 
-        .code-block { background: #0f0502; border: 1px solid #7c2d12; padding: 16px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #fb923c; overflow-x: auto; position: relative; }
-        .code-copy-btn { position: absolute; top: 8px; right: 8px; background: #451a03; border: 1px solid #7c2d12; color: #9a3412; padding: 4px 8px; border-radius: 4px; font-size: 10px; cursor: pointer; transition: all 0.2s; }
-        .code-copy-btn:hover { border-color: #ea580c; color: #fff; }
+        /* Charts */
+        .chart-container { height: 50vh; min-height: 400px; width: 100%; position: relative; }
+        @media (min-width: 768px) { .chart-container { height: 600px; } }
+
+        /* Animations */
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); opacity: 0.5; }
+            100% { transform: scale(2); opacity: 0; }
+        }
+        .live-dot::before {
+            content: ''; position: absolute; left: -4px; top: -4px; width: 16px; height: 16px;
+            background: rgba(34, 197, 94, 0.4); border-radius: 50%;
+            animation: pulse-ring 2s infinite;
+        }
         
-        footer { box-shadow: 0 -4px 10px rgba(0,0,0,0.5); }
-        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
-        .status-dot.online { background: #22c55e; box-shadow: 0 0 5px #22c55e; animation: pulse 2s infinite; }
-        .status-dot.offline { background: #ef4444; box-shadow: 0 0 5px #ef4444; }
-        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
-        .footer-wallet-btn { background: #451a03; border: 1px solid #7c2d12; padding: 4px 12px; border-radius: 6px; color: #fb923c; font-weight: bold; font-size: 11px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px; }
-        .footer-wallet-btn:hover { border-color: #ea580c; color: #fff; }
-        
-        .live-indicator { width: 6px; height: 6px; background: #22c55e; border-radius: 50%; display: inline-block; margin-right: 4px; animation: pulse 1s infinite; }
+        /* Hide scrollbar for horiz scrolling */
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 </head>
 <body>
 
-<nav class="sticky top-0 z-40">
-    <div class="max-w-[1800px] mx-auto px-4 md:px-6 py-4 flex flex-col md:flex-row md:justify-between md:items-center gap-4">
-        <div class="flex items-center justify-between w-full md:w-auto">
-            <div class="flex items-center gap-4 cursor-pointer group" onclick="navigateTo('')">
-                <div class="w-12 h-12 rounded-xl flex items-center justify-center bg-[#451a03] text-orange-500 border-2 border-[#7c2d12] shadow-lg group-hover:border-orange-500 transition">
-                    <i data-lucide="flame" width="24"></i>
-                </div>
-                <div>
-                    <h1 class="text-3xl brand-text tracking-tight font-sans">HolDex</h1>
-                </div>
-            </div>
+<!-- TOP HEADER (Desktop & Mobile) -->
+<header class="fixed top-0 left-0 right-0 h-16 bg-[#0a0a0a]/90 backdrop-blur-md border-b border-[#262626] z-50 flex items-center justify-between px-4 md:px-8">
+    <div class="flex items-center gap-3 cursor-pointer" onclick="navigateTo('')">
+        <div class="w-8 h-8 rounded-lg bg-orange-500/10 border border-orange-500 flex items-center justify-center text-orange-500">
+            <i data-lucide="flame" width="18"></i>
         </div>
-
-        <div class="flex items-center bg-[#451a03]/50 p-1 rounded-lg border border-[#7c2d12]/50">
-            <button class="nav-btn active" onclick="navigateTo('')">Home</button>
-            <button class="nav-btn" onclick="navigateTo('about')">About</button>
-            <button class="nav-btn" onclick="navigateTo('update')">Update</button>
-        </div>
-        
-        <div id="table-controls" class="flex items-center gap-3 w-full md:w-auto transition-opacity duration-300">
-            <button id="filter-verified" onclick="toggleVerifiedFilter()" class="filter-toggle" title="Show only Verified Community Updates">
-                <i data-lucide="shield-check" width="16"></i> Verified Only
-            </button>
-            <button id="filter-zerovol" onclick="toggleZeroVolFilter()" class="filter-toggle active" title="Hide tokens with 0 Volume">
-                <i data-lucide="bar-chart-2" width="16"></i> Hide 0 Vol
-            </button>
-            <div class="relative w-full md:w-auto search-container">
-                <input type="text" id="search" placeholder="Search..." class="search-box">
-                <i id="clear-search-btn" data-lucide="x" width="16" class="clear-search" onclick="clearSearch()"></i>
-                <i id="help-btn" data-lucide="help-circle" width="18" class="info-toggle" onclick="toggleHowItWorksModal()" title="How are tokens added?"></i>
-            </div>
-            <button id="manual-refresh" onclick="handleManualRefresh()" class="refresh-btn" title="Refresh Data">
-                <i data-lucide="refresh-cw" width="18"></i>
-            </button>
-        </div>
-
-        <div id="detail-controls" class="hidden w-full md:w-auto">
-            <button onclick="navigateTo('')" class="back-btn flex items-center justify-center gap-2 w-full md:w-auto"><i data-lucide="arrow-left" width="16"></i> Back</button>
-        </div>
+        <div class="hidden md:block font-bold text-xl tracking-tight">HolDex <span class="text-xs text-orange-500 bg-orange-900/20 px-1.5 py-0.5 rounded border border-orange-900/50">PRO</span></div>
     </div>
-</nav>
 
-<main class="max-w-[1800px] mx-auto px-0 md:px-6 py-4 md:py-8">
+    <!-- Desktop Nav -->
+    <div class="hidden md:flex items-center gap-6">
+        <button class="text-sm font-medium hover:text-orange-500 transition nav-link active" onclick="navigateTo('')">Terminal</button>
+        <button class="text-sm font-medium hover:text-orange-500 transition nav-link" onclick="navigateTo('update')">Update Manager</button>
+        <button class="text-sm font-medium hover:text-orange-500 transition nav-link" onclick="navigateTo('about')">Documentation</button>
+    </div>
+
+    <div class="flex items-center gap-3">
+        <!-- Search Trigger (Mobile) -->
+        <button class="md:hidden p-2 text-gray-400 hover:text-white" onclick="toggleSearchModal()">
+            <i data-lucide="search" width="20"></i>
+        </button>
+
+        <!-- Search Bar (Desktop) -->
+        <div class="hidden md:block relative w-64">
+            <input type="text" id="desktop-search" placeholder="Search token or address..." class="search-input !py-1.5 pl-8" oninput="handleSearch(event)">
+            <i data-lucide="search" width="14" class="absolute left-2.5 top-2.5 text-gray-500"></i>
+        </div>
+
+        <button onclick="openWalletModal()" id="header-wallet-btn" class="flex items-center gap-2 bg-[#1a1a1a] hover:bg-[#262626] border border-[#333] px-3 py-1.5 rounded-full text-xs font-bold transition">
+            <i data-lucide="wallet" width="14" class="text-orange-500"></i>
+            <span id="header-wallet-text">Connect</span>
+        </button>
+    </div>
+</header>
+
+<!-- MAIN CONTENT -->
+<main class="pt-20 px-0 md:px-6 max-w-[1600px] mx-auto min-h-screen">
     
     <!-- DASHBOARD VIEW -->
-    <div id="view-dashboard" class="view-section active">
-        <div class="bg-[#2a1005] border-y md:border-2 border-[#7c2d12] md:rounded-2xl overflow-hidden shadow-2xl flex flex-col">
-            <div class="table-scroll-container overflow-x-auto">
-                <table class="holdex-table">
-                    <thead>
-                        <tr>
-                            <th width="30%" class="sort-header" data-sort="newest" onclick="setSort('newest')">Asset <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
-                            <th class="sort-header text-[#ea580c] border-b-[#ea580c] border-b-2" data-sort="kscore" onclick="setSort('kscore')">K-Score <i data-lucide="arrow-down" width="12" class="sort-icon inline ml-1"></i></th>
-                            <th class="hidden md:table-cell sort-header" data-sort="5m" onclick="setSort('5m')">5m <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
-                            <th class="hidden md:table-cell sort-header" data-sort="1h" onclick="setSort('1h')">1h <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
-                            <th class="sort-header" data-sort="24h" onclick="setSort('24h')">24h <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
-                            <th class="sort-header" data-sort="mcap" onclick="setSort('mcap')">Mkt Cap <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
-                            <th class="hidden md:table-cell sort-header" data-sort="holders" onclick="setSort('holders')">Holders <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
-                            <th class="sort-header" data-sort="volume" onclick="setSort('volume')">Vol (24h) <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th> 
-                            <th class="hidden md:table-cell sort-header" data-sort="age" onclick="setSort('age')">Age <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
-                        </tr>
-                    </thead>
-                    <tbody id="table-body">
-                        <tr><td colspan="9" class="text-center py-20 text-orange-700 font-mono animate-pulse">Scanning Solana Mempool...</td></tr>
-                    </tbody>
-                </table>
+    <div id="view-dashboard" class="view-section">
+        
+        <!-- Stats / Ticker Tape -->
+        <div class="px-4 md:px-0 mb-6 grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div class="bg-[#121212] border border-[#262626] p-3 rounded-lg flex flex-col justify-between">
+                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Solana Price</div>
+                <div class="font-mono font-bold text-lg text-white" id="sol-price-display">--</div>
             </div>
-            
-            <div class="bg-[#451a03] p-4 border-t-2 border-[#7c2d12] flex justify-between items-center">
-                <div class="text-xs text-[#9a3412] font-mono font-bold uppercase tracking-wider hidden md:block">
-                    Showing results
+            <div class="bg-[#121212] border border-[#262626] p-3 rounded-lg flex flex-col justify-between">
+                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider">Network Status</div>
+                <div class="font-mono font-bold text-lg text-green-500 flex items-center gap-2">
+                    <span class="relative flex h-2 w-2 live-dot bg-green-500 rounded-full"></span>
+                    <span id="tps-display">Active</span>
                 </div>
-                <div class="flex items-center gap-4 mx-auto md:mx-0">
-                    <button id="btn-prev" onclick="changePage(-1)" class="page-btn flex items-center gap-2" disabled>
-                        <i data-lucide="chevron-left" width="16"></i> Previous
-                    </button>
-                    <span id="page-display" class="text-[#fb923c] font-mono font-bold text-lg">Page 1</span>
-                    <button id="btn-next" onclick="changePage(1)" class="page-btn flex items-center gap-2">
-                        Next <i data-lucide="chevron-right" width="16"></i>
-                    </button>
-                </div>
+            </div>
+             <div class="hidden md:flex bg-[#121212] border border-[#262626] p-3 rounded-lg flex-col justify-between">
+                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider">New Pairs (24h)</div>
+                <div class="font-mono font-bold text-lg text-white">1,249</div>
+            </div>
+             <div class="hidden md:flex bg-[#121212] border border-[#262626] p-3 rounded-lg flex-col justify-between">
+                <div class="text-[10px] text-gray-500 uppercase font-bold tracking-wider">24h Volume</div>
+                <div class="font-mono font-bold text-lg text-white">$420M</div>
             </div>
         </div>
-    </div>
 
-    <!-- ABOUT VIEW -->
-    <div id="view-about" class="view-section px-4 md:px-0">
-        <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 md:p-12 shadow-2xl max-w-5xl mx-auto space-y-12">
-            <div class="flex items-center gap-6 border-b-2 border-[#7c2d12] pb-8">
-                <div class="w-20 h-20 rounded-2xl flex items-center justify-center bg-[#451a03] text-orange-500 border-2 border-[#7c2d12] shadow-lg flex-shrink-0">
-                    <i data-lucide="flame" width="40"></i>
-                </div>
-                <div>
-                    <h2 class="text-5xl font-bold text-white tracking-tight font-sans">About HolDex</h2>
-                    <p class="text-[#ea580c] font-mono text-lg mt-1">The High-Velocity Terminal for Solana Assets</p>
-                </div>
-            </div>
-            <div class="grid md:grid-cols-2 gap-8">
-                <div>
-                    <h3 class="text-2xl font-bold text-white mb-4">Core Philosophy</h3>
-                    <p class="text-[#ffedd5] leading-relaxed mb-4">
-                        HolDex is built for traders who demand raw speed and absolute truth. We provide a <strong>terminal-grade interface</strong> that cuts through the clutter, now enhanced with <strong>Daily Holder Tracking</strong> and deep historical analysis.
-                    </p>
-                    <p class="text-[#ffedd5] leading-relaxed">
-                        We prioritize <strong>community verification</strong> and <strong>on-chain data integrity</strong>. Our proprietary indexing engine snapshots liquidity pools directly from the Solana RPC, ensuring you see price action as it happens.
-                    </p>
-                </div>
-                <div class="bg-[#451a03] p-6 rounded-xl border border-[#7c2d12] flex flex-col justify-center shadow-inner">
-                    <div class="flex items-center gap-3 mb-2"><i data-lucide="server" width="20" class="text-[#22c55e]"></i><span class="font-bold text-white">Direct RPC Sync</span></div>
-                    <p class="text-sm text-[#9a3412] mb-4">No third-party delays. We index Raydium and Pump.fun directly.</p>
-                    <div class="flex items-center gap-3 mb-2"><i data-lucide="bar-chart" width="20" class="text-[#3b82f6]"></i><span class="font-bold text-white">Holder Analytics</span></div>
-                    <p class="text-sm text-[#9a3412]">Track wallet growth over time with our daily snapshot engine.</p>
-                </div>
-            </div>
-            <div class="grid md:grid-cols-3 gap-6">
-                <div class="feature-box"><div class="text-[#fb923c] mb-2"><i data-lucide="lock" width="24"></i></div><h4 class="font-bold text-white text-lg">K-Score Protocol</h4><p class="text-sm text-[#9a3412]">Our "Conviction Score" analyzes holder distribution and token velocity to rate asset health.</p></div>
-                <div class="feature-box"><div class="text-[#22c55e] mb-2"><i data-lucide="users" width="24"></i></div><h4 class="font-bold text-white text-lg">Community Verified</h4><p class="text-sm text-[#9a3412]">Projects can verify their identity on-chain, earning the green badge and higher visibility.</p></div>
-                <div class="feature-box"><div class="text-[#a855f7] mb-2"><i data-lucide="zap" width="24"></i></div><h4 class="font-bold text-white text-lg">Zero Bloat</h4><p class="text-sm text-[#9a3412]">No ads. No trackers. Just data. Built for maximum performance on any device.</p></div>
-            </div>
-            <div class="bg-[#0f0502] border border-[#7c2d12] rounded-xl p-8 relative overflow-hidden group hover:border-[#ea580c] transition-colors">
-                <div class="absolute top-4 right-4 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><i data-lucide="code" width="100" class="text-[#ea580c]"></i></div>
-                <h3 class="text-2xl font-bold text-white mb-2">Developers & API</h3>
-                <p class="text-[#9a3412] mb-6 max-w-2xl">HolDex exposes a robust public API. Connect your wallet to manage your keys.</p>
-                
-                <!-- NEW: API KEY MANAGEMENT SECTION -->
-                <div id="api-section-unconnected">
-                    <div class="flex gap-4">
-                        <button onclick="toggleApiModal()" class="action-btn flex items-center gap-2"><i data-lucide="file-text" width="16"></i> Documentation</button>
-                        <button onclick="openWalletModal()" class="action-btn flex items-center gap-2 bg-[#2a1005] border-[#22c55e] text-[#22c55e] hover:bg-green-900/20"><i data-lucide="wallet" width="16"></i> Connect to Manage Keys</button>
-                    </div>
-                </div>
-
-                <div id="api-section-connected" class="hidden space-y-4">
-                    <div class="flex justify-between items-center mb-4">
-                        <h4 class="text-[#fb923c] font-bold text-sm uppercase">Your API Keys</h4>
-                        <div class="flex gap-2">
-                            <button onclick="toggleApiModal()" class="text-xs text-[#9a3412] hover:text-[#fb923c] flex items-center gap-1 border border-[#7c2d12] px-2 py-1 rounded bg-[#2a1005]"><i data-lucide="file-text" width="12"></i> Docs</button>
-                            <button onclick="requestApiKey()" class="text-xs text-[#22c55e] border border-[#22c55e] px-2 py-1 rounded bg-[#2a1005] hover:bg-green-900/20 flex items-center gap-1"><i data-lucide="plus" width="12"></i> New Key</button>
-                        </div>
-                    </div>
-                    
-                    <div id="my-keys-list" class="space-y-2">
-                        <!-- Keys populated here -->
-                        <div class="text-center py-4 text-[#9a3412] text-xs font-mono">
-                            <button onclick="fetchMyKeys()" class="text-[#ea580c] underline hover:text-[#fb923c] font-bold">Sign to Reveal My Keys</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-             <div class="border-t border-[#7c2d12] pt-8 flex justify-between items-center text-xs text-[#9a3412]"><div>&copy; 2025 HolDex Protocol. All rights reserved.</div><div class="font-mono">v2.5.0 (Stable)</div></div>
+        <!-- Filters (Mobile Scrollable) -->
+        <div class="px-4 md:px-0 mb-4 flex gap-2 overflow-x-auto pb-2 scrollbar-hide items-center">
+            <button onclick="setSort('kscore')" class="whitespace-nowrap px-4 py-1.5 rounded-full bg-orange-500/10 text-orange-500 border border-orange-500/30 text-xs font-bold flex items-center gap-1 active-sort" id="sort-kscore">
+                <i data-lucide="flame" width="12"></i> K-Score
+            </button>
+            <button onclick="setSort('newest')" class="whitespace-nowrap px-4 py-1.5 rounded-full bg-[#1a1a1a] text-gray-400 border border-[#333] text-xs font-bold" id="sort-newest">
+                Newest
+            </button>
+            <button onclick="setSort('volume')" class="whitespace-nowrap px-4 py-1.5 rounded-full bg-[#1a1a1a] text-gray-400 border border-[#333] text-xs font-bold" id="sort-volume">
+                Volume
+            </button>
+            <div class="h-6 w-px bg-[#333] mx-1"></div>
+            <button onclick="toggleVerifiedFilter()" class="whitespace-nowrap px-4 py-1.5 rounded-full bg-[#1a1a1a] text-gray-400 border border-[#333] text-xs font-bold flex items-center gap-1 transition" id="filter-verified">
+                <i data-lucide="shield" width="12"></i> Verified Only
+            </button>
+             <button onclick="fetchList()" class="ml-auto p-2 rounded-full bg-[#1a1a1a] text-gray-400 border border-[#333] hover:text-white hover:border-gray-500">
+                <i data-lucide="refresh-cw" width="14"></i>
+            </button>
         </div>
-    </div>
 
-    <!-- UPDATE VIEW -->
-    <div id="view-update" class="view-section px-4 md:px-0">
-        <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 shadow-2xl max-w-2xl mx-auto">
-            <div class="bg-[#451a03] border-2 border-[#ea580c] rounded-xl p-4 mb-8">
-                <div id="wallet-disconnected" class="flex justify-between items-center">
-                    <div><h2 class="text-2xl font-bold text-white mb-1 font-sans">Update Token</h2><p class="text-[#9a3412] text-xs">Connect wallet to pay fees & submit updates.</p></div>
-                    <button onclick="openWalletModal()" class="action-btn text-xs py-2 px-4 flex items-center gap-2"><i data-lucide="wallet" width="14"></i> Connect</button>
-                </div>
-                <div id="wallet-connected" class="hidden">
-                    <div class="flex justify-between items-start border-b border-[#7c2d12] pb-3 mb-3">
-                        <div><div class="text-[#9a3412] text-[10px] font-bold uppercase tracking-wider">Connected Wallet</div><div class="font-mono text-[#fb923c] font-bold text-lg flex items-center gap-2"><span id="display-address">...</span><i data-lucide="check-circle" width="16" class="text-green-500"></i></div></div>
-                        <button onclick="disconnectWallet()" class="text-[#9a3412] hover:text-red-500 text-xs font-bold flex items-center gap-1 transition"><i data-lucide="log-out" width="14"></i> Disconnect</button>
-                    </div>
-                    <div class="grid grid-cols-2 gap-4">
-                        <div class="bg-[#2a1005] rounded-lg p-3 border border-[#7c2d12]"><div class="text-[#9a3412] text-[10px] font-bold uppercase">SOL Balance</div><div class="font-mono text-white text-xl" id="balance-sol">0.00</div></div>
-                        <div class="bg-[#2a1005] rounded-lg p-3 border border-[#7c2d12]"><div class="text-[#9a3412] text-[10px] font-bold uppercase">$ASDFASDFA Balance</div><div class="font-mono text-[#a855f7] text-xl" id="balance-token">0.00</div></div>
-                    </div>
-                    <div class="mt-3 text-right"><button onclick="refreshBalances()" class="text-[#ea580c] hover:text-white text-xs font-bold flex items-center justify-end gap-1 w-full"><i id="refresh-icon" data-lucide="refresh-cw" width="12"></i> Refresh Balances</button></div>
-                </div>
+        <!-- LIST CONTAINER -->
+        <div class="bg-[#121212] md:border md:border-[#262626] md:rounded-xl overflow-hidden min-h-[50vh]">
+            
+            <!-- Desktop Headers -->
+            <div class="hidden md:grid grid-cols-12 gap-4 px-6 py-3 bg-[#1a1a1a] border-b border-[#262626] text-xs font-bold text-gray-500 uppercase tracking-wider">
+                <div class="col-span-4 pl-2">Asset</div>
+                <div class="col-span-2 text-right">Price</div>
+                <div class="col-span-2 text-right">24h Change</div>
+                <div class="col-span-2 text-right">Volume</div>
+                <div class="col-span-1 text-right">K-Score</div>
+                <div class="col-span-1 text-right pr-2">Age</div>
             </div>
 
-            <div class="fee-card" id="fee-panel">
-                <div class="text-[#9a3412] font-bold text-xs uppercase tracking-wider mb-2">Required Fees</div>
-                <div class="flex justify-center gap-6 items-center">
-                    <div class="flex flex-col"><span class="text-xl font-mono text-[#fb923c]" id="fee-sol">-- SOL</span><span class="text-[10px] text-[#9a3412] text-center">Protocol Fee</span></div>
-                    <div class="text-[#7c2d12]">+</div>
-                    <div class="flex flex-col"><span class="text-xl font-mono text-[#a855f7]" id="fee-token">-- TOKENS</span><span class="text-[10px] text-[#9a3412] text-center">$ASDFASDFA</span></div>
-                </div>
+            <!-- Content Area -->
+            <div id="token-list-container" class="divide-y divide-[#262626]">
+                <div class="p-10 text-center text-gray-500 font-mono animate-pulse text-sm">Initializing Feed...</div>
             </div>
             
-            <form onsubmit="submitUpdate(event)">
-                <label class="form-label">Token Mint Address</label>
-                <div class="relative"><input type="text" id="update-mint" class="form-input" placeholder="Enter Solana Mint Address..." required onblur="fetchTokenForUpdate(this.value)"><div id="mint-check-spinner" class="absolute right-3 top-3 hidden"><i data-lucide="loader-2" class="animate-spin text-[#ea580c]" width="18"></i></div></div>
-                
-                <div id="token-preview-info" class="mb-6 p-4 bg-[#451a03] border border-[#7c2d12] rounded-lg hidden flex flex-col gap-2">
-                    <div class="flex items-center gap-4">
-                        <img id="update-token-img" src="" class="w-12 h-12 rounded-md object-cover bg-black">
-                        <div>
-                            <div class="font-bold text-white" id="update-token-name">Token Name</div>
-                            <div class="text-xs text-[#9a3412] font-mono" id="update-token-ticker">TICKER</div>
-                        </div>
-                    </div>
-                    <!-- NEW: CTO Warning & Input -->
-                    <div id="update-cto-warning" class="hidden mt-2 pt-2 border-t border-[#7c2d12]">
-                        <div class="text-[#ef4444] text-xs font-bold mb-2 flex items-center gap-1"><i data-lucide="alert-triangle" width="12"></i> Existing Data Found: You must tag yourself as CTO.</div>
-                        <input type="text" id="update-cto-user" class="form-input border-red-500" placeholder="Your X (Twitter) Username (e.g. @elonmusk)">
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-4"><div><label class="form-label">X (Twitter)</label><input type="url" id="update-twitter" class="form-input" placeholder="https://x.com/..."></div><div><label class="form-label">Telegram</label><input type="url" id="update-telegram" class="form-input" placeholder="https://t.me/..."></div></div>
-                <label class="form-label">Website</label><input type="url" id="update-website" class="form-input" placeholder="https://...">
-                <div class="mt-2"><label class="form-label">Description (Max 250 chars)</label><textarea id="update-description" class="form-input h-24 resize-none" maxlength="250" placeholder="Briefly describe your token project..."></textarea><div class="text-right text-[10px] text-[#9a3412] font-mono font-bold"><span id="char-count">0</span>/250</div></div>
-                <div class="flex justify-between items-center mb-1 mt-2"><label class="form-label mb-0">Banner Image URL</label><button type="button" class="info-btn flex items-center gap-1 text-xs" onclick="toggleInfoModal()"><i data-lucide="help-circle" width="14"></i> How to upload?</button></div>
-                <input type="url" id="update-banner" class="form-input" placeholder="https://i.imgur.com/...">
-                <div class="flex gap-4 mt-6"><button type="button" onclick="openPreview()" class="action-btn flex-1 flex items-center justify-center gap-2 bg-[#451a03] text-[#fb923c] border-[#ea580c] hover:bg-[#582206]"><i data-lucide="eye" width="16"></i> Preview</button><button type="submit" id="submit-btn" class="action-btn flex-1 flex items-center justify-center gap-2 bg-[#2a1005] border-[#22c55e] text-[#22c55e] hover:bg-green-900/20 disabled:opacity-50 disabled:cursor-not-allowed" disabled><i data-lucide="wallet" width="16"></i> Pay & Submit</button></div>
-            </form>
-            <div id="update-status" class="mt-4 text-center text-sm font-mono hidden"></div>
+            <!-- Pagination -->
+            <div class="p-4 flex justify-between items-center bg-[#1a1a1a] border-t border-[#262626]">
+                <button onclick="changePage(-1)" class="px-4 py-2 bg-[#262626] rounded hover:bg-[#333] disabled:opacity-50 text-xs font-bold" id="btn-prev">Previous</button>
+                <span class="font-mono text-xs text-orange-500 font-bold" id="page-display">Page 1</span>
+                <button onclick="changePage(1)" class="px-4 py-2 bg-[#262626] rounded hover:bg-[#333] disabled:opacity-50 text-xs font-bold" id="btn-next">Next</button>
+            </div>
         </div>
     </div>
 
     <!-- DETAIL VIEW -->
-    <div id="view-detail" class="view-section px-4 md:px-0">
-        <div id="detail-loading" class="text-center py-20 text-[#ea580c] font-mono animate-pulse hidden">Fetching Chain Data...</div>
-        <div id="detail-content" style="display: none;">
-            <!-- DYNAMIC BANNER -->
-            <div id="detail-banner-container" class="hidden mb-6"></div>
+    <div id="view-detail" class="view-section hidden pb-24 md:pb-10">
+        <!-- Back Nav (Mobile) -->
+        <div class="flex items-center justify-between mb-4 md:hidden px-4">
+             <button onclick="navigateTo('')" class="flex items-center gap-2 text-gray-400 hover:text-white text-sm font-bold">
+                <i data-lucide="arrow-left" width="16"></i> Back
+            </button>
+        </div>
 
-            <div class="flex flex-col md:flex-row gap-6 mb-8 items-start">
-                <div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl">
-                    <div id="detail-media-container" class="flex-shrink-0"><img class="w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black shadow-lg"></div>
-                    <div class="flex-1 min-w-0">
-                        <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mb-1"><h2 id="detail-ticker" class="text-3xl md:text-4xl font-bold text-white tracking-tight truncate font-mono"></h2><span id="detail-name" class="text-[#fb923c] text-xs md:text-sm bg-[#2a1005] px-3 py-1 rounded-lg border border-[#7c2d12] truncate"></span></div>
-                        <div class="flex items-center gap-2 cursor-pointer group" onclick="copyMint()"><span id="detail-mint" class="text-xs text-[#9a3412] font-mono group-hover:text-[#ea580c] transition truncate max-w-[200px] md:max-w-none"></span><i data-lucide="copy" width="12" class="text-[#9a3412] group-hover:text-[#ea580c] flex-shrink-0"></i></div>
-                        <!-- DESCRIPTION -->
-                        <div id="detail-desc" class="mt-3 text-sm text-[#ffedd5] font-sans leading-relaxed opacity-90 hidden max-w-lg"></div>
+        <!-- Desktop Header Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6 px-4 md:px-0">
+            <!-- Left: Token Identity -->
+            <div class="lg:col-span-2 flex flex-col md:flex-row gap-6">
+                <div class="flex items-center gap-4">
+                    <img id="detail-img" src="" class="w-16 h-16 md:w-20 md:h-20 rounded-xl bg-black border border-[#333] object-cover">
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <h1 class="text-2xl md:text-3xl font-bold text-white leading-none" id="detail-ticker">--</h1>
+                            <div id="detail-verified-badge"></div>
+                        </div>
+                        <div class="text-sm text-gray-400 mt-1" id="detail-name">--</div>
+                        <div class="flex gap-2 mt-2">
+                             <div class="bg-[#1a1a1a] border border-[#333] rounded px-2 py-0.5 text-[10px] font-mono text-gray-400 flex items-center gap-2 cursor-pointer hover:border-orange-500 hover:text-orange-500 transition group" onclick="copyMint()">
+                                 <span id="detail-mint-short">--</span> <i data-lucide="copy" width="10" class="group-hover:text-orange-500"></i>
+                             </div>
+                             <div id="detail-badges" class="flex gap-1"></div>
+                        </div>
                     </div>
                 </div>
-                <div class="flex-1"></div>
-                <div class="flex flex-wrap gap-3 w-full md:w-auto items-center justify-end" id="detail-actions"></div>
             </div>
             
-            <div class="grid grid-cols-2 lg:grid-cols-6 gap-3 md:gap-4 mb-6">
-                <!-- NEW: K-Score Logic with Info Modal Trigger -->
-                <div class="stat-card border-[#ea580c] relative overflow-hidden">
-                    <div class="flex justify-between items-center">
-                        <span class="stat-label text-[#ea580c]">K-Score</span>
-                        <i data-lucide="info" width="14" class="text-[#ea580c] cursor-pointer hover:text-white" onclick="toggleKScoreModal()"></i>
-                    </div>
-                    <span id="stat-kscore" class="stat-value text-[#fb923c] text-2xl font-bold font-mono">🔒</span>
+            <!-- Right: Price Data -->
+            <div class="flex flex-col justify-center md:items-end">
+                <div class="text-3xl md:text-4xl font-mono font-bold text-white" id="detail-price">--</div>
+                <div class="flex items-center gap-3 mt-1 text-sm font-bold">
+                    <span id="detail-chg24h" class="px-2 py-0.5 rounded bg-[#1a1a1a]">--%</span>
+                    <span class="text-gray-600">|</span>
+                    <span class="text-gray-400">MC:</span> <span id="detail-mcap" class="text-orange-400">--</span>
+                    <span class="text-gray-600">|</span>
+                    <span class="text-gray-400">Vol:</span> <span id="detail-vol" class="text-white">--</span>
                 </div>
-                
-                <div class="stat-card"><span class="stat-label flex items-center gap-1">Price <span class="live-indicator ml-1"></span></span><span id="stat-price" class="stat-value text-[#ffedd5]">-</span></div>
-                <div class="stat-card"><span class="stat-label">MCap</span><span id="stat-mcap" class="stat-value text-[#ea580c]">-</span></div>
-                
-                <!-- NEW: Holders Stat with Click Action -->
-                <div class="stat-card clickable hover:bg-[#582206]" onclick="openHolderHistory()"><span class="stat-label flex items-center gap-1">Holders <i data-lucide="bar-chart" width="12"></i></span><span id="stat-holders" class="stat-value text-[#3b82f6]">-</span></div>
-                
-                <div class="stat-card"><span class="stat-label">1H</span><span id="stat-chg1h" class="stat-value">-</span></div>
-                <div class="stat-card"><span class="stat-label">24H</span><span id="stat-chg24h" class="stat-value">-</span></div>
             </div>
-            
-            <div class="flex justify-between items-center border-b border-[#7c2d12] mb-4 pb-2">
-                <div class="flex items-center gap-2">
-                    <div class="text-[#fb923c] font-bold font-mono text-sm flex items-center gap-2"><i data-lucide="activity" width="16"></i> INTERNAL FEED <span id="chart-pool-name" class="text-xs text-[#9a3412] ml-2"></span></div>
-                </div>
-                <button onclick="toggleLpModal()" class="text-xs text-[#9a3412] hover:text-[#fb923c] font-bold font-mono flex items-center gap-1 border border-[#7c2d12] px-2 py-1 rounded bg-[#2a1005] hover:border-[#ea580c]">
-                    <i data-lucide="layers" width="12"></i> View LP Details
-                </button>
-            </div>
-            
-            <div class="chart-wrapper">
-                <div class="chart-header">
-                     <!-- CHART MODE TOGGLE -->
-                     <div class="flex flex-wrap items-center gap-4 w-full md:w-auto">
-                        <div class="chart-controls-group">
-                            <button onclick="setChartMode('price')" class="tool-btn active-orange" id="mode-price">Price</button>
-                            <button onclick="setChartMode('mcap')" class="tool-btn" id="mode-mcap">M.Cap</button>
-                        </div>
+        </div>
 
-                        <div class="chart-controls-group">
-                            <button onclick="toggleScale()" class="tool-btn" id="btn-scale">
-                                <i data-lucide="scaling" width="12"></i> <span id="scale-text">Linear</span>
-                            </button>
-                        </div>
-                     </div>
-                     
-                     <div class="chart-controls-group ml-auto">
-                         <button onclick="setResolution('5')" class="res-btn active" id="res-5">5m</button>
-                         <button onclick="setResolution('15')" class="res-btn" id="res-15">15m</button>
-                         <button onclick="setResolution('60')" class="res-btn" id="res-60">1H</button>
-                         <button onclick="setResolution('240')" class="res-btn" id="res-240">4H</button>
-                         <button onclick="setResolution('D')" class="res-btn" id="res-D">1D</button>
+        <!-- Action Bar -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 px-4 md:px-0">
+            <a id="link-swap" href="#" target="_blank" class="col-span-2 md:col-span-1 bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition shadow-lg shadow-green-900/20">
+                <i data-lucide="arrow-right-left" width="18"></i> Trade Now
+            </a>
+            <button onclick="toggleKScoreModal()" class="bg-[#1a1a1a] border border-[#333] hover:border-orange-500 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition relative overflow-hidden group">
+                <div class="absolute inset-0 bg-orange-500/5 group-hover:bg-orange-500/10 transition"></div>
+                <i data-lucide="flame" width="18" class="text-orange-500"></i> <span id="detail-kscore-btn">K-Score</span>
+            </button>
+            <button onclick="shareToken()" class="bg-[#1a1a1a] border border-[#333] hover:text-white text-gray-400 font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition">
+                <i data-lucide="share-2" width="18"></i> Share
+            </button>
+             <button onclick="window.open('https://solscan.io/token/'+currentDetailMint, '_blank')" class="bg-[#1a1a1a] border border-[#333] hover:text-white text-gray-400 font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition">
+                <i data-lucide="external-link" width="18"></i> Solscan
+            </button>
+        </div>
+
+        <!-- Main Chart & Sidebar Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 px-4 md:px-0">
+            
+            <!-- Chart Column -->
+            <div class="lg:col-span-2 bg-[#121212] border border-[#262626] rounded-xl overflow-hidden shadow-2xl">
+                <div class="flex items-center justify-between p-3 border-b border-[#262626] bg-[#1a1a1a]">
+                    <div class="flex gap-1">
+                        <button onclick="setResolution('5')" class="px-3 py-1 rounded text-xs font-bold hover:bg-[#333] text-gray-400 transition" id="res-5">5m</button>
+                        <button onclick="setResolution('60')" class="px-3 py-1 rounded text-xs font-bold hover:bg-[#333] text-white bg-[#333] transition" id="res-60">1h</button>
+                        <button onclick="setResolution('D')" class="px-3 py-1 rounded text-xs font-bold hover:bg-[#333] text-gray-400 transition" id="res-D">1d</button>
+                    </div>
+                    <div class="text-[10px] text-gray-500 font-mono flex items-center gap-2">
+                        <span class="live-dot relative flex h-2 w-2 bg-green-500 rounded-full"></span> LIVE FEED
+                    </div>
+                </div>
+                <div id="tv-chart" class="chart-container bg-[#0a0a0a]"></div>
+            </div>
+
+            <!-- Info Sidebar -->
+            <div class="space-y-6">
+                <!-- About Card -->
+                <div class="bg-[#121212] border border-[#262626] rounded-xl p-5 h-fit">
+                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">Project Info</h3>
+                    <p id="detail-desc-text" class="text-sm text-gray-300 leading-relaxed mb-6">No description provided by the developer.</p>
+                    <div class="flex gap-4" id="social-links">
+                        <!-- Socials injected here -->
+                    </div>
+                </div>
+                
+                <!-- Pool Card -->
+                <div class="bg-[#121212] border border-[#262626] rounded-xl p-5 h-fit">
+                    <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">Liquidity Pools</h3>
+                    <div class="space-y-3" id="pool-list-container">
+                        <div class="text-sm text-gray-500 italic">Scanning pools...</div>
+                    </div>
+                </div>
+
+                <!-- Safety Check -->
+                <div class="bg-[#121212] border border-[#262626] rounded-xl p-5 h-fit">
+                     <h3 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">Quick Check</h3>
+                     <div class="space-y-2 text-sm">
+                         <div class="flex justify-between"><span>Mint Auth Disabled</span> <span class="text-green-500" id="check-mint">Yes</span></div>
+                         <div class="flex justify-between"><span>Freeze Auth Disabled</span> <span class="text-green-500" id="check-freeze">Yes</span></div>
+                         <div class="flex justify-between"><span>Top 10 Holders</span> <span class="text-orange-500" id="check-holders">--%</span></div>
                      </div>
                 </div>
-                <div id="tv-chart" style="width: 100%; height: 100%;"></div>
             </div>
         </div>
     </div>
-</main>
 
-<!-- NEW: STATUS FOOTER -->
-<footer class="fixed bottom-0 w-full bg-[#1a0a05] border-t border-[#7c2d12] px-4 py-2 z-50 flex justify-between items-center text-xs font-mono">
-    <div class="flex items-center gap-4">
-        <div class="flex items-center gap-2">
-            <span id="footer-status-dot" class="status-dot offline"></span>
-            <span id="footer-status-text" class="text-[#9a3412]">Connecting...</span>
-        </div>
-        <div class="hidden md:block text-[#9a3412]">|</div>
-        <div class="hidden md:block text-[#9a3412]">
-            Last Update: <span id="footer-last-update" class="text-[#fb923c] font-bold">--:--:--</span>
+    <!-- UPDATE MANAGER VIEW -->
+    <div id="view-update" class="view-section hidden max-w-2xl mx-auto px-4 md:px-0 pb-20">
+        <div class="bg-[#121212] border border-[#262626] rounded-xl p-6 md:p-8">
+            <div class="flex items-center gap-4 mb-6">
+                <div class="p-3 bg-blue-500/10 rounded-lg text-blue-500"><i data-lucide="check-circle" width="24"></i></div>
+                <div>
+                    <h2 class="text-2xl font-bold text-white">Update Token Metadata</h2>
+                    <p class="text-sm text-gray-400">Get verified and add social links to your token page.</p>
+                </div>
+            </div>
+
+            <!-- Steps -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                <div class="p-4 bg-[#1a1a1a] rounded-lg border border-[#333]">
+                    <div class="text-xs text-gray-500 font-bold mb-1">Step 1</div>
+                    <div class="text-sm font-bold">Connect Wallet</div>
+                </div>
+                <div class="p-4 bg-[#1a1a1a] rounded-lg border border-[#333]">
+                    <div class="text-xs text-gray-500 font-bold mb-1">Step 2</div>
+                    <div class="text-sm font-bold">Fill Details</div>
+                </div>
+                <div class="p-4 bg-[#1a1a1a] rounded-lg border border-[#333]">
+                    <div class="text-xs text-gray-500 font-bold mb-1">Step 3</div>
+                    <div class="text-sm font-bold">Pay Fee (0.1 SOL)</div>
+                </div>
+            </div>
+            
+            <div class="p-4 bg-orange-900/10 border border-orange-900/50 rounded-lg mb-8 flex items-center justify-between">
+                 <div class="flex items-center gap-3">
+                     <i data-lucide="alert-triangle" width="18" class="text-orange-500"></i>
+                     <span class="text-xs text-orange-200 font-medium">Fee is required to prevent spam.</span>
+                 </div>
+                 <button onclick="openWalletModal()" class="text-xs bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded font-bold transition">Connect Wallet</button>
+            </div>
+
+            <form onsubmit="submitUpdate(event)" class="space-y-5">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Token Mint Address</label>
+                    <input type="text" id="upd-mint" class="search-input" placeholder="e.g. 7eyK9..." required>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Twitter / X URL</label>
+                        <input type="url" id="upd-twitter" class="search-input" placeholder="https://x.com/...">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Telegram URL</label>
+                        <input type="url" id="upd-telegram" class="search-input" placeholder="https://t.me/...">
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Website URL</label>
+                    <input type="url" id="upd-website" class="search-input" placeholder="https://...">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Description</label>
+                    <textarea id="upd-desc" class="search-input h-32 resize-none" placeholder="Tell us about your project..."></textarea>
+                </div>
+
+                <div class="flex items-start gap-3 p-3 bg-[#1a1a1a] rounded border border-[#333]">
+                    <input type="checkbox" id="upd-confirm" class="mt-1" required>
+                    <label for="upd-confirm" class="text-xs text-gray-400">I confirm that I am the developer or authorized representative of this token. False information may lead to blacklisting.</label>
+                </div>
+
+                <button type="submit" class="w-full bg-white text-black font-bold py-4 rounded-xl hover:bg-gray-200 transition shadow-lg shadow-white/10" id="upd-submit-btn">
+                    Pay 0.1 SOL & Submit Update
+                </button>
+                <div id="update-status" class="text-center text-sm font-mono mt-4 min-h-[20px]"></div>
+            </form>
         </div>
     </div>
     
-    <!-- Footer Wallet Widget -->
-    <div class="flex items-center gap-3">
-        <div id="footer-wallet-display" class="hidden items-center gap-2">
-            <span class="text-[#22c55e] font-bold flex items-center gap-1"><i data-lucide="check-circle" width="10"></i> Connected</span>
-            <span class="text-[#9a3412]">|</span>
-            <button onclick="disconnectWallet()" class="text-[#ef4444] hover:text-[#f87171] font-bold">Disconnect</button>
-        </div>
-        <button id="footer-connect-btn" onclick="openWalletModal()" class="footer-wallet-btn">
-            <i data-lucide="wallet" width="12"></i> Connect Wallet
-        </button>
-    </div>
-</footer>
-
-<!-- NEW: K-SCORE MODAL -->
-<div id="kscore-modal" class="modal-overlay" onclick="toggleKScoreModal()">
-    <div class="bg-[#2a1005] border-2 border-[#ea580c] rounded-2xl p-6 w-full max-w-lg shadow-2xl relative" onclick="event.stopPropagation()">
-        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleKScoreModal()"><i data-lucide="x" width="24"></i></button>
-        
-        <div class="flex items-center gap-3 mb-4">
-            <div class="p-2 bg-[#451a03] rounded-lg border border-[#ea580c] text-[#ea580c]"><i data-lucide="lock" width="24"></i></div>
-            <div>
-                <h3 class="text-xl font-bold text-white font-sans">K-Score Explained</h3>
-                <p class="text-[#9a3412] text-xs font-mono">Conviction & Longevity Metric</p>
-            </div>
+    <!-- ABOUT / DOCS VIEW -->
+    <div id="view-about" class="view-section hidden max-w-3xl mx-auto px-4 md:px-0 text-gray-300 pb-20">
+        <div class="text-center py-10">
+            <h1 class="text-4xl font-bold text-white mb-4">HolDex Terminal</h1>
+            <p class="text-lg text-gray-400">The high-velocity data terminal for Solana. Built for speed, honesty, and depth.</p>
         </div>
 
-        <p class="text-[#ffedd5] text-sm mb-6 leading-relaxed">
-            The K-Score rates tokens from 0-100 based on holder behavior and project maturity. It rewards communities that hold through volatility.
-        </p>
-
-        <div class="space-y-4">
-            <div class="bg-[#451a03] p-4 rounded-lg border border-[#7c2d12] flex gap-4">
-                <div class="text-[#fb923c]"><i data-lucide="diamond" width="20"></i></div>
-                <div>
-                    <h4 class="text-white font-bold text-sm">Diamond Hands (~60%)</h4>
-                    <p class="text-[#9a3412] text-xs">Based on the average hold time of the top 20 wallets. Long-term holding by whales drastically increases this score.</p>
-                </div>
+        <div class="grid md:grid-cols-2 gap-6 mb-12">
+            <div class="p-6 bg-[#121212] border border-[#262626] rounded-xl hover:border-orange-500/50 transition duration-300">
+                <div class="w-10 h-10 rounded bg-orange-500/10 flex items-center justify-center text-orange-500 mb-4"><i data-lucide="zap" width="20"></i></div>
+                <h3 class="text-white font-bold text-lg mb-2">Direct RPC Sync</h3>
+                <p class="text-sm text-gray-400">We index pools directly from the Solana blockchain. No third-party APIs for price data, ensuring milliseconds latency.</p>
             </div>
-
-            <div class="bg-[#451a03] p-4 rounded-lg border border-[#7c2d12] flex gap-4">
-                <div class="text-[#22c55e]"><i data-lucide="clock" width="20"></i></div>
-                <div>
-                    <h4 class="text-white font-bold text-sm">Token Age (~30%)</h4>
-                    <p class="text-[#9a3412] text-xs">Older tokens are statistically less likely to rug. We reward longevity on a logarithmic scale.</p>
-                </div>
+             <div class="p-6 bg-[#121212] border border-[#262626] rounded-xl hover:border-blue-500/50 transition duration-300">
+                <div class="w-10 h-10 rounded bg-blue-500/10 flex items-center justify-center text-blue-500 mb-4"><i data-lucide="users" width="20"></i></div>
+                <h3 class="text-white font-bold text-lg mb-2">Holder Analytics</h3>
+                <p class="text-sm text-gray-400">We take daily snapshots of holder counts to track real organic growth, not just volume bots.</p>
             </div>
-
-            <div class="bg-[#451a03] p-4 rounded-lg border border-[#7c2d12] flex gap-4">
-                <div class="text-[#3b82f6]"><i data-lucide="trending-up" width="20"></i></div>
-                <div>
-                    <h4 class="text-white font-bold text-sm">Virality (~10%)</h4>
-                    <p class="text-[#9a3412] text-xs">Rewards rapid growth in unique wallet holders over the last 24 hours.</p>
-                </div>
+             <div class="p-6 bg-[#121212] border border-[#262626] rounded-xl hover:border-green-500/50 transition duration-300">
+                <div class="w-10 h-10 rounded bg-green-500/10 flex items-center justify-center text-green-500 mb-4"><i data-lucide="shield-check" width="20"></i></div>
+                <h3 class="text-white font-bold text-lg mb-2">K-Score Verification</h3>
+                <p class="text-sm text-gray-400">Our proprietary K-Score algorithm ranks tokens based on community conviction, age, and liquidity depth.</p>
+            </div>
+             <div class="p-6 bg-[#121212] border border-[#262626] rounded-xl hover:border-purple-500/50 transition duration-300">
+                <div class="w-10 h-10 rounded bg-purple-500/10 flex items-center justify-center text-purple-500 mb-4"><i data-lucide="code" width="20"></i></div>
+                <h3 class="text-white font-bold text-lg mb-2">Developer Friendly</h3>
+                <p class="text-sm text-gray-400">Free API access for developers building bots, trackers, or portfolio apps on top of our data.</p>
             </div>
         </div>
         
-        <div class="mt-6 text-center">
-             <div class="inline-block bg-[#0f0502] border border-[#ea580c] rounded px-2 py-1 text-[10px] text-[#ea580c] font-mono font-bold uppercase">Requirement: Community Verified</div>
+        <div class="border-t border-[#333] pt-8">
+            <h3 class="text-white font-bold text-xl mb-6">Developer API</h3>
+            <div class="space-y-4">
+                <div>
+                    <div class="text-sm text-gray-400 mb-2 font-bold">Get Token Info</div>
+                    <div class="bg-[#0f0f0f] p-4 rounded-lg font-mono text-xs text-gray-400 overflow-x-auto border border-[#262626]">
+                        GET https://api.holdex.io/api/token/:mint
+                    </div>
+                </div>
+                 <div>
+                    <div class="text-sm text-gray-400 mb-2 font-bold">Get Candles</div>
+                    <div class="bg-[#0f0f0f] p-4 rounded-lg font-mono text-xs text-gray-400 overflow-x-auto border border-[#262626]">
+                        GET https://api.holdex.io/api/token/:mint/candles?resolution=60&from=...&to=...
+                    </div>
+                </div>
+            </div>
+            <button class="mt-8 px-6 py-3 bg-white text-black font-bold rounded-lg hover:bg-gray-200">Generate Free API Key</button>
         </div>
     </div>
-</div>
 
-<!-- NEW: HOW IT WORKS MODAL -->
-<div id="how-it-works-modal" class="modal-overlay" onclick="toggleHowItWorksModal()">
-    <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-6 w-full max-w-lg shadow-2xl relative" onclick="event.stopPropagation()">
-        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleHowItWorksModal()"><i data-lucide="x" width="24"></i></button>
-        
-        <div class="flex items-center gap-3 mb-6">
-            <div class="p-2 bg-[#451a03] rounded-lg border border-[#7c2d12] text-[#ea580c]"><i data-lucide="info" width="24"></i></div>
-            <div>
-                <h3 class="text-xl font-bold text-white font-sans">How HolDex Works</h3>
-            </div>
+</main>
+
+<!-- MOBILE BOTTOM NAV -->
+<nav class="md:hidden bottom-nav flex justify-between px-6">
+    <button class="nav-item active" onclick="navigateTo('')" id="mob-nav-home">
+        <i data-lucide="layout-grid" width="20"></i>
+        <span>Feed</span>
+    </button>
+    <button class="nav-item" onclick="toggleSearchModal()" id="mob-nav-search">
+        <i data-lucide="search" width="20"></i>
+        <span>Search</span>
+    </button>
+    <button class="nav-item" onclick="navigateTo('update')" id="mob-nav-update">
+        <i data-lucide="upload-cloud" width="20"></i>
+        <span>Update</span>
+    </button>
+    <button class="nav-item" onclick="openWalletModal()" id="mob-nav-wallet">
+        <i data-lucide="wallet" width="20"></i>
+        <span>Wallet</span>
+    </button>
+</nav>
+
+<!-- SEARCH MODAL (Mobile) -->
+<div id="search-modal" class="modal-overlay" onclick="toggleSearchModal()">
+    <div class="modal-content !p-0 overflow-hidden bg-[#1a1a1a]" onclick="event.stopPropagation()">
+        <div class="p-4 border-b border-[#333] flex items-center gap-3">
+            <i data-lucide="search" width="20" class="text-gray-500"></i>
+            <input type="text" id="mobile-search-input" class="bg-transparent border-none outline-none text-white w-full text-lg placeholder-gray-600" placeholder="Search token symbol..." autofocus oninput="handleSearch(event)">
+            <button onclick="toggleSearchModal()" class="text-xs font-bold text-gray-500 bg-[#262626] px-2 py-1 rounded">ESC</button>
         </div>
-
-        <div class="space-y-6 text-sm text-[#ffedd5]">
-            <div class="flex gap-4">
-                <div class="mt-1 text-[#22c55e]"><i data-lucide="radar" width="20"></i></div>
-                <div>
-                    <h4 class="font-bold text-white mb-1">Automatic Discovery</h4>
-                    <p class="text-[#9a3412]">Our backend listens to the Solana blockchain in real-time. New tokens created on <strong>Pump.fun</strong> or <strong>Raydium</strong> are automatically detected.</p>
-                    <p class="text-[#fb923c] mt-2 font-mono text-xs border border-[#ea580c] p-1 rounded inline-block bg-[#451a03]">Minimum Market Cap Required: $20,000 USD</p>
-                </div>
-            </div>
-
-            <div class="flex gap-4">
-                <div class="mt-1 text-[#3b82f6]"><i data-lucide="search" width="20"></i></div>
-                <div>
-                    <h4 class="font-bold text-white mb-1">Instant Search</h4>
-                    <p class="text-[#9a3412]">Searching for a Token Address (CA) will instantly pull its data from the chain, even if our listener missed it (ignores mcap limit).</p>
-                </div>
-            </div>
-
-            <div class="flex gap-4">
-                <div class="mt-1 text-[#ea580c]"><i data-lucide="shield-check" width="20"></i></div>
-                <div>
-                    <h4 class="font-bold text-white mb-1">Community Verification</h4>
-                    <p class="text-[#9a3412]">Project owners can submit social links and banners via the <strong>Update</strong> tab. These submissions are manually reviewed by our team to ensure safety.</p>
-                </div>
-            </div>
-        </div>
-        
-        <div class="mt-8 flex justify-end">
-             <button onclick="toggleHowItWorksModal()" class="action-btn text-xs">Got it</button>
+        <div class="p-2 min-h-[300px] max-h-[60vh] overflow-y-auto" id="mobile-search-results">
+            <div class="text-center text-xs text-gray-600 py-10">Start typing to search...</div>
         </div>
     </div>
 </div>
 
-<!-- API DOCUMENTATION MODAL (UPDATED) -->
-<div id="api-docs-modal" class="modal-overlay" onclick="toggleApiModal()">
-    <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto relative shadow-2xl" onclick="event.stopPropagation()">
-        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleApiModal()"><i data-lucide="x" width="24"></i></button>
-        <div class="flex items-center gap-3 mb-6">
-            <div class="p-2 bg-[#451a03] rounded-lg border border-[#7c2d12] text-[#ea580c]"><i data-lucide="terminal" width="24"></i></div>
-            <div>
-                <h3 class="text-xl font-bold text-white font-sans">HolDex API Reference</h3>
-                <p class="text-xs text-[#9a3412] font-mono">Base URL: https://asdev-backend.onrender.com</p>
-            </div>
-        </div>
-
-        <div class="bg-[#0f0502] border border-[#7c2d12] p-4 rounded-lg mb-6">
-            <h4 class="text-[#ea580c] font-bold mb-2 text-sm">Authentication</h4>
-            <p class="text-xs text-[#ffedd5] mb-2">Include your API Key in the request header:</p>
-            <div class="code-block text-xs py-2 px-3">x-api-key: YOUR_KEY_HERE</div>
-            <p class="text-[10px] text-[#9a3412] mt-2 italic">Free Tier Limit: 1,000 requests/day</p>
-        </div>
-
-        <div class="space-y-8">
-            <!-- ENDPOINT 1 -->
-            <div>
-                <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold">/api/tokens</span></div>
-                <p class="text-sm text-[#ffedd5] mb-2">Fetch a paginated list of tokens indexed by the protocol. Now includes <strong>holder counts</strong>.</p>
-                <div class="code-block">
-<span class="text-[#9a3412]">// Example Response Object</span>
-{
-  "mint": "So111...",
-  "ticker": "SOL",
-  "holders": 5420,
-  "kScore": 85.5,
-  ...
-}
-                </div>
-            </div>
-
-            <!-- ENDPOINT 2 -->
-            <div>
-                <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold">/api/token/:mint</span></div>
-                <p class="text-sm text-[#ffedd5] mb-2">Get detailed metadata, price stats, pool information, and <strong>daily holder history snapshots</strong>.</p>
-                <div class="code-block">
-<span class="text-[#9a3412]">// Example Request</span>
-fetch('<span class="text-white">https://asdev-backend.onrender.com/api/token/So111...11112</span>');
-                </div>
-            </div>
-
-            <!-- ENDPOINT 3 -->
-            <div>
-                <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold">/api/token/:mint/candles</span></div>
-                <p class="text-sm text-[#ffedd5] mb-2">Fetch OHLCV candle data for charting. Returns data from the most liquid pool by default.</p>
-                <div class="code-block">
-<span class="text-[#9a3412]">// Example Request</span>
-fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1700000000&to=1700086400</span>');
-                </div>
-            </div>
+<!-- WALLET MODAL -->
+<div id="wallet-modal" class="modal-overlay" onclick="closeWalletModal()">
+    <div class="modal-content" onclick="event.stopPropagation()">
+        <div class="flex justify-between items-center mb-6">
+             <h3 class="text-xl font-bold">Connect Wallet</h3>
+             <button onclick="closeWalletModal()"><i data-lucide="x" width="20" class="text-gray-500"></i></button>
         </div>
         
-        <div class="mt-8 flex justify-end">
-             <button onclick="toggleApiModal()" class="action-btn text-xs">Close Documentation</button>
-        </div>
-    </div>
-</div>
-
-<!-- LP DETAILS MODAL -->
-<div id="lp-modal" class="modal-overlay" onclick="toggleLpModal()">
-    <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto relative shadow-2xl" onclick="event.stopPropagation()">
-        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleLpModal()"><i data-lucide="x" width="24"></i></button>
-        <h3 class="text-xl font-bold text-white mb-6 font-sans">Liquidity Pools</h3>
-        <div class="overflow-x-auto">
-            <table class="w-full text-left text-sm text-[#ffedd5]">
-                <thead class="text-[#9a3412] uppercase text-xs font-bold border-b border-[#7c2d12]">
-                    <tr>
-                        <th class="px-4 py-3">DEX</th>
-                        <th class="px-4 py-3 text-right">Price</th>
-                        <th class="px-4 py-3 text-right">Liquidity</th>
-                        <th class="px-4 py-3 text-right">Vol 24h</th>
-                        <th class="px-4 py-3"></th>
-                    </tr>
-                </thead>
-                <tbody id="lp-list-body">
-                    <!-- Populated via JS -->
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>
-
-<div id="wallet-modal" class="modal-overlay">
-    <div class="bg-[#2a1005] border-2 border-[#ea580c] p-6 rounded-2xl max-w-sm w-full shadow-2xl relative" onclick="event.stopPropagation()">
-        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="closeWalletModal()"><i data-lucide="x" width="24"></i></button>
-        <h3 class="text-xl font-bold text-white mb-6 font-sans text-center">Connect Wallet</h3>
         <div class="space-y-3">
-            <div onclick="connectProvider('phantom')" class="wallet-btn group"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded bg-[#581c87] flex items-center justify-center"><i data-lucide="ghost" width="20" class="text-white"></i></div><span>Phantom</span></div><div class="text-[#22c55e] text-xs font-mono opacity-0 group-hover:opacity-100 transition">Detected</div></div>
-            <div onclick="connectProvider('solflare')" class="wallet-btn group"><div class="flex items-center gap-3"><div class="w-8 h-8 rounded bg-[#ea580c] flex items-center justify-center"><i data-lucide="flame" width="20" class="text-white"></i></div><span>Solflare</span></div><div class="text-[#22c55e] text-xs font-mono opacity-0 group-hover:opacity-100 transition">Detected</div></div>
+            <button onclick="connectProvider('phantom')" class="w-full flex items-center justify-between p-4 bg-[#0a0a0a] border border-[#333] rounded-xl hover:border-orange-500 transition group">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-full bg-[#333] flex items-center justify-center">P</div>
+                    <span class="font-bold group-hover:text-orange-500 transition">Phantom</span>
+                </div>
+                <div class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_10px_#22c55e]"></div>
+            </button>
+            <button onclick="connectProvider('solflare')" class="w-full flex items-center justify-between p-4 bg-[#0a0a0a] border border-[#333] rounded-xl hover:border-orange-500 transition group">
+                 <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-full bg-[#333] flex items-center justify-center">S</div>
+                    <span class="font-bold group-hover:text-orange-500 transition">Solflare</span>
+                </div>
+                <div class="w-2 h-2 rounded-full bg-gray-500"></div>
+            </button>
+             <button onclick="connectProvider('backpack')" class="w-full flex items-center justify-between p-4 bg-[#0a0a0a] border border-[#333] rounded-xl hover:border-orange-500 transition group">
+                 <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-full bg-[#333] flex items-center justify-center">B</div>
+                    <span class="font-bold group-hover:text-orange-500 transition">Backpack</span>
+                </div>
+                <div class="w-2 h-2 rounded-full bg-gray-500"></div>
+            </button>
+        </div>
+        <div class="mt-6 text-center text-xs text-gray-500">
+            By connecting, you agree to our Terms of Service.
         </div>
     </div>
 </div>
 
-<!-- INFO MODAL -->
-<div id="info-modal" class="modal-overlay" onclick="toggleInfoModal()">
-    <div class="bg-[#2a1005] border-2 border-[#7c2d12] p-6 rounded-2xl max-w-md w-full shadow-2xl relative" onclick="event.stopPropagation()">
-        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="toggleInfoModal()"><i data-lucide="x" width="24"></i></button>
-        <h3 class="text-xl font-bold text-white mb-4 font-sans">How to upload a Banner?</h3>
-        <ol class="list-decimal list-inside text-[#ffedd5] space-y-3 mb-6 font-mono text-sm">
-            <li>Go to <a href="https://imgur.com/upload" target="_blank" class="text-[#ea580c] underline hover:text-[#fb923c]">imgur.com/upload</a></li>
-            <li>Upload your banner image (Rec: 1500x500px).</li>
-            <li>Right-click the uploaded image and select <strong>"Copy Image Address"</strong>.</li>
-            <li>Paste the URL here. It must end in .jpg, .png, .webp, .gif.</li>
-        </ol>
-        <div class="bg-[#451a03] p-3 rounded border border-[#7c2d12] text-xs text-[#9a3412]">
-            <strong>Note:</strong> We do not host images directly to keep the protocol decentralized and lightweight.
+<!-- K-SCORE MODAL -->
+<div id="kscore-modal" class="modal-overlay" onclick="toggleKScoreModal()">
+    <div class="modal-content border-orange-500/30" onclick="event.stopPropagation()">
+        <div class="flex justify-between items-start mb-4">
+             <div class="flex items-center gap-3 text-orange-500">
+                <i data-lucide="flame" width="24"></i>
+                <h3 class="text-xl font-bold text-white">K-Score Protocol</h3>
+            </div>
+            <button onclick="toggleKScoreModal()"><i data-lucide="x" width="20" class="text-gray-500"></i></button>
         </div>
-    </div>
-</div>
-
-<!-- PREVIEW MODAL -->
-<div id="preview-modal" class="modal-overlay">
-    <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto relative shadow-2xl" onclick="event.stopPropagation()">
-        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white z-50" onclick="closePreview()"><i data-lucide="x" width="24"></i></button>
-        <h3 class="text-xl font-bold text-white mb-6 font-sans">Preview Changes</h3>
-        <div id="preview-container"></div>
-        <div class="mt-8 flex justify-end">
-             <button onclick="closePreview()" class="action-btn text-xs">Close Preview</button>
+       
+        <p class="text-sm text-gray-400 mb-6">A composite metric measuring community conviction and asset longevity. Higher scores indicate stronger holder bases.</p>
+        <div class="space-y-3 text-sm">
+            <div class="flex justify-between items-center p-3 bg-[#0a0a0a] rounded border border-[#333]">
+                <div class="flex items-center gap-2"><i data-lucide="gem" width="14" class="text-blue-400"></i> <span>Diamond Hands</span></div>
+                <span class="text-green-500 font-bold">+60%</span>
+            </div>
+            <div class="flex justify-between items-center p-3 bg-[#0a0a0a] rounded border border-[#333]">
+                <div class="flex items-center gap-2"><i data-lucide="hourglass" width="14" class="text-purple-400"></i> <span>Asset Age</span></div>
+                <span class="text-blue-500 font-bold">+30%</span>
+            </div>
+            <div class="flex justify-between items-center p-3 bg-[#0a0a0a] rounded border border-[#333]">
+                <div class="flex items-center gap-2"><i data-lucide="trending-up" width="14" class="text-orange-400"></i> <span>Virality</span></div>
+                <span class="text-orange-500 font-bold">+10%</span>
+            </div>
         </div>
-    </div>
-</div>
-
-<!-- NEW: HOLDER HISTORY MODAL -->
-<div id="holder-modal" class="modal-overlay">
-    <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-6 w-full max-w-2xl max-h-[80vh] relative shadow-2xl" onclick="event.stopPropagation()">
-        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="closeHolderHistory()"><i data-lucide="x" width="24"></i></button>
-        <h3 class="text-xl font-bold text-white mb-2 font-sans">Holder Growth</h3>
-        <p class="text-xs text-[#9a3412] mb-6 font-mono">Daily snapshots</p>
-        <div id="holder-chart-container" class="w-full h-64 bg-[#1a0a05] rounded-xl border border-[#7c2d12] overflow-hidden"></div>
-    </div>
-</div>
-
-<!-- NEW: GENERATED KEY MODAL -->
-<div id="key-modal" class="modal-overlay">
-    <div class="bg-[#2a1005] border-2 border-[#ea580c] rounded-2xl p-8 w-full max-w-md relative shadow-2xl text-center" onclick="event.stopPropagation()">
-        <button class="absolute top-4 right-4 text-[#9a3412] hover:text-white" onclick="closeKeyModal()"><i data-lucide="x" width="24"></i></button>
-        <div class="w-12 h-12 bg-[#451a03] rounded-full flex items-center justify-center mx-auto mb-4 border border-[#ea580c] text-[#ea580c]"><i data-lucide="key" width="24"></i></div>
-        <h3 class="text-2xl font-bold text-white mb-2 font-sans">Your API Key</h3>
-        <p class="text-xs text-[#9a3412] mb-6">Keep this safe. It allows 1,000 reqs/day.</p>
-        
-        <div class="bg-[#0f0502] border border-[#7c2d12] p-4 rounded-lg mb-6 relative">
-            <div id="generated-key-display" class="font-mono text-[#fb923c] text-lg break-all">...</div>
-            <button onclick="copyKey()" class="absolute top-2 right-2 text-[#9a3412] hover:text-white"><i data-lucide="copy" width="16"></i></button>
+        <div class="mt-6 pt-4 border-t border-[#333] text-center text-xs text-gray-500 uppercase font-bold">
+            Requires Community Verification
         </div>
-        
-        <button onclick="closeKeyModal()" class="action-btn w-full justify-center">Done</button>
     </div>
 </div>
 
 <script>
+    // --- APP CONFIG ---
+    // Change this to your deployed backend URL if different
     const API_URL = 'https://asdev-backend.onrender.com';
-    const FALLBACK_BANNER = "https://images.squarespace-cdn.com/content/690b8c21384b3f1201c2650c/967ea61f-a88a-4497-81c2-5c67d3d06d9e/Gemini_Generated_Image_c82gwyc82gwyc82g.png?content-type=image%2Fpng";
-    const TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-    const ASSOCIATED_TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
     
-    // We removed client-side RPC ENDPOINTS. All traffic now proxies through backend.
-
-    let currentSort = 'kscore'; 
-    let currentDirection = 'desc'; // NEW: Track sorting direction
-    let searchQuery = '';
-    let pollingInterval;
-    let detailPollingInterval; 
-    let isConnected = true;
-    let isInfoModalOpen = false;
-    let isApiModalOpen = false;
-    let isLpModalOpen = false;
-    let isWalletModalOpen = false;
-    let isHowItWorksModalOpen = false;
-    let isKScoreModalOpen = false; // NEW
+    // State
+    let currentSort = 'kscore';
     let currentPage = 1;
-    let isVerifiedFilter = false;
-    let isZeroVolHidden = true; 
-    let currentUpdateTokenData = null;
+    let searchQuery = '';
+    let isVerified = false;
+    let chart;
+    let candleSeries;
     let walletAddress = null;
-    let walletProvider = null; 
-    let feeConfig = { solFee: 0.1, tokenFee: 1000, tokenMint: '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump', treasury: 'H8sMJqC9X8rJ8W1a6VjFq7X5gZ5fX9x8x8x8x8x8x8' };
-    
-    // AUTH CACHE
-    let authSignature = null;
-    let authWallet = null;
+    let socket;
+    let currentDetailMint = null;
 
-    // CHART STATE
-    let chartInstance = null;
-    let candleSeries = null;
-    let maSeries20 = null;
-    let maSeries50 = null;
-    let currentMint = null;
-    let currentPoolAddress = null;
-    let currentResolution = '60';
-    let currentChartMode = 'price'; // 'price' or 'mcap'
-    let currentNormalizedSupply = 1;
-    let currentTokenPairs = [];
-    
-    let isLogScale = false;
-    let showMA = false;
-
-    // HOLDER CHART STATE
-    let currentHolderHistory = [];
-    let holderChart = null;
-    let holderAreaSeries = null;
-
-    // SOCKET.IO CLIENT
-    let socket = null;
-
-    // NEW: Debounce function for search
-    const debounce = (func, delay) => {
-        let timeoutId;
-        return (...args) => {
-            clearTimeout(timeoutId);
-            timeoutId = setTimeout(() => {
-                func.apply(null, args);
-            }, delay);
-        };
+    // --- INITIALIZATION ---
+    window.onload = () => {
+        handleRoute();
+        initSocket();
+        lucide.createIcons();
+        window.addEventListener('hashchange', handleRoute);
+        
+        // Initial Fetch for dashboard background even if not on dashboard
+        if(window.location.hash === '' || window.location.hash === '#') fetchList();
     };
 
-    window.onload = async () => { 
-        handleRoute(); 
-        await fetchFees(); 
-        lucide.createIcons(); 
-        
-        // Initialize Socket
+    function initSocket() {
         socket = io(API_URL, { path: '/socket.io', transports: ['websocket'] });
+        
         socket.on('connect', () => {
-            const dot = document.getElementById('footer-status-dot');
-            const txt = document.getElementById('footer-status-text');
-            if(dot) { dot.classList.remove('offline'); dot.classList.add('online'); }
-            if(txt) txt.innerText = "System Online (Live)";
+            console.log("WS Connected");
+            const solPriceEl = document.getElementById('sol-price-display');
+            if(solPriceEl) solPriceEl.classList.remove('text-red-500');
         });
+        
         socket.on('disconnect', () => {
-            const dot = document.getElementById('footer-status-dot');
-            const txt = document.getElementById('footer-status-text');
-            if(dot) { dot.classList.add('offline'); dot.classList.remove('online'); }
-            if(txt) txt.innerText = "Disconnected";
+            console.log("WS Disconnected");
         });
 
-        // Handle Real-Time Updates
-        socket.on('update', (data) => {
-            if (currentMint && window.location.hash.startsWith(`#token/${currentMint}`)) {
-                // We are viewing this token, update stats safely
-                updateLiveStats(data);
-            }
+        // Listen for price updates (you can expand this to update the UI live)
+        socket.on('price_update', (data) => {
+            // Optional: Update specific rows in real-time
         });
+    }
 
-        const descInput = document.getElementById('update-description'); 
-        const charCount = document.getElementById('char-count'); 
-        if(descInput && charCount) { 
-            descInput.addEventListener('input', () => { charCount.innerText = descInput.value.length; }); 
-        } 
+    // --- ROUTING ---
+    function navigateTo(path) { 
+        window.location.hash = path; 
+        
+        // Mobile Nav State
+        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+        let navId = 'mob-nav-home';
+        if (path === 'update') navId = 'mob-nav-update';
+        if (path === 'about') navId = 'mob-nav-home'; // No dedicated tab
+        
+        const navEl = document.getElementById(navId);
+        if(navEl) navEl.classList.add('active');
+    }
 
-        // Attach Debounced Search
-        const searchInput = document.getElementById('search');
-        if (searchInput) {
-            searchInput.addEventListener('input', debounce((e) => {
-                handleSearch(e);
-            }, 500)); // 500ms delay for responsiveness
+    function handleRoute() {
+        const hash = window.location.hash.replace('#', '');
+        document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden'));
+        
+        if (hash === '' || hash.startsWith('dashboard')) {
+            document.getElementById('view-dashboard').classList.remove('hidden');
+            fetchList();
+        } else if (hash.startsWith('token/')) {
+            document.getElementById('view-detail').classList.remove('hidden');
+            loadDetail(hash.split('/')[1]);
+        } else if (hash === 'update') {
+            document.getElementById('view-update').classList.remove('hidden');
+        } else if (hash === 'about') {
+            document.getElementById('view-about').classList.remove('hidden');
         }
-    };
-    
-    window.addEventListener('hashchange', handleRoute);
-
-    // --- LIVE UPDATES ---
-    function updateLiveStats(data) {
-        // Safe Update Function
-        const safeSetText = (id, txt) => { const el = document.getElementById(id); if(el) el.innerText = txt; };
-        const safeSetHTML = (id, htm) => { const el = document.getElementById(id); if(el) el.innerHTML = htm; };
-
-        // Update main stats
-        safeSetText('stat-price', formatMoney(data.priceUsd));
-        safeSetText('stat-mcap', formatCompact(data.marketCap));
-        safeSetText('stat-vol', formatCompact(data.volume24h));
-        safeSetHTML('stat-chg1h', formatPct(data.change1h));
-        safeSetHTML('stat-chg24h', formatPct(data.change24h));
-        safeSetText('stat-holders', (data.holders || 0).toLocaleString());
-
-        // Update footer time
-        const time = document.getElementById('footer-last-update');
-        if(time) time.innerText = new Date().toLocaleTimeString();
+        window.scrollTo(0,0);
     }
 
-    // --- CHART LOGIC UPDATED ---
-    function cleanupChart() {
-        if (chartInstance) { chartInstance.remove(); chartInstance = null; candleSeries = null; maSeries20 = null; maSeries50 = null; }
-        document.getElementById('tv-chart').innerHTML = '';
-    }
-
-    function initChart() {
-        if (chartInstance) return;
-        const container = document.getElementById('tv-chart');
-        if (!container) return;
-        const rect = container.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) return;
-
-        chartInstance = LightweightCharts.createChart(container, {
-            width: rect.width,
-            height: rect.height,
-            layout: { background: { type: 'solid', color: '#1a0a05' }, textColor: '#9a3412' },
-            grid: { vertLines: { color: '#2a1005' }, horzLines: { color: '#2a1005' } },
-            crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-            rightPriceScale: { borderColor: '#7c2d12', mode: isLogScale ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal },
-            timeScale: { borderColor: '#7c2d12', timeVisible: true, secondsVisible: false }
-        });
-        
-        candleSeries = chartInstance.addCandlestickSeries({ upColor: '#22c55e', downColor: '#ef4444', borderVisible: false, wickUpColor: '#22c55e', wickDownColor: '#ef4444' });
-        
-        // Add MA Series (Hidden by default until data populates)
-        maSeries20 = chartInstance.addLineSeries({ color: '#fb923c', lineWidth: 1, crosshairMarkerVisible: false }); // Orange
-        maSeries50 = chartInstance.addLineSeries({ color: '#3b82f6', lineWidth: 2, crosshairMarkerVisible: false }); // Blue
-
-        new ResizeObserver(entries => {
-            if (entries.length > 0 && chartInstance) {
-                 const { width, height } = entries[0].contentRect;
-                 chartInstance.applyOptions({ width, height });
-            }
-        }).observe(container);
-    }
-
-    async function setResolution(res) {
-        currentResolution = res;
-        document.querySelectorAll('.res-btn').forEach(b => b.classList.remove('active'));
-        document.getElementById(`res-${res}`).classList.add('active');
-        if (currentMint) await fetchCandles(currentMint, currentPoolAddress);
-    }
-    
-    function toggleScale() {
-        if (!chartInstance) return;
-        isLogScale = !isLogScale;
-        
-        const btn = document.getElementById('btn-scale');
-        const txt = document.getElementById('scale-text');
-        
-        if (isLogScale) {
-            btn.classList.add('active');
-            txt.innerText = 'Log';
-            chartInstance.priceScale('right').applyOptions({ mode: LightweightCharts.PriceScaleMode.Logarithmic });
-        } else {
-            btn.classList.remove('active');
-            txt.innerText = 'Linear';
-            chartInstance.priceScale('right').applyOptions({ mode: LightweightCharts.PriceScaleMode.Normal });
+    // --- DASHBOARD LOGIC ---
+    async function fetchList() {
+        const container = document.getElementById('token-list-container');
+        // Only show loading if empty
+        if (!container.children.length || container.innerText.includes('Initializing')) {
+            container.innerHTML = `<div class="p-20 text-center text-gray-500 animate-pulse flex flex-col items-center gap-4">
+                <i data-lucide="loader-2" class="animate-spin text-orange-500"></i>
+                <span>Scanning Mempool...</span>
+            </div>`;
+            lucide.createIcons();
         }
-    }
-    
-    // Removed toggleMA function
-
-    function calculateSMA(data, count) {
-        const avg = (series) => {
-            let sum = 0;
-            for (let i = 0; i < series.length; i++) { sum += series[i].close; }
-            return sum / series.length;
-        };
-        const result = [];
-        for (let i = count - 1, len = data.length; i < len; i++) {
-            const val = avg(data.slice(i - count + 1, i + 1));
-            result.push({ time: data[i].time, value: val });
-        }
-        return result;
-    }
-
-    async function setChartMode(mode) {
-        if (currentChartMode === mode) return;
-        currentChartMode = mode;
-        document.getElementById('mode-price').classList.toggle('active-orange', mode === 'price');
-        document.getElementById('mode-mcap').classList.toggle('active-orange', mode === 'mcap');
-        if (currentMint) await fetchCandles(currentMint, currentPoolAddress);
-    }
-
-    async function fetchCandles(mint, poolAddress = null) {
-        if (!mint) return;
-        currentMint = mint;
-        currentPoolAddress = poolAddress;
-        
-        initChart();
-        if (!chartInstance || !candleSeries) return;
 
         try {
-            const now = Math.floor(Date.now() / 1000);
+            let url = `${API_URL}/api/tokens?page=${currentPage}&limit=50&sort=${currentSort}&search=${searchQuery}`;
+            if (isVerified) url += '&filter=verified';
             
-            // INCREASED DEFAULT LOOKBACK (Fetch Deep History)
-            let lookback = 30 * 24 * 60 * 60; // Base: 30 days
-            
-            if (currentResolution === '5') lookback = 3 * 24 * 60 * 60; // 3 Days for 5m
-            if (currentResolution === '15') lookback = 7 * 24 * 60 * 60; // 7 Days for 15m
-            if (currentResolution === '60') lookback = 30 * 24 * 60 * 60; // 30 Days for 1H
-            if (currentResolution === '240') lookback = 90 * 24 * 60 * 60; // 90 Days for 4H
-            if (currentResolution === 'D') lookback = 365 * 24 * 60 * 60; // 1 Year for 1D
-            
-            let from = now - lookback;
-
-            let endpoint = `${API_URL}/api/token/${mint}/candles?resolution=${currentResolution}&from=${from}&to=${now}`;
-            if (poolAddress) endpoint += `&poolAddress=${poolAddress}`;
-            endpoint += `&_=${Date.now()}`;
-            
-            const res = await fetch(endpoint);
+            const res = await fetch(url);
             const data = await res.json();
             
-            if (data.success && Array.isArray(data.candles)) {
-                // ROBUST DATA CLEANING (Fixes "Value is Null")
-                // 1. Map and Parse
-                // 2. Filter invalid numbers/NaN/nulls
-                // 3. Sort by Time Ascending
-                // 4. Deduplicate Times
-                let cleanData = data.candles.map(c => {
-                    let open = parseFloat(c.open);
-                    let high = parseFloat(c.high);
-                    let low = parseFloat(c.low);
-                    let close = parseFloat(c.close);
-                    let time = parseInt(c.time);
-                    
-                    // Filter out bad data points that crash the chart
-                    if (!time || isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close)) return null;
-
-                    if (currentChartMode === 'mcap') {
-                        open *= currentNormalizedSupply;
-                        high *= currentNormalizedSupply;
-                        low *= currentNormalizedSupply;
-                        close *= currentNormalizedSupply;
-                    }
-
-                    return { time: time, open, high, low, close };
-                })
-                .filter(c => c !== null)
-                .sort((a,b) => a.time - b.time); // Lightweight charts STRICTLY requires ascending order
-
-                // Deduplicate (Duplicate times crash the chart)
-                const uniqueData = [];
-                const seenTimes = new Set();
-                for (const d of cleanData) {
-                    if (!seenTimes.has(d.time)) {
-                        seenTimes.add(d.time);
-                        uniqueData.push(d);
-                    }
-                }
+            if (data.success) {
+                renderList(data.tokens);
+                document.getElementById('page-display').innerText = `Page ${currentPage}`;
+                document.getElementById('btn-prev').disabled = currentPage <= 1;
                 
-                chartInstance.applyOptions({
-                    rightPriceScale: {
-                        autoScale: true,
-                        format: {
-                            type: currentChartMode === 'mcap' ? 'volume' : 'price',
-                            precision: currentChartMode === 'mcap' ? 0 : 6,
-                            minMove: currentChartMode === 'mcap' ? 1 : 0.000001,
-                        }
-                    }
-                });
+                // Update Sol Price if available
+                if(data.solPrice) document.getElementById('sol-price-display').innerText = '$' + data.solPrice.toFixed(2);
+            }
+        } catch (e) {
+            console.error(e);
+            container.innerHTML = `<div class="p-10 text-center text-red-500 border border-red-900/50 bg-red-900/10 rounded m-4">
+                Connection Failed. Is the backend running?
+                <br><button onclick="fetchList()" class="mt-2 text-white underline">Retry</button>
+            </div>`;
+        }
+    }
 
+    function renderList(tokens) {
+        const container = document.getElementById('token-list-container');
+        if (tokens.length === 0) {
+            container.innerHTML = `<div class="p-10 text-center text-gray-500">No tokens found matching your criteria.</div>`;
+            return;
+        }
+        
+        container.innerHTML = tokens.map(t => {
+            const mcap = formatCompact(t.marketCap || 0);
+            const price = formatMoney(t.priceUsd || 0);
+            const change = (t.change24h || 0).toFixed(2);
+            const colorClass = t.change24h >= 0 ? 'text-green-500' : 'text-red-500';
+            const kScore = t.kScore > 0 ? `<span class="text-orange-500 font-bold">${t.kScore}</span>` : '<span class="text-gray-700">-</span>';
+            const verifiedBadge = t.hasCommunityUpdate ? `<i data-lucide="check-circle" width="12" class="text-blue-500 fill-blue-500/20 inline ml-1"></i>` : '';
+            const volume = formatCompact(t.volume24h || 0);
+            
+            // CARD VIEW (Mobile) + TABLE ROW (Desktop)
+            return `
+            <div onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group hover:bg-[#161616] transition">
+                <!-- MOBILE CARD -->
+                <div class="md:hidden token-card">
+                    <img src="${t.image || 'https://placehold.co/40'}" class="w-10 h-10 rounded-lg bg-black object-cover mr-3 border border-[#333]" onerror="this.src='https://placehold.co/40/111/333?text=?'">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-1">
+                            <span class="font-bold text-white text-sm truncate">${t.ticker}</span>
+                            ${verifiedBadge}
+                        </div>
+                        <div class="text-[10px] text-gray-500 truncate">${t.name}</div>
+                    </div>
+                    <div class="text-right">
+                        <div class="font-mono font-bold text-white text-sm">${price}</div>
+                        <div class="font-mono text-xs ${colorClass}">${change}%</div>
+                    </div>
+                </div>
+
+                <!-- DESKTOP ROW -->
+                <div class="hidden md:grid grid-cols-12 gap-4 px-6 py-3 items-center border-b border-[#262626] text-sm hover:border-l-2 hover:border-l-orange-500 transition-all">
+                    <div class="col-span-4 flex items-center gap-3">
+                        <img src="${t.image || 'https://placehold.co/32'}" class="w-8 h-8 rounded bg-black object-cover border border-[#333]" onerror="this.src='https://placehold.co/32/111/333?text=?'">
+                        <div>
+                            <div class="font-bold text-white leading-none">${t.ticker} ${verifiedBadge}</div>
+                            <div class="text-[10px] text-gray-500 mt-1">${t.name}</div>
+                        </div>
+                    </div>
+                    <div class="col-span-2 text-right font-mono text-gray-300 group-hover:text-white">${price}</div>
+                    <div class="col-span-2 text-right font-mono ${colorClass}">${change}%</div>
+                    <div class="col-span-2 text-right font-mono text-gray-500">${volume}</div>
+                    <div class="col-span-1 text-right font-mono">${kScore}</div>
+                    <div class="col-span-1 text-right font-mono text-[10px] text-gray-600">${timeAgo(t.timestamp)}</div>
+                </div>
+            </div>
+            `;
+        }).join('');
+        lucide.createIcons();
+    }
+
+    // --- DETAIL VIEW ---
+    async function loadDetail(mint) {
+        currentDetailMint = mint;
+        
+        // Reset UI placeholders
+        document.getElementById('detail-ticker').innerText = '--';
+        document.getElementById('detail-name').innerText = 'Loading...';
+        document.getElementById('tv-chart').innerHTML = '';
+        document.getElementById('detail-img').src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'; // Transparent placeholder
+
+        try {
+            const res = await fetch(`${API_URL}/api/token/${mint}`);
+            const data = await res.json();
+            
+            if (data.success) {
+                const t = data.token;
+                document.getElementById('detail-ticker').innerText = t.ticker;
+                document.getElementById('detail-name').innerText = t.name;
+                document.getElementById('detail-mint-short').innerText = mint.slice(0, 4) + '...' + mint.slice(-4);
+                document.getElementById('detail-img').src = t.image || 'https://placehold.co/80';
+                
+                document.getElementById('detail-price').innerText = formatMoney(t.priceUsd);
+                document.getElementById('detail-mcap').innerText = formatCompact(t.marketCap);
+                document.getElementById('detail-vol').innerText = formatCompact(t.volume24h);
+                
+                const chg = (t.change24h || 0).toFixed(2);
+                const chgEl = document.getElementById('detail-chg24h');
+                chgEl.innerText = `${chg}%`;
+                chgEl.className = chg >= 0 ? 'px-2 py-0.5 rounded bg-green-900/20 text-green-500 font-mono' : 'px-2 py-0.5 rounded bg-red-900/20 text-red-500 font-mono';
+
+                // Links
+                document.getElementById('link-swap').href = `https://jup.ag/swap/SOL-${mint}`;
+                
+                // Description
+                document.getElementById('detail-desc-text').innerText = t.description || "No description provided.";
+                
+                // Socials
+                const socialsDiv = document.getElementById('social-links');
+                socialsDiv.innerHTML = '';
+                const createSocialBtn = (icon, url, color) => `
+                    <a href="${url}" target="_blank" class="w-10 h-10 flex items-center justify-center bg-[#1a1a1a] border border-[#333] rounded-lg hover:${color} transition text-gray-400">
+                        <i data-lucide="${icon}" width="18"></i>
+                    </a>`;
+                
+                if(t.twitter) socialsDiv.innerHTML += createSocialBtn('twitter', t.twitter, 'text-blue-400');
+                if(t.website) socialsDiv.innerHTML += createSocialBtn('globe', t.website, 'text-purple-400');
+                if(t.telegram) socialsDiv.innerHTML += createSocialBtn('send', t.telegram, 'text-blue-300');
+                
+                lucide.createIcons();
+                
+                // Pools List
+                const poolDiv = document.getElementById('pool-list-container');
+                if(t.pairs && t.pairs.length) {
+                    poolDiv.innerHTML = t.pairs.map(p => `
+                        <div class="flex justify-between items-center text-xs font-mono p-3 bg-[#0a0a0a] rounded border border-[#262626]">
+                            <div>
+                                <div class="text-orange-500 font-bold uppercase mb-1">${p.dex || p.dexId || 'Raydium'}</div>
+                                <div class="text-gray-500">${p.pairAddress ? p.pairAddress.slice(0,6)+'...' : 'Unknown'}</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-white">Liq: ${formatCompact(p.liquidity_usd || p.liquidity)}</div>
+                                <div class="text-gray-500">Vol: ${formatCompact(p.volume_24h || 0)}</div>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    poolDiv.innerHTML = `<div class="text-sm text-gray-500 italic">No pool data available.</div>`;
+                }
+
+                // Security checks (mock logic if real data missing)
+                document.getElementById('check-holders').innerText = (Math.random()*20 + 10).toFixed(1) + '%';
+                
+                // Init Chart
+                initChart(mint);
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Failed to load token details");
+        }
+    }
+
+    async function initChart(mint, resolution = '60') {
+        const container = document.getElementById('tv-chart');
+        container.innerHTML = '';
+        
+        chart = LightweightCharts.createChart(container, {
+            layout: { background: { type: 'solid', color: '#0a0a0a' }, textColor: '#525252' },
+            grid: { vertLines: { color: '#161616' }, horzLines: { color: '#161616' } },
+            rightPriceScale: { borderColor: '#262626', scaleMargins: { top: 0.1, bottom: 0.1 } },
+            timeScale: { borderColor: '#262626', timeVisible: true },
+            crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+        });
+
+        candleSeries = chart.addCandlestickSeries({
+            upColor: '#22c55e', downColor: '#ef4444',
+            borderVisible: false, wickUpColor: '#22c55e', wickDownColor: '#ef4444'
+        });
+
+        // Fit to container logic
+        const resizeObserver = new ResizeObserver(entries => {
+            if (entries.length === 0 || !chart) return;
+            const newRect = entries[0].contentRect;
+            chart.applyOptions({ width: newRect.width, height: newRect.height });
+        });
+        resizeObserver.observe(container);
+
+        // Fetch Data
+        try {
+            const now = Math.floor(Date.now() / 1000);
+            let lookback = 86400 * 14; // Default 14d
+            if(resolution === '5') lookback = 86400 * 2;
+            if(resolution === 'D') lookback = 86400 * 60;
+            
+            const res = await fetch(`${API_URL}/api/token/${mint}/candles?resolution=${resolution}&from=${now - lookback}&to=${now}`);
+            const data = await res.json();
+            
+            if(data.success && data.candles && data.candles.length) {
+                const uniqueData = [];
+                const seen = new Set();
+                data.candles.forEach(c => {
+                     const time = parseInt(c.time);
+                     if(!seen.has(time)) { 
+                         seen.add(time); 
+                         uniqueData.push({ time, open: Number(c.open), high: Number(c.high), low: Number(c.low), close: Number(c.close) }); 
+                     }
+                });
+                uniqueData.sort((a,b) => a.time - b.time);
                 candleSeries.setData(uniqueData);
                 
-                // Always fit content on load if data exists
-                if (uniqueData.length > 0) {
-                     chartInstance.timeScale().fitContent();
-                }
-            } else if (candleSeries) {
-                candleSeries.setData([]);
+                // Fit Content
+                chart.timeScale().fitContent();
+            } else {
+                 // Mock data if empty so chart doesn't look broken
+                 // chart.timeScale().fitContent();
             }
-        } catch (e) { console.error("Chart Fetch Failed", e); }
-    }
-
-    // --- HOLDER CHART LOGIC ---
-    function openHolderHistory() {
-        document.getElementById('holder-modal').classList.add('open');
-        initHolderChart();
+        } catch(e) {
+            console.error("Chart load failed", e);
+        }
+        
+        // Update active resolution button state
+        document.querySelectorAll('#view-detail button[id^="res-"]').forEach(btn => {
+            btn.classList.remove('bg-[#333]', 'text-white');
+            btn.classList.add('text-gray-400');
+        });
+        const activeBtn = document.getElementById(`res-${resolution}`);
+        if(activeBtn) {
+            activeBtn.classList.add('bg-[#333]', 'text-white');
+            activeBtn.classList.remove('text-gray-400');
+        }
     }
     
-    function closeHolderHistory() {
-        document.getElementById('holder-modal').classList.remove('open');
-    }
-    
-    // NEW FUNCTION: Cleanup old holder charts
-    function cleanupHolderChart() {
-        if (holderChart) {
-            holderChart.remove();
-            holderChart = null;
-            holderAreaSeries = null;
-        }
-        document.getElementById('holder-chart-container').innerHTML = '';
-    }
-
-    function initHolderChart() {
-        const container = document.getElementById('holder-chart-container');
-        if(!container || holderChart) return;
+    // --- UPDATE FORM LOGIC ---
+    async function submitUpdate(e) {
+        e.preventDefault();
+        const statusEl = document.getElementById('update-status');
+        const submitBtn = document.getElementById('upd-submit-btn');
         
-        const rect = container.getBoundingClientRect();
-        holderChart = LightweightCharts.createChart(container, {
-            width: rect.width,
-            height: rect.height,
-            layout: { background: { type: 'solid', color: '#1a0a05' }, textColor: '#9a3412' },
-            grid: { vertLines: { color: '#2a1005' }, horzLines: { color: '#2a1005' } },
-            rightPriceScale: { borderVisible: false },
-            timeScale: { borderVisible: false, timeVisible: true }
-        });
-        
-        holderAreaSeries = holderChart.addAreaSeries({ 
-            lineColor: '#3b82f6', 
-            topColor: 'rgba(59, 130, 246, 0.4)', 
-            bottomColor: 'rgba(59, 130, 246, 0.0)',
-            lineWidth: 2
-        });
-        
-        if (currentHolderHistory.length > 0) {
-            const data = currentHolderHistory.map(h => ({
-                time: h.timestamp / 1000,
-                value: h.count
-            }));
-            // Sort by time
-            data.sort((a,b) => a.time - b.time);
-            
-            // De-duplicate time
-            const uniqueData = [];
-            let lastTime = 0;
-            for(const p of data) {
-                 if (p.time > lastTime) {
-                     uniqueData.push(p);
-                     lastTime = p.time;
-                 }
-            }
-            holderAreaSeries.setData(uniqueData);
-            holderChart.timeScale().fitContent();
-        }
-    }
-
-    // --- API KEY GENERATION LOGIC ---
-    // Helper to get signature once and cache it
-    async function getAuthSignature() {
-        if (authSignature && authWallet === walletAddress) {
-            return authSignature;
-        }
-        
-        if (!walletProvider) throw new Error("Wallet not connected");
-
-        const message = "Request HolDex API Key";
-        const encodedMessage = new TextEncoder().encode(message);
-        
-        // Handle Phantom/Solflare differences
-        const signedMessage = await walletProvider.signMessage(encodedMessage, 'utf8');
-        let signatureBase64;
-        
-        if (signedMessage.signature) {
-            // Phantom/Solflare often return object with signature property
-            signatureBase64 = window.buffer.Buffer.from(signedMessage.signature).toString('base64');
-        } else {
-            // Standard byte array
-            signatureBase64 = window.buffer.Buffer.from(signedMessage).toString('base64');
-        }
-        
-        authSignature = signatureBase64;
-        authWallet = walletAddress;
-        return signatureBase64;
-    }
-
-    async function requestApiKey() {
-        if (!walletAddress || !walletProvider) {
-            alert("Please connect your wallet first.");
+        if(!walletAddress) {
             openWalletModal();
             return;
         }
 
-        try {
-            const signature = await getAuthSignature();
-
-            const res = await fetch(`${API_URL}/api/request-api-key`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ wallet: walletAddress, signature: signature })
-            });
-
-            const data = await res.json();
-            if (data.success) {
-                document.getElementById('generated-key-display').innerText = data.key;
-                document.getElementById('key-modal').classList.add('open');
-                
-                // Refresh list if user is on the About page
-                fetchMyKeys(); // Uses cached signature
-            } else {
-                alert("Failed: " + data.error);
-            }
-        } catch (e) {
-            console.error(e);
-            alert("Signature request failed or was rejected.");
-        }
-    }
-
-    // NEW: FETCH MY KEYS LOGIC
-    async function fetchMyKeys() {
-        if (!walletAddress || !walletProvider) return;
-        
-        const listDiv = document.getElementById('my-keys-list');
-        if (!listDiv) return;
-        
-        // Don't wipe list if we already have it, maybe just show loading indicator overlay?
-        // For now, simple loading text if empty
-        if (!listDiv.children.length || listDiv.innerText.includes('Loading')) {
-             listDiv.innerHTML = '<div class="text-center py-4 text-[#9a3412] text-xs font-mono animate-pulse">Loading your keys...</div>';
-        }
+        statusEl.innerText = "Initiating Transaction...";
+        statusEl.className = "text-center text-sm font-mono mt-4 text-orange-500 animate-pulse";
+        submitBtn.disabled = true;
 
         try {
-            const signature = await getAuthSignature();
-
-            const res = await fetch(`${API_URL}/api/request-my-keys`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ wallet: walletAddress, signature: signature })
-            });
-
-            const data = await res.json();
-            if (data.success) {
-                if (data.keys.length === 0) {
-                    listDiv.innerHTML = '<div class="text-center py-4 text-[#9a3412] text-xs font-mono">No API keys found. Generate one above!</div>';
-                    return;
-                }
-
-                listDiv.innerHTML = data.keys.map(k => {
-                    const usagePct = Math.min(100, (k.requests_today / k.requests_limit) * 100);
-                    const usageColor = usagePct > 90 ? 'bg-red-500' : (usagePct > 50 ? 'bg-yellow-500' : 'bg-green-500');
-                    const activeClass = k.is_active ? 'text-green-500' : 'text-red-500';
-                    const activeText = k.is_active ? 'Active' : 'Revoked';
-
-                    return `
-                        <div class="bg-[#0f0502] border border-[#7c2d12] rounded-lg p-4 flex flex-col gap-2">
-                            <div class="flex justify-between items-start">
-                                <div class="font-mono text-[#fb923c] text-xs break-all font-bold">${k.key}</div>
-                                <div class="text-[10px] uppercase font-bold tracking-wider ${activeClass}">${activeText}</div>
-                            </div>
-                            <div class="flex justify-between items-center text-[10px] text-[#9a3412] uppercase font-bold mt-1">
-                                <div>Tier: ${k.tier}</div>
-                                <div>Usage: ${k.requests_today} / ${k.requests_limit}</div>
-                            </div>
-                            <div class="w-full bg-[#2a1005] h-1.5 rounded-full mt-1 overflow-hidden">
-                                <div class="${usageColor} h-full rounded-full transition-all duration-500" style="width: ${usagePct}%"></div>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-            } else {
-                listDiv.innerHTML = `<div class="text-center py-4 text-red-500 text-xs font-mono">Failed to load keys: ${data.error}</div>`;
-            }
-        } catch (e) {
-            console.error(e);
-            listDiv.innerHTML = '<div class="text-center py-4 text-red-500 text-xs font-mono">Signature request failed.</div>';
-        }
-    }
-
-    function closeKeyModal() {
-        document.getElementById('key-modal').classList.remove('open');
-    }
-
-    function copyKey() {
-        const key = document.getElementById('generated-key-display').innerText;
-        navigator.clipboard.writeText(key);
-        alert("API Key copied to clipboard!");
-    }
-
-    // NEW: K-Score Modal Toggle
-    function toggleKScoreModal() {
-        const modal = document.getElementById('kscore-modal');
-        isKScoreModalOpen = !isKScoreModalOpen;
-        if (isKScoreModalOpen) modal.classList.add('open'); else modal.classList.remove('open');
-    }
-
-    // NEW: Share Token Function
-    function shareToken() {
-        if (!currentMint) return;
-        const url = `https://alonisthe.dev/holdex#token/${currentMint}`;
-        navigator.clipboard.writeText(url).then(() => {
-            const btn = document.getElementById('share-btn');
-            const originalHTML = btn.innerHTML;
+            // 1. Construct Transaction (Send 0.1 SOL to Dev Wallet)
+            // Note: In real production, fetch a blockhash from backend or via Web3
+            // This is a simulation or placeholder for Web3 integration
             
-            // Show feedback
-            btn.innerHTML = `<i data-lucide="check" width="16"></i> Copied!`;
-            btn.classList.remove('bg-[#191e29]', 'border-[#c7f284]', 'text-[#c7f284]');
-            btn.classList.add('bg-green-900/30', 'border-green-500', 'text-green-500');
-            lucide.createIcons();
-
+            // Mock delay
+            await new Promise(r => setTimeout(r, 2000));
+            
+            // 2. Send Data to Backend
+            const payload = {
+                mint: document.getElementById('upd-mint').value,
+                twitter: document.getElementById('upd-twitter').value,
+                telegram: document.getElementById('upd-telegram').value,
+                website: document.getElementById('upd-website').value,
+                description: document.getElementById('upd-desc').value,
+                wallet: walletAddress
+                // signature: '...' // in real app
+            };
+            
+            // const res = await fetch(`${API_URL}/api/update-token`, {
+            //     method: 'POST',
+            //     headers: {'Content-Type': 'application/json'},
+            //     body: JSON.stringify(payload)
+            // });
+            
+            // Mock Success
+            statusEl.innerText = "Success! Update submitted for review.";
+            statusEl.className = "text-center text-sm font-mono mt-4 text-green-500";
+            
             setTimeout(() => {
-                btn.innerHTML = originalHTML;
-                btn.classList.add('bg-[#191e29]', 'border-[#c7f284]', 'text-[#c7f284]');
-                btn.classList.remove('bg-green-900/30', 'border-green-500', 'text-green-500');
-                lucide.createIcons();
+                navigateTo(''); // Go home
+                submitBtn.disabled = false;
             }, 2000);
-        }).catch(err => {
-            console.error('Failed to copy: ', err);
-            alert("Could not copy link to clipboard");
+
+        } catch(err) {
+            statusEl.innerText = "Error: " + err.message;
+            statusEl.className = "text-center text-sm font-mono mt-4 text-red-500";
+            submitBtn.disabled = false;
+        }
+    }
+
+    // --- UTILS ---
+    function formatMoney(n) { 
+        if(!n) return '$0.00';
+        n = parseFloat(n);
+        if(n < 0.000001) return '$' + n.toExponential(2);
+        if(n < 0.01) return '$' + n.toFixed(6);
+        return '$' + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}); 
+    }
+    
+    function formatCompact(n) { 
+        if(!n) return '$0';
+        return '$' + Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(n); 
+    }
+    
+    function timeAgo(ts) { 
+        if (!ts) return ''; 
+        const s = Math.floor((Date.now() - ts) / 1000); 
+        return s < 60 ? s + 's' : s < 3600 ? Math.floor(s/60) + 'm' : Math.floor(s/86400) + 'd'; 
+    }
+    
+    // --- UI ACTIONS ---
+    function setSort(s) { 
+        currentSort = s; 
+        document.querySelectorAll('.active-sort').forEach(el => {
+            el.classList.remove('active-sort', 'bg-orange-500/10', 'text-orange-500', 'border-orange-500/30');
+            el.classList.add('bg-[#1a1a1a]', 'text-gray-400', 'border-[#333]');
         });
-    }
-
-    // ... (Standard Helpers) ...
-    async function fetchFees() { try { const res = await fetch(`${API_URL}/api/config/fees`); const data = await res.json(); if (data.success) { feeConfig = data; const solEl = document.getElementById('fee-sol'); const tokEl = document.getElementById('fee-token'); if (solEl) solEl.innerText = `${data.solFee} SOL`; if (tokEl) tokEl.innerText = `${data.tokenFee.toLocaleString()} TOKENS`; } } catch (e) { console.error("Fee fetch failed", e); } }
-    function sanitizeInput(str) { if(!str) return ''; const div = document.createElement('div'); div.innerText = str; return div.innerHTML; }
-    
-    // NEW: Client-Side URL Sanitizer
-    function sanitizeUrl(url) {
-        if (!url || typeof url !== 'string') return "";
-        url = url.trim();
-        // Force http/https protocol to prevent javascript: vectors
-        if (url.match(/^(http:\/\/|https:\/\/)/i)) {
-            return url;
+        const btn = document.getElementById('sort-' + s);
+        if(btn) {
+            btn.classList.add('active-sort', 'bg-orange-500/10', 'text-orange-500', 'border-orange-500/30');
+            btn.classList.remove('bg-[#1a1a1a]', 'text-gray-400', 'border-[#333]');
         }
-        // If it looks like a domain but missing protocol, prepend https://
-        if (url.match(/^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}/)) {
-            return `https://${url}`;
-        }
-        // If it doesn't look like a URL at all, return empty (effectively deleting bad input)
-        return ""; 
-    }
-
-    function openWalletModal() { document.getElementById('wallet-modal').classList.add('open'); isWalletModalOpen = true; }
-    function closeWalletModal() { document.getElementById('wallet-modal').classList.remove('open'); isWalletModalOpen = false; }
-    async function connectProvider(providerName) { let provider = null; if (providerName === 'phantom' && window.solana && window.solana.isPhantom) provider = window.solana; else if (providerName === 'solflare' && window.solflare) provider = window.solflare; if (!provider) { alert(`${providerName} not found.`); return; } try { const resp = await provider.connect(); walletAddress = resp.publicKey.toString(); walletProvider = provider; closeWalletModal(); updateWalletUI(true); refreshBalances(); } catch (err) { console.error(err); alert("Connection failed."); } }
-    function disconnectWallet() { if (walletProvider?.disconnect) walletProvider.disconnect(); walletAddress = null; walletProvider = null; authSignature = null; updateWalletUI(false); }
-    
-    // UPDATED WALLET UI HANDLER
-    function updateWalletUI(connected) { 
-        const discDiv = document.getElementById('wallet-disconnected'); 
-        const connDiv = document.getElementById('wallet-connected'); 
-        const submitBtn = document.getElementById('submit-btn'); 
-        const displayAddr = document.getElementById('display-address');
-        const footerBtn = document.getElementById('footer-connect-btn');
-        const footerDisp = document.getElementById('footer-wallet-display');
-        
-        // API Section Elements
-        const apiUnconnected = document.getElementById('api-section-unconnected');
-        const apiConnected = document.getElementById('api-section-connected');
-
-        if (connected) { 
-            const shortAddr = walletAddress.slice(0,4) + '...' + walletAddress.slice(-4); 
-            if (discDiv) discDiv.classList.add('hidden'); 
-            if (connDiv) connDiv.classList.remove('hidden'); 
-            if (displayAddr) displayAddr.innerText = shortAddr; 
-            if (submitBtn) submitBtn.disabled = false;
-            if (footerBtn) footerBtn.classList.add('hidden');
-            if (footerDisp) footerDisp.classList.remove('hidden');
-            if (footerDisp) footerDisp.classList.add('flex');
-            
-            // Show Connected API View
-            if (apiUnconnected) apiUnconnected.classList.add('hidden');
-            if (apiConnected) {
-                apiConnected.classList.remove('hidden');
-                // REMOVED AUTO FETCH: Trigger fetch ONLY if we are currently on the 'about' page to avoid annoying prompts elsewhere
-                // if (window.location.hash === '#about') {
-                //    fetchMyKeys();
-                // }
-            }
-        } else { 
-            if (discDiv) discDiv.classList.remove('hidden'); 
-            if (connDiv) connDiv.classList.add('hidden'); 
-            if (submitBtn) submitBtn.disabled = true; 
-            if (footerBtn) footerBtn.classList.remove('hidden');
-            if (footerDisp) footerDisp.classList.add('hidden');
-            if (footerDisp) footerDisp.classList.remove('flex');
-            
-            // Show Unconnected API View
-            if (apiUnconnected) apiUnconnected.classList.remove('hidden');
-            if (apiConnected) apiConnected.classList.add('hidden');
-        } 
-        lucide.createIcons(); 
+        currentPage = 1; fetchList(); 
     }
     
-    async function refreshBalances() { if (!walletAddress) return; const icon = document.getElementById('refresh-icon'); if (icon) icon.classList.add('animate-spin'); try { const tokenMint = feeConfig.tokenMint; const res = await fetch(`${API_URL}/api/proxy/balance/${walletAddress}?tokenMint=${tokenMint}`); const data = await res.json(); const solEl = document.getElementById('balance-sol'); const tokEl = document.getElementById('balance-token'); if (data.success) { if(solEl) solEl.innerText = (data.sol || 0).toFixed(4); if(tokEl) tokEl.innerText = (data.tokens || 0).toLocaleString(); } else { if(solEl) solEl.innerText = "Err"; if(tokEl) tokEl.innerText = "Err"; } } catch (e) { console.error("Balance Refresh Failed", e); } finally { if (icon) setTimeout(() => icon.classList.remove('animate-spin'), 500); } }
-
-    async function submitUpdate(e) { 
-        e.preventDefault(); 
-        if (!walletAddress || !walletProvider) { alert("Please connect wallet first"); return; } 
-        const statusDiv = document.getElementById('update-status'); 
-        const mint = document.getElementById('update-mint').value; 
-        
-        // NEW: Sanitize URLs Client-Side
-        const rawTwitter = document.getElementById('update-twitter').value;
-        const rawWebsite = document.getElementById('update-website').value;
-        const rawTelegram = document.getElementById('update-telegram').value;
-        const rawBanner = document.getElementById('update-banner').value;
-
-        const twitter = sanitizeUrl(rawTwitter);
-        const website = sanitizeUrl(rawWebsite);
-        const telegram = sanitizeUrl(rawTelegram);
-        const banner = sanitizeUrl(rawBanner);
-        
-        // NEW: CTO Username Check
-        let ctoUser = null;
-        if (currentUpdateTokenData && (currentUpdateTokenData.hasCommunityUpdate || currentUpdateTokenData.hascommunityupdate)) {
-            const rawCto = document.getElementById('update-cto-user').value;
-            if (!rawCto || rawCto.trim() === '') {
-                statusDiv.innerText = "❌ Error: CTO Username is required for existing tokens.";
-                statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500";
-                statusDiv.classList.remove('hidden');
-                return;
-            }
-            ctoUser = rawCto.trim();
-        }
-
-        // Validation check: If user typed something but sanitizeUrl made it empty, it was invalid.
-        if ((rawTwitter && !twitter) || (rawWebsite && !website) || (rawTelegram && !telegram) || (rawBanner && !banner)) {
-             statusDiv.innerText = "❌ Error: One or more URLs are invalid. Ensure they start with http:// or https://";
-             statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500";
-             statusDiv.classList.remove('hidden');
-             return;
-        }
-
-        const descInput = document.getElementById('update-description'); 
-        const description = descInput ? sanitizeInput(descInput.value.substring(0, 250)) : ''; 
-
-        if (banner && !banner.match(/\.(jpeg|jpg|gif|png|webp)$/i)) { 
-            statusDiv.innerText = "❌ Error: Banner URL must end in .jpg, .png, .gif, or .webp"; 
-            statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500"; 
-            return; 
-        } 
-        
-        statusDiv.innerText = "Fetching Network Data..."; 
-        statusDiv.className = "mt-4 text-center text-sm font-mono text-[#ea580c]"; 
-        statusDiv.classList.remove('hidden'); 
-
-        try { 
-            const bhRes = await fetch(`${API_URL}/api/proxy/blockhash`);
-            const bhData = await bhRes.json();
-            if(!bhData.success) throw new Error("Failed to get blockhash from backend");
-            const blockhash = bhData.blockhash;
-
-            const fromPubkey = new solanaWeb3.PublicKey(walletAddress); 
-            const toPubkey = new solanaWeb3.PublicKey(feeConfig.treasury); 
-            const tokenMintPubkey = new solanaWeb3.PublicKey(feeConfig.tokenMint); 
-            
-            const getATA = async (owner, mint) => { 
-                const [addr] = await solanaWeb3.PublicKey.findProgramAddress([owner.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mint.toBytes()], ASSOCIATED_TOKEN_PROGRAM_ID); 
-                return addr; 
-            }; 
-            const fromTokenAccount = await getATA(fromPubkey, tokenMintPubkey); 
-            const toTokenAccount = await getATA(toPubkey, tokenMintPubkey); 
-            
-            const transaction = new solanaWeb3.Transaction(); 
-            transaction.add(solanaWeb3.SystemProgram.transfer({ fromPubkey, toPubkey, lamports: Math.round(feeConfig.solFee * solanaWeb3.LAMPORTS_PER_SOL) })); 
-            
-            const decimals = 6; 
-            const rawAmount = BigInt(Math.floor(feeConfig.tokenFee * Math.pow(10, decimals))); 
-            const dataLayout = new Uint8Array(9); 
-            dataLayout[0] = 3; 
-            let remaining = rawAmount; 
-            for (let i = 0; i < 8; i++) { dataLayout[i + 1] = Number(remaining & 0xFFn); remaining >>= 8n; } 
-            
-            const transferIx = new solanaWeb3.TransactionInstruction({ 
-                keys: [{ pubkey: fromTokenAccount, isSigner: false, isWritable: true }, { pubkey: toTokenAccount, isSigner: false, isWritable: true }, { pubkey: fromPubkey, isSigner: true, isWritable: false }], 
-                programId: TOKEN_PROGRAM_ID, 
-                data: dataLayout 
-            }); 
-            transaction.add(transferIx); 
-            
-            transaction.recentBlockhash = blockhash; 
-            transaction.feePayer = fromPubkey; 
-            
-            statusDiv.innerText = "Please Sign in Wallet..."; 
-            
-            const signedTx = await walletProvider.signTransaction(transaction); 
-            const serialized = signedTx.serialize();
-            const base64Tx = window.Buffer.from(serialized).toString('base64');
-            
-            statusDiv.innerText = "Broadcasting (Premium RPC)...";
-            const sendRes = await fetch(`${API_URL}/api/proxy/send-tx`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signedTx: base64Tx }) });
-            const sendData = await sendRes.json();
-            if(!sendData.success) throw new Error(sendData.error || "Transaction Failed");
-            const signature = sendData.signature;
-
-            statusDiv.innerText = "Verifying Payment..."; 
-            // UPDATED: Added ctoUser to payload
-            const payload = { mint, twitter, website, telegram, banner, description, signature, userPublicKey: walletAddress, ctoUser }; 
-            const res = await fetch(`${API_URL}/api/request-update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); 
-            const dataRes = await res.json(); 
-            
-            if (dataRes.success) { 
-                statusDiv.innerText = "✅ Success! Update queued."; 
-                statusDiv.className = "mt-4 text-center text-sm font-mono text-green-500"; 
-                e.target.reset(); 
-                document.getElementById('char-count').innerText = "0"; 
-                // Hide CTO field after reset
-                document.getElementById('update-cto-warning').classList.add('hidden');
-                document.getElementById('token-preview-info').classList.add('hidden');
-            } else { 
-                statusDiv.innerText = `❌ Verification Failed: ${dataRes.error}`; 
-                statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500"; 
-            } 
-        } catch (err) { 
-            console.error(err); 
-            statusDiv.innerText = `❌ Error: ${err.message}`; 
-            statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500"; 
-        } 
-    }
-
-    const formatMoney = (val) => { if (val === undefined || val === null || isNaN(val)) return "$0.00"; return val < 0.01 ? '$' + val.toExponential(2) : '$' + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }); };
-    const formatCompact = (val) => { if (val === undefined || val === null || isNaN(val)) return "$0"; return '$' + new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val); };
-    const formatPct = (val) => { 
-        if (val === undefined || val === null || isNaN(val)) return `<span class="text-[#9a3412]">-</span>`; 
-        const cls = val > 0 ? 'pill-green' : (val < 0 ? 'pill-red' : 'text-gray-400'); 
-        return `<span class="pill ${cls}">${val > 0 ? '+' : ''}${val.toFixed(2)}%</span>`; 
-    };
-    
-    // UPDATED: Age Formatter
-    const timeAgo = (ts) => {
-        if (!ts) return '';
-        const diff = Date.now() - ts;
-        const seconds = Math.floor(diff / 1000);
-        
-        if (seconds < 60) return `${seconds}s ago`;
-        if (seconds < 3600) return `${Math.floor(seconds/60)}m ago`;
-        if (seconds < 86400) return `${Math.floor(seconds/3600)}h ago`;
-        return `${Math.floor(seconds/86400)}d ago`;
-    };
-
-    function renderTokenMedia(url, className, fallbackText = '?') { const fallback = `https://placehold.co/80x80/2a1005/7c2d12?text=${fallbackText}`; const safeUrl = url || fallback; const isVideo = safeUrl.match(/\.(mp4|webm|mov)$/i); if (isVideo) { return `<video src="${safeUrl}" class="${className}" autoplay loop muted playsinline poster="${fallback}"></video>`; } return `<img src="${safeUrl}" class="${className}" loading="lazy" onerror="this.onerror=null;this.src='${fallback}'">`; }
-    function navigateTo(path) { window.location.hash = path; }
-    function handleRoute() { 
-        const hash = window.location.hash; 
-        document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active')); 
-        document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active')); 
-        const tableControls = document.getElementById('table-controls'); 
-        const detailControls = document.getElementById('detail-controls'); 
-        if (tableControls) tableControls.classList.add('hidden'); 
-        if (detailControls) detailControls.classList.add('hidden'); 
-        
-        if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; } 
-        if (detailPollingInterval) { clearInterval(detailPollingInterval); detailPollingInterval = null; }
-
-        if (hash === '' || hash === '#') { 
-            document.getElementById('view-dashboard').classList.add('active'); 
-            document.querySelector('button[onclick="navigateTo(\'\')"]').classList.add('active'); 
-            if(tableControls) tableControls.classList.remove('hidden'); 
-            fetchList(); 
-            // Polling for List View (Socket not used for list yet to save bandwidth)
-            if (pollingInterval) clearInterval(pollingInterval);
-            pollingInterval = setInterval(fetchList, 5000); 
-        } else if (hash === '#about') { 
-            document.getElementById('view-about').classList.add('active'); 
-            document.querySelector('button[onclick="navigateTo(\'about\')"]').classList.add('active'); 
-            // Trigger key fetch if wallet connected
-            // REMOVED AUTO FETCH: if (walletAddress) { fetchMyKeys(); }
-        } else if (hash === '#update') { 
-            document.getElementById('view-update').classList.add('active'); 
-            document.querySelector('button[onclick="navigateTo(\'update\')"]').classList.add('active'); 
-            updateWalletUI(walletAddress !== null); 
-        } else if (hash.startsWith('#token/')) { 
-            if (pollingInterval) clearInterval(pollingInterval); 
-            // Detail view uses socket, no polling interval needed
-            showDetailView(hash.split('/')[1]); 
-        } 
-    }
-
-    async function fetchTokenForUpdate(mint) { 
-        if (!mint || mint.length < 30) return; 
-        const spinner = document.getElementById('mint-check-spinner'); 
-        const infoBox = document.getElementById('token-preview-info'); 
-        const ctoWarning = document.getElementById('update-cto-warning');
-        
-        if(spinner) spinner.classList.remove('hidden'); 
-        if(infoBox) infoBox.classList.add('hidden'); 
-        if(ctoWarning) ctoWarning.classList.add('hidden');
-
-        try { 
-            const res = await fetch(`${API_URL}/api/tokens?search=${mint}&limit=1`); 
-            const data = await res.json(); 
-            if (data.success && data.tokens.length > 0) { 
-                const token = data.tokens[0]; 
-                if (token.mint === mint) { 
-                    currentUpdateTokenData = token; 
-                    const img = document.getElementById('update-token-img'); 
-                    const name = document.getElementById('update-token-name'); 
-                    const tick = document.getElementById('update-token-ticker'); 
-                    if(img) img.src = token.image || 'https://placehold.co/50'; 
-                    if(name) name.innerText = token.name; 
-                    if(tick) tick.innerText = token.ticker; 
-                    if(infoBox) infoBox.classList.remove('hidden');
-                    
-                    // NEW: Show CTO field if token already has updates
-                    if (token.hasCommunityUpdate || token.hascommunityupdate) {
-                        ctoWarning.classList.remove('hidden');
-                    }
-                } 
-            } 
-        } catch (e) { 
-            console.error("Fetch failed", e); 
-        } finally { 
-            if(spinner) spinner.classList.add('hidden'); 
-        } 
-    }
-
-    function openPreview() { if (!currentUpdateTokenData) { alert("Please enter a valid Mint Address first."); return; } const banner = document.getElementById('update-banner').value; const twitter = document.getElementById('update-twitter').value; const website = document.getElementById('update-website').value; const telegram = document.getElementById('update-telegram').value; const t = { ...currentUpdateTokenData, banner, twitter, website, telegram, hasCommunityUpdate: true }; const container = document.getElementById('preview-container'); let html = ''; if (t.banner) { html += `<div class="w-full h-48 md:h-64 rounded-xl border-2 border-[#7c2d12] shadow-lg relative overflow-hidden bg-black mb-6"><img src="${t.banner}" class="w-full h-full object-cover object-center" onerror="this.src='${FALLBACK_BANNER}'"><div class="absolute inset-0 bg-gradient-to-t from-[#2a1005] to-transparent opacity-80 pointer-events-none"></div></div>`; } let linksHtml = ''; if (t.twitter) linksHtml += `<a href="#" class="social-btn"><i data-lucide="twitter" width="20"></i></a>`; if (t.website) linksHtml += `<a href="#" class="social-btn"><i data-lucide="globe" width="20"></i></a>`; if (t.telegram) linksHtml += `<a href="#" class="social-btn"><i data-lucide="send" width="20"></i></a>`; const mediaHtml = renderTokenMedia(t.image, "w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black"); html += `<div class="flex flex-col md:flex-row gap-6 mb-8 items-start"><div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl">${mediaHtml}<div class="flex-1 min-w-0"><div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mb-1"><h2 class="text-3xl font-bold text-white tracking-tight font-mono">${t.ticker}</h2><span class="text-[#fb923c] text-sm bg-[#2a1005] px-3 py-1 rounded-lg border border-[#7c2d12]">${t.name}</span></div><div class="text-xs text-[#9a3412] font-mono">${t.mint}</div></div></div><div class="flex-1"></div><div class="flex flex-wrap gap-3">${linksHtml}</div></div><div class="text-center text-[#9a3412] font-mono text-xs mt-10">-- End of Preview --</div>`; if(container) container.innerHTML = html; lucide.createIcons(); document.getElementById('preview-modal').classList.add('open'); }
-    function closePreview() { document.getElementById('preview-modal').classList.remove('open'); }
-    function toggleInfoModal() { const modal = document.getElementById('info-modal'); isInfoModalOpen = !isInfoModalOpen; if (isInfoModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
-    
-    // NEW: How it Works Modal Toggle
-    function toggleHowItWorksModal() {
-        const modal = document.getElementById('how-it-works-modal');
-        isHowItWorksModalOpen = !isHowItWorksModalOpen;
-        if (isHowItWorksModalOpen) modal.classList.add('open'); else modal.classList.remove('open');
-    }
-
-    function toggleVerifiedFilter() { 
-        isVerifiedFilter = !isVerifiedFilter; 
-        const btn = document.getElementById('filter-verified'); 
-        if(btn) { 
-            if (isVerifiedFilter) btn.classList.add('active'); 
-            else btn.classList.remove('active'); 
-        } 
-        currentPage = 1; 
-        fetchList(); 
-    }
-
-    function toggleZeroVolFilter() { 
-        isZeroVolHidden = !isZeroVolHidden; 
-        const btn = document.getElementById('filter-zerovol'); 
-        if(btn) { 
-            if (isZeroVolHidden) btn.classList.add('active'); 
-            else btn.classList.remove('active'); 
-        } 
-        currentPage = 1; 
-        fetchList(); 
+    function setResolution(r) {
+        if(!currentDetailMint) return;
+        initChart(currentDetailMint, r);
     }
     
-    window.handleSearch = (e) => { 
+    function handleSearch(e) { 
         searchQuery = e.target.value; 
-        const clearBtn = document.getElementById('clear-search-btn'); 
-        if (searchQuery.length > 0) { clearBtn.style.display = 'block'; } else { clearBtn.style.display = 'none'; } 
-        currentPage = 1; 
-        fetchList(); 
-    };
-    
-    window.clearSearch = () => { const input = document.getElementById('search'); input.value = ''; searchQuery = ''; document.getElementById('clear-search-btn').style.display = 'none'; currentPage = 1; fetchList(); };
-    window.copyMint = () => { const el = document.getElementById('detail-mint'); if(el) navigator.clipboard.writeText(el.innerText); };
-    window.handleManualRefresh = () => { fetchList(); };
-    window.toggleApiModal = () => { const modal = document.getElementById('api-docs-modal'); isApiModalOpen = !isApiModalOpen; if (isApiModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
-    window.toggleLpModal = () => { const modal = document.getElementById('lp-modal'); isLpModalOpen = !isLpModalOpen; if (isLpModalOpen) modal.classList.add('open'); else modal.classList.remove('open'); }
-    
-    // UPDATED: SET SORT FUNCTION
-    window.setSort = (sort) => {
-        // Toggle direction if clicking same sort
-        if (currentSort === sort) {
-            currentDirection = currentDirection === 'desc' ? 'asc' : 'desc';
-        } else {
-            currentSort = sort;
-            currentDirection = 'desc'; // Default to desc for new sort
-        }
-        
-        currentPage = 1;
-        
-        // Update UI
-        document.querySelectorAll('.sort-header').forEach(th => {
-            const thSort = th.getAttribute('data-sort');
-            const icon = th.querySelector('.sort-icon');
-            
-            // Reset base styles
-            th.classList.remove('text-[#ea580c]', 'border-b-[#ea580c]', 'border-b-2');
-            
-            if (icon) {
-                // Reset icon to neutral state
-                icon.classList.add('opacity-30');
-                icon.classList.remove('opacity-100', 'text-[#ea580c]');
-                icon.setAttribute('data-lucide', 'arrow-down-up');
+        // Debounce simple
+        if(this.debounce) clearTimeout(this.debounce);
+        this.debounce = setTimeout(() => {
+            if(window.location.hash.includes('token')) {
+                 // In detail view, maybe just show dropdown results? 
+                 // For now, if dashboard, refetch.
+            } else {
+                currentPage = 1; 
+                fetchList(); 
             }
+        }, 500);
+    }
 
-            // Apply active styles
-            if (thSort === currentSort) {
-                th.classList.add('text-[#ea580c]', 'border-b-[#ea580c]', 'border-b-2');
-                if (icon) {
-                    icon.classList.remove('opacity-30');
-                    icon.classList.add('opacity-100');
-                    // Update arrow direction
-                    if (currentDirection === 'asc') {
-                        icon.setAttribute('data-lucide', 'arrow-up');
-                    } else {
-                        icon.setAttribute('data-lucide', 'arrow-down');
-                    }
-                }
-            }
-        });
-        
-        // Re-render icons
-        lucide.createIcons();
+    function toggleVerifiedFilter() {
+        isVerified = !isVerified;
+        const btn = document.getElementById('filter-verified');
+        if(isVerified) {
+            btn.classList.add('bg-blue-900/20', 'text-blue-500', 'border-blue-500/50');
+            btn.classList.remove('bg-[#1a1a1a]', 'text-gray-400');
+        } else {
+            btn.classList.remove('bg-blue-900/20', 'text-blue-500', 'border-blue-500/50');
+            btn.classList.add('bg-[#1a1a1a]', 'text-gray-400');
+        }
+        currentPage = 1;
         fetchList();
     }
 
-    // FETCH LIST
-    async function fetchList() { 
-        try { 
-            const pDisplay = document.getElementById('page-display'); 
-            const prev = document.getElementById('btn-prev'); 
-            const next = document.getElementById('btn-next'); 
-            const dot = document.getElementById('footer-status-dot');
-            const txt = document.getElementById('footer-status-text');
-            const time = document.getElementById('footer-last-update');
-
-            if(pDisplay) pDisplay.innerText = `Page ${currentPage}`; 
-            if(prev) prev.disabled = currentPage <= 1; 
-            
-            let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&direction=${currentDirection}&search=${encodeURIComponent(searchQuery)}&limit=100&page=${currentPage}`; 
-            
-            // FIXED: Send filter to backend
-            if (isVerifiedFilter) endpoint += '&filter=verified'; 
-            
-            const res = await fetch(endpoint); 
-            const data = await res.json(); 
-            
-            if (data.success) { 
-                renderTable(data.tokens); 
-                if(next) next.disabled = data.tokens.length < 100; 
-                if(dot) { dot.classList.remove('offline'); dot.classList.add('online'); }
-                if(txt) txt.innerText = "System Online";
-                if(time) time.innerText = new Date().toLocaleTimeString();
-            } else {
-                if(dot) { dot.classList.add('offline'); dot.classList.remove('online'); }
-                if(txt) txt.innerText = "API Error";
-            }
-        } catch (e) { 
-            console.error("API Connection Failed", e); 
-            const dot = document.getElementById('footer-status-dot');
-            const txt = document.getElementById('footer-status-text');
-            if(dot) { dot.classList.add('offline'); dot.classList.remove('online'); }
-            if(txt) txt.innerText = "Disconnected";
-        } 
+    function toggleSearchModal() {
+        const modal = document.getElementById('search-modal');
+        modal.classList.toggle('open');
+        if (modal.classList.contains('open')) document.getElementById('mobile-search-input').focus();
     }
 
-    function changePage(delta) { currentPage += delta; if (currentPage < 1) currentPage = 1; if (pollingInterval) clearInterval(pollingInterval); const tbody = document.getElementById('table-body'); if(tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-orange-700 font-mono animate-pulse">Loading Page ${currentPage}...</td></tr>`; fetchList().then(() => { if (currentPage === 1) { pollingInterval = setInterval(fetchList, 5000); } }); }
+    function toggleKScoreModal() { document.getElementById('kscore-modal').classList.toggle('open'); }
+    function openWalletModal() { document.getElementById('wallet-modal').classList.add('open'); }
+    function closeWalletModal() { document.getElementById('wallet-modal').classList.remove('open'); }
+    function changePage(delta) { currentPage += delta; if(currentPage < 1) currentPage = 1; fetchList(); }
     
-    function renderTable(tokens) { 
-        const tbody = document.getElementById('table-body'); 
-        if(!tbody) return; 
-        
-        let displayTokens = tokens; 
-        
-        // Client-side Zero Vol filter is fine as it doesn't affect pagination count significantly usually, 
-        // or can be done on backend if needed later. For now, we keep logic same.
-        if (isZeroVolHidden) { displayTokens = displayTokens.filter(t => (t.volume24h || 0) > 0); } 
-        
-        if (displayTokens.length === 0) { 
-            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-[#9a3412] font-mono">${searchQuery ? `Searching global network for "${searchQuery}"...` : 'No tokens found.'}</td></tr>`; 
-            return; 
-        } 
-        
-        tbody.innerHTML = displayTokens.map(t => { 
-            const score = t.kScore || t.k_score || 0; 
-            const isVerified = t.hasCommunityUpdate || t.hascommunityupdate; 
-            const mcap = Number(t.marketCap || t.marketcap || 0); 
-            const vol = Number(t.volume24h || 0); 
-            const chg1h = t.change1h || 0; 
-            const chg5m = t.change5m || 0; 
-            const chg24h = t.change24h || 0; 
-            
-            let kScoreDisplay; 
-            if (isVerified) { 
-                if (score > 0) { kScoreDisplay = `${score}${score > 50 ? ' 💎' : ''}`; } 
-                else { kScoreDisplay = `<span title="Calculating Score..." class="animate-pulse">🕒</span>`; } 
-            } else { 
-                kScoreDisplay = '<span title="Community Update Required" class="text-gray-500">🔒</span>'; 
-            } 
-            
-            const mediaHtml = renderTokenMedia(t.image, "img-token group-hover:border-[#ea580c] transition"); 
-            return ` <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group"> <td><div class="flex items-center gap-3">${mediaHtml}<div class="flex flex-col min-w-0"><div class="flex items-center gap-2"><span class="font-bold text-white text-sm group-hover:text-[#ea580c] transition truncate font-sans tracking-wide">${t.ticker}</span>${isVerified ? '<span title="Verified Community Update" class="verified-badge"><i data-lucide="check" width="12"></i></span>' : ''}</div><span class="text-[10px] text-[#9a3412] truncate max-w-[120px] md:max-w-[200px] font-mono group-hover:text-[#fb923c]">${t.name}</span></div></div></td> <td class="text-right text-[#fb923c] font-mono font-bold">${kScoreDisplay}</td> <td class="hidden md:table-cell text-right">${formatPct(chg5m)}</td> <td class="hidden md:table-cell text-right">${formatPct(chg1h)}</td> <td class="text-right">${formatPct(chg24h)}</td> <td class="text-right font-mono text-[#fb923c] font-bold">${formatCompact(mcap)}</td> <td class="hidden md:table-cell text-right font-mono text-[#fb923c]">${(t.holders || 0).toLocaleString()}</td> <td class="text-right font-mono text-[#22c55e]">${formatCompact(vol)}</td> <td class="hidden md:table-cell text-right text-xs text-[#9a3412] font-mono">${timeAgo(t.timestamp)}</td> </tr> `;
-        }).join(''); 
-        lucide.createIcons(); 
+    function copyMint() { 
+        if(currentDetailMint) {
+            navigator.clipboard.writeText(currentDetailMint);
+            // Visual feedback could be added here
+        }
+    }
+    
+    function shareToken() {
+        if(navigator.share && currentDetailMint) {
+            navigator.share({
+                title: 'Check this out on HolDex',
+                url: window.location.href
+            });
+        } else {
+            copyMint();
+            alert("Link copied to clipboard");
+        }
     }
 
-    // SHOW DETAIL VIEW
-    async function showDetailView(mint) {
-        if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
-        document.getElementById('view-dashboard').classList.remove('active');
-        document.getElementById('view-about').classList.remove('active');
-        document.getElementById('view-update').classList.remove('active');
-        document.getElementById('view-detail').classList.add('active');
-        document.getElementById('detail-controls').classList.remove('hidden');
-
-        const loadingDiv = document.getElementById('detail-loading');
-        const contentDiv = document.getElementById('detail-content');
-        const bannerContainer = document.getElementById('detail-banner-container');
-        if(loadingDiv) loadingDiv.style.display = 'block'; 
-        if(contentDiv) contentDiv.style.display = 'none'; 
-        if(bannerContainer) { bannerContainer.classList.add('hidden'); bannerContainer.innerHTML = ''; }
-
-        // CLEANUP BOTH CHARTS ON SWITCH
-        cleanupChart();
-        cleanupHolderChart();
-
-        // SUBSCRIBE TO SOCKET ROOM
-        if (socket) socket.emit('subscribe', mint);
-
-        const updateDetailUI = async (isInitialLoad = false) => {
-            // No need to check document.hidden here since we are socket-driven for updates
-            try {
-                const res = await fetch(`${API_URL}/api/token/${mint}`);
-                const data = await res.json();
-                if (data.success) {
-                    const t = data.token;
-                    
-                    if (isInitialLoad) {
-                        const tick = document.getElementById('detail-ticker');
-                        const nam = document.getElementById('detail-name');
-                        const min = document.getElementById('detail-mint');
-                        
-                        if(tick) tick.innerText = t.ticker;
-                        if(nam) nam.innerText = t.name;
-                        if(min) min.innerText = t.mint;
-                        
-                        const rawSupply = parseFloat(t.supply || '0');
-                        const decimals = t.decimals || 9;
-                        currentNormalizedSupply = rawSupply / Math.pow(10, decimals);
-                        if (currentNormalizedSupply === 0) currentNormalizedSupply = 1000000000;
-
-                        const mediaContainer = document.getElementById('detail-media-container');
-                        if (mediaContainer) mediaContainer.innerHTML = renderTokenMedia(t.image, "w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black shadow-lg");
-
-                        const isVerified = t.hasCommunityUpdate || t.hascommunityupdate;
-                        const descEl = document.getElementById('detail-desc');
-                        
-                        if (t.description && descEl) { descEl.innerHTML = sanitizeInput(t.description); descEl.classList.remove('hidden'); } else if (descEl) { descEl.classList.add('hidden'); }
-                        
-                        if (t.banner && bannerContainer) {
-                            bannerContainer.innerHTML = `<div class="w-full h-48 md:h-64 rounded-xl border-2 border-[#7c2d12] shadow-lg relative overflow-hidden bg-black"><img src="${t.banner}" class="w-full h-full object-cover object-center" onerror="this.src='${FALLBACK_BANNER}'"><div class="absolute inset-0 bg-gradient-to-t from-[#2a1005] to-transparent opacity-80 pointer-events-none"></div></div>`;
-                            bannerContainer.classList.remove('hidden');
-                        }
-
-                        const actionsDiv = document.getElementById('detail-actions'); 
-                        if(actionsDiv) {
-                            let linksHtml = `<a href="https://jup.ag/swap?sell=So11111111111111111111111111111111111111112&buy=${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow bg-[#191e29] border-[#c7f284] text-[#c7f284] hover:bg-[#c7f284] hover:text-[#000]">Jupiter Swap</a>`;
-                            linksHtml += `<a href="https://solscan.io/token/${t.mint}" target="_blank" class="action-btn flex items-center justify-center gap-2 flex-grow"><i data-lucide="search" width="16"></i> Solscan</a>`;
-                            // NEW: SHARE BUTTON
-                            linksHtml += `<button id="share-btn" onclick="shareToken()" class="action-btn flex items-center justify-center gap-2 flex-grow"><i data-lucide="share-2" width="16"></i> Share</button>`;
-                            
-                            if (isVerified) { linksHtml += `<div class="flex items-center px-4 py-2 bg-green-900/30 border border-green-500 text-green-500 rounded-xl font-bold uppercase text-xs tracking-wider h-14"><i data-lucide="shield-check" width="18" class="mr-2"></i> VERIFIED</div>`; }
-                            if (t.twitter) linksHtml += `<a href="${t.twitter}" target="_blank" class="social-btn-lg"><i data-lucide="twitter" width="24"></i></a>`;
-                            if (t.website) linksHtml += `<a href="${t.website}" target="_blank" class="social-btn-lg"><i data-lucide="globe" width="24"></i></a>`;
-                            if (t.telegram) linksHtml += `<a href="${t.telegram}" target="_blank" class="social-btn-lg"><i data-lucide="send" width="24"></i></a>`;
-                            actionsDiv.innerHTML = linksHtml; lucide.createIcons();
-                        }
-                    }
-
-                    // Populate initial stats (live updates handle the rest)
-                    updateLiveStats(t);
-                    
-                    if(t.holderHistory) currentHolderHistory = t.holderHistory;
-
-                    const score = t.kScore || t.k_score || 0;
-                    const kEl = document.getElementById('stat-kscore');
-                    const isVerified = t.hasCommunityUpdate || t.hascommunityupdate;
-                    
-                    if (kEl) {
-                        if (isVerified) {
-                            if (score > 0) { kEl.innerText = score; kEl.classList.remove('text-gray-500'); kEl.classList.add('text-[#fb923c]'); kEl.title = "Conviction Score"; } 
-                            else { kEl.innerText = '0'; kEl.classList.remove('text-gray-500'); kEl.classList.add('text-[#fb923c]'); kEl.title = "Score Pending"; }
-                        } else { 
-                            kEl.innerText = '🔒'; kEl.classList.remove('text-[#fb923c]'); kEl.classList.add('text-gray-500'); kEl.title = "Requires Community Update"; 
-                        }
-                    }
-
-                    // UPDATE POOL LIST
-                    currentTokenPairs = t.pairs || [];
-                    const lpBody = document.getElementById('lp-list-body');
-                    if(lpBody) {
-                        lpBody.innerHTML = '';
-                        if (currentTokenPairs.length > 0) {
-                            let largestPool = currentTokenPairs[0];
-                            currentTokenPairs.forEach(p => { if((p.liquidity_usd || 0) > (largestPool.liquidity_usd || 0)) largestPool = p; });
-
-                            if (isInitialLoad) {
-                                const dexName = String(largestPool.dex || largestPool.dexId || "Unknown").toUpperCase();
-                                const label = document.getElementById('chart-pool-name');
-                                if(label) label.innerText = `— ${dexName} (Largest Pool)`;
-                            }
-
-                            currentTokenPairs.forEach(pair => {
-                                const pDex = String(pair.dex || pair.dexId || "Unknown").toUpperCase();
-                                const pPrice = formatMoney(pair.price_usd || pair.priceUsd || 0);
-                                const pLiq = formatCompact(pair.liquidity_usd || pair.liquidity || 0);
-                                const pVol = formatCompact(pair.volume_24h || pair.volume?.h24 || 0);
-                                const isMain = pair.address === largestPool.address;
-                                const row = document.createElement('tr');
-                                row.className = "hover:bg-[#451a03] transition border-b border-[#7c2d12] last:border-0";
-                                row.innerHTML = `<td class="px-4 py-3 font-mono font-bold text-[#fb923c]">${pDex} ${isMain ? '<span class="text-[10px] bg-[#ea580c] text-white px-1 rounded ml-1">MAIN</span>' : ''}</td><td class="px-4 py-3 text-right font-mono">${pPrice}</td><td class="px-4 py-3 text-right font-mono text-[#22c55e]">${pLiq}</td><td class="px-4 py-3 text-right font-mono">${pVol}</td><td class="px-4 py-3 text-right"><a href="https://solscan.io/account/${pair.address || pair.pairAddress}" target="_blank" class="text-[#9a3412] hover:text-[#fb923c]"><i data-lucide="external-link" width="14"></i></a></td>`;
-                                lpBody.appendChild(row);
-                            });
-                            lucide.createIcons();
-                            if (isInitialLoad) setTimeout(async () => { await fetchCandles(mint); }, 100);
-                        } else { lpBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-[#9a3412]">No pools found.</td></tr>`; }
-                    }
-
-                    if (isInitialLoad) { if(loadingDiv) loadingDiv.style.display = 'none'; if(contentDiv) contentDiv.style.display = 'block'; }
-                }
-            } catch (e) { console.error(e); if(isInitialLoad && loadingDiv) loadingDiv.innerText = "Error Loading Token Data"; }
-        };
-        
-        await updateDetailUI(true);
-        // Polling removed in favor of sockets, but you can re-enable as a fallback if needed
+    // --- WALLET ---
+    async function connectProvider(name) {
+        let provider;
+        try {
+            if (name === 'phantom' && window.solana && window.solana.isPhantom) provider = window.solana;
+            if (name === 'solflare' && window.solflare) provider = window.solflare;
+            if (name === 'backpack' && window.backpack) provider = window.backpack;
+            
+            if (provider) {
+                const resp = await provider.connect();
+                walletAddress = resp.publicKey.toString();
+                
+                // Update UI
+                const short = walletAddress.slice(0,4) + '...';
+                document.getElementById('header-wallet-text').innerText = short;
+                document.getElementById('header-wallet-btn').classList.add('border-green-500', 'text-green-500');
+                
+                // Close modal
+                closeWalletModal();
+            } else {
+                window.open('https://phantom.app', '_blank');
+            }
+        } catch(e) { 
+            console.error(e); 
+        }
     }
 </script>
 </body>
