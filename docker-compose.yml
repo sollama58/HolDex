@@ -23,6 +23,7 @@ services:
       - REDIS_URL=redis://redis:6379
       # Pass through RPC config if using .env file or environment injection
       - SOLANA_RPC_URL=${SOLANA_RPC_URL}
+      - SOLANA_WSS_URL=${SOLANA_WSS_URL}
       - HELIUS_API_KEY=${HELIUS_API_KEY}
     depends_on:
       - db
@@ -39,6 +40,7 @@ services:
       - DATABASE_URL=postgres://user:password@db:5432/holdex
       - REDIS_URL=redis://redis:6379
       - SOLANA_RPC_URL=${SOLANA_RPC_URL}
+      - SOLANA_WSS_URL=${SOLANA_WSS_URL}
       - HELIUS_API_KEY=${HELIUS_API_KEY}
     depends_on:
       - db
@@ -55,7 +57,9 @@ services:
       - DATABASE_URL=postgres://user:password@db:5432/holdex
       - REDIS_URL=redis://redis:6379
       - SOLANA_RPC_URL=${SOLANA_RPC_URL}
+      - SOLANA_WSS_URL=${SOLANA_WSS_URL}
       - HELIUS_API_KEY=${HELIUS_API_KEY}
+      - SERVICE_TYPE=listener
     depends_on:
       - db
       - redis
