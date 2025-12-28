@@ -76,6 +76,27 @@
         .refresh-btn { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; transition: all 0.2s; flex-shrink: 0; }
         .refresh-btn:disabled i { animation: spin 1s linear infinite; }
         
+        /* Select Dropdown Style */
+        .limit-select {
+            background: #451a03;
+            border: 2px solid #7c2d12;
+            color: #9a3412;
+            padding: 8px 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 700;
+            outline: none;
+            transition: all 0.2s;
+            appearance: none; /* Remove default arrow */
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239a3412' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            padding-right: 24px;
+        }
+        .limit-select:focus { border-color: #ea580c; color: #fb923c; }
+
         /* Chart Styles */
         .chart-wrapper { width: 100%; height: 400px; background: #1a0a05; border-radius: 16px; overflow: hidden; border: 2px solid #7c2d12; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
         @media (min-width: 768px) { .chart-wrapper { height: 600px; } }
@@ -128,6 +149,9 @@
         .form-label { display: block; color: #9a3412; font-size: 12px; font-weight: bold; margin-bottom: 6px; text-transform: uppercase; }
         
         .code-block { background: #0f0502; border: 1px solid #7c2d12; padding: 16px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #fb923c; overflow-x: auto; position: relative; }
+        
+        #detail-banner-container { width: 100%; overflow: hidden; position: relative; background: #000; border-radius: 12px; margin-bottom: 16px; }
+        #detail-banner-img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; }
     </style>
 </head>
 <body>
@@ -148,7 +172,7 @@
                 </div>
             </div>
 
-            <!-- Mobile Wallet Connect (Visible only on mobile) -->
+            <!-- Mobile Wallet Connect -->
             <div class="md:hidden">
                 <button id="mobile-connect-btn" onclick="openWalletModal()" class="bg-[#451a03] border border-[#7c2d12] text-[#fb923c] px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2">
                     <i data-lucide="wallet" width="14"></i> <span id="mobile-wallet-text">Connect</span>
@@ -169,14 +193,23 @@
                     <i data-lucide="refresh-cw" width="18"></i>
                 </button>
             </div>
-            <!-- Filter Row (Horizontal Scroll on Mobile) -->
-            <div class="flex gap-2 overflow-x-auto hidden-scrollbar pb-1 md:pb-0">
+            <!-- Filter Row -->
+            <div class="flex gap-2 overflow-x-auto hidden-scrollbar pb-1 md:pb-0 items-center">
                 <button id="filter-verified" onclick="toggleVerifiedFilter()" class="filter-toggle" title="Show only Verified">
                     <i data-lucide="shield-check" width="14"></i> Verified
                 </button>
                 <button id="filter-zerovol" onclick="toggleZeroVolFilter()" class="filter-toggle active" title="Hide 0 Volume">
                     <i data-lucide="bar-chart-2" width="14"></i> >$0 Vol
                 </button>
+                
+                <!-- NEW LIMIT SELECTOR -->
+                <select id="limit-select" onchange="changeLimit(this.value)" class="limit-select" title="Tokens per page">
+                    <option value="10">10</option>
+                    <option value="20" selected>20</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                </select>
+
                 <div class="md:hidden flex-shrink-0 w-4"></div> <!-- Spacer -->
             </div>
         </div>
@@ -185,7 +218,7 @@
             <button onclick="navigateTo('')" class="bg-[#2a1005] border-2 border-[#7c2d12] text-[#9a3412] hover:text-[#ea580c] hover:border-[#ea580c] py-2 px-4 rounded-lg font-bold flex items-center justify-center gap-2 w-full md:w-auto transition"><i data-lucide="arrow-left" width="16"></i> Back to List</button>
         </div>
         
-        <!-- Desktop Connect (Hidden on Mobile) -->
+        <!-- Desktop Connect -->
         <div class="hidden md:block">
             <button id="desktop-connect-btn" onclick="openWalletModal()" class="bg-[#451a03] border border-[#7c2d12] text-[#fb923c] px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-[#582206] transition">
                 <i data-lucide="wallet" width="14"></i> <span id="desktop-wallet-text">Connect Wallet</span>
@@ -203,19 +236,12 @@
                 <table class="holdex-table">
                     <thead>
                         <tr>
-                            <!-- Asset always visible -->
                             <th class="sort-header w-auto md:w-[30%]" data-sort="newest" onclick="setSort('newest')">Asset <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
-                            
-                            <!-- Hidden on Mobile -->
                             <th class="sort-header text-[#ea580c] border-b-[#ea580c] border-b-2 hidden md:table-cell" data-sort="kscore" onclick="setSort('kscore')">Score <i data-lucide="arrow-down" width="12" class="sort-icon inline ml-1"></i></th>
                             <th class="sort-header hidden md:table-cell" data-sort="price" onclick="setSort('price')">Price</th>
                             <th class="sort-header hidden md:table-cell" data-sort="24h" onclick="setSort('24h')">24h% <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
-                            
-                            <!-- Visible on Mobile -->
                             <th class="sort-header" data-sort="volume" onclick="setSort('volume')">Vol <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th> 
                             <th class="sort-header" data-sort="mcap" onclick="setSort('mcap')">MCap <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
-                            
-                            <!-- Hidden on Mobile -->
                             <th class="sort-header hidden md:table-cell" data-sort="holders" onclick="setSort('holders')">Holders <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
                             <th class="sort-header hidden md:table-cell" data-sort="age" onclick="setSort('age')">Age <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
                         </tr>
@@ -239,7 +265,7 @@
         </div>
     </div>
 
-    <!-- ABOUT VIEW (EXPANDED) -->
+    <!-- ABOUT VIEW -->
     <div id="view-about" class="view-section px-4 md:px-0 hidden">
         <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 md:p-12 shadow-2xl max-w-5xl mx-auto space-y-12">
             <div class="flex items-center gap-6 border-b-2 border-[#7c2d12] pb-8">
@@ -305,7 +331,7 @@
         </div>
     </div>
 
-    <!-- UPDATE VIEW (EXPANDED WITH BALANCE CHECK) -->
+    <!-- UPDATE VIEW -->
     <div id="view-update" class="view-section px-4 md:px-0 hidden">
         <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 shadow-2xl max-w-2xl mx-auto">
             <h2 class="text-2xl font-bold text-white mb-4 font-sans border-b border-[#7c2d12] pb-4">Update Token</h2>
@@ -398,8 +424,9 @@
         <div id="detail-loading" class="text-center py-20 text-[#ea580c] font-mono animate-pulse hidden">Fetching Chain Data...</div>
         <div id="detail-content" style="display: none;">
             
-            <!-- Banner Placeholder -->
-            <div id="detail-banner-container" class="hidden w-full h-32 md:h-48 rounded-xl bg-black border border-[#7c2d12] mb-4 overflow-hidden relative"></div>
+            <div id="detail-banner-container" class="hidden h-32 md:h-48 rounded-xl border border-[#7c2d12] mb-4 shadow-lg">
+                <img id="detail-banner-img" src="" alt="Token Banner">
+            </div>
 
             <!-- Mobile Header Stack -->
             <div class="bg-[#451a03] rounded-xl border border-[#7c2d12] p-4 mb-4 shadow-lg relative z-10">
@@ -424,10 +451,8 @@
                     </div>
                 </div>
                 
-                <!-- Description Collapsible -->
                 <div id="detail-desc" class="mt-3 text-sm text-[#ffedd5] leading-relaxed border-t border-[#7c2d12] pt-3 hidden whitespace-pre-wrap"></div>
                 
-                <!-- Action Buttons -->
                 <div id="detail-actions" class="flex flex-wrap gap-2 mt-4 pt-2 border-t border-[#7c2d12]"></div>
             </div>
 
@@ -478,7 +503,7 @@
 
 </main>
 
-<!-- BOTTOM NAVIGATION (NOW VISIBLE ON ALL SCREENS) -->
+<!-- BOTTOM NAVIGATION -->
 <nav class="bottom-nav">
     <button class="bottom-nav-item active" onclick="navigateTo('')" id="nav-home">
         <i data-lucide="layout-grid" width="20"></i>
@@ -600,7 +625,6 @@
     </div>
 </div>
 
-<!-- HOW IT WORKS (EXPANDED) -->
 <div id="how-it-works-modal" class="modal-overlay hidden">
     <div class="modal-content bg-[#2a1005] border-2 border-[#7c2d12] p-6 shadow-2xl relative w-full max-w-lg">
         <button class="absolute top-4 right-4 text-[#9a3412]" onclick="toggleHowItWorksModal()"><i data-lucide="x" width="24"></i></button>
@@ -680,6 +704,7 @@
     let currentDirection = 'desc';
     let searchQuery = '';
     let currentPage = 1;
+    let currentLimit = 20; // Default limit
     let isVerifiedFilter = false;
     let isZeroVolHidden = true; 
     let currentMint = null;
@@ -708,6 +733,7 @@
     let currentPoolAddress = null;
     let currentNormalizedSupply = 1;
     let currentHolderHistory = [];
+    let chartResizeObserver = null;
 
     // Socket
     let socket = null;
@@ -736,7 +762,18 @@
         const searchInput = document.getElementById('search');
         if (searchInput) searchInput.addEventListener('input', debounce((e) => handleSearch(e), 500));
         
-        window.addEventListener('resize', () => { if (chartInstance) chartInstance.timeScale().fitContent(); });
+        // Use ResizeObserver for robust chart resizing
+        const chartContainer = document.getElementById('tv-chart');
+        if (chartContainer) {
+            chartResizeObserver = new ResizeObserver(entries => {
+                if (entries.length === 0 || !entries[0].contentRect) return;
+                const newRect = entries[0].contentRect;
+                if (chartInstance && newRect.width > 0 && newRect.height > 0) {
+                    chartInstance.applyOptions({ width: newRect.width, height: newRect.height });
+                }
+            });
+            chartResizeObserver.observe(chartContainer);
+        }
     };
     
     window.addEventListener('hashchange', handleRoute);
@@ -795,7 +832,8 @@
             if(pDisplay) pDisplay.innerText = `Page ${currentPage}`; 
             if(prev) prev.disabled = currentPage <= 1; 
             
-            let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&direction=${currentDirection}&search=${encodeURIComponent(searchQuery)}&limit=20&page=${currentPage}`; 
+            // Limit is now dynamic
+            let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&direction=${currentDirection}&search=${encodeURIComponent(searchQuery)}&limit=${currentLimit}&page=${currentPage}`; 
             if (isVerifiedFilter) endpoint += '&filter=verified'; 
             
             const res = await fetch(endpoint); 
@@ -803,7 +841,7 @@
             
             if (data.success) { 
                 renderTable(data.tokens); 
-                if(next) next.disabled = data.tokens.length < 20; 
+                if(next) next.disabled = data.tokens.length < currentLimit; 
             }
         } catch (e) { console.error("API Error", e); } 
     }
@@ -872,6 +910,7 @@
         const loadingDiv = document.getElementById('detail-loading');
         const contentDiv = document.getElementById('detail-content');
         const bannerContainer = document.getElementById('detail-banner-container');
+        const bannerImg = document.getElementById('detail-banner-img');
         
         loadingDiv.classList.remove('hidden');
         contentDiv.style.display = 'none';
@@ -916,7 +955,8 @@
                 if(t.description) { descEl.innerText = t.description; descEl.classList.remove('hidden'); } else { descEl.innerText = ''; descEl.classList.add('hidden'); }
                 
                 if (t.banner && bannerContainer) {
-                    bannerContainer.innerHTML = `<div class="w-full h-32 rounded-xl border border-[#7c2d12] shadow-lg relative overflow-hidden bg-black"><img src="${t.banner}" class="w-full h-full object-cover object-center" onerror="this.src='${FALLBACK_BANNER}'"><div class="absolute inset-0 bg-gradient-to-t from-[#2a1005] to-transparent opacity-80 pointer-events-none"></div></div>`;
+                    bannerImg.src = t.banner;
+                    bannerImg.onerror = function() { this.src = FALLBACK_BANNER; };
                     bannerContainer.classList.remove('hidden');
                 } else { bannerContainer.classList.add('hidden'); }
 
@@ -948,7 +988,11 @@
                 loadingDiv.classList.add('hidden');
                 contentDiv.style.display = 'block';
                 lucide.createIcons();
-                setTimeout(() => initChart(mint, currentPoolAddress), 100);
+                
+                // Force a layout update before chart init to ensure container has dimensions
+                requestAnimationFrame(() => {
+                    initChart(mint, currentPoolAddress);
+                });
             } else { loadingDiv.innerText = 'Token not found.'; }
         } catch(e) { console.error(e); loadingDiv.innerText = 'Error fetching data.'; }
     }
@@ -974,26 +1018,43 @@
         if(chartInstance) chartInstance.priceScale('right').applyOptions({ mode: isLogScale ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal });
     };
 
-    function initChart() {
-        if (chartInstance) return;
+    function initChart(mint, poolAddress) {
+        // If chart exists, just fetch data
+        if (chartInstance) {
+            fetchCandles(mint, poolAddress);
+            return;
+        }
+
         const container = document.getElementById('tv-chart');
         if(!container) return;
+        
+        // Ensure container has dimensions. If hidden or 0, wait.
         const rect = container.getBoundingClientRect();
-        if (rect.width === 0) return; 
+        if (rect.width === 0 || rect.height === 0) {
+            // Retry briefly if layout hasn't settled
+            setTimeout(() => initChart(mint, poolAddress), 50);
+            return;
+        } 
+        
+        container.innerHTML = ''; // Clear any previous
+        
         chartInstance = LightweightCharts.createChart(container, {
-            width: rect.width, height: rect.height,
+            width: rect.width, 
+            height: rect.height,
             layout: { background: { type: 'solid', color: '#1a0a05' }, textColor: '#9a3412' },
             grid: { vertLines: { color: '#2a1005' }, horzLines: { color: '#2a1005' } },
             timeScale: { borderColor: '#7c2d12', timeVisible: true },
             rightPriceScale: { borderColor: '#7c2d12', mode: isLogScale ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal },
-            autoSize: true,
+            autoSize: false, // Managed by ResizeObserver
         });
+        
         candleSeries = chartInstance.addCandlestickSeries({ upColor: '#22c55e', downColor: '#ef4444', borderVisible: false, wickUpColor: '#22c55e', wickDownColor: '#ef4444' });
+        
+        fetchCandles(mint, poolAddress);
     }
     
     async function fetchCandles(mint, poolAddress) {
-        if (!chartInstance || !candleSeries) initChart();
-        if (!chartInstance) return;
+        if (!chartInstance || !candleSeries) return;
         try {
             const now = Math.floor(Date.now() / 1000);
             let lookback = 30 * 24 * 60 * 60;
@@ -1062,7 +1123,7 @@
                 
                 // Try to get token name via backend proxy or just use ticker
                 // For now, hardcode "HDX" or similar if unknown, but better to fetch name
-                document.getElementById('fee-token-name').innerText = "HolDex Fee";
+                document.getElementById('fee-token-name').innerText = "Token Fee";
                 
                 if (walletAddress) { checkBalances(); }
                 document.getElementById('fee-panel').classList.remove('hidden'); 
@@ -1250,6 +1311,7 @@
     window.clearSearch = () => { document.getElementById('search').value=''; searchQuery=''; fetchList(); };
     window.handleSearch = (e) => { searchQuery = e.target.value; fetchList(); };
     window.copyMint = () => { if(currentMint) navigator.clipboard.writeText(currentMint).then(()=>alert('Mint copied')); };
+    window.changeLimit = (val) => { currentLimit = parseInt(val); currentPage = 1; fetchList(); };
     
     // Modal Toggles
     const toggleModal = (id) => { 
