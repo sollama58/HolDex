@@ -222,10 +222,12 @@ async function aggregateAndSaveToken(db, mint) {
         }
 
         // Build Update Query
-        const params = [totalLiq, totalVol, price, mint, now]; 
-        let query = `UPDATE tokens SET liquidity = $1, volume24h = $2, priceUsd = $3, timestamp = $5, marketCap = ($3 * CAST(supply AS DOUBLE PRECISION) / POWER(10, COALESCE(decimals, 9)))`;
+        // FIX: Removed `timestamp` column update to preserve original creation time.
+        // FIX: Added `updated_at = NOW()` to track recent updates properly.
+        const params = [totalLiq, totalVol, price, mint]; 
+        let query = `UPDATE tokens SET liquidity = $1, volume24h = $2, priceUsd = $3, updated_at = NOW(), marketCap = ($3 * CAST(supply AS DOUBLE PRECISION) / POWER(10, COALESCE(decimals, 9)))`;
         
-        let idx = 6;
+        let idx = 5; // Start at 5 since we use $1-$4 above
         if (change24h !== null) { query += `, change24h = $${idx++}`; params.push(change24h); }
         if (change1h !== null) { query += `, change1h = $${idx++}`; params.push(change1h); }
         if (change5m !== null) { query += `, change5m = $${idx++}`; params.push(change5m); }
