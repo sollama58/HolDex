@@ -13,10 +13,20 @@ function getSolanaConnection() {
         // Rate limit mitigation for public endpoints
         const confirmTimeout = rpcUrl.includes('mainnet-beta') ? 120000 : 60000;
 
+        // Fix: Explicitly derive WSS URL for Helius to ensure onLogs works reliably
+        let wsUrl = undefined;
+        if (rpcUrl.includes('helius')) {
+             wsUrl = rpcUrl.replace('https://', 'wss://').replace('http://', 'ws://');
+        }
+
         connection = new Connection(rpcUrl, {
             commitment: 'confirmed',
-            confirmTransactionInitialTimeout: confirmTimeout
+            confirmTransactionInitialTimeout: confirmTimeout,
+            wsEndpoint: wsUrl,
+            disableRetryOnRateLimit: false,
         });
+        
+        logger.info(`🔌 Solana Connection Init: ${rpcUrl.includes('helius') ? 'High-Performance Mode' : 'Standard Mode'}`);
     }
     return connection;
 }
@@ -66,7 +76,7 @@ async function fetchAccountsForProgram(conn, programId, mintAddress) {
         if (e.message.includes('Too many accounts') || e.message.includes('Size limit')) {
             return 0; 
         }
-        logger.warn(`⚠️ RPC Holder Check Error: ${e.message}`);
+        // logger.warn(`⚠️ RPC Holder Check Error: ${e.message}`);
         return 0;
     }
 }

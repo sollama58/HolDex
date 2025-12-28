@@ -1,131 +1,152 @@
-const { Connection, PublicKey } = require('@solana/web3.js');
-const { getSolanaConnection } = require('./solana');
-const { getDB } = require('./database');
-const { getClient } = require('./redis'); // Need Redis for the pending list
-const { indexTokenOnChain } = require('./indexer'); 
-const logger = require('./logger');
-const axios = require('axios');
+const { getSolanaConnection, retryRPC } = require('../services/solana');
+const { getDB } = require('../services/database');
+const { indexTokenOnChain } = require('../services/indexer');
+const logger = require('../services/logger');
+const { PublicKey } = require('@solana/web3.js');
 
-// Raydium Liquidity Pool V4
+// Raydium Liquidity Pool V4 Program ID
 const RAYDIUM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
 
-// Pump.fun Bonding Curve Program
+// Pump.fun Bonding Curve Program ID
 const PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5DkzonjNwu78hRvfCKubJ14M5uBEwF6P');
 
-// MINIMUM MARKET CAP CONFIG
-const MIN_MCAP_USD = 20000;
-const PENDING_GROWERS_KEY = 'pending_growers'; // Redis Set Key
+// Minimum time between processing the same signature (deduplication)
+const processedSigs = new Set();
 
-let isListening = false;
-
-async function startNewTokenListener() {
-    if (isListening) return;
-    
-    const connection = getSolanaConnection();
-    const db = getDB();
-
-    logger.info('🛰️ Listener: Starting On-Chain Discovery Service (Raydium & Pump.fun)...');
-
-    connection.onLogs(
-        RAYDIUM_PROGRAM_ID,
-        async (logs, ctx) => {
-            if (logs.err) return;
-            const isInit = logs.logs.some(l => l.includes('InitializeInstruction2') || l.includes('initialize2'));
-            if (isInit) {
-                await processNewPoolTx(logs.signature, connection, db, 'Raydium');
-            }
-        },
-        'confirmed'
-    );
-
-    connection.onLogs(
-        PUMP_PROGRAM_ID,
-        async (logs, ctx) => {
-            if (logs.err) return;
-            const isCreate = logs.logs.some(l => l.includes('Instruction: Create'));
-            if (isCreate) {
-                await processNewPoolTx(logs.signature, connection, db, 'Pump.fun');
-            }
-        },
-        'confirmed'
-    );
-
-    isListening = true;
-    logger.info('✅ Listener: Connected to Solana WebSocket.');
-}
-
-async function getQuickMarketCap(mint) {
-    try {
-        // Strategy: Wait 5 seconds to let price aggregators index it, then check.
-        await new Promise(r => setTimeout(r, 5000));
-
-        const url = `https://api.geckoterminal.com/api/v2/networks/solana/tokens/${mint}`;
-        const res = await axios.get(url, { timeout: 3000 });
-        const attrs = res.data?.data?.attributes;
-        
-        const mcap = parseFloat(attrs?.fdv_usd || attrs?.market_cap_usd || 0);
-        return mcap;
-    } catch (e) {
-        return 0; 
-    }
-}
-
+/**
+ * Processes a detected transaction to identify and ingest new tokens.
+ * @param {string} signature - The transaction signature
+ * @param {Connection} connection - Solana connection object
+ * @param {object} db - Database instance
+ * @param {string} source - 'Raydium' or 'Pump.fun'
+ */
 async function processNewPoolTx(signature, connection, db, source) {
+    if (processedSigs.has(signature)) return;
+    processedSigs.add(signature);
+    
+    // Clear set periodically to prevent memory leak (reset every ~10000 txs)
+    if (processedSigs.size > 10000) processedSigs.clear();
+
     try {
-        const tx = await connection.getParsedTransaction(signature, {
-            maxSupportedTransactionVersion: 0,
-            commitment: 'confirmed'
-        });
+        // FIX: Add initial delay to allow RPC node to index the transaction.
+        // 'onLogs' fires extremely fast, often before the transaction is retrievable via getParsedTransaction.
+        await new Promise(r => setTimeout(r, 2000));
 
-        if (!tx || !tx.meta || tx.meta.err) return;
-
-        const mints = new Set();
+        let tx = null;
         
+        // FIX: Retry loop for fetching transaction details.
+        // We try 3 times with a delay to handle eventual consistency on RPC nodes.
+        for (let i = 0; i < 3; i++) {
+            tx = await connection.getParsedTransaction(signature, {
+                maxSupportedTransactionVersion: 0,
+                commitment: 'confirmed'
+            });
+            if (tx) break;
+            await new Promise(r => setTimeout(r, 1500));
+        }
+
+        if (!tx || !tx.meta || tx.meta.err) {
+            // Transaction failed or wasn't found after retries.
+            return;
+        }
+
+        // Strategy: Look for new token balances or instructions that define the mint.
+        // For Raydium/Pump, the Mint is usually one of the 'postTokenBalances' that appeared in the tx.
+        // We filter out known common tokens (SOL, USDC, USDT) to isolate the new "shitcoin" or token.
+        
+        const knownMints = new Set([
+            'So11111111111111111111111111111111111111112', // Wrapped SOL
+            'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+            'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
+        ]);
+
+        const candidateMints = new Set();
+
         if (tx.meta.postTokenBalances) {
             tx.meta.postTokenBalances.forEach(bal => {
-                // Filter out SOL and known quote tokens if necessary
-                if (bal.mint && bal.mint !== 'So11111111111111111111111111111111111111112') {
-                    mints.add(bal.mint);
+                if (bal.mint && !knownMints.has(bal.mint)) {
+                    candidateMints.add(bal.mint);
                 }
             });
         }
 
-        for (const mint of mints) {
+        for (const mint of candidateMints) {
+            // Check if we already have it in the database
             const exists = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
             
             if (!exists) {
-                logger.info(`🔍 Discovery [${source}]: Checking MCAP for ${mint}...`);
-                const mcap = await getQuickMarketCap(mint);
-
-                if (mcap < MIN_MCAP_USD) {
-                    // CHANGED: Instead of skipping, add to "Pending Growers" list in Redis
-                    logger.info(`🌱 Potential Grower ${mint}: MCAP $${mcap.toFixed(0)} < $${MIN_MCAP_USD}. Added to watch list.`);
-                    
-                    const redis = getClient();
-                    if (redis) {
-                        // Store as JSON with timestamp to allow expiration later
-                        const payload = JSON.stringify({ mint, addedAt: Date.now() });
-                        await redis.sadd(PENDING_GROWERS_KEY, payload);
-                    }
-                    continue; 
-                }
-
-                logger.info(`✨ Discovery [${source}]: Valid Token Found! ${mint} (MCAP: $${mcap.toFixed(0)})`);
+                logger.info(`✨ Discovery [${source}]: Found new token ${mint}`);
                 
+                // Insert into DB with "New" status
+                // Initial K-Score 10 (Low trust until proven)
                 await db.run(`
-                    INSERT INTO tokens (mint, name, symbol, timestamp, k_score, marketCap) 
-                    VALUES ($1, 'New Discovery', 'NEW', $2, 50, $3) 
-                    ON CONFLICT DO NOTHING
-                `, [mint, Date.now(), mcap]);
+                    INSERT INTO tokens (mint, name, symbol, timestamp, k_score, marketCap, hasCommunityUpdate) 
+                    VALUES ($1, 'New Discovery', 'NEW', $2, 10, 0, FALSE) 
+                    ON CONFLICT (mint) DO NOTHING
+                `, [mint, Date.now()]);
                 
+                // Trigger immediate indexing (Metadata, Pools, etc.)
+                // We don't await this to keep the listener loop fast and responsive
                 indexTokenOnChain(mint).catch(e => 
-                    logger.error(`Indexing failed for discovered token ${mint}: ${e.message}`)
+                    logger.warn(`Indexing failed for discovered token ${mint}: ${e.message}`)
                 );
             }
         }
 
     } catch (e) {
-        logger.error(`Listener Error processing ${signature} (${source}): ${e.message}`);
+        // Suppress "Too Many Requests" logs to avoid spamming the console
+        if (!e.message.includes('429')) {
+            logger.error(`Listener Error processing ${signature} (${source}): ${e.message}`);
+        }
+    }
+}
+
+/**
+ * Main entry point for the Token Listener service.
+ * Subscribes to Solana Logs for Raydium and Pump.fun programs.
+ */
+async function startNewTokenListener() {
+    const connection = getSolanaConnection();
+    const db = getDB();
+    
+    logger.info("📡 Listener: Monitoring Raydium & Pump.fun for new pools...");
+
+    // 1. Listen for Raydium V4 "Initialize2" (New Pool Creation)
+    try {
+        connection.onLogs(
+            RAYDIUM_PROGRAM_ID,
+            async (logs, ctx) => {
+                if (logs.err) return;
+                // Check logs for initialization instruction patterns
+                const isInit = logs.logs.some(l => l.includes('InitializeInstruction2') || l.includes('initialize2'));
+                if (isInit) {
+                    await processNewPoolTx(logs.signature, connection, db, 'Raydium');
+                }
+            },
+            "confirmed"
+        );
+        logger.info("✅ Listener: Subscribed to Raydium V4");
+    } catch (e) {
+        logger.error(`Raydium Listener Error: ${e.message}`);
+    }
+
+    // 2. Listen for Pump.fun "Create"
+    try {
+        connection.onLogs(
+            PUMP_PROGRAM_ID,
+            async (logs, ctx) => {
+                if (logs.err) return;
+                // Check logs for Pump.fun creation instruction patterns
+                const isCreate = logs.logs.some(l => l.includes('Instruction: Create') || l.includes('Program log: Instruction: Create'));
+                if (isCreate) {
+                    await processNewPoolTx(logs.signature, connection, db, 'Pump.fun');
+                }
+            },
+            "confirmed"
+        );
+        logger.info("✅ Listener: Subscribed to Pump.fun");
+    } catch (e) {
+        logger.error(`Pump.fun Listener Error: ${e.message}`);
     }
 }
 
