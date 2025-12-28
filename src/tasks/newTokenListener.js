@@ -9,17 +9,16 @@ const RAYDIUM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFS
 const PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5DkzonjNwu78hRvfCKubJ14M5uBEwF6P');
 const PENDING_KEY = 'pending_growers'; 
 
-// Known System Addresses to Ignore
 const IGNORED_MINTS = new Set([
-    'So11111111111111111111111111111111111111112', // Wrapped SOL
-    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
-    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
-    '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R', // Raydium Authority
-    '5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1', // Raydium Authority
-    'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', // Token Program
-    '11111111111111111111111111111111',             // System Program
-    'SysvarRent111111111111111111111111111111111',  // Rent
-    'Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1', // Pump Authority
+    'So11111111111111111111111111111111111111112', 
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+    '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R', 
+    '5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1',
+    'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', 
+    '11111111111111111111111111111111',             
+    'SysvarRent111111111111111111111111111111111',  
+    'Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1',
 ]);
 
 const processedSigs = new Set();
@@ -32,7 +31,6 @@ function isIgnored(mint) {
     if (!mint) return true;
     const m = mint.toString().trim();
     if (IGNORED_MINTS.has(m)) return true;
-    // Basic format check (base58 length ~32-44 chars)
     if (m.length < 30 || m.length > 45) return true;
     return false;
 }
@@ -43,6 +41,9 @@ async function processNewPoolTx(signature, connection, db, source) {
     if (processedSigs.size > 10000) processedSigs.clear();
 
     lastLogTime = Date.now();
+    
+    // DEBUG LOG: Signal Received
+    logger.info(`🔍 [${source}] Signal Detected: ${signature}`);
 
     try {
         await new Promise(r => setTimeout(r, 2000));
@@ -54,48 +55,49 @@ async function processNewPoolTx(signature, connection, db, source) {
                     maxSupportedTransactionVersion: 0,
                     commitment: 'confirmed'
                 });
-            } catch (err) {}
+            } catch (err) {
+                 logger.warn(`   ⚠️ RPC Error fetching ${signature}: ${err.message}`);
+            }
             if (tx && tx.meta && !tx.meta.err) break;
-            await new Promise(r => setTimeout(r, 2000));
+            await new Promise(r => setTimeout(r, 1500));
         }
 
-        if (!tx || !tx.meta || tx.meta.err) {
-            // logger.debug(`⚠️ Failed to fetch TX ${signature}`); // Too noisy for prod
+        if (!tx) {
+            logger.warn(`   ❌ Failed to fetch TX body for ${signature} (gave up).`);
+            return;
+        }
+        if (tx.meta && tx.meta.err) {
+            // logger.warn(`   ❌ TX Reverted/Failed on-chain: ${signature}`);
             return;
         }
 
         const candidateMints = new Set();
 
-        // STRATEGY A: Post Token Balances (The Gold Standard)
+        // STRATEGY A: Post Token Balances
         if (tx.meta.postTokenBalances && tx.meta.postTokenBalances.length > 0) {
             tx.meta.postTokenBalances.forEach(bal => {
                 if (bal.mint && !isIgnored(bal.mint)) candidateMints.add(bal.mint);
             });
         }
 
-        // STRATEGY B: Pump.fun "Create" Specific (Account Keys)
-        // In a "Create" instruction, the Mint is a Signer (index 1 or 2 usually).
-        // It is also Writable.
+        // STRATEGY B: Pump.fun "Create" Specific
         if (source === 'Pump.fun' && candidateMints.size === 0) {
              const keys = tx.transaction.message.accountKeys;
              const keyList = Array.isArray(keys) ? keys : (keys.staticAccountKeys || []);
 
              keyList.forEach((keyObj, index) => {
-                 if (index === 0) return; // Skip Payer
-                 
+                 if (index === 0) return; 
                  const pubkey = keyObj.pubkey ? keyObj.pubkey.toString() : keyObj.toString();
                  const isSigner = keyObj.signer || (typeof keyObj === 'object' && keyObj.signer);
                  const isWritable = keyObj.writable || (typeof keyObj === 'object' && keyObj.writable);
 
-                 // Pump Mint is always a Signer AND Writable during creation
                  if (isSigner && isWritable && !isIgnored(pubkey)) {
                       candidateMints.add(pubkey);
                  }
              });
         }
 
-        // STRATEGY C: Inner Instructions (Deep Scan)
-        // Sometimes Raydium/Pump initialization happens via CPI.
+        // STRATEGY C: Inner Instructions
         if (candidateMints.size === 0 && tx.meta.innerInstructions) {
              tx.meta.innerInstructions.forEach(inner => {
                  inner.instructions.forEach(inst => {
@@ -107,16 +109,15 @@ async function processNewPoolTx(signature, connection, db, source) {
              });
         }
 
-        const redis = getClient();
-        if (!redis) {
-             logger.error(`❌ FATAL: Redis disconnected in Listener loop.`);
-             return;
+        if (candidateMints.size === 0) {
+            logger.warn(`   ⚠️ ANALYZED TX ${signature} BUT FOUND 0 MINTS.`);
+            return;
         }
 
-        if (candidateMints.size === 0) {
-            // Uncomment for deep debugging if needed
-            // logger.warn(`⚠️ No mints found in ${source} TX: ${signature}`);
-            return;
+        const redis = getClient();
+        if (!redis) {
+             logger.error(`   ❌ Redis Disconnected! Cannot queue mints.`);
+             return;
         }
 
         for (const mint of candidateMints) {
@@ -127,15 +128,16 @@ async function processNewPoolTx(signature, connection, db, source) {
             try {
                 const added = await redis.sadd(PENDING_KEY, data);
                 if (added) {
-                    // CONSOLE BLOCK FOR VISIBILITY
                     console.log(`\n--------------------------------------------------`);
                     logger.info(`🌱 [PENDING LIST] Added: ${mint}`);
                     logger.info(`   📝 Source: ${source}`);
                     logger.info(`   🔗 Tx: ${signature}`);
                     console.log(`--------------------------------------------------\n`);
+                } else {
+                    // logger.info(`   (Duplicate skipped: ${mint})`);
                 }
             } catch (redisErr) {
-                logger.error(`❌ Redis Write Failed: ${redisErr.message}`);
+                logger.error(`   ❌ Redis Write Failed: ${redisErr.message}`);
             }
         }
     } catch (e) {
@@ -200,7 +202,7 @@ async function startNewTokenListener() {
     watchdogInterval = setInterval(async () => {
         const timeSinceLastLog = Date.now() - lastLogTime;
         if (timeSinceLastLog > 120000) { 
-            logger.warn(`⚠️ LISTENERS DEAD? Reconnecting...`);
+            logger.warn(`⚠️ LISTENERS DEAD? No logs for ${(timeSinceLastLog / 60000).toFixed(1)} mins. Reconnecting...`);
             try {
                 currentConnection = getSolanaConnection(true); 
                 await setupSubscriptions(currentConnection, db);
