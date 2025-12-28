@@ -20,7 +20,7 @@ let subscriptionIds = [];
 let lastLogTime = Date.now();
 let watchdogInterval = null;
 let currentConnection = null;
-let hasDumpedStructure = false; // ONE-TIME FLAG
+let debugLogCounter = 0; 
 
 function isIgnored(mint) {
     if (!mint) return true;
@@ -53,40 +53,16 @@ async function processNewPoolTx(signature, connection, db, source) {
             await new Promise(r => setTimeout(r, 1500));
         }
 
-        if (!tx) {
-            logger.warn(`   ⚠️ Fetch FAILED for ${signature} (Result is null)`);
-            return;
-        }
-
-        // --- STRUCTURE DUMP (ONCE) ---
-        if (!hasDumpedStructure && source === 'Pump.fun') {
-            hasDumpedStructure = true;
-            console.log("\n\n🚨🚨🚨 STRUCTURE DUMP START 🚨🚨🚨");
-            console.log(`TX: ${signature}`);
-            // Use safe stringify to avoid circular ref errors if any
-            try {
-                const safeTx = JSON.stringify(tx, (key, value) => 
-                    typeof value === 'bigint' ? value.toString() : value
-                , 2);
-                console.log(safeTx);
-            } catch(e) {
-                console.log("Could not stringify TX:", e.message);
-                console.log(tx);
-            }
-            console.log("🚨🚨🚨 STRUCTURE DUMP END 🚨🚨🚨\n\n");
-        }
-        // -----------------------------
+        if (!tx) return;
 
         const candidateMints = new Set();
 
-        // Strategy A: Post Token Balances
         if (tx.meta.postTokenBalances && tx.meta.postTokenBalances.length > 0) {
             tx.meta.postTokenBalances.forEach(bal => {
                 if (bal.mint && !isIgnored(bal.mint)) candidateMints.add(bal.mint);
             });
         }
 
-        // Strategy B: Pump.fun Specific (Robust Account Keys)
         if (source === 'Pump.fun' && candidateMints.size === 0) {
              const message = tx.transaction.message;
              const keyList = message.accountKeys.staticAccountKeys || message.accountKeys;
@@ -94,7 +70,6 @@ async function processNewPoolTx(signature, connection, db, source) {
              if (Array.isArray(keyList)) {
                  keyList.forEach((keyObj, index) => {
                      if (index === 0) return; 
-                     
                      const pubkey = keyObj.pubkey ? keyObj.pubkey.toString() : keyObj.toString();
                      
                      let isSigner = false;
@@ -105,15 +80,11 @@ async function processNewPoolTx(signature, connection, db, source) {
                          isWritable = keyObj.writable;
                      } 
 
-                     // Pump Mint is typically a Signer AND Writable during creation
-                     if (isSigner && isWritable && !isIgnored(pubkey)) {
-                          candidateMints.add(pubkey);
-                     }
+                     if (isSigner && isWritable && !isIgnored(pubkey)) candidateMints.add(pubkey);
                  });
              }
         }
 
-        // Strategy C: Inner Instructions
         if (candidateMints.size === 0 && tx.meta.innerInstructions) {
              tx.meta.innerInstructions.forEach(inner => {
                  inner.instructions.forEach(inst => {
@@ -135,7 +106,6 @@ async function processNewPoolTx(signature, connection, db, source) {
             if (isIgnored(mint)) continue;
             
             const data = JSON.stringify({ mint, addedAt: Date.now(), source });
-            
             try {
                 const added = await redis.sadd(PENDING_KEY, data);
                 if (added) {
@@ -150,7 +120,7 @@ async function processNewPoolTx(signature, connection, db, source) {
             }
         }
     } catch (e) {
-        // Suppress benign errors
+        // Suppress errors
     }
 }
 
@@ -162,13 +132,19 @@ async function setupSubscriptions(connection, db) {
             RAYDIUM_PROGRAM_ID,
             async (logs, ctx) => {
                 lastLogTime = Date.now();
-                if (logs.err) return;
-                const isInit = logs.logs.some(l => 
+                // SAFE PARSING: Handle nested structure
+                const safeLogs = logs.logs ? logs.logs : (logs.value && logs.value.logs ? logs.value.logs : []);
+                const safeSig = logs.signature ? logs.signature : (logs.value && logs.value.signature ? logs.value.signature : null);
+                const safeErr = logs.err ? logs.err : (logs.value && logs.value.err ? logs.value.err : null);
+
+                if (safeErr || !safeSig) return;
+
+                const isInit = safeLogs.some(l => 
                     l.includes('InitializeInstruction2') || 
                     l.includes('initialize2') ||
                     l.includes('InitializeMint')
                 );
-                if (isInit) await processNewPoolTx(logs.signature, connection, db, 'Raydium');
+                if (isInit) await processNewPoolTx(safeSig, connection, db, 'Raydium');
             },
             "confirmed" 
         );
@@ -181,16 +157,30 @@ async function setupSubscriptions(connection, db) {
             PUMP_PROGRAM_ID,
             async (logs, ctx) => {
                 lastLogTime = Date.now();
-                if (logs.err) return;
 
-                const isCreate = logs.logs.some(l => 
+                // --- PAYLOAD INSPECTION START ---
+                debugLogCounter++;
+                if (debugLogCounter <= 3) {
+                    console.log(`🕵️ [PAYLOAD INSPECTION ${debugLogCounter}]: Keys found ->`, Object.keys(logs));
+                    if (logs.value) console.log(`   -> .value Keys:`, Object.keys(logs.value));
+                }
+                // --------------------------------
+
+                // SAFE PARSING: Handle nested structure
+                const safeLogs = logs.logs ? logs.logs : (logs.value && logs.value.logs ? logs.value.logs : []);
+                const safeSig = logs.signature ? logs.signature : (logs.value && logs.value.signature ? logs.value.signature : null);
+                const safeErr = logs.err ? logs.err : (logs.value && logs.value.err ? logs.value.err : null);
+
+                if (safeErr || !safeSig) return;
+
+                const isCreate = safeLogs.some(l => 
                     l.includes('Instruction: Create') || 
                     l.includes('Create') || 
                     l.includes('InitializeMint') || 
                     l.includes('MintTo')
                 );
 
-                if (isCreate) await processNewPoolTx(logs.signature, connection, db, 'Pump.fun');
+                if (isCreate) await processNewPoolTx(safeSig, connection, db, 'Pump.fun');
             },
             "confirmed"
         );
@@ -202,7 +192,6 @@ async function setupSubscriptions(connection, db) {
 async function startNewTokenListener() {
     const redis = getClient();
     if (!redis) {
-        logger.warn("Redis not ready, retrying...");
         setTimeout(startNewTokenListener, 2000);
         return;
     } 
