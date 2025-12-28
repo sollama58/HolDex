@@ -238,7 +238,8 @@
                         <tr>
                             <th class="sort-header w-auto md:w-[30%]" data-sort="newest" onclick="setSort('newest')">Asset <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
                             <th class="sort-header text-[#ea580c] border-b-[#ea580c] border-b-2 hidden md:table-cell cursor-pointer" onclick="toggleKScoreModal()">Score <i data-lucide="help-circle" width="12" class="inline ml-1"></i></th>
-                            <th class="sort-header hidden md:table-cell" data-sort="price" onclick="setSort('price')">Price</th>
+                            <!-- PRICE COLUMN REMOVED -->
+                            <th class="sort-header hidden md:table-cell" data-sort="1h" onclick="setSort('1h')">1h% <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
                             <th class="sort-header hidden md:table-cell" data-sort="24h" onclick="setSort('24h')">24h% <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
                             <th class="sort-header" data-sort="volume" onclick="setSort('volume')">Vol <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th> 
                             <th class="sort-header" data-sort="mcap" onclick="setSort('mcap')">MCap <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
@@ -719,7 +720,7 @@
     let currentDirection = 'desc';
     let searchQuery = '';
     let currentPage = 1;
-    let currentLimit = 20; // Default limit
+    let currentLimit = 20; // Correctly initialized
     let isVerifiedFilter = false;
     let isZeroVolHidden = true; 
     let currentMint = null;
@@ -847,7 +848,7 @@
             if(pDisplay) pDisplay.innerText = `Page ${currentPage}`; 
             if(prev) prev.disabled = currentPage <= 1; 
             
-            // Explicitly use currentLimit
+            // Explicitly use currentLimit variable set by dropdown
             let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&direction=${currentDirection}&search=${encodeURIComponent(searchQuery)}&limit=${currentLimit}&page=${currentPage}`; 
             if (isVerifiedFilter) endpoint += '&filter=verified'; 
             
@@ -856,7 +857,7 @@
             
             if (data.success) { 
                 renderTable(data.tokens); 
-                // Check if returned tokens count matches request limit for pagination state
+                // Ensure pagination respects dynamic limit
                 if(next) next.disabled = data.tokens.length < currentLimit; 
             }
         } catch (e) { console.error("API Error", e); } 
@@ -876,14 +877,17 @@
         
         tbody.innerHTML = displayTokens.map(t => { 
             const score = t.kScore || 0; 
-            const isVerified = t.hasCommunityUpdate; // Correct property check
+            const isVerified = t.hasCommunityUpdate; 
             const kScoreDisplay = isVerified ? (score > 0 ? `<span class="text-[#ea580c]">${score}</span>` : `<span class="animate-pulse">⏳</span>`) : '<span class="text-gray-600">🔒</span>'; 
             const formatPct = (v) => (v !== undefined && v !== null) ? `<span class="pill ${v>0?'pill-green':'pill-red'}">${v.toFixed(1)}%</span>` : '-';
             const formatVal = (v) => v ? '$'+ new Intl.NumberFormat('en',{notation:'compact'}).format(v) : '-';
+            // Price removed, keeping logic just in case needed elsewhere
             const formatPrice = (v) => { if(!v) return '$0.00'; return v < 0.01 ? '$'+v.toExponential(2) : '$'+v.toFixed(4); };
             const img = t.image || `https://placehold.co/40x40/2a1005/7c2d12?text=${t.ticker?.[0]||'?'}`;
 
-            // Badge added next to ticker if verified
+            // Diamond Logic: Verified + K-Score > 50
+            const showDiamond = isVerified && score > 50;
+
             return `
             <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group border-b border-[#7c2d12]/30">
                 <td class="bg-[#2a1005]">
@@ -893,6 +897,7 @@
                             <div class="flex items-center gap-1">
                                 <span class="font-bold text-white text-xs truncate font-sans">${t.ticker}</span>
                                 ${isVerified ? '<i data-lucide="shield-check" width="12" class="text-green-500 fill-green-500/20"></i>' : ''}
+                                ${showDiamond ? '<span title="High Conviction">💎</span>' : ''}
                             </div>
                             <span class="text-[10px] text-[#9a3412] truncate max-w-[80px]">${t.name}</span>
                         </div>
@@ -900,7 +905,8 @@
                 </td>
                 
                 <td class="text-right font-mono font-bold hidden md:table-cell">${kScoreDisplay}</td>
-                <td class="text-right font-mono text-[#ffedd5] text-xs hidden md:table-cell">${formatPrice(t.priceUsd)}</td>
+                <!-- Price Removed, replaced with 1h% -->
+                <td class="text-right hidden md:table-cell">${formatPct(t.change1h)}</td>
                 <td class="text-right hidden md:table-cell">${formatPct(t.change24h)}</td>
                 
                 <td class="text-right font-mono text-[#22c55e] text-xs">${formatVal(t.volume24h)}</td>
@@ -957,7 +963,6 @@
                 document.getElementById('stat-chg24h').className = c24h>=0?'text-[#4ade80] font-mono text-xs':'text-[#fca5a5] font-mono text-xs';
                 
                 const verEl = document.getElementById('detail-verified');
-                // Ensure logic matches property name
                 if(t.hasCommunityUpdate) verEl.classList.remove('hidden'); else verEl.classList.add('hidden');
                 
                 const rawSupply = parseFloat(t.supply || '0');
