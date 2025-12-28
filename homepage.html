@@ -202,7 +202,7 @@
                     <i data-lucide="bar-chart-2" width="14"></i> >$0 Vol
                 </button>
                 
-                <!-- NEW LIMIT SELECTOR -->
+                <!-- LIMIT SELECTOR -->
                 <select id="limit-select" onchange="changeLimit(this.value)" class="limit-select" title="Tokens per page">
                     <option value="10">10</option>
                     <option value="20" selected>20</option>
@@ -237,7 +237,7 @@
                     <thead>
                         <tr>
                             <th class="sort-header w-auto md:w-[30%]" data-sort="newest" onclick="setSort('newest')">Asset <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
-                            <th class="sort-header text-[#ea580c] border-b-[#ea580c] border-b-2 hidden md:table-cell" data-sort="kscore" onclick="setSort('kscore')">Score <i data-lucide="arrow-down" width="12" class="sort-icon inline ml-1"></i></th>
+                            <th class="sort-header text-[#ea580c] border-b-[#ea580c] border-b-2 hidden md:table-cell cursor-pointer" onclick="toggleKScoreModal()">Score <i data-lucide="help-circle" width="12" class="inline ml-1"></i></th>
                             <th class="sort-header hidden md:table-cell" data-sort="price" onclick="setSort('price')">Price</th>
                             <th class="sort-header hidden md:table-cell" data-sort="24h" onclick="setSort('24h')">24h% <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
                             <th class="sort-header" data-sort="volume" onclick="setSort('volume')">Vol <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th> 
@@ -440,14 +440,14 @@
                             <div class="flex items-center gap-2 mt-1">
                                 <span id="detail-name" class="text-[#fb923c] text-xs px-2 py-0.5 rounded border border-[#7c2d12] truncate max-w-[120px]">Name</span>
                                 <span id="detail-verified" class="hidden"><i data-lucide="shield-check" width="14" class="text-[#22c55e]"></i></span>
-                                <span id="detail-mint" class="hidden"></span> <!-- Hidden holder for copy function -->
+                                <span id="detail-mint" class="hidden"></span>
                                 <i data-lucide="copy" width="12" class="text-[#9a3412] cursor-pointer" onclick="copyMint()"></i>
                             </div>
                         </div>
                     </div>
-                    <div class="text-right">
+                    <div class="text-right" onclick="toggleKScoreModal()" class="cursor-pointer">
                          <div id="stat-kscore" class="text-2xl font-bold text-[#fb923c] font-mono">--</div>
-                         <div class="text-[10px] text-[#9a3412] uppercase font-bold">Score</div>
+                         <div class="text-[10px] text-[#9a3412] uppercase font-bold flex justify-end items-center gap-1">Score <i data-lucide="help-circle" width="10"></i></div>
                     </div>
                 </div>
                 
@@ -622,6 +622,21 @@
         <button class="absolute top-4 right-4 text-[#9a3412]" onclick="closeHolderHistory()"><i data-lucide="x" width="24"></i></button>
         <h3 class="text-xl font-bold text-white mb-2">Holder Growth</h3>
         <div id="holder-chart-container" class="w-full h-64 bg-[#1a0a05] rounded-xl border border-[#7c2d12] overflow-hidden"></div>
+    </div>
+</div>
+
+<div id="kscore-modal" class="modal-overlay hidden">
+    <div class="modal-content bg-[#2a1005] border-2 border-[#7c2d12] p-6 shadow-2xl relative w-full max-w-md">
+        <button class="absolute top-4 right-4 text-[#9a3412]" onclick="toggleKScoreModal()"><i data-lucide="x" width="24"></i></button>
+        <h3 class="text-xl font-bold text-white mb-4">K-Score Explained</h3>
+        <p class="text-sm text-[#ffedd5] mb-4">Our proprietary metric for analyzing token health:</p>
+        <ul class="list-disc list-inside text-sm text-[#9a3412] space-y-2 mb-4">
+            <li><span class="text-[#ea580c] font-bold">Holder Distribution:</span> Are coins spread widely or concentrated?</li>
+            <li><span class="text-[#ea580c] font-bold">Velocity:</span> Is the token being traded actively or stagnant?</li>
+            <li><span class="text-[#ea580c] font-bold">Longevity:</span> How long have holders held their positions?</li>
+        </ul>
+        <p class="text-xs text-[#9a3412] italic">Higher scores indicate stronger community conviction.</p>
+        <button onclick="toggleKScoreModal()" class="w-full bg-[#451a03] text-[#fb923c] py-3 rounded-lg font-bold text-sm mt-4">Close</button>
     </div>
 </div>
 
@@ -832,7 +847,7 @@
             if(pDisplay) pDisplay.innerText = `Page ${currentPage}`; 
             if(prev) prev.disabled = currentPage <= 1; 
             
-            // Limit is now dynamic
+            // Explicitly use currentLimit
             let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&direction=${currentDirection}&search=${encodeURIComponent(searchQuery)}&limit=${currentLimit}&page=${currentPage}`; 
             if (isVerifiedFilter) endpoint += '&filter=verified'; 
             
@@ -841,6 +856,7 @@
             
             if (data.success) { 
                 renderTable(data.tokens); 
+                // Check if returned tokens count matches request limit for pagination state
                 if(next) next.disabled = data.tokens.length < currentLimit; 
             }
         } catch (e) { console.error("API Error", e); } 
@@ -860,13 +876,14 @@
         
         tbody.innerHTML = displayTokens.map(t => { 
             const score = t.kScore || 0; 
-            const isVerified = t.hasCommunityUpdate; 
+            const isVerified = t.hasCommunityUpdate; // Correct property check
             const kScoreDisplay = isVerified ? (score > 0 ? `<span class="text-[#ea580c]">${score}</span>` : `<span class="animate-pulse">⏳</span>`) : '<span class="text-gray-600">🔒</span>'; 
             const formatPct = (v) => (v !== undefined && v !== null) ? `<span class="pill ${v>0?'pill-green':'pill-red'}">${v.toFixed(1)}%</span>` : '-';
             const formatVal = (v) => v ? '$'+ new Intl.NumberFormat('en',{notation:'compact'}).format(v) : '-';
             const formatPrice = (v) => { if(!v) return '$0.00'; return v < 0.01 ? '$'+v.toExponential(2) : '$'+v.toFixed(4); };
             const img = t.image || `https://placehold.co/40x40/2a1005/7c2d12?text=${t.ticker?.[0]||'?'}`;
 
+            // Badge added next to ticker if verified
             return `
             <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group border-b border-[#7c2d12]/30">
                 <td class="bg-[#2a1005]">
@@ -875,7 +892,7 @@
                         <div class="flex flex-col min-w-0">
                             <div class="flex items-center gap-1">
                                 <span class="font-bold text-white text-xs truncate font-sans">${t.ticker}</span>
-                                ${isVerified ? '<i data-lucide="shield-check" width="10" class="text-green-500"></i>' : ''}
+                                ${isVerified ? '<i data-lucide="shield-check" width="12" class="text-green-500 fill-green-500/20"></i>' : ''}
                             </div>
                             <span class="text-[10px] text-[#9a3412] truncate max-w-[80px]">${t.name}</span>
                         </div>
@@ -940,6 +957,7 @@
                 document.getElementById('stat-chg24h').className = c24h>=0?'text-[#4ade80] font-mono text-xs':'text-[#fca5a5] font-mono text-xs';
                 
                 const verEl = document.getElementById('detail-verified');
+                // Ensure logic matches property name
                 if(t.hasCommunityUpdate) verEl.classList.remove('hidden'); else verEl.classList.add('hidden');
                 
                 const rawSupply = parseFloat(t.supply || '0');
@@ -1079,6 +1097,69 @@
                 if (unique.length) chartInstance.timeScale().fitContent();
             }
         } catch(e) { console.error(e); }
+    }
+
+    // --- HOLDER CHART FIX ---
+    function openHolderHistory() {
+        document.getElementById('holder-modal').classList.remove('hidden');
+        setTimeout(() => {
+            document.getElementById('holder-modal').classList.add('open');
+            initHolderChart();
+        }, 10);
+    }
+    
+    function closeHolderHistory() {
+        document.getElementById('holder-modal').classList.remove('open');
+        setTimeout(() => document.getElementById('holder-modal').classList.add('hidden'), 300);
+    }
+    
+    function initHolderChart() {
+        if (holderChart) {
+            // Already created, verify size?
+            return;
+        }
+        
+        const container = document.getElementById('holder-chart-container');
+        if(!container) return;
+        
+        // IMPORTANT: Ensure container has size.
+        const rect = container.getBoundingClientRect();
+        if(rect.width === 0) {
+            setTimeout(initHolderChart, 50);
+            return;
+        }
+        
+        container.innerHTML = ''; // Reset
+        
+        holderChart = LightweightCharts.createChart(container, {
+            width: rect.width,
+            height: rect.height,
+            layout: { background: { type: 'solid', color: '#1a0a05' }, textColor: '#9a3412' },
+            grid: { vertLines: { color: '#2a1005' }, horzLines: { color: '#2a1005' } },
+            rightPriceScale: { borderVisible: false },
+            timeScale: { borderVisible: false, timeVisible: true }
+        });
+        
+        holderAreaSeries = holderChart.addAreaSeries({ 
+            lineColor: '#3b82f6', 
+            topColor: 'rgba(59, 130, 246, 0.4)', 
+            bottomColor: 'rgba(59, 130, 246, 0.0)',
+            lineWidth: 2
+        });
+        
+        if (currentHolderHistory.length > 0) {
+            const data = currentHolderHistory.map(h => ({
+                time: Math.floor(new Date(h.timestamp).getTime() / 1000), // Convert to UNIX
+                value: h.count
+            })).sort((a,b) => a.time - b.time);
+            
+            // Dedup
+            const unique = []; const times = new Set();
+            data.forEach(c => { if(!times.has(c.time)){ times.add(c.time); unique.push(c); }});
+            
+            holderAreaSeries.setData(unique);
+            holderChart.timeScale().fitContent();
+        }
     }
 
     // --- UPDATES & WALLET ---
@@ -1323,7 +1404,7 @@
     window.openWalletModal = () => toggleModal('wallet-modal'); window.closeWalletModal = () => toggleModal('wallet-modal');
     window.toggleApiModal = () => toggleModal('api-docs-modal'); window.toggleLpModal = () => toggleModal('lp-modal');
     window.toggleHowItWorksModal = () => toggleModal('how-it-works-modal'); window.closePreview = () => toggleModal('preview-modal');
-    window.closeHolderHistory = () => toggleModal('holder-modal'); window.toggleInfoModal = () => toggleModal('info-modal');
+    window.toggleKScoreModal = () => toggleModal('kscore-modal'); window.toggleInfoModal = () => toggleModal('info-modal');
     
     // Connect Dummy
     window.connectProvider = async (p) => { 
