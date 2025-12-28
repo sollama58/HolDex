@@ -1228,7 +1228,7 @@ fetch('<span class="text-white">.../api/token/:mint/candles?resolution=60&from=1
     // NEW: Share Token Function
     function shareToken() {
         if (!currentMint) return;
-        const url = `https://alonisthe.dev/token/${currentMint}`;
+        const url = `https://alonisthe.dev/holdex#token/${currentMint}`;
         navigator.clipboard.writeText(url).then(() => {
             const btn = document.getElementById('share-btn');
             const originalHTML = btn.innerHTML;
