@@ -187,6 +187,9 @@
                 <button id="manual-refresh" onclick="handleManualRefresh()" class="refresh-btn" title="Refresh Data">
                     <i data-lucide="refresh-cw" width="18"></i>
                 </button>
+                <button onclick="toggleAppsModal()" class="refresh-btn ml-0" title="Ecosystem Apps">
+                    <i data-lucide="grid" width="18"></i>
+                </button>
             </div>
             <!-- Filter Row -->
             <div class="flex gap-2 overflow-x-auto hidden-scrollbar pb-1 md:pb-0 items-center">
@@ -700,6 +703,29 @@
     </div>
 </div>
 
+<div id="apps-modal" class="modal-overlay hidden">
+    <div class="modal-content bg-[#2a1005] border-2 border-[#7c2d12] p-6 shadow-2xl relative w-full max-w-sm">
+        <button class="absolute top-4 right-4 text-[#9a3412]" onclick="toggleAppsModal()"><i data-lucide="x" width="24"></i></button>
+        <h3 class="text-xl font-bold text-white mb-6 flex items-center gap-2">
+            <i data-lucide="grid" width="24" class="text-[#ea580c]"></i> Ecosystem
+        </h3>
+        <div class="space-y-3">
+            <a href="https://alonisthe.dev/ignition" target="_blank" class="block bg-[#451a03] border border-[#7c2d12] p-4 rounded-xl hover:border-[#ea580c] transition group">
+                <div class="font-bold text-white group-hover:text-[#ea580c]">Ignition</div>
+                <div class="text-xs text-[#9a3412]">Launchpad & Tools</div>
+            </a>
+            <a href="https://alonisthe.dev/asdforecast" target="_blank" class="block bg-[#451a03] border border-[#7c2d12] p-4 rounded-xl hover:border-[#ea580c] transition group">
+                <div class="font-bold text-white group-hover:text-[#ea580c]">ASDForecast</div>
+                <div class="text-xs text-[#9a3412]">Predictive Analytics</div>
+            </a>
+            <a href="https://alonisthe.dev/burns" target="_blank" class="block bg-[#451a03] border border-[#7c2d12] p-4 rounded-xl hover:border-[#ea580c] transition group">
+                <div class="font-bold text-white group-hover:text-[#ea580c]">Flywheel</div>
+                <div class="text-xs text-[#9a3412]">Burn Mechanisms</div>
+            </a>
+        </div>
+    </div>
+</div>
+
 <script>
     const API_URL = 'https://asdev-backend.onrender.com';
     const FALLBACK_BANNER = "https://placehold.co/600x200/2a1005/7c2d12?text=HolDex";
@@ -983,7 +1009,7 @@
                     if(t.socials.telegram) links += `<a href="${t.socials.telegram}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="send" width="16"></i></a>`;
                     if(t.socials.website) links += `<a href="${t.socials.website}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="globe" width="16"></i></a>`;
                 }
-                actions.innerHTML = links;
+                actions.innerHTML = links + `<button onclick="shareToken()" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c] flex items-center gap-2 text-xs font-bold px-3"><i data-lucide="share-2" width="14"></i> Share</button>`;
                 
                 if(t.holderHistory) currentHolderHistory = t.holderHistory;
 
@@ -1404,6 +1430,19 @@
     window.toggleApiModal = () => toggleModal('api-docs-modal'); window.toggleLpModal = () => toggleModal('lp-modal');
     window.toggleHowItWorksModal = () => toggleModal('how-it-works-modal'); window.closePreview = () => toggleModal('preview-modal');
     window.toggleKScoreModal = () => toggleModal('kscore-modal'); window.toggleInfoModal = () => toggleModal('info-modal');
+    
+    // --- NEW FUNCTIONS: Apps & Share ---
+    window.toggleAppsModal = () => toggleModal('apps-modal');
+    window.shareToken = () => {
+        const url = window.location.href;
+        navigator.clipboard.writeText(url).then(() => {
+            // Simple visual feedback could be added here, but alert is standard
+            const btn = document.querySelector('button[onclick="shareToken()"]');
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = `<i data-lucide="check" width="14"></i> Copied!`;
+            setTimeout(() => { btn.innerHTML = originalHTML; lucide.createIcons(); }, 2000);
+        }).catch(err => alert('Failed to copy link'));
+    };
     
     // Connect Dummy
     window.connectProvider = async (p) => { 
