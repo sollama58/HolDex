@@ -159,7 +159,7 @@
 <!-- TOP NAVIGATION -->
 <nav class="sticky top-0 z-40 px-3 py-3 md:px-6 md:py-4">
     <div class="max-w-[1800px] mx-auto flex flex-col md:flex-row gap-3">
-        <!-- Header Row: Logo & Connect -->
+        <!-- Header Row: Logo -->
         <div class="flex justify-between items-center">
             <div class="flex items-center gap-3 cursor-pointer group" onclick="navigateTo('')">
                 <div class="w-10 h-10 md:w-12 md:h-12 rounded-xl flex items-center justify-center bg-[#451a03] text-orange-500 border-2 border-[#7c2d12] shadow-lg group-hover:border-orange-500 transition relative">
@@ -171,13 +171,8 @@
                     <h1 class="text-2xl md:text-3xl brand-text tracking-tight font-sans">HolDex</h1>
                 </div>
             </div>
-
-            <!-- Mobile Wallet Connect -->
-            <div class="md:hidden">
-                <button id="mobile-connect-btn" onclick="openWalletModal()" class="bg-[#451a03] border border-[#7c2d12] text-[#fb923c] px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2">
-                    <i data-lucide="wallet" width="14"></i> <span id="mobile-wallet-text">Connect</span>
-                </button>
-            </div>
+            
+            <!-- Mobile Wallet Button REMOVED -->
         </div>
         
         <!-- Controls & Search -->
@@ -218,12 +213,7 @@
             <button onclick="navigateTo('')" class="bg-[#2a1005] border-2 border-[#7c2d12] text-[#9a3412] hover:text-[#ea580c] hover:border-[#ea580c] py-2 px-4 rounded-lg font-bold flex items-center justify-center gap-2 w-full md:w-auto transition"><i data-lucide="arrow-left" width="16"></i> Back to List</button>
         </div>
         
-        <!-- Desktop Connect -->
-        <div class="hidden md:block">
-            <button id="desktop-connect-btn" onclick="openWalletModal()" class="bg-[#451a03] border border-[#7c2d12] text-[#fb923c] px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-[#582206] transition">
-                <i data-lucide="wallet" width="14"></i> <span id="desktop-wallet-text">Connect Wallet</span>
-            </button>
-        </div>
+        <!-- Desktop Wallet Button REMOVED -->
     </div>
 </nav>
 
