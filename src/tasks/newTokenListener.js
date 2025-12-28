@@ -4,16 +4,15 @@ const { getClient } = require('../services/redis');
 const logger = require('../services/logger');
 const { PublicKey } = require('@solana/web3.js');
 
-// --- CONSTANTS ---
 const RAYDIUM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
 const PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5DkzonjNwu78hRvfCKubJ14M5uBEwF6P');
 const PENDING_KEY = 'pending_growers'; 
 
 const IGNORED_MINTS = new Set([
-    'So11111111111111111111111111111111111111112', // Wrapped SOL
-    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
-    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
-    'Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1', // Pump Authority
+    'So11111111111111111111111111111111111111112', 
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', 
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+    'Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1',
 ]);
 
 const processedSigs = new Set();
@@ -21,7 +20,7 @@ let subscriptionIds = [];
 let lastLogTime = Date.now();
 let watchdogInterval = null;
 let currentConnection = null;
-let debugLogCounter = 0; 
+let hasDumpedStructure = false; // ONE-TIME FLAG
 
 function isIgnored(mint) {
     if (!mint) return true;
@@ -55,9 +54,28 @@ async function processNewPoolTx(signature, connection, db, source) {
         }
 
         if (!tx) {
-            logger.warn(`   ⚠️ Could not fetch body for ${signature}`);
+            logger.warn(`   ⚠️ Fetch FAILED for ${signature} (Result is null)`);
             return;
         }
+
+        // --- STRUCTURE DUMP (ONCE) ---
+        if (!hasDumpedStructure && source === 'Pump.fun') {
+            hasDumpedStructure = true;
+            console.log("\n\n🚨🚨🚨 STRUCTURE DUMP START 🚨🚨🚨");
+            console.log(`TX: ${signature}`);
+            // Use safe stringify to avoid circular ref errors if any
+            try {
+                const safeTx = JSON.stringify(tx, (key, value) => 
+                    typeof value === 'bigint' ? value.toString() : value
+                , 2);
+                console.log(safeTx);
+            } catch(e) {
+                console.log("Could not stringify TX:", e.message);
+                console.log(tx);
+            }
+            console.log("🚨🚨🚨 STRUCTURE DUMP END 🚨🚨🚨\n\n");
+        }
+        // -----------------------------
 
         const candidateMints = new Set();
 
@@ -71,28 +89,21 @@ async function processNewPoolTx(signature, connection, db, source) {
         // Strategy B: Pump.fun Specific (Robust Account Keys)
         if (source === 'Pump.fun' && candidateMints.size === 0) {
              const message = tx.transaction.message;
-             // V0 transactions store keys in staticAccountKeys, Legacy in accountKeys
              const keyList = message.accountKeys.staticAccountKeys || message.accountKeys;
 
              if (Array.isArray(keyList)) {
                  keyList.forEach((keyObj, index) => {
                      if (index === 0) return; 
                      
-                     // Handle both object (parsed) and raw PublicKey
                      const pubkey = keyObj.pubkey ? keyObj.pubkey.toString() : keyObj.toString();
                      
-                     // Signer check logic depends on format
                      let isSigner = false;
                      let isWritable = false;
 
                      if (typeof keyObj === 'object' && keyObj.signer) {
                          isSigner = keyObj.signer;
                          isWritable = keyObj.writable;
-                     } else {
-                         // For raw keys in V0, we need to check header (too complex for quick patch)
-                         // BUT getParsedTransaction usually returns enriched objects.
-                         // Fallback: If it's the 1st or 2nd account and we are in Pump.fun context, likely the mint.
-                     }
+                     } 
 
                      // Pump Mint is typically a Signer AND Writable during creation
                      if (isSigner && isWritable && !isIgnored(pubkey)) {
@@ -171,11 +182,6 @@ async function setupSubscriptions(connection, db) {
             async (logs, ctx) => {
                 lastLogTime = Date.now();
                 if (logs.err) return;
-
-                debugLogCounter++;
-                if (debugLogCounter % 50 === 0) {
-                    // console.log(`🔍 [PUMP SAMPLE]:`, JSON.stringify(logs.logs[0] || "Empty"));
-                }
 
                 const isCreate = logs.logs.some(l => 
                     l.includes('Instruction: Create') || 
