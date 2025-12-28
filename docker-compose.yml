@@ -21,15 +21,16 @@ services:
       - PORT=3000
       - DATABASE_URL=postgres://user:password@db:5432/holdex
       - REDIS_URL=redis://redis:6379
-      # ... Ensure your other ENV vars are here or use env_file
+      # Pass through RPC config if using .env file or environment injection
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL}
+      - HELIUS_API_KEY=${HELIUS_API_KEY}
     depends_on:
       - db
       - redis
     networks:
       - holdex-network
-    # In production, you scale this: docker-compose up --scale api=3
 
-  # WORKER (Background Jobs)
+  # WORKER (Background Jobs - Metadata, etc)
   worker:
     build: .
     command: node src/worker.js
@@ -37,6 +38,24 @@ services:
     environment:
       - DATABASE_URL=postgres://user:password@db:5432/holdex
       - REDIS_URL=redis://redis:6379
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL}
+      - HELIUS_API_KEY=${HELIUS_API_KEY}
+    depends_on:
+      - db
+      - redis
+    networks:
+      - holdex-network
+
+  # LISTENER (New Token Discovery - Pump.fun/Raydium)
+  listener:
+    build: .
+    command: node src/listener_worker.js
+    restart: always
+    environment:
+      - DATABASE_URL=postgres://user:password@db:5432/holdex
+      - REDIS_URL=redis://redis:6379
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL}
+      - HELIUS_API_KEY=${HELIUS_API_KEY}
     depends_on:
       - db
       - redis

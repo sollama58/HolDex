@@ -43,18 +43,24 @@ async function processNewPoolTx(signature, connection, db, source) {
     if (processedSigs.has(signature)) return;
     processedSigs.add(signature);
     
+    // Keep set size manageable
     if (processedSigs.size > 10000) processedSigs.clear();
 
     try {
-        // Wait for RPC indexing
+        // Wait briefly for RPC indexing to catch up
         await new Promise(r => setTimeout(r, 2000));
 
         let tx = null;
         for (let i = 0; i < 10; i++) {
-            tx = await connection.getParsedTransaction(signature, {
-                maxSupportedTransactionVersion: 0,
-                commitment: 'confirmed'
-            });
+            try {
+                tx = await connection.getParsedTransaction(signature, {
+                    maxSupportedTransactionVersion: 0,
+                    commitment: 'confirmed'
+                });
+            } catch (err) {
+                // Ignore temporary RPC errors during fetch
+            }
+            
             if (tx && tx.meta && !tx.meta.err) break;
             await new Promise(r => setTimeout(r, 2000));
         }
@@ -73,22 +79,31 @@ async function processNewPoolTx(signature, connection, db, source) {
             });
         }
 
-        // --- STRATEGY B: Account Key Signers (Fallback) ---
-        // ONLY use this for Pump.fun. 
-        // WARNING: Do NOT use for Raydium. In Raydium Init, the mint is NOT a signer.
-        // The Signer is the User (Fee Payer). If we enable this for Raydium, we will index Users as Tokens.
+        // --- STRATEGY B: Account Key Signers (Fallback for Pump.fun) ---
+        // Pump.fun 'Create' instruction typically requires the Mint to be a Signer.
         if (source === 'Pump.fun' && candidateMints.size === 0 && tx.transaction.message.accountKeys) {
              const keys = tx.transaction.message.accountKeys;
-             const keyList = Array.isArray(keys) ? keys : keys.staticAccountKeys;
+             
+             // Check if 'keys' is an array or an object with staticAccountKeys (legacy vs v0)
+             // getParsedTransaction usually returns a standard structure for accountKeys in parsed messages.
+             const keyList = Array.isArray(keys) ? keys : (keys.staticAccountKeys || []);
 
              keyList.forEach((keyObj, index) => {
                  // Skip Fee Payer (Index 0 is always fee payer)
                  if (index === 0) return;
 
+                 // Safe Pubkey Extraction
                  const pubkey = keyObj.pubkey ? keyObj.pubkey.toString() : keyObj.toString();
-                 const isSigner = keyObj.signer || connection._isSigner(keyObj, index);
                  
-                 // Pump.fun 'Create' requires Mint to be a Signer
+                 // Robust Signer Check
+                 // Note: connection._isSigner is private/internal and deprecated.
+                 // We rely on the parsed property 'signer'.
+                 let isSigner = false;
+                 
+                 if (typeof keyObj === 'object' && keyObj.signer) {
+                     isSigner = true;
+                 }
+                 
                  if (isSigner && !isIgnored(pubkey)) {
                       candidateMints.add(pubkey);
                  }
@@ -101,7 +116,6 @@ async function processNewPoolTx(signature, connection, db, source) {
         for (const mint of candidateMints) {
             // Final Safety Check
             if (isIgnored(mint)) {
-                // logger.debug(`🛡️ Filtered ignored mint: ${mint}`);
                 continue;
             }
 
@@ -123,7 +137,7 @@ async function processNewPoolTx(signature, connection, db, source) {
         }
 
     } catch (e) {
-        if (!e.message.includes('429')) {
+        if (e.message && !e.message.includes('429')) {
             logger.error(`Listener Error ${signature}: ${e.message}`);
         }
     }
