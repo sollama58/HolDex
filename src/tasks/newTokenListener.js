@@ -23,6 +23,7 @@ const IGNORED_MINTS = new Set([
 const processedSigs = new Set();
 let subscriptionIds = [];
 let lastLogTime = Date.now();
+let lastHeartbeat = 0; // For throttling logs
 let watchdogInterval = null;
 let currentConnection = null;
 
@@ -43,12 +44,14 @@ async function processNewPoolTx(signature, connection, db, source) {
     if (processedSigs.size > 10000) processedSigs.clear();
 
     lastLogTime = Date.now(); // Heartbeat update
-    logger.info(`🔍 [${source}] SIGNAL DETECTED: ${signature}`);
+    
+    // Only log "Signal Detected" at INFO level for actual hits, to avoid noise
+    // We log detailed processing at DEBUG level
+    logger.debug(`🔍 [${source}] SIGNAL: ${signature}`);
 
     try {
         let tx = null;
-        // RETRY LOOP: Wait up to 15s for the TX to be confirmed and visible on RPC
-        // "processed" logs come in fast, but "getParsedTransaction" needs "confirmed"
+        // RETRY LOOP: Wait up to 20s for the TX to be confirmed and visible on RPC
         for (let i = 0; i < 8; i++) {
             try {
                 // Exponential backoff: 2s, 3s, 4s...
@@ -65,7 +68,7 @@ async function processNewPoolTx(signature, connection, db, source) {
         }
 
         if (!tx) {
-            logger.warn(`   ⚠️ Failed to fetch TX body for ${signature} after retries.`);
+            logger.debug(`   ⚠️ Failed to fetch TX body for ${signature} after retries.`);
             return;
         }
 
@@ -91,20 +94,6 @@ async function processNewPoolTx(signature, connection, db, source) {
                      if (index === 0) return;
                      
                      const pubkey = keyObj.pubkey ? keyObj.pubkey.toString() : keyObj.toString();
-                     
-                     let isSigner = false;
-                     let isWritable = false;
-
-                     // Handle both raw keys (Legacy) and object keys (some RPC responses)
-                     if (typeof keyObj === 'object') {
-                         isSigner = keyObj.signer;
-                         isWritable = keyObj.writable;
-                     } else {
-                         // If it's just a string/PublicKey, we have to rely on header (complex for V0)
-                         // But usually getParsedTransaction returns objects in accountKeys for Legacy
-                         // For V0, we check header. For now, rely on parsed structure.
-                     }
-                     
                      // In Pump.fun V0 transactions, the mint is often the 2nd or 3rd signer
                      if (!isIgnored(pubkey)) {
                           candidateMints.add(pubkey);
@@ -126,10 +115,7 @@ async function processNewPoolTx(signature, connection, db, source) {
              });
         }
 
-        if (candidateMints.size === 0) {
-            logger.debug(`   ℹ️ No valid mints found in ${signature}`);
-            return;
-        }
+        if (candidateMints.size === 0) return;
 
         const redis = getClient();
         
@@ -163,20 +149,27 @@ async function processNewPoolTx(signature, connection, db, source) {
     }
 }
 
+function logHeartbeat(source) {
+    const now = Date.now();
+    // Log heartbeat at INFO level once every 60 seconds per source
+    if (now - lastHeartbeat > 60000) {
+        logger.info(`💓 [${source}] Listener Heartbeat: Logs are flowing...`);
+        lastHeartbeat = now;
+    }
+}
+
 async function setupSubscriptions(connection, db) {
-    logger.info("📡 Subscribing to Raydium & Pump.fun logs...");
+    logger.info("📡 Setting up WebSocket Subscriptions...");
 
     // RAYDIUM LISTENER
     try {
         const id1 = connection.onLogs(
             RAYDIUM_PROGRAM_ID,
             async (logs, ctx) => {
+                logHeartbeat('Raydium');
                 const safeLogs = logs.logs || (logs.value && logs.value.logs) || [];
                 const safeSig = logs.signature || (logs.value && logs.value.signature) || null;
                 if (!safeSig) return;
-
-                // Heartbeat check (every 50 logs)
-                if (Math.random() < 0.02) logger.debug(`💓 Raydium Heartbeat: Logs flowing...`);
 
                 const isInit = safeLogs.some(l => 
                     l.includes('InitializeInstruction2') || 
@@ -196,12 +189,10 @@ async function setupSubscriptions(connection, db) {
         const id2 = connection.onLogs(
             PUMP_PROGRAM_ID,
             async (logs, ctx) => {
+                logHeartbeat('Pump.fun');
                 const safeLogs = logs.logs || (logs.value && logs.value.logs) || [];
                 const safeSig = logs.signature || (logs.value && logs.value.signature) || null;
                 if (!safeSig) return;
-
-                // Heartbeat check
-                if (Math.random() < 0.02) logger.debug(`💓 Pump.fun Heartbeat: Logs flowing...`);
 
                 const isCreate = safeLogs.some(l => 
                     l.includes('Instruction: Create') || 
@@ -231,8 +222,9 @@ async function startNewTokenListener() {
     const db = getDB();
     
     // FORCE NEW CONNECTION
+    // We pass true to force a fresh connection tailored for WSS
     currentConnection = getSolanaConnection(true); 
-    logger.info(`🔌 Listener Connection Endpoint: ${currentConnection.rpcEndpoint}`);
+    logger.info(`🔌 Listener connected. Waiting for logs...`);
 
     await setupSubscriptions(currentConnection, db);
 
@@ -246,15 +238,15 @@ async function startNewTokenListener() {
             logger.warn(`⚠️ LISTENERS DEAD? No logs for ${mins} mins. Reconnecting...`);
             try {
                 try { 
+                    // Attempt cleanup
                     subscriptionIds.forEach(id => currentConnection.removeOnLogsListener(id)); 
+                    subscriptionIds = [];
                 } catch(e) {}
                 
                 currentConnection = getSolanaConnection(true); 
                 await setupSubscriptions(currentConnection, db);
                 lastLogTime = Date.now();
             } catch (err) { logger.error(`❌ Reconnection Failed: ${err.message}`); }
-        } else {
-            // logger.info(`💓 Listener Alive. Last log: ${mins} mins ago.`);
         }
     }, 60000);
 }

@@ -46,6 +46,7 @@ function createConnection() {
     const logUrl = rpcUrl.replace(/\?api-key=[^&]+/, '?api-key=***');
     const logWs = wsUrl ? wsUrl.replace(/\?api-key=[^&]+/, '?api-key=***') : 'Standard (Auto)';
     
+    // Log at INFO level so we can see it in production logs
     logger.info(`🔌 Solana Connection Init: ${logUrl}`);
     logger.info(`🔌 WSS Endpoint: ${logWs}`);
 
