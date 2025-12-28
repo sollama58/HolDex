@@ -204,7 +204,6 @@ function init(deps) {
             const verified = nacl.sign.detached.verify(msg, sigBytes, pubBytes);
             if (!verified) return res.status(403).json({ success: false, error: "Invalid Signature" });
             
-            // CHECK COUNT instead of assuming single key
             const result = await db.get('SELECT COUNT(*) as count FROM api_keys WHERE owner = $1', [wallet]);
             const count = parseInt(result?.count || 0);
             
@@ -228,13 +227,11 @@ function init(deps) {
         } catch (e) { console.error(e); res.status(500).json({ success: false, error: "Server Error" }); }
     });
 
-    // --- FETCH MY KEYS ---
     router.post('/request-my-keys', async (req, res) => {
         const { wallet, signature } = req.body;
         try {
             if (!wallet || !signature) return res.status(400).json({ success: false, error: "Wallet and Signature required" });
             
-            // Validate Signature (Same msg as creation for simplicity)
             const msg = new TextEncoder().encode("Request HolDex API Key");
             const sigBytes = Buffer.from(signature, 'base64');
             const pubBytes = new PublicKey(wallet).toBytes();
@@ -380,7 +377,6 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
     });
 
-    // --- BACKUP & RESTORE ---
     router.get('/admin/backup/updates', requireAdmin, async (req, res) => { try { const updates = await db.all('SELECT * FROM token_updates ORDER BY submittedAt DESC'); const keys = await db.all('SELECT * FROM api_keys'); res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Disposition', `attachment; filename=holdex_full_backup_${Date.now()}.json`); res.json({ success: true, timestamp: Date.now(), updates: updates, api_keys: keys }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     
     router.post('/admin/restore/updates', requireAdmin, async (req, res) => { 
@@ -588,10 +584,18 @@ function init(deps) {
     });
 
     router.get('/tokens', cacheControl(2, 5), apiKeyAuth(false), async (req, res) => {
-        const { search = '', sort = 'kscore', page = 1, filter, direction = 'desc' } = req.query;
+        let { search = '', sort = 'kscore', page = 1, filter, direction = 'desc', limit = 20 } = req.query;
         try {
-            const isGenericView = !search && !filter && direction === 'desc'; 
-            const cacheKey = `api:tokens:list:${sort}:${page}:${search}:${filter}:${direction}`;
+            // Validate Limit
+            limit = parseInt(limit);
+            if (isNaN(limit) || limit < 1) limit = 20;
+            if (limit > 100) limit = 100;
+            
+            page = parseInt(page);
+            if (isNaN(page) || page < 1) page = 1;
+
+            const isGenericView = !search && !filter && direction === 'desc' && limit === 20 && page === 1; 
+            const cacheKey = `api:tokens:list:${sort}:${page}:${search}:${filter}:${direction}:${limit}`;
             const redis = getClient(); 
             if (isGenericView && redis) { try { const cached = await redis.get(cacheKey); if (cached) { res.setHeader('X-Cache', 'HIT'); return res.json(JSON.parse(cached)); } } catch(e) {} }
 
@@ -603,7 +607,7 @@ function init(deps) {
                     rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
                     if (rows.length === 0) { await indexTokenOnChain(search); rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]); }
                 } else {
-                    rows = await db.all(`SELECT * FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) LIMIT 50`, [`%${search}%`]);
+                    rows = await db.all(`SELECT * FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) LIMIT $2`, [`%${search}%`, limit]);
                 }
             } else {
                 const dir = direction.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
@@ -636,13 +640,15 @@ function init(deps) {
                     whereClause = 'WHERE hasCommunityUpdate = TRUE';
                 }
 
-                const offset = (page - 1) * 100;
-                rows = await db.all(`SELECT * FROM tokens ${whereClause} ORDER BY ${orderBy} LIMIT 100 OFFSET ${offset}`);
+                const offset = (page - 1) * limit;
+                rows = await db.all(`SELECT * FROM tokens ${whereClause} ORDER BY ${orderBy} LIMIT $1 OFFSET $2`, [limit, offset]);
             }
 
             const responsePayload = {
                 success: true,
                 lastUpdate: Date.now(),
+                page,
+                limit,
                 tokens: rows.map(r => ({
                     mint: r.mint, 
                     name: r.name, 
