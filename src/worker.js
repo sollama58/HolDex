@@ -5,7 +5,6 @@ const { findPoolsOnChain } = require('./services/pool_finder');
 const { fetchTokenMetadata } = require('./utils/metaplex');
 const { getSolanaConnection } = require('./services/solana');
 const { PublicKey } = require('@solana/web3.js');
-const { initRedis } = require('./services/redis');
 const logger = require('./services/logger');
 const metadataUpdater = require('./tasks/metadataUpdater'); 
 
@@ -100,8 +99,9 @@ async function startWorker() {
         
         const redis = getClient();
         if (!redis) {
-            logger.warn("⚠️ Worker: Redis not available. Worker disabled.");
+            logger.warn("⚠️ Worker: Redis not available. Retrying in 5s...");
             isRunning = false;
+            setTimeout(startWorker, 5000);
             return;
         }
 
@@ -110,8 +110,10 @@ async function startWorker() {
         logger.info("🛠️ Worker: Starting Services...");
 
         // Start Metadata Updater
-        metadataUpdater.start({ db });
-        logger.info("🛠️ Worker: Metadata Updater Started.");
+        if (metadataUpdater && typeof metadataUpdater.start === 'function') {
+            metadataUpdater.start({ db });
+            logger.info("🛠️ Worker: Metadata Updater Started.");
+        }
 
         logger.info("🛠️ Worker: Listening for token queue jobs...");
 
@@ -143,6 +145,7 @@ async function startWorker() {
     } catch (e) {
         logger.error(`Worker Fatal Error: ${e.message}`);
         isRunning = false;
+        setTimeout(startWorker, 5000); // Retry logic
     }
 }
 

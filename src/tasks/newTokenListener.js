@@ -10,7 +10,6 @@ const RAYDIUM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFS
 const PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5DkzonjNwu78hRvfCKubJ14M5uBEwF6P');
 
 // Explicit Blocklist of known tokens to NEVER index as "New"
-// Includes SOL, USDC, USDT, Raydium Authority, Pump Authority, etc.
 const IGNORED_MINTS = new Set([
     'So11111111111111111111111111111111111111112', // Wrapped SOL
     'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
@@ -23,6 +22,7 @@ const IGNORED_MINTS = new Set([
 ]);
 
 const processedSigs = new Set();
+let heartbeatInterval = null;
 
 /**
  * Helper to check if a mint is on the ignore list.
@@ -51,7 +51,7 @@ async function processNewPoolTx(signature, connection, db, source) {
         await new Promise(r => setTimeout(r, 2000));
 
         let tx = null;
-        for (let i = 0; i < 10; i++) {
+        for (let i = 0; i < 5; i++) { // Tried 10 times, reduced to 5 to save RPC
             try {
                 tx = await connection.getParsedTransaction(signature, {
                     maxSupportedTransactionVersion: 0,
@@ -83,9 +83,6 @@ async function processNewPoolTx(signature, connection, db, source) {
         // Pump.fun 'Create' instruction typically requires the Mint to be a Signer.
         if (source === 'Pump.fun' && candidateMints.size === 0 && tx.transaction.message.accountKeys) {
              const keys = tx.transaction.message.accountKeys;
-             
-             // Check if 'keys' is an array or an object with staticAccountKeys (legacy vs v0)
-             // getParsedTransaction usually returns a standard structure for accountKeys in parsed messages.
              const keyList = Array.isArray(keys) ? keys : (keys.staticAccountKeys || []);
 
              keyList.forEach((keyObj, index) => {
@@ -95,11 +92,8 @@ async function processNewPoolTx(signature, connection, db, source) {
                  // Safe Pubkey Extraction
                  const pubkey = keyObj.pubkey ? keyObj.pubkey.toString() : keyObj.toString();
                  
-                 // Robust Signer Check
-                 // Note: connection._isSigner is private/internal and deprecated.
-                 // We rely on the parsed property 'signer'.
+                 // Robust Signer Check - REMOVED DEPRECATED _isSigner
                  let isSigner = false;
-                 
                  if (typeof keyObj === 'object' && keyObj.signer) {
                      isSigner = true;
                  }
@@ -115,9 +109,7 @@ async function processNewPoolTx(signature, connection, db, source) {
         // Process Candidates
         for (const mint of candidateMints) {
             // Final Safety Check
-            if (isIgnored(mint)) {
-                continue;
-            }
+            if (isIgnored(mint)) continue;
 
             const exists = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
             
@@ -147,7 +139,7 @@ async function startNewTokenListener() {
     const connection = getSolanaConnection();
     const db = getDB();
     
-    logger.info("📡 Listener: Monitoring Raydium & Pump.fun...");
+    logger.info("📡 Listener: Initializing Block Monitors...");
 
     // 1. Raydium Listener
     try {
@@ -157,12 +149,13 @@ async function startNewTokenListener() {
                 if (logs.err) return;
                 const isInit = logs.logs.some(l => l.includes('InitializeInstruction2') || l.includes('initialize2'));
                 if (isInit) {
+                    // logger.debug(`Raydium Init Detected: ${logs.signature}`); // Uncomment for heavy debug
                     await processNewPoolTx(logs.signature, connection, db, 'Raydium');
                 }
             },
             "confirmed"
         );
-        logger.info("✅ Listener: Raydium V4 Active");
+        logger.info("✅ Listener: Raydium V4 Connected");
     } catch (e) {
         logger.error(`Raydium Listener Error: ${e.message}`);
     }
@@ -180,10 +173,16 @@ async function startNewTokenListener() {
             },
             "confirmed"
         );
-        logger.info("✅ Listener: Pump.fun Active");
+        logger.info("✅ Listener: Pump.fun Connected");
     } catch (e) {
         logger.error(`Pump.fun Listener Error: ${e.message}`);
     }
+
+    // 3. Heartbeat (To prove to Render we are alive)
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+    heartbeatInterval = setInterval(() => {
+        logger.info("💓 Listener Active: Scanning for new pools...");
+    }, 60000);
 }
 
 module.exports = { startNewTokenListener };

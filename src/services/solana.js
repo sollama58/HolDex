@@ -15,16 +15,19 @@ function getSolanaConnection() {
     if (!connection) {
         const rpcUrl = config.SOLANA_RPC_URL || config.RPC_URL || 'https://api.mainnet-beta.solana.com';
         
-        // Rate limit mitigation for public endpoints
-        // Longer timeout for Mainnet to avoid premature timeouts during congestion
-        const confirmTimeout = rpcUrl.includes('mainnet-beta') ? 120000 : 60000;
+        // WARN if using public RPC for a listener
+        if (rpcUrl.includes('api.mainnet-beta.solana.com')) {
+            logger.warn("⚠️  WARNING: Using Public Solana RPC. Listeners (WebSockets) will likely fail or be rate-limited. Please use Helius/QuickNode.");
+        }
 
-        // Fix: Explicitly derive WSS URL for Helius/Custom RPCs to ensure onLogs works reliably.
+        // Fix: Explicitly derive WSS URL for Helius to ensure onLogs works reliably.
         // Standard 'https' connections often default to a public WSS endpoint which drops logs.
         let wsUrl = undefined;
         if (rpcUrl.includes('helius')) {
              wsUrl = rpcUrl.replace('https://', 'wss://').replace('http://', 'ws://');
         }
+
+        const confirmTimeout = rpcUrl.includes('mainnet-beta') ? 120000 : 60000;
 
         connection = new Connection(rpcUrl, {
             commitment: 'confirmed',
@@ -33,7 +36,8 @@ function getSolanaConnection() {
             disableRetryOnRateLimit: false,
         });
         
-        logger.info(`🔌 Solana Connection Init: ${rpcUrl.includes('helius') ? 'High-Performance Mode' : 'Standard Mode'}`);
+        logger.info(`🔌 Solana Connection Init: ${rpcUrl.includes('helius') ? 'High-Performance (Helius)' : 'Standard'} Mode`);
+        if (wsUrl) logger.info(`🔌 WSS Endpoint: ${wsUrl}`);
     }
     return connection;
 }

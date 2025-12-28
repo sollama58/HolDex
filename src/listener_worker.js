@@ -94,13 +94,12 @@ async function startListenerWorker() {
         await initDB();
         await initRedis();
         const db = getDB();
+        logger.info("✅ Infra: DB & Redis Connected");
 
         // 2. Start the Indexer (Volume/Candles/Snapshots)
         if (indexerService && typeof indexerService.start === 'function') {
             logger.info("📊 LISTENER: Starting Token Indexer...");
             indexerService.start();
-        } else {
-            logger.info("ℹ️ LISTENER: No Indexer service 'start' function found.");
         }
 
         // 3. Start New Token Listener (Ingestion from Solana)
@@ -115,8 +114,6 @@ async function startListenerWorker() {
         if (growerScanner && typeof growerScanner.start === 'function') {
             logger.info("🌱 LISTENER: Starting Grower Scanner...");
             growerScanner.start({ db });
-        } else {
-            logger.warn("⚠️ LISTENER: Grower Scanner module missing start function.");
         }
 
         // 5. Start K-Score Analysis Loop (Heavy Background Task)
