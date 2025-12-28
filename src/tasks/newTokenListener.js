@@ -31,10 +31,6 @@ function isIgnored(mint) {
     return false;
 }
 
-// ... [processNewPoolTx logic remains the same as previous "Full Logic" version] ...
-// I am omitting the body of processNewPoolTx for brevity, but assume it is the same
-// robust version from the previous step. The critical change is below in STARTUP.
-
 async function processNewPoolTx(signature, connection, db, source) {
     if (processedSigs.has(signature)) return;
     processedSigs.add(signature);
@@ -62,12 +58,14 @@ async function processNewPoolTx(signature, connection, db, source) {
 
         const candidateMints = new Set();
 
+        // Strategy A: Post Token Balances
         if (tx.meta.postTokenBalances && tx.meta.postTokenBalances.length > 0) {
             tx.meta.postTokenBalances.forEach(bal => {
                 if (bal.mint && !isIgnored(bal.mint)) candidateMints.add(bal.mint);
             });
         }
 
+        // Strategy B: Pump.fun Specific
         if (source === 'Pump.fun' && candidateMints.size === 0) {
              const keys = tx.transaction.message.accountKeys;
              const keyList = Array.isArray(keys) ? keys : (keys.staticAccountKeys || []);
@@ -80,7 +78,7 @@ async function processNewPoolTx(signature, connection, db, source) {
              });
         }
 
-        // Inner Instructions Check
+        // Strategy C: Inner Instructions
         if (candidateMints.size === 0 && tx.meta.innerInstructions) {
              tx.meta.innerInstructions.forEach(inner => {
                  inner.instructions.forEach(inst => {
@@ -93,11 +91,16 @@ async function processNewPoolTx(signature, connection, db, source) {
         }
 
         const redis = getClient();
-        if (!redis) return;
+        if (!redis) {
+             logger.error("❌ Redis is NULL inside process loop!");
+             return;
+        }
 
         for (const mint of candidateMints) {
             if (isIgnored(mint)) continue;
+            
             const data = JSON.stringify({ mint, addedAt: Date.now(), source });
+            
             try {
                 const added = await redis.sadd(PENDING_KEY, data);
                 if (added) {
@@ -117,37 +120,42 @@ async function processNewPoolTx(signature, connection, db, source) {
 }
 
 async function setupSubscriptions(connection, db) {
-    console.log("⚙️  Setting up Log Subscriptions..."); // EMERGENCY LOG
+    logger.info("📡 Subscribing to Raydium & Pump.fun logs...");
 
     try {
+        // Use 'confirmed' for Raydium to avoid reorgs on large pools
         const id1 = connection.onLogs(
             RAYDIUM_PROGRAM_ID,
             async (logs, ctx) => {
                 lastLogTime = Date.now();
                 if (logs.err) return;
-                const isInit = logs.logs.some(l => l.includes('InitializeInstruction2') || l.includes('initialize2') || l.includes('InitializeMint'));
+                const isInit = logs.logs.some(l => 
+                    l.includes('InitializeInstruction2') || 
+                    l.includes('initialize2') ||
+                    l.includes('InitializeMint')
+                );
                 if (isInit) await processNewPoolTx(logs.signature, connection, db, 'Raydium');
             },
-            "confirmed"
+            "confirmed" 
         );
         subscriptionIds.push(id1);
         logger.info(`✅ Subscribed to Raydium (ID: ${id1})`);
     } catch (e) { logger.error(`Raydium Sub Error: ${e.message}`); }
 
     try {
+        // Pump.fun Listener (with Sample Logging enabled)
         const id2 = connection.onLogs(
             PUMP_PROGRAM_ID,
             async (logs, ctx) => {
                 lastLogTime = Date.now();
                 if (logs.err) return;
 
-                // --- FIREHOSE ---
                 debugLogCounter++;
-                if (debugLogCounter <= 10) {
-                    console.log(`🔥 [RAW LOG ${debugLogCounter}]:`, JSON.stringify(logs.logs));
+                if (debugLogCounter % 50 === 0) {
+                    console.log(`🔍 [PUMP SAMPLE]:`, JSON.stringify(logs.logs[0] || "Empty"));
                 }
-                // ----------------
 
+                // Wide Net Filter: Create OR Mint OR Initialize
                 const isCreate = logs.logs.some(l => 
                     l.includes('Instruction: Create') || 
                     l.includes('Create') || 
@@ -165,40 +173,30 @@ async function setupSubscriptions(connection, db) {
 }
 
 async function startNewTokenListener() {
-    // 1. EMERGENCY LOG: Proves function was called
-    console.log("\n\n************************************************");
-    console.log("🚨 EMERGENCY DEBUG: LISTENER MODULE STARTING 🚨");
-    console.log("************************************************\n");
-
     const redis = getClient();
     if (!redis) {
-        logger.error("❌ Redis Client is NULL. Retrying in 2s...");
+        logger.warn("Redis not ready, retrying...");
         setTimeout(startNewTokenListener, 2000);
         return;
     }
-    logger.info("✅ Redis Client Found.");
+    
+    // REDIS PERMISSION CHECK
+    try {
+        await redis.set('listener_test_key', 'ok');
+        const test = await redis.get('listener_test_key');
+        if (test === 'ok') logger.info("✅ Listener: Redis Write Check PASSED.");
+    } catch (e) {
+        logger.error(`❌ Listener: Redis Write Check CRASHED: ${e.message}`);
+    }
 
     const db = getDB();
     
-    // 2. CONNECTION LOG
-    try {
-        currentConnection = getSolanaConnection(true);
-        const endpoint = currentConnection.rpcEndpoint;
-        logger.info(`🔌 RPC Endpoint: ${endpoint}`);
-        
-        // Helius Check: If using Helius, verify it's not the public one
-        if (endpoint.includes('api.mainnet-beta')) {
-            logger.warn("⚠️ WARNING: Using PUBLIC endpoint. WSS will likely fail!");
-        }
-    } catch (e) {
-        logger.error(`❌ Connection Creation Failed: ${e.message}`);
-        return;
-    }
+    // FORCE NEW CONNECTION OBJECT
+    currentConnection = getSolanaConnection(true); 
+    logger.info(`🔌 Listener Connection Endpoint: ${currentConnection.rpcEndpoint}`);
 
-    // 3. SUBSCRIPTION START
     await setupSubscriptions(currentConnection, db);
 
-    // 4. HEARTBEAT START
     if (watchdogInterval) clearInterval(watchdogInterval);
     watchdogInterval = setInterval(async () => {
         const timeSinceLastLog = Date.now() - lastLogTime;
@@ -207,6 +205,12 @@ async function startNewTokenListener() {
         if (timeSinceLastLog > 120000) { 
             logger.warn(`⚠️ LISTENERS DEAD? No logs for ${mins} mins. Reconnecting...`);
             try {
+                // Kill old connection
+                try { 
+                    subscriptionIds.forEach(id => currentConnection.removeOnLogsListener(id)); 
+                } catch(e) {}
+                
+                // New Connection
                 currentConnection = getSolanaConnection(true); 
                 await setupSubscriptions(currentConnection, db);
                 lastLogTime = Date.now();
@@ -215,8 +219,6 @@ async function startNewTokenListener() {
             logger.info(`💓 Listener Alive. Last log: ${mins} mins ago.`);
         }
     }, 60000);
-    
-    console.log("✅ Listener Startup Sequence Complete.");
 }
 
 module.exports = { startNewTokenListener };
