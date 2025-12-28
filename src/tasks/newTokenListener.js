@@ -77,26 +77,29 @@ async function processNewPoolTx(signature, connection, db, source) {
              });
         }
 
+        // --- CRITICAL REDIS CHECK ---
         const redis = getClient();
-        if (!redis) return;
+        if (!redis) {
+             logger.error(`❌ Listener Error: Redis is NULL. Cannot queue ${candidateMints.size} candidate(s).`);
+             return;
+        }
 
         for (const mint of candidateMints) {
             if (isIgnored(mint)) continue;
             
-            // 1. CHECK IF ALREADY IN DB (To avoid re-queueing known tokens)
-            // Optimization: We skip DB check for speed here, relying on Redis set uniqueness.
-            // If it is already in DB, the Scanner will just update it or skip it later.
-            
             // 2. ADD TO PENDING LIST (Redis)
-            // Use 'SADD' (Set Add) to ensure no duplicates in the queue
             const data = JSON.stringify({ mint, addedAt: Date.now(), source });
-            const added = await redis.sadd(PENDING_KEY, data);
             
-            if (added) {
-                console.log(`\n--------------------------------------------------`);
-                logger.info(`🌱 [PENDING LIST] Added: ${mint}`);
-                logger.info(`   📝 Source: ${source}`);
-                console.log(`--------------------------------------------------\n`);
+            try {
+                const added = await redis.sadd(PENDING_KEY, data);
+                if (added) {
+                    console.log(`\n--------------------------------------------------`);
+                    logger.info(`🌱 [PENDING LIST] Added: ${mint}`);
+                    logger.info(`   📝 Source: ${source}`);
+                    console.log(`--------------------------------------------------\n`);
+                }
+            } catch (redisErr) {
+                logger.error(`❌ Redis Write Failed: ${redisErr.message}`);
             }
         }
     } catch (e) {
@@ -144,6 +147,16 @@ async function setupSubscriptions(connection, db) {
 }
 
 async function startNewTokenListener() {
+    // --- VERIFY INFRASTRUCTURE ---
+    const redis = getClient();
+    if (!redis) {
+        logger.error("❌ FATAL: Listener started but Redis is NOT connected. Retrying in 5s...");
+        setTimeout(startNewTokenListener, 5000);
+        return;
+    } else {
+        logger.info("✅ Listener: Redis Connection Verified.");
+    }
+
     const db = getDB();
     currentConnection = getSolanaConnection(true); 
     await setupSubscriptions(currentConnection, db);
