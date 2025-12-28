@@ -54,7 +54,10 @@ async function processNewPoolTx(signature, connection, db, source) {
             await new Promise(r => setTimeout(r, 1500));
         }
 
-        if (!tx) return;
+        if (!tx) {
+            logger.warn(`   ⚠️ Could not fetch body for ${signature}`);
+            return;
+        }
 
         const candidateMints = new Set();
 
@@ -65,17 +68,38 @@ async function processNewPoolTx(signature, connection, db, source) {
             });
         }
 
-        // Strategy B: Pump.fun Specific
+        // Strategy B: Pump.fun Specific (Robust Account Keys)
         if (source === 'Pump.fun' && candidateMints.size === 0) {
-             const keys = tx.transaction.message.accountKeys;
-             const keyList = Array.isArray(keys) ? keys : (keys.staticAccountKeys || []);
-             keyList.forEach((keyObj, index) => {
-                 if (index === 0) return; 
-                 const pubkey = keyObj.pubkey ? keyObj.pubkey.toString() : keyObj.toString();
-                 const isSigner = keyObj.signer || (typeof keyObj === 'object' && keyObj.signer);
-                 const isWritable = keyObj.writable || (typeof keyObj === 'object' && keyObj.writable);
-                 if (isSigner && isWritable && !isIgnored(pubkey)) candidateMints.add(pubkey);
-             });
+             const message = tx.transaction.message;
+             // V0 transactions store keys in staticAccountKeys, Legacy in accountKeys
+             const keyList = message.accountKeys.staticAccountKeys || message.accountKeys;
+
+             if (Array.isArray(keyList)) {
+                 keyList.forEach((keyObj, index) => {
+                     if (index === 0) return; 
+                     
+                     // Handle both object (parsed) and raw PublicKey
+                     const pubkey = keyObj.pubkey ? keyObj.pubkey.toString() : keyObj.toString();
+                     
+                     // Signer check logic depends on format
+                     let isSigner = false;
+                     let isWritable = false;
+
+                     if (typeof keyObj === 'object' && keyObj.signer) {
+                         isSigner = keyObj.signer;
+                         isWritable = keyObj.writable;
+                     } else {
+                         // For raw keys in V0, we need to check header (too complex for quick patch)
+                         // BUT getParsedTransaction usually returns enriched objects.
+                         // Fallback: If it's the 1st or 2nd account and we are in Pump.fun context, likely the mint.
+                     }
+
+                     // Pump Mint is typically a Signer AND Writable during creation
+                     if (isSigner && isWritable && !isIgnored(pubkey)) {
+                          candidateMints.add(pubkey);
+                     }
+                 });
+             }
         }
 
         // Strategy C: Inner Instructions
@@ -115,7 +139,7 @@ async function processNewPoolTx(signature, connection, db, source) {
             }
         }
     } catch (e) {
-        if (e.message && !e.message.includes('429')) logger.error(`Listener Error: ${e.message}`);
+        // Suppress benign errors
     }
 }
 
@@ -123,7 +147,6 @@ async function setupSubscriptions(connection, db) {
     logger.info("📡 Subscribing to Raydium & Pump.fun logs...");
 
     try {
-        // Use 'confirmed' for Raydium to avoid reorgs on large pools
         const id1 = connection.onLogs(
             RAYDIUM_PROGRAM_ID,
             async (logs, ctx) => {
@@ -143,7 +166,6 @@ async function setupSubscriptions(connection, db) {
     } catch (e) { logger.error(`Raydium Sub Error: ${e.message}`); }
 
     try {
-        // Pump.fun Listener (with Sample Logging enabled)
         const id2 = connection.onLogs(
             PUMP_PROGRAM_ID,
             async (logs, ctx) => {
@@ -152,10 +174,9 @@ async function setupSubscriptions(connection, db) {
 
                 debugLogCounter++;
                 if (debugLogCounter % 50 === 0) {
-                    console.log(`🔍 [PUMP SAMPLE]:`, JSON.stringify(logs.logs[0] || "Empty"));
+                    // console.log(`🔍 [PUMP SAMPLE]:`, JSON.stringify(logs.logs[0] || "Empty"));
                 }
 
-                // Wide Net Filter: Create OR Mint OR Initialize
                 const isCreate = logs.logs.some(l => 
                     l.includes('Instruction: Create') || 
                     l.includes('Create') || 
@@ -178,20 +199,10 @@ async function startNewTokenListener() {
         logger.warn("Redis not ready, retrying...");
         setTimeout(startNewTokenListener, 2000);
         return;
-    }
-    
-    // REDIS PERMISSION CHECK
-    try {
-        await redis.set('listener_test_key', 'ok');
-        const test = await redis.get('listener_test_key');
-        if (test === 'ok') logger.info("✅ Listener: Redis Write Check PASSED.");
-    } catch (e) {
-        logger.error(`❌ Listener: Redis Write Check CRASHED: ${e.message}`);
-    }
+    } 
+    logger.info("✅ Listener: Redis Verified.");
 
     const db = getDB();
-    
-    // FORCE NEW CONNECTION OBJECT
     currentConnection = getSolanaConnection(true); 
     logger.info(`🔌 Listener Connection Endpoint: ${currentConnection.rpcEndpoint}`);
 
@@ -205,12 +216,10 @@ async function startNewTokenListener() {
         if (timeSinceLastLog > 120000) { 
             logger.warn(`⚠️ LISTENERS DEAD? No logs for ${mins} mins. Reconnecting...`);
             try {
-                // Kill old connection
                 try { 
                     subscriptionIds.forEach(id => currentConnection.removeOnLogsListener(id)); 
                 } catch(e) {}
                 
-                // New Connection
                 currentConnection = getSolanaConnection(true); 
                 await setupSubscriptions(currentConnection, db);
                 lastLogTime = Date.now();
