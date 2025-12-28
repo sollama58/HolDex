@@ -3,6 +3,7 @@ const { getDB } = require('../services/database');
 const { getClient } = require('../services/redis'); 
 const logger = require('../services/logger');
 const { PublicKey } = require('@solana/web3.js');
+const { indexTokenOnChain } = require('../services/indexer');
 
 // --- CONSTANTS ---
 const RAYDIUM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
@@ -41,33 +42,37 @@ async function processNewPoolTx(signature, connection, db, source) {
     processedSigs.add(signature);
     if (processedSigs.size > 10000) processedSigs.clear();
 
-    lastLogTime = Date.now();
-    logger.info(`🔍 [${source}] MATCH FOUND: ${signature}`);
+    lastLogTime = Date.now(); // Heartbeat update
+    logger.info(`🔍 [${source}] SIGNAL DETECTED: ${signature}`);
 
     try {
-        // Wait briefly for indexing
-        await new Promise(r => setTimeout(r, 2000));
-
         let tx = null;
-        for (let i = 0; i < 5; i++) {
+        // RETRY LOOP: Wait up to 15s for the TX to be confirmed and visible on RPC
+        // "processed" logs come in fast, but "getParsedTransaction" needs "confirmed"
+        for (let i = 0; i < 8; i++) {
             try {
+                // Exponential backoff: 2s, 3s, 4s...
+                await new Promise(r => setTimeout(r, 2000 + (i * 1000)));
+                
                 tx = await connection.getParsedTransaction(signature, {
                     maxSupportedTransactionVersion: 0,
-                    commitment: 'confirmed'
+                    commitment: 'confirmed' 
                 });
-            } catch (err) {}
+            } catch (err) {
+                // Ignore network errors during polling
+            }
             if (tx && tx.meta && !tx.meta.err) break;
-            await new Promise(r => setTimeout(r, 1500));
         }
 
         if (!tx) {
-            logger.warn(`   ⚠️ Failed to fetch TX body for ${signature}`);
+            logger.warn(`   ⚠️ Failed to fetch TX body for ${signature} after retries.`);
             return;
         }
 
         const candidateMints = new Set();
 
         // --- STRATEGY A: Post Token Balances ---
+        // Good for Raydium
         if (tx.meta.postTokenBalances && tx.meta.postTokenBalances.length > 0) {
             tx.meta.postTokenBalances.forEach(bal => {
                 if (bal.mint && !isIgnored(bal.mint)) candidateMints.add(bal.mint);
@@ -75,35 +80,42 @@ async function processNewPoolTx(signature, connection, db, source) {
         }
 
         // --- STRATEGY B: Account Keys (Pump.fun Specific) ---
-        // Handles both Legacy and V0 transaction structures
-        if (source === 'Pump.fun' && candidateMints.size === 0) {
+        // Pump.fun creation often involves the Mint being a Signer and Writable
+        if (source === 'Pump.fun') {
              const message = tx.transaction.message;
              const keyList = message.accountKeys.staticAccountKeys || message.accountKeys;
 
              if (Array.isArray(keyList)) {
                  keyList.forEach((keyObj, index) => {
-                     if (index === 0) return; // Skip Payer
+                     // Index 0 is Payer, usually not the mint
+                     if (index === 0) return;
                      
                      const pubkey = keyObj.pubkey ? keyObj.pubkey.toString() : keyObj.toString();
                      
                      let isSigner = false;
                      let isWritable = false;
 
-                     if (typeof keyObj === 'object' && keyObj.signer) {
+                     // Handle both raw keys (Legacy) and object keys (some RPC responses)
+                     if (typeof keyObj === 'object') {
                          isSigner = keyObj.signer;
                          isWritable = keyObj.writable;
-                     } 
-
-                     // Pump Mint is typically a Signer AND Writable during creation
-                     if (isSigner && isWritable && !isIgnored(pubkey)) {
+                     } else {
+                         // If it's just a string/PublicKey, we have to rely on header (complex for V0)
+                         // But usually getParsedTransaction returns objects in accountKeys for Legacy
+                         // For V0, we check header. For now, rely on parsed structure.
+                     }
+                     
+                     // In Pump.fun V0 transactions, the mint is often the 2nd or 3rd signer
+                     if (!isIgnored(pubkey)) {
                           candidateMints.add(pubkey);
                      }
                  });
              }
         }
 
-        // --- STRATEGY C: Inner Instructions ---
-        if (candidateMints.size === 0 && tx.meta.innerInstructions) {
+        // --- STRATEGY C: Inner Instructions (MintTo) ---
+        // Catches any 'initializeMint' instruction
+        if (tx.meta.innerInstructions) {
              tx.meta.innerInstructions.forEach(inner => {
                  inner.instructions.forEach(inst => {
                      if (inst.program === 'spl-token' && inst.parsed && inst.parsed.type === 'initializeMint') {
@@ -114,28 +126,36 @@ async function processNewPoolTx(signature, connection, db, source) {
              });
         }
 
-        const redis = getClient();
-        if (!redis) {
-             logger.error("❌ FATAL: Redis disconnected in Listener loop.");
-             return;
+        if (candidateMints.size === 0) {
+            logger.debug(`   ℹ️ No valid mints found in ${signature}`);
+            return;
         }
 
+        const redis = getClient();
+        
         for (const mint of candidateMints) {
             if (isIgnored(mint)) continue;
             
-            const data = JSON.stringify({ mint, addedAt: Date.now(), source });
-            
-            try {
-                const added = await redis.sadd(PENDING_KEY, data);
-                if (added) {
-                    console.log(`\n--------------------------------------------------`);
-                    logger.info(`🌱 [PENDING LIST] Added: ${mint}`);
-                    logger.info(`   📝 Source: ${source}`);
-                    logger.info(`   🔗 Tx: ${signature}`);
-                    console.log(`--------------------------------------------------\n`);
-                }
-            } catch (redisErr) {
-                logger.error(`❌ Redis Write Failed: ${redisErr.message}`);
+            // CHECK DATABASE DEDUPLICATION
+            const exists = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
+            if (exists) continue;
+
+            logger.info(`🚀 [NEW TOKEN] ${mint} detected on ${source}`);
+
+            // 1. ADD TO DB IMMEDIATELY
+            await db.run(`
+                INSERT INTO tokens (mint, name, symbol, timestamp, k_score, marketCap, hasCommunityUpdate, updated_at) 
+                VALUES ($1, 'New Discovery', 'NEW', $2, 10, 0, FALSE, NOW()) 
+                ON CONFLICT (mint) DO NOTHING
+            `, [mint, Date.now()]);
+
+            // 2. TRIGGER INDEXER
+            indexTokenOnChain(mint).catch(e => logger.error(`Indexer failed for ${mint}: ${e.message}`));
+
+            // 3. ADD TO GROWER SCANNER
+            if (redis) {
+                const data = JSON.stringify({ mint, addedAt: Date.now(), source });
+                await redis.sadd(PENDING_KEY, data);
             }
         }
     } catch (e) {
@@ -151,13 +171,12 @@ async function setupSubscriptions(connection, db) {
         const id1 = connection.onLogs(
             RAYDIUM_PROGRAM_ID,
             async (logs, ctx) => {
-                lastLogTime = Date.now();
-                // Safe Parsing for nested objects
                 const safeLogs = logs.logs || (logs.value && logs.value.logs) || [];
                 const safeSig = logs.signature || (logs.value && logs.value.signature) || null;
-                const safeErr = logs.err || (logs.value && logs.value.err) || null;
+                if (!safeSig) return;
 
-                if (safeErr || !safeSig) return;
+                // Heartbeat check (every 50 logs)
+                if (Math.random() < 0.02) logger.debug(`💓 Raydium Heartbeat: Logs flowing...`);
 
                 const isInit = safeLogs.some(l => 
                     l.includes('InitializeInstruction2') || 
@@ -166,7 +185,7 @@ async function setupSubscriptions(connection, db) {
                 );
                 if (isInit) await processNewPoolTx(safeSig, connection, db, 'Raydium');
             },
-            "processed" // Fast commitment
+            "processed"
         );
         subscriptionIds.push(id1);
         logger.info(`✅ Subscribed to Raydium (ID: ${id1})`);
@@ -177,15 +196,13 @@ async function setupSubscriptions(connection, db) {
         const id2 = connection.onLogs(
             PUMP_PROGRAM_ID,
             async (logs, ctx) => {
-                lastLogTime = Date.now();
-                // Safe Parsing
                 const safeLogs = logs.logs || (logs.value && logs.value.logs) || [];
                 const safeSig = logs.signature || (logs.value && logs.value.signature) || null;
-                const safeErr = logs.err || (logs.value && logs.value.err) || null;
+                if (!safeSig) return;
 
-                if (safeErr || !safeSig) return;
+                // Heartbeat check
+                if (Math.random() < 0.02) logger.debug(`💓 Pump.fun Heartbeat: Logs flowing...`);
 
-                // Wide Net Filter
                 const isCreate = safeLogs.some(l => 
                     l.includes('Instruction: Create') || 
                     l.includes('Create') || 
@@ -195,7 +212,7 @@ async function setupSubscriptions(connection, db) {
 
                 if (isCreate) await processNewPoolTx(safeSig, connection, db, 'Pump.fun');
             },
-            "processed" // Fast commitment
+            "processed"
         );
         subscriptionIds.push(id2);
         logger.info(`✅ Subscribed to Pump.fun (ID: ${id2})`);
@@ -219,6 +236,7 @@ async function startNewTokenListener() {
 
     await setupSubscriptions(currentConnection, db);
 
+    // WATCHDOG: Reconnect if silence > 2 minutes
     if (watchdogInterval) clearInterval(watchdogInterval);
     watchdogInterval = setInterval(async () => {
         const timeSinceLastLog = Date.now() - lastLogTime;
@@ -236,7 +254,7 @@ async function startNewTokenListener() {
                 lastLogTime = Date.now();
             } catch (err) { logger.error(`❌ Reconnection Failed: ${err.message}`); }
         } else {
-            logger.info(`💓 Listener Alive. Last log: ${mins} mins ago.`);
+            // logger.info(`💓 Listener Alive. Last log: ${mins} mins ago.`);
         }
     }, 60000);
 }

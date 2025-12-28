@@ -13,26 +13,24 @@ const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqC
 function createConnection() {
     const rpcUrl = config.SOLANA_RPC_URL || config.RPC_URL || 'https://api.mainnet-beta.solana.com';
     
-    if (rpcUrl.includes('api.mainnet-beta.solana.com')) {
-        logger.warn("⚠️  WARNING: Using Public Solana RPC. Listeners (WebSockets) will likely fail.");
-    }
-
     // PRIORITY 1: Explicit Env Var
     let wsUrl = config.SOLANA_WSS_URL;
 
-    // PRIORITY 2: Auto-Derive for known providers if not set
+    // PRIORITY 2: Helius API Key (Most Robust)
+    if (!wsUrl && config.HELIUS_API_KEY) {
+        wsUrl = `wss://mainnet.helius-rpc.com/?api-key=${config.HELIUS_API_KEY}`;
+    }
+
+    // PRIORITY 3: Auto-Derive from RPC URL
     if (!wsUrl) {
-        if (rpcUrl.includes('helius') || rpcUrl.includes('quicknode') || rpcUrl.includes('alchemy')) {
+        if (rpcUrl.includes('helius') || rpcUrl.includes('quicknode') || rpcUrl.includes('alchemy') || rpcUrl.includes('devnet')) {
              wsUrl = rpcUrl.replace('https://', 'wss://').replace('http://', 'ws://');
         }
     }
 
     // --- CRITICAL CHECK ---
-    // If we are intended to be a Listener, we MUST have a WSS URL.
-    // If we don't, we log a loud error.
     if (!wsUrl && process.env.SERVICE_TYPE === 'listener') {
-        logger.error("❌ FATAL: No WebSocket URL found! Listeners will not work.");
-        logger.error("   -> Set SOLANA_WSS_URL in your environment.");
+        logger.warn("⚠️  WARNING: No explicit WSS URL found. Listeners might fail on Public RPC.");
     }
 
     const confirmTimeout = 60000;
@@ -56,6 +54,7 @@ function createConnection() {
 
 /**
  * Singleton connection provider.
+ * @param {boolean} forceNew - If true, creates a fresh connection instance (useful for listener restarts)
  */
 function getSolanaConnection(forceNew = false) {
     if (!connection || forceNew) {
