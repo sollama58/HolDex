@@ -573,6 +573,12 @@ function init(deps) {
                 tokenData.volume24h = tokenData.volume24h || 0;
                 tokenData.holders = tokenData.holders || 0;
                 tokenData.kScore = tokenData.k_score || tokenData.kScore || 0;
+                
+                // --- NORMALIZE UPDATED STATUS ---
+                // Force boolean conversion for frontend consistency
+                const rawStatus = token.hasCommunityUpdate || token.hascommunityupdate;
+                tokenData.hasCommunityUpdate = (rawStatus === true || rawStatus === 1 || rawStatus === 'true');
+
                 if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
                 if (tokenData.metadata) { try { const meta = typeof tokenData.metadata === 'string' ? JSON.parse(tokenData.metadata) : tokenData.metadata; const comm = meta.community || {}; tokenData.banner = comm.banner || meta.banner; tokenData.description = comm.description || meta.description; tokenData.twitter = comm.twitter || meta.twitter; tokenData.telegram = comm.telegram || meta.telegram; tokenData.website = comm.website || meta.website; } catch (e) {} }
                 if (pairs.length > 0) { const mainPool = pairs[0]; if (mainPool.price_usd > 0) tokenData.priceUsd = mainPool.price_usd; }
@@ -649,23 +655,26 @@ function init(deps) {
                 lastUpdate: Date.now(),
                 page,
                 limit,
-                tokens: rows.map(r => ({
-                    mint: r.mint, 
-                    name: r.name, 
-                    ticker: r.symbol, 
-                    image: r.image,
-                    marketCap: r.marketcap || r.marketCap || 0,
-                    volume24h: r.volume24h || 0,
-                    priceUsd: r.priceusd || r.priceUsd || 0,
-                    change24h: r.change24h || 0,
-                    change1h: r.change1h || 0,
-                    change5m: r.change5m || 0,
-                    liquidity: r.liquidity || 0,
-                    holders: r.holders || 0, 
-                    hasCommunityUpdate: r.hasCommunityUpdate || r.hascommunityupdate || false,
-                    timestamp: parseInt(r.timestamp),
-                    kScore: r.k_score || 0
-                }))
+                tokens: rows.map(r => {
+                    const rawStatus = r.hasCommunityUpdate || r.hascommunityupdate;
+                    return {
+                        mint: r.mint, 
+                        name: r.name, 
+                        ticker: r.symbol, 
+                        image: r.image,
+                        marketCap: r.marketcap || r.marketCap || 0,
+                        volume24h: r.volume24h || 0,
+                        priceUsd: r.priceusd || r.priceUsd || 0,
+                        change24h: r.change24h || 0,
+                        change1h: r.change1h || 0,
+                        change5m: r.change5m || 0,
+                        liquidity: r.liquidity || 0,
+                        holders: r.holders || 0, 
+                        hasCommunityUpdate: (rawStatus === true || rawStatus === 1 || rawStatus === 'true'),
+                        timestamp: parseInt(r.timestamp),
+                        kScore: r.k_score || 0
+                    };
+                })
             };
 
             if (isGenericView && redis) { try { await redis.set(cacheKey, JSON.stringify(responsePayload), 'EX', 3); } catch(e){} }

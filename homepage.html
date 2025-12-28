@@ -159,7 +159,7 @@
 <!-- TOP NAVIGATION -->
 <nav class="sticky top-0 z-40 px-3 py-3 md:px-6 md:py-4">
     <div class="max-w-[1800px] mx-auto flex flex-col md:flex-row gap-3">
-        <!-- Header Row: Logo -->
+        <!-- Header Row: Logo & Connect -->
         <div class="flex justify-between items-center">
             <div class="flex items-center gap-3 cursor-pointer group" onclick="navigateTo('')">
                 <div class="w-10 h-10 md:w-12 md:h-12 rounded-xl flex items-center justify-center bg-[#451a03] text-orange-500 border-2 border-[#7c2d12] shadow-lg group-hover:border-orange-500 transition relative">
@@ -170,6 +170,13 @@
                 <div>
                     <h1 class="text-2xl md:text-3xl brand-text tracking-tight font-sans">HolDex</h1>
                 </div>
+            </div>
+
+            <!-- Mobile Wallet Connect -->
+            <div class="md:hidden">
+                <button id="mobile-connect-btn" onclick="openWalletModal()" class="bg-[#451a03] border border-[#7c2d12] text-[#fb923c] px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2">
+                    <i data-lucide="wallet" width="14"></i> <span id="mobile-wallet-text">Connect</span>
+                </button>
             </div>
         </div>
         
@@ -209,6 +216,13 @@
 
         <div id="detail-controls" class="hidden w-full md:w-auto md:ml-auto">
             <button onclick="navigateTo('')" class="bg-[#2a1005] border-2 border-[#7c2d12] text-[#9a3412] hover:text-[#ea580c] hover:border-[#ea580c] py-2 px-4 rounded-lg font-bold flex items-center justify-center gap-2 w-full md:w-auto transition"><i data-lucide="arrow-left" width="16"></i> Back to List</button>
+        </div>
+        
+        <!-- Desktop Connect -->
+        <div class="hidden md:block">
+            <button id="desktop-connect-btn" onclick="openWalletModal()" class="bg-[#451a03] border border-[#7c2d12] text-[#fb923c] px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-[#582206] transition">
+                <i data-lucide="wallet" width="14"></i> <span id="desktop-wallet-text">Connect Wallet</span>
+            </button>
         </div>
     </div>
 </nav>
@@ -478,13 +492,13 @@
             <div class="chart-wrapper">
                 <div class="flex items-center justify-between bg-[#2a1005] p-2 border-b border-[#7c2d12]">
                      <div class="flex gap-1">
-                         <button onclick="setResolution('5')" class="res-btn" id="res-5">5m</button>
-                         <button onclick="setResolution('60')" class="res-btn active" id="res-60">1h</button>
+                         <button onclick="setResolution('5')" class="res-btn active" id="res-5">5m</button>
+                         <button onclick="setResolution('60')" class="res-btn" id="res-60">1h</button>
                          <button onclick="setResolution('D')" class="res-btn" id="res-D">1d</button>
                      </div>
                      <div class="flex gap-1">
-                         <button onclick="setChartMode('price')" class="res-btn" id="mode-price">Price</button>
-                         <button onclick="setChartMode('mcap')" class="res-btn active" id="mode-mcap">MCap</button>
+                         <button onclick="setChartMode('price')" class="res-btn active" id="mode-price">Price</button>
+                         <button onclick="setChartMode('mcap')" class="res-btn" id="mode-mcap">MCap</button>
                          <button onclick="toggleScale()" class="res-btn" id="btn-scale">Log</button>
                      </div>
                 </div>
@@ -953,9 +967,9 @@
         const bannerContainer = document.getElementById('detail-banner-container');
         const bannerImg = document.getElementById('detail-banner-img');
         
-        loadingDiv.classList.remove('hidden');
-        contentDiv.style.display = 'none';
-        loadingDiv.innerText = 'Fetching Chain Data...';
+        if (loadingDiv) loadingDiv.classList.remove('hidden');
+        if (contentDiv) contentDiv.style.display = 'none';
+        if (loadingDiv) loadingDiv.innerText = 'Fetching Chain Data...';
         
         try {
             const res = await fetch(`${API_URL}/api/token/${mint}`);
@@ -963,42 +977,65 @@
             
             if(data.success) {
                 const t = data.token;
-                document.getElementById('detail-ticker').innerText = t.ticker || 'UNK';
-                document.getElementById('detail-name').innerText = t.name || 'Unknown';
+                
+                // Handle mixed casing and normalization
+                // This ensures we always get a boolean regardless of 0/1/"true"/"false"
+                const rawStatus = t.hasCommunityUpdate || t.has_community_update;
+                const isVerified = (rawStatus === true || rawStatus === 1 || rawStatus === 'true');
+                console.log(`🔍 Verified Status for ${t.ticker}:`, isVerified, `(Raw: ${rawStatus})`); // Debug log
+
+                const tickerEl = document.getElementById('detail-ticker');
+                const nameEl = document.getElementById('detail-name');
+                if (tickerEl) tickerEl.innerText = t.ticker || 'UNK';
+                if (nameEl) nameEl.innerText = t.name || 'Unknown';
                 
                 const price = t.priceUsd || 0;
-                document.getElementById('stat-price').innerText = (price < 0.01 && price > 0) ? '$'+price.toExponential(2) : '$'+price.toFixed(6);
-                document.getElementById('stat-mcap').innerText = '$' + new Intl.NumberFormat('en', {notation:'compact'}).format(t.marketCap||0);
-                document.getElementById('stat-holders').innerText = (t.holders||0).toLocaleString();
+                const priceEl = document.getElementById('stat-price');
+                if (priceEl) priceEl.innerText = (price < 0.01 && price > 0) ? '$'+price.toExponential(2) : '$'+price.toFixed(6);
+                
+                const mcapEl = document.getElementById('stat-mcap');
+                if (mcapEl) mcapEl.innerText = '$' + new Intl.NumberFormat('en', {notation:'compact'}).format(t.marketCap||0);
+                
+                const holdersEl = document.getElementById('stat-holders');
+                if (holdersEl) holdersEl.innerText = (t.holders||0).toLocaleString();
                 
                 // CONDITIONAL KSCORE DISPLAY
                 const kScoreContainer = document.getElementById('kscore-container');
-                if (t.hasCommunityUpdate) {
-                    kScoreContainer.style.visibility = 'visible';
-                    document.getElementById('stat-kscore').innerText = (t.kScore || '--');
-                } else {
-                    kScoreContainer.style.visibility = 'hidden';
+                if (kScoreContainer) {
+                    if (isVerified) {
+                        kScoreContainer.style.visibility = 'visible';
+                        const kScoreValEl = document.getElementById('stat-kscore');
+                        if (kScoreValEl) kScoreValEl.innerText = (t.kScore || t.k_score || '--');
+                    } else {
+                        kScoreContainer.style.visibility = 'hidden';
+                    }
                 }
                 
                 const c5m = t.change5m || 0;
-                document.getElementById('stat-chg5m').innerHTML = (c5m>0?`+${c5m.toFixed(2)}%`:`${c5m.toFixed(2)}%`);
-                document.getElementById('stat-chg5m').className = c5m>=0?'text-[#4ade80] font-mono text-xs':'text-[#fca5a5] font-mono text-xs';
+                const c5mEl = document.getElementById('stat-chg5m');
+                if (c5mEl) {
+                    c5mEl.innerHTML = (c5m>0?`+${c5m.toFixed(2)}%`:`${c5m.toFixed(2)}%`);
+                    c5mEl.className = c5m>=0?'text-[#4ade80] font-mono text-xs':'text-[#fca5a5] font-mono text-xs';
+                }
                 
                 const c24h = t.change24h || 0;
-                document.getElementById('stat-chg24h').innerHTML = (c24h>0?`+${c24h.toFixed(2)}%`:`${c24h.toFixed(2)}%`);
-                document.getElementById('stat-chg24h').className = c24h>=0?'text-[#4ade80] font-mono text-xs':'text-[#fca5a5] font-mono text-xs';
+                const c24hEl = document.getElementById('stat-chg24h');
+                if (c24hEl) {
+                    c24hEl.innerHTML = (c24h>0?`+${c24h.toFixed(2)}%`:`${c24h.toFixed(2)}%`);
+                    c24hEl.className = c24h>=0?'text-[#4ade80] font-mono text-xs':'text-[#fca5a5] font-mono text-xs';
+                }
                 
                 // BADGE LOGIC IN DESCRIPTION AREA
                 const badgeContainer = document.getElementById('badge-container');
-                const verEl = document.getElementById('detail-verified'); // Original hidden badge
+                const verEl = document.getElementById('detail-verified'); // Original hidden badge in header
                 
                 // We use the new container for better placement
-                if(t.hasCommunityUpdate) {
-                    badgeContainer.innerHTML = `<span class="px-2 py-1 rounded bg-green-900/30 border border-green-500/30 text-green-500 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 w-fit"><i data-lucide="shield-check" width="12"></i> Community Updated</span>`;
-                    verEl.classList.add('hidden'); // Hide old one just in case
+                if(isVerified) {
+                    if (badgeContainer) badgeContainer.innerHTML = `<span class="px-2 py-1 rounded bg-green-900/30 border border-green-500/30 text-green-500 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 w-fit"><i data-lucide="shield-check" width="12"></i> Community Updated</span>`;
+                    if (verEl) verEl.classList.remove('hidden'); // Show checkmark in title if verified
                 } else {
-                    badgeContainer.innerHTML = `<span class="px-2 py-1 rounded bg-red-900/20 border border-red-500/30 text-red-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 w-fit"><i data-lucide="lock" width="12"></i> Community Update Required</span>`;
-                    verEl.classList.add('hidden');
+                    if (badgeContainer) badgeContainer.innerHTML = `<span class="px-2 py-1 rounded bg-red-900/20 border border-red-500/30 text-red-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 w-fit"><i data-lucide="lock" width="12"></i> Community Update Required</span>`;
+                    if (verEl) verEl.classList.add('hidden');
                 }
                 
                 const rawSupply = parseFloat(t.supply || '0');
@@ -1007,53 +1044,62 @@
                 if (currentNormalizedSupply === 0) currentNormalizedSupply = 1000000000;
 
                 const media = document.getElementById('detail-media-container');
-                const imgUrl = t.image || 'https://placehold.co/80';
-                media.innerHTML = `<img src="${imgUrl}" class="w-16 h-16 rounded-lg border-2 border-[#ea580c] bg-black object-cover">`;
+                if (media) {
+                    const imgUrl = t.image || 'https://placehold.co/80';
+                    media.innerHTML = `<img src="${imgUrl}" class="w-16 h-16 rounded-lg border-2 border-[#ea580c] bg-black object-cover">`;
+                }
 
                 const descEl = document.getElementById('detail-desc');
-                if(t.description) { descEl.innerText = t.description; descEl.classList.remove('hidden'); } else { descEl.innerText = ''; descEl.classList.add('hidden'); }
+                if (descEl) {
+                    if(t.description) { descEl.innerText = t.description; descEl.classList.remove('hidden'); } else { descEl.innerText = ''; descEl.classList.add('hidden'); }
+                }
                 
-                if (t.banner && bannerContainer) {
+                if (t.banner && bannerContainer && bannerImg) {
                     bannerImg.src = t.banner;
                     bannerImg.onerror = function() { this.src = FALLBACK_BANNER; };
                     bannerContainer.classList.remove('hidden');
-                } else { bannerContainer.classList.add('hidden'); }
+                } else if (bannerContainer) { bannerContainer.classList.add('hidden'); }
 
                 const actions = document.getElementById('detail-actions');
-                let links = '';
-                if(t.twitter) links += `<a href="${t.twitter}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="twitter" width="16"></i></a>`;
-                if(t.telegram) links += `<a href="${t.telegram}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="send" width="16"></i></a>`;
-                if(t.website) links += `<a href="${t.website}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="globe" width="16"></i></a>`;
-                if(links === '' && t.socials) {
-                    if(t.socials.twitter) links += `<a href="${t.socials.twitter}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="twitter" width="16"></i></a>`;
-                    if(t.socials.telegram) links += `<a href="${t.socials.telegram}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="send" width="16"></i></a>`;
-                    if(t.socials.website) links += `<a href="${t.socials.website}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="globe" width="16"></i></a>`;
+                if (actions) {
+                    let links = '';
+                    if(t.twitter) links += `<a href="${t.twitter}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="twitter" width="16"></i></a>`;
+                    if(t.telegram) links += `<a href="${t.telegram}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="send" width="16"></i></a>`;
+                    if(t.website) links += `<a href="${t.website}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="globe" width="16"></i></a>`;
+                    if(links === '' && t.socials) {
+                        if(t.socials.twitter) links += `<a href="${t.socials.twitter}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="twitter" width="16"></i></a>`;
+                        if(t.socials.telegram) links += `<a href="${t.socials.telegram}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="send" width="16"></i></a>`;
+                        if(t.socials.website) links += `<a href="${t.socials.website}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="globe" width="16"></i></a>`;
+                    }
+                    actions.innerHTML = links + `<button onclick="shareToken()" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c] flex items-center gap-2 text-xs font-bold px-3"><i data-lucide="share-2" width="14"></i> Share</button>`;
                 }
-                actions.innerHTML = links + `<button onclick="shareToken()" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c] flex items-center gap-2 text-xs font-bold px-3"><i data-lucide="share-2" width="14"></i> Share</button>`;
                 
                 if(t.holderHistory) currentHolderHistory = t.holderHistory;
 
                 const lpBody = document.getElementById('lp-list-body');
-                if(t.pairs && t.pairs.length > 0) {
-                    currentPoolAddress = t.pairs[0].address;
-                    lpBody.innerHTML = t.pairs.map(p => `<tr><td class="px-2 py-2 text-[#fb923c] font-bold text-xs">${p.dexId}</td><td class="px-2 py-2 text-right text-xs font-mono">$${(p.priceUsd||0).toFixed(6)}</td><td class="px-2 py-2 text-right text-[#22c55e] text-xs font-mono">$${(p.liquidity?.usd||0).toLocaleString()}</td></tr>`).join('');
-                    const dexName = String(t.pairs[0].dex || t.pairs[0].dexId || "Unknown").toUpperCase();
-                    document.getElementById('chart-pool-name').innerText = `— ${dexName} (Largest Pool)`;
-                } else {
-                    lpBody.innerHTML = '<tr><td colspan="3" class="text-center p-2 text-xs">No pools</td></tr>';
-                    currentPoolAddress = null;
+                if (lpBody) {
+                    if(t.pairs && t.pairs.length > 0) {
+                        currentPoolAddress = t.pairs[0].address;
+                        lpBody.innerHTML = t.pairs.map(p => `<tr><td class="px-2 py-2 text-[#fb923c] font-bold text-xs">${p.dexId}</td><td class="px-2 py-2 text-right text-xs font-mono">$${(p.priceUsd||0).toFixed(6)}</td><td class="px-2 py-2 text-right text-[#22c55e] text-xs font-mono">$${(p.liquidity?.usd||0).toLocaleString()}</td></tr>`).join('');
+                        const dexName = String(t.pairs[0].dex || t.pairs[0].dexId || "Unknown").toUpperCase();
+                        const poolNameEl = document.getElementById('chart-pool-name');
+                        if (poolNameEl) poolNameEl.innerText = `— ${dexName} (Largest Pool)`;
+                    } else {
+                        lpBody.innerHTML = '<tr><td colspan="3" class="text-center p-2 text-xs">No pools</td></tr>';
+                        currentPoolAddress = null;
+                    }
                 }
 
-                loadingDiv.classList.add('hidden');
-                contentDiv.style.display = 'block';
+                if (loadingDiv) loadingDiv.classList.add('hidden');
+                if (contentDiv) contentDiv.style.display = 'block';
                 lucide.createIcons();
                 
                 // Force a layout update before chart init to ensure container has dimensions
                 requestAnimationFrame(() => {
                     initChart(mint, currentPoolAddress);
                 });
-            } else { loadingDiv.innerText = 'Token not found.'; }
-        } catch(e) { console.error(e); loadingDiv.innerText = 'Error fetching data.'; }
+            } else { if (loadingDiv) loadingDiv.innerText = 'Token not found.'; }
+        } catch(e) { console.error(e); if (loadingDiv) loadingDiv.innerText = 'Error fetching data.'; }
     }
 
     // --- CHARTING ---
@@ -1066,12 +1112,8 @@
     };
     window.setChartMode = (mode) => {
         currentChartMode = mode;
-        document.querySelectorAll('.res-btn').forEach(b => {
-             // Only target the mode buttons
-             if (b.id.startsWith('mode-')) b.classList.remove('active');
-        });
-        document.getElementById(`mode-${mode}`).classList.add('active');
-        
+        document.getElementById('mode-price').classList.toggle('active', mode === 'price');
+        document.getElementById('mode-mcap').classList.toggle('active', mode === 'mcap');
         if(currentMint) fetchCandles(currentMint, currentPoolAddress);
     };
     window.toggleScale = () => {
@@ -1451,7 +1493,7 @@
     window.toggleHowItWorksModal = () => toggleModal('how-it-works-modal'); window.closePreview = () => toggleModal('preview-modal');
     window.toggleKScoreModal = () => toggleModal('kscore-modal'); window.toggleInfoModal = () => toggleModal('info-modal');
     
-    // --- NEW FUNCTIONS: Apps & Share ---
+        // --- NEW FUNCTIONS: Apps & Share ---
     window.toggleAppsModal = () => toggleModal('apps-modal');
     window.shareToken = () => {
         const url = window.location.href;
