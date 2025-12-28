@@ -3,7 +3,7 @@
  * -------------------
  * Scans 'pending_growers' Redis set.
  * - Checks MCAP via GeckoTerminal.
- * - Promotion: If MCAP >= $10,000 -> Add to DB.
+ * - Promotion: If MCAP >= $10,000 -> INSERT into DB.
  */
 const axios = require('axios');
 const { getClient } = require('../services/redis');
@@ -13,8 +13,8 @@ const logger = require('../services/logger');
 
 const PENDING_KEY = 'pending_growers';
 const MIN_MCAP_USD = 10000;         
-const PRUNE_AGE_MS = 10 * 60 * 1000; // 10 Minutes
-const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 Hours
+const PRUNE_AGE_MS = 10 * 60 * 1000; 
+const MAX_AGE_MS = 24 * 60 * 60 * 1000; 
 
 const BATCH_SIZE = 50; 
 
@@ -55,7 +55,9 @@ async function scanGrowers(deps) {
             return;
         }
 
-        logger.info(`🌱 Scanner: Checking ${members.length} pending growers...`);
+        logger.info(`🌱 Scanner: Evaluating ${members.length} pending candidates...`);
+
+        let promotedCount = 0;
 
         for (const memberStr of members) {
             let data;
@@ -69,8 +71,11 @@ async function scanGrowers(deps) {
             const { mint, addedAt } = data;
             const now = Date.now();
             const age = now - addedAt;
+            const ageMins = (age / 60000).toFixed(1);
 
+            // 1. Prune Very Old Tokens (24h+)
             if (age > MAX_AGE_MS) {
+                logger.info(`🗑️ Pruning stale grower candidate: ${mint}`);
                 await redis.srem(PENDING_KEY, memberStr);
                 continue;
             }
@@ -80,29 +85,49 @@ async function scanGrowers(deps) {
 
                 const mcap = await checkMarketCap(mint);
 
+                // 2. CHECK PROMOTION CONDITION
                 if (mcap >= MIN_MCAP_USD) {
-                    logger.info(`🚀 GROWER PROMOTED: ${mint} (MCAP: $${mcap.toFixed(0)})`);
+                    console.log(`\n==================================================`);
+                    logger.info(`🚀 [GROWER PROMOTION] Token Qualified!`);
+                    logger.info(`   🎯 Mint:   ${mint}`);
+                    logger.info(`   CX Mcap:   $${mcap.toLocaleString()}`);
                     
-                    // FIXED: Initial Score lowered to 15 (Better than new, but still skeptical)
+                    // INSERT NEW RECORD (Score 15)
                     await db.run(`
-                        INSERT INTO tokens (mint, name, symbol, timestamp, k_score, marketCap) 
-                        VALUES ($1, 'Growth Discovery', 'GROW', $2, 15, $3) 
-                        ON CONFLICT (mint) DO NOTHING
+                        INSERT INTO tokens (mint, name, symbol, timestamp, updated_at, k_score, marketCap, hasCommunityUpdate) 
+                        VALUES ($1, 'Growth Discovery', 'GROW', $2, NOW(), 15, $3, FALSE) 
+                        ON CONFLICT (mint) DO UPDATE SET
+                            k_score = GREATEST(tokens.k_score, 15),
+                            marketCap = $3,
+                            updated_at = NOW()
                     `, [mint, Date.now(), mcap]);
+                    
+                    logger.info(`   ✅ Database: Inserted successfully`);
 
                     await indexTokenOnChain(mint);
+                    logger.info(`   ✅ Indexer:  Triggered deep scan`);
+
                     await redis.srem(PENDING_KEY, memberStr);
+                    console.log(`==================================================\n`);
+
+                    promotedCount++;
                 } 
-                else if (age > PRUNE_AGE_MS && mcap < MIN_MCAP_USD) {
+                // 3. Early Prune (if waiting > 10 mins and still tiny mcap)
+                else if (age > PRUNE_AGE_MS && mcap < (MIN_MCAP_USD * 0.1)) {
+                    // Silent Prune
                     await redis.srem(PENDING_KEY, memberStr);
                 }
                 
             } catch (err) {
                 if (err.message === 'RATE_LIMIT') {
-                    logger.warn("⚠️ Grower Scanner Rate Limited. Pausing batch.");
+                    logger.warn("⚠️ Scanner Rate Limited. Pausing.");
                     break; 
                 }
             }
+        }
+
+        if (promotedCount > 0) {
+            logger.info(`📈 Promoted ${promotedCount} tokens.`);
         }
 
     } catch (e) {
@@ -114,8 +139,8 @@ async function scanGrowers(deps) {
 
 function start(deps) {
     logger.info("🟢 Grower Scanner Started (5m interval).");
+    setTimeout(() => scanGrowers(deps), 5000);
     setInterval(() => scanGrowers(deps), 5 * 60 * 1000);
-    setTimeout(() => scanGrowers(deps), 15000);
 }
 
 module.exports = { start };

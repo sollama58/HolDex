@@ -1,12 +1,13 @@
 const { getSolanaConnection, retryRPC } = require('../services/solana');
 const { getDB } = require('../services/database');
-const { indexTokenOnChain } = require('../services/indexer');
+const { getClient } = require('../services/redis'); 
 const logger = require('../services/logger');
 const { PublicKey } = require('@solana/web3.js');
 
 // --- CONSTANTS ---
 const RAYDIUM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
 const PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5DkzonjNwu78hRvfCKubJ14M5uBEwF6P');
+const PENDING_KEY = 'pending_growers'; 
 
 const IGNORED_MINTS = new Set([
     'So11111111111111111111111111111111111111112', 
@@ -37,7 +38,6 @@ async function processNewPoolTx(signature, connection, db, source) {
     processedSigs.add(signature);
     if (processedSigs.size > 10000) processedSigs.clear();
 
-    // UPDATE HEARTBEAT
     lastLogTime = Date.now();
 
     try {
@@ -77,19 +77,26 @@ async function processNewPoolTx(signature, connection, db, source) {
              });
         }
 
+        const redis = getClient();
+        if (!redis) return;
+
         for (const mint of candidateMints) {
             if (isIgnored(mint)) continue;
-            const exists = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
             
-            if (!exists) {
-                logger.info(`✨ Discovery [${source}]: Found new token ${mint} (Tx: ${signature})`);
-                await db.run(`
-                    INSERT INTO tokens (mint, name, symbol, updated_at, k_score, marketCap, hasCommunityUpdate) 
-                    VALUES ($1, 'New Discovery', 'NEW', NOW(), 10, 0, FALSE) 
-                    ON CONFLICT (mint) DO NOTHING
-                `, [mint]);
-                
-                indexTokenOnChain(mint).catch(e => logger.warn(`Indexing failed for ${mint}: ${e.message}`));
+            // 1. CHECK IF ALREADY IN DB (To avoid re-queueing known tokens)
+            // Optimization: We skip DB check for speed here, relying on Redis set uniqueness.
+            // If it is already in DB, the Scanner will just update it or skip it later.
+            
+            // 2. ADD TO PENDING LIST (Redis)
+            // Use 'SADD' (Set Add) to ensure no duplicates in the queue
+            const data = JSON.stringify({ mint, addedAt: Date.now(), source });
+            const added = await redis.sadd(PENDING_KEY, data);
+            
+            if (added) {
+                console.log(`\n--------------------------------------------------`);
+                logger.info(`🌱 [PENDING LIST] Added: ${mint}`);
+                logger.info(`   📝 Source: ${source}`);
+                console.log(`--------------------------------------------------\n`);
             }
         }
     } catch (e) {
@@ -98,7 +105,6 @@ async function processNewPoolTx(signature, connection, db, source) {
 }
 
 async function setupSubscriptions(connection, db) {
-    // Clear old subscriptions
     if (subscriptionIds.length > 0) {
         subscriptionIds.forEach(id => connection.removeOnLogsListener(id).catch(() => {}));
         subscriptionIds = [];
@@ -110,7 +116,7 @@ async function setupSubscriptions(connection, db) {
         const id1 = connection.onLogs(
             RAYDIUM_PROGRAM_ID,
             async (logs, ctx) => {
-                lastLogTime = Date.now(); // Heartbeat on ANY log
+                lastLogTime = Date.now();
                 if (logs.err) return;
                 const isInit = logs.logs.some(l => l.includes('InitializeInstruction2') || l.includes('initialize2'));
                 if (isInit) await processNewPoolTx(logs.signature, connection, db, 'Raydium');
@@ -125,7 +131,7 @@ async function setupSubscriptions(connection, db) {
         const id2 = connection.onLogs(
             PUMP_PROGRAM_ID,
             async (logs, ctx) => {
-                lastLogTime = Date.now(); // Heartbeat on ANY log
+                lastLogTime = Date.now();
                 if (logs.err) return;
                 const isCreate = logs.logs.some(l => l.includes('Instruction: Create') || l.includes('Program log: Instruction: Create'));
                 if (isCreate) await processNewPoolTx(logs.signature, connection, db, 'Pump.fun');
@@ -139,36 +145,21 @@ async function setupSubscriptions(connection, db) {
 
 async function startNewTokenListener() {
     const db = getDB();
-    
-    // Initial Start
-    currentConnection = getSolanaConnection(true); // Force fresh connection
+    currentConnection = getSolanaConnection(true); 
     await setupSubscriptions(currentConnection, db);
 
-    // WATCHDOG: Checks every 60s
     if (watchdogInterval) clearInterval(watchdogInterval);
-    
     watchdogInterval = setInterval(async () => {
         const timeSinceLastLog = Date.now() - lastLogTime;
-        const minutesSilence = (timeSinceLastLog / 60000).toFixed(1);
-
-        if (timeSinceLastLog > 120000) { // 2 Minutes Silence
-            logger.warn(`⚠️ LISTENERS DEAD? No logs for ${minutesSilence} mins. Reconnecting...`);
-            
+        if (timeSinceLastLog > 120000) { 
+            logger.warn(`⚠️ LISTENERS DEAD? Reconnecting...`);
             try {
-                // 1. Force New Connection
                 currentConnection = getSolanaConnection(true); 
-                
-                // 2. Re-Subscribe
                 await setupSubscriptions(currentConnection, db);
-                
-                // 3. Reset Timer
                 lastLogTime = Date.now();
-                logger.info("♻️ Listener Reconnection Complete.");
-            } catch (err) {
-                logger.error(`❌ Reconnection Failed: ${err.message}`);
-            }
+            } catch (err) { logger.error(`❌ Reconnection Failed: ${err.message}`); }
         } else {
-            logger.info(`💓 Listener Alive. Last log: ${minutesSilence} mins ago.`);
+            logger.info(`💓 Listener Alive. Last log: ${(timeSinceLastLog / 60000).toFixed(1)} mins ago.`);
         }
     }, 60000);
 }
