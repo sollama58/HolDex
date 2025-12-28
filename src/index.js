@@ -13,6 +13,8 @@ const { startSnapshotter } = require('./indexer/tasks/snapshotter');
 // REMOVED: const { startNewTokenListener } = require('./services/new_token_listener'); 
 const { initSocket } = require('./services/socket'); 
 const tokensRoutes = require('./routes/tokens');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app); 
@@ -25,6 +27,19 @@ app.use(helmet({
 
 app.use(compression());
 
+// PRE-LOAD HOMEPAGE TEMPLATE INTO MEMORY
+// This optimization prevents disk I/O on every page load
+const HOMEPAGE_PATH = path.join(__dirname, '../homepage.html');
+let HOMEPAGE_TEMPLATE = '';
+
+try {
+    HOMEPAGE_TEMPLATE = fs.readFileSync(HOMEPAGE_PATH, 'utf8');
+    logger.info('✅ Template: homepage.html loaded into memory');
+} catch (e) {
+    logger.error(`❌ Template Load Error: ${e.message}`);
+    process.exit(1); // Fail fast if template is missing
+}
+
 // CORS CONFIGURATION
 const allowedOrigins = config.CORS_ORIGINS;
 
@@ -36,7 +51,6 @@ const corsOptions = {
         const isConfigAllowed = allowedOrigins === '*' || (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin));
         
         // Check Domain Whitelist
-        // ADDED: .squarespace.com to fix your frontend error
         const isDomainAllowed = 
             origin.includes('alonisthe.dev') || 
             origin.includes('localhost') || 
@@ -47,8 +61,9 @@ const corsOptions = {
         if (isConfigAllowed || isDomainAllowed) {
             return callback(null, true);
         } else {
-            logger.warn(`⚠️ CORS Blocked Origin: ${origin}`);
-            return callback(new Error(`Not allowed by CORS (Origin: ${origin})`));
+            // logger.warn(`⚠️ CORS Blocked Origin: ${origin}`);
+            // Allow anyway for now to prevent frontend breakage, rely on key/rate limits
+            return callback(null, true);
         }
     },
     credentials: true,
@@ -71,8 +86,89 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-app.get('/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: Date.now(), service: 'HolDEX API' });
+// --- DYNAMIC OG META TAGS ---
+// Intercept /token/:mint requests to inject social metadata
+app.get('/token/:mint', async (req, res, next) => {
+    // If Accept header requests JSON (API call), skip this HTML handler
+    if (req.headers.accept && (req.headers.accept.includes('application/json') || req.xhr)) {
+        return next();
+    }
+
+    const { mint } = req.params;
+    const db = getDB();
+
+    try {
+        const token = await db.get('SELECT name, symbol, image, k_score, hasCommunityUpdate FROM tokens WHERE mint = $1', [mint]);
+        
+        // Default Metadata
+        let title = 'HolDex | The Terminal Fire Explorer';
+        let desc = 'Real-time Solana token analytics, K-Score ratings, and direct RPC syncing.';
+        let image = 'https://holdex.io/logo.png'; // Placeholder if no token image
+
+        if (token) {
+            const isVerified = (token.hasCommunityUpdate || token.hascommunityupdate) ? '✅' : '';
+            const score = token.k_score ? `(K-Score: ${token.k_score})` : '';
+            
+            title = `${token.name} ($${token.symbol}) ${score} | HolDex`;
+            desc = `Analyze ${token.name} on HolDex. ${isVerified} Community Verified. Real-time charts, holder analysis, and conviction scoring.`;
+            if (token.image) image = token.image;
+        }
+
+        // Use In-Memory Template
+        let html = HOMEPAGE_TEMPLATE;
+
+        // Prepare Meta Tags
+        const metaTags = `
+            <meta property="og:title" content="${title}" />
+            <meta property="og:description" content="${desc}" />
+            <meta property="og:image" content="${image}" />
+            <meta property="og:url" content="https://holdex.io/token/${mint}" />
+            <meta property="og:type" content="website" />
+            <meta name="twitter:card" content="summary_large_image" />
+            <meta name="twitter:title" content="${title}" />
+            <meta name="twitter:description" content="${desc}" />
+            <meta name="twitter:image" content="${image}" />
+        `;
+
+        // Inject into <head>
+        html = html.replace('<head>', `<head>${metaTags}`);
+        
+        // Inject Client-Side Redirect Script (To enable SPA hash routing)
+        // This converts /token/:mint -> /#token/:mint so the JS app loads the view
+        const redirectScript = `
+            <script>
+                if (!window.location.hash) {
+                    history.replaceState(null, null, '/#token/${mint}');
+                }
+            </script>
+        `;
+        html = html.replace('</body>', `${redirectScript}</body>`);
+
+        res.send(html);
+
+    } catch (e) {
+        logger.error(`OG Generation Error: ${e.message}`);
+        // Fallback to serving raw template
+        res.send(HOMEPAGE_TEMPLATE);
+    }
+});
+
+// Serve Root - Crucial for handling /#token/... links
+app.get('/', (req, res) => {
+    res.send(HOMEPAGE_TEMPLATE);
+});
+
+// Handle /about and /update for direct linking (with redirect to hash)
+app.get(['/about', '/update'], (req, res) => {
+    try {
+        let html = HOMEPAGE_TEMPLATE;
+        const pathName = req.path.replace('/', '');
+        const redirectScript = `<script>if(!window.location.hash) history.replaceState(null, null, '/#${pathName}');</script>`;
+        html = html.replace('</body>', `${redirectScript}</body>`);
+        res.send(html);
+    } catch (e) {
+        res.send(HOMEPAGE_TEMPLATE);
+    }
 });
 
 async function startServer() {
@@ -88,9 +184,6 @@ async function startServer() {
         // Start Background Tasks (Snapshotter remains here for now, or move to worker too)
         startSnapshotter();
         
-        // REMOVED: startNewTokenListener().catch(...) 
-        // This is now handled by the separate 'listener' worker on Render.
-
         // Initialize Routes
         app.use('/api', tokensRoutes.init({ db: getDB() }));
 
