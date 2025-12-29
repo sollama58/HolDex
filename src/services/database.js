@@ -51,31 +51,30 @@ async function initDB() {
 
 async function initSchema(db) {
     try {
-        // --- TOKENS TABLE ---
+        // --- TOKENS TABLE (aligned with production) ---
         await db.exec(`
             CREATE TABLE IF NOT EXISTS tokens (
                 mint TEXT PRIMARY KEY,
                 name TEXT,
-                ticker TEXT,
+                symbol TEXT,
                 image TEXT,
-                banner TEXT,
-                description TEXT,
-                website TEXT,
-                twitter TEXT,
-                tweetUrl TEXT,
-                telegram TEXT,
-                marketCap DOUBLE PRECISION DEFAULT 0,
+                supply TEXT,
+                decimals INTEGER,
+                priceusd DOUBLE PRECISION DEFAULT 0,
+                liquidity DOUBLE PRECISION DEFAULT 0,
+                marketcap DOUBLE PRECISION DEFAULT 0,
                 volume24h DOUBLE PRECISION DEFAULT 0,
-                priceUsd DOUBLE PRECISION DEFAULT 0,
-                change5m DOUBLE PRECISION DEFAULT 0,
-                change1h DOUBLE PRECISION DEFAULT 0,
                 change24h DOUBLE PRECISION DEFAULT 0,
+                change1h DOUBLE PRECISION DEFAULT 0,
+                change5m DOUBLE PRECISION DEFAULT 0,
+                holders INTEGER DEFAULT 0,
+                last_holder_check BIGINT,
+                k_score DOUBLE PRECISION DEFAULT 0,
+                hascommunityupdate BOOLEAN DEFAULT FALSE,
+                metadata TEXT,
                 timestamp BIGINT,
-                lastUpdated BIGINT,
-                last_k_calc BIGINT DEFAULT 0,
-                userPubkey TEXT,
-                hasCommunityUpdate BOOLEAN DEFAULT FALSE,
-                k_score INTEGER DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT NOW(),
+                last_k_score_update BIGINT,
                 conviction_score INTEGER DEFAULT 0,
                 conviction_accumulators INTEGER DEFAULT 0,
                 conviction_holders INTEGER DEFAULT 0,
@@ -95,27 +94,25 @@ async function initSchema(db) {
             await db.exec(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_analyzed INTEGER DEFAULT 0;`);
         } catch(e) { /* columns may already exist */ }
 
-        // --- POOLS TABLE ---
-        // Note: Production may have different schema, CREATE IF NOT EXISTS won't modify existing table
+        // --- POOLS TABLE (aligned with production) ---
         await db.exec(`
             CREATE TABLE IF NOT EXISTS pools (
-                mint TEXT PRIMARY KEY,
-                symbol TEXT,
-                pair_address TEXT,
-                base_vault TEXT,
-                quote_vault TEXT,
-                base_decimals INTEGER,
-                quote_decimals INTEGER
+                address TEXT PRIMARY KEY,
+                mint TEXT,
+                dex TEXT,
+                token_a TEXT NOT NULL,
+                token_b TEXT NOT NULL,
+                reserve_a TEXT,
+                reserve_b TEXT,
+                price_usd DOUBLE PRECISION,
+                liquidity_usd DOUBLE PRECISION,
+                volume_24h DOUBLE PRECISION,
+                created_at BIGINT,
+                symbol TEXT
             );
         `);
 
-        // Add symbol column if it doesn't exist (migration for existing DBs)
-        try {
-            await db.exec(`ALTER TABLE pools ADD COLUMN IF NOT EXISTS symbol TEXT;`);
-        } catch (e) { /* column may already exist */ }
-
         // --- CANDLES TABLE ---
-        // Uses 'symbol' as key (matches production schema)
         await db.exec(`
             CREATE TABLE IF NOT EXISTS candles (
                 symbol TEXT,
@@ -130,20 +127,12 @@ async function initSchema(db) {
 
         try {
             await db.exec(`CREATE INDEX IF NOT EXISTS idx_candles_symbol_time ON candles(symbol, time DESC);`);
-        } catch (e) { /* index may already exist with different definition */ }
+            await db.exec(`CREATE INDEX IF NOT EXISTS idx_pools_mint ON pools(mint);`);
+            await db.exec(`CREATE INDEX IF NOT EXISTS idx_pools_liquidity ON pools(liquidity_usd DESC);`);
+        } catch (e) { /* index may already exist */ }
 
         await db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score);`);
 
-        // --- SEED SOLANA (Example) ---
-        // Seed only if pools table has symbol column
-        try {
-            await db.run(`
-                INSERT INTO pools (mint, symbol, base_vault, quote_vault, base_decimals, quote_decimals)
-                VALUES ('So11111111111111111111111111111111111111112', 'SOL', 'DQyrAcCrDXQ7NeoqGgDCZwBvWDcYmFCjSb9JtteuvPpz', 'HLmqeL62xR1QoZ1HKKbXRrdN1p3ph9EHDW6o72a6WzGV', 9, 6)
-                ON CONFLICT (mint) DO NOTHING;
-            `);
-        } catch (e) { /* seed may fail on incompatible schema */ }
-        
     } catch (err) {
         console.error("❌ Database Schema Init Error:", err);
     }
@@ -182,26 +171,25 @@ async function saveTokenData(db, mint, metadata, timestamp = Date.now()) {
     try {
         await d.run(`
             INSERT INTO tokens (
-                mint, name, ticker, image, 
-                marketCap, volume24h, priceUsd, 
-                timestamp, lastUpdated
+                mint, name, symbol, image,
+                marketcap, volume24h, priceusd,
+                timestamp, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
             ON CONFLICT(mint) DO UPDATE SET
-                marketCap = excluded.marketCap,
-                volume24h = excluded.volume24h,
-                priceUsd = excluded.priceUsd,
-                lastUpdated = excluded.lastUpdated
+                marketcap = EXCLUDED.marketcap,
+                volume24h = EXCLUDED.volume24h,
+                priceusd = EXCLUDED.priceusd,
+                updated_at = NOW()
         `, [
-            mint, 
-            metadata.name, 
-            metadata.ticker, 
-            metadata.image, 
-            metadata.marketCap || 0, 
-            metadata.volume24h || 0, 
-            metadata.priceUsd || 0, 
-            timestamp, 
-            Date.now()
+            mint,
+            metadata.name,
+            metadata.ticker || metadata.symbol,
+            metadata.image,
+            metadata.marketCap || 0,
+            metadata.volume24h || 0,
+            metadata.priceUsd || 0,
+            timestamp
         ]);
     } catch (e) {
         console.error(`Error saving token ${mint}:`, e.message);

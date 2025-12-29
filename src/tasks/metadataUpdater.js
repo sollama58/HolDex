@@ -75,11 +75,15 @@ async function syncTokenData(deps, mint, pairs) {
     const change1h = Number(bestPair.priceChange?.h1 || 0);
     const change24h = Number(bestPair.priceChange?.h24 || 0);
 
+    // Get liquidity from best pair
+    const liquidity = Number(bestPair.liquidity?.usd || 0);
+
     const query = `
-        UPDATE tokens SET 
-        volume24h = $1, marketCap = $2, priceUsd = $3, 
-        change5m = $4, change1h = $5, change24h = $6, 
-        lastUpdated = $7 
+        UPDATE tokens SET
+        volume24h = $1, marketcap = $2, priceusd = $3,
+        liquidity = $4,
+        change5m = $5, change1h = $6, change24h = $7,
+        updated_at = NOW()
         WHERE mint = $8
     `;
 
@@ -87,10 +91,10 @@ async function syncTokenData(deps, mint, pairs) {
         totalVolume,
         marketCap,
         priceUsd,
+        liquidity,
         change5m,
         change1h,
         change24h,
-        Date.now(),
         mint
     ];
 
