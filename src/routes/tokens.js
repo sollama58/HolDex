@@ -215,7 +215,7 @@ function init(deps) {
             const defaultLimit = 1000;
             const defaultTier = 'free';
             
-            await db.run(`INSERT INTO api_keys (key, owner, tier, requests_limit, created_at) VALUES ($1, $2, $3, $4, $5)`, [key, owner, defaultTier, defaultLimit, Date.now()]);
+            await db.run(`INSERT INTO api_keys (key, owner, tier, requests_limit, created_at) VALUES ($1, $2, $3, $4, $5)`, [key, wallet, defaultTier, defaultLimit, Date.now()]);
             
             res.json({ 
                 success: true, 
