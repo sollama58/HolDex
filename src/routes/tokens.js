@@ -1,7 +1,7 @@
 /**
  * Token Routes
  * Platform: PostgreSQL
- * Updated: History endpoint uses MINT instead of SYMBOL
+ * Updated: Candles queried by SYMBOL (production schema compatible)
  */
 const express = require('express');
 const axios = require('axios');
@@ -33,28 +33,76 @@ async function checkExternalRateLimit() {
 function init(deps) {
     const { db } = deps;
 
-    // --- HISTORY ENDPOINT (UPDATED) ---
-    // Fetches OHLC candles by MINT
+    // --- HISTORY ENDPOINT ---
+    // Fetches OHLC candles by MINT (translates to symbol for candles table)
     router.get('/history/:mint', async (req, res) => {
         const { mint } = req.params;
-        
-        // Cache this response for 10s
+
         res.set('Cache-Control', 'public, max-age=10');
 
         try {
-            // Get last 2000 candles
+            // First get the symbol from tokens or pools table
+            const token = await db.get(`SELECT ticker FROM tokens WHERE mint = $1`, [mint]);
+            const pool = await db.get(`SELECT symbol FROM pools WHERE mint = $1`, [mint]);
+            const symbol = token?.ticker || pool?.symbol;
+
+            if (!symbol) {
+                return res.json([]);
+            }
+
+            // Get candles by symbol
             const candles = await db.all(`
-                SELECT time, open, high, low, close 
-                FROM candles 
-                WHERE mint = $1 
-                ORDER BY time ASC 
+                SELECT time, open, high, low, close
+                FROM candles
+                WHERE symbol = $1
+                ORDER BY time ASC
                 LIMIT 2000
-            `, [mint]);
+            `, [symbol]);
 
             res.json(candles || []);
         } catch (e) {
             console.error("History Error:", e);
             res.status(500).json({ error: 'DB Error' });
+        }
+    });
+
+    // --- CANDLES ENDPOINT (for frontend compatibility) ---
+    router.get('/token/:mint/candles', async (req, res) => {
+        const { mint } = req.params;
+        const { resolution = '1', from, to } = req.query;
+
+        res.set('Cache-Control', 'public, max-age=10');
+
+        try {
+            // Get symbol from tokens or pools
+            const token = await db.get(`SELECT ticker FROM tokens WHERE mint = $1`, [mint]);
+            const pool = await db.get(`SELECT symbol FROM pools WHERE mint = $1`, [mint]);
+            const symbol = token?.ticker || pool?.symbol;
+
+            if (!symbol) {
+                return res.json({ success: true, candles: [] });
+            }
+
+            // Build query with optional time range
+            let query = `SELECT time, open, high, low, close FROM candles WHERE symbol = $1`;
+            const params = [symbol];
+
+            if (from) {
+                query += ` AND time >= $${params.length + 1}`;
+                params.push(parseInt(from));
+            }
+            if (to) {
+                query += ` AND time <= $${params.length + 1}`;
+                params.push(parseInt(to));
+            }
+
+            query += ` ORDER BY time ASC LIMIT 2000`;
+
+            const candles = await db.all(query, params);
+            res.json({ success: true, candles: candles || [] });
+        } catch (e) {
+            console.error("Candles Error:", e);
+            res.status(500).json({ success: false, candles: [], error: 'DB Error' });
         }
     });
 

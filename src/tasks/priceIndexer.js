@@ -1,6 +1,6 @@
 /**
  * Price Indexer (Refactored for Stability)
- * - Uses 'mint' as key instead of 'symbol'
+ * - Uses 'symbol' as key for candles (matches production schema)
  * - Handles empty pool tables gracefully
  * - Batches RPC calls efficiently
  */
@@ -103,10 +103,10 @@ async function updatePrices(deps) {
             if (baseVal > 0) {
                 const price = quoteVal / baseVal;
 
-                // Push flatten values
-                queryValues.push(p.mint, timeBucket, price);
-                
-                // ($1, $2, $3, $3, $3, $3) = (mint, time, open, high, low, close)
+                // Push flatten values (use symbol for candles table)
+                queryValues.push(p.symbol, timeBucket, price);
+
+                // ($1, $2, $3, $3, $3, $3) = (symbol, time, open, high, low, close)
                 placeholders.push(`($${paramIndex}, $${paramIndex+1}, $${paramIndex+2}, $${paramIndex+2}, $${paramIndex+2}, $${paramIndex+2})`);
                 
                 paramIndex += 3; 
@@ -117,9 +117,9 @@ async function updatePrices(deps) {
     // 5. Bulk Upsert
     if (placeholders.length > 0) {
         const query = `
-            INSERT INTO candles (mint, time, open, high, low, close)
+            INSERT INTO candles (symbol, time, open, high, low, close)
             VALUES ${placeholders.join(', ')}
-            ON CONFLICT (mint, time) DO UPDATE SET
+            ON CONFLICT (symbol, time) DO UPDATE SET
                 high = GREATEST(candles.high, EXCLUDED.high),
                 low = LEAST(candles.low, EXCLUDED.low),
                 close = EXCLUDED.close;

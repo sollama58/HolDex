@@ -95,9 +95,8 @@ async function initSchema(db) {
             await db.exec(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_analyzed INTEGER DEFAULT 0;`);
         } catch(e) { /* columns may already exist */ }
 
-        // --- POOLS TABLE (Refactored) ---
-        // Changed Primary Key to MINT.
-        // This is crucial because our API queries history by Mint, not by arbitrary Ticker.
+        // --- POOLS TABLE ---
+        // Note: Production may have different schema, CREATE IF NOT EXISTS won't modify existing table
         await db.exec(`
             CREATE TABLE IF NOT EXISTS pools (
                 mint TEXT PRIMARY KEY,
@@ -110,30 +109,40 @@ async function initSchema(db) {
             );
         `);
 
-        // --- CANDLES TABLE (Refactored) ---
-        // Changed 'symbol' to 'mint' to avoid collisions between two tokens named "PEPE".
+        // Add symbol column if it doesn't exist (migration for existing DBs)
+        try {
+            await db.exec(`ALTER TABLE pools ADD COLUMN IF NOT EXISTS symbol TEXT;`);
+        } catch (e) { /* column may already exist */ }
+
+        // --- CANDLES TABLE ---
+        // Uses 'symbol' as key (matches production schema)
         await db.exec(`
             CREATE TABLE IF NOT EXISTS candles (
-                mint TEXT,
-                time BIGINT, 
+                symbol TEXT,
+                time BIGINT,
                 open DOUBLE PRECISION,
                 high DOUBLE PRECISION,
                 low DOUBLE PRECISION,
                 close DOUBLE PRECISION,
-                PRIMARY KEY (mint, time)
+                PRIMARY KEY (symbol, time)
             );
         `);
 
-        await db.exec(`CREATE INDEX IF NOT EXISTS idx_candles_mint_time ON candles(mint, time DESC);`);
+        try {
+            await db.exec(`CREATE INDEX IF NOT EXISTS idx_candles_symbol_time ON candles(symbol, time DESC);`);
+        } catch (e) { /* index may already exist with different definition */ }
+
         await db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score);`);
-        
+
         // --- SEED SOLANA (Example) ---
-        // Using Wrapped SOL Mint
-        await db.run(`
-            INSERT INTO pools (mint, symbol, base_vault, quote_vault, base_decimals, quote_decimals)
-            VALUES ('So11111111111111111111111111111111111111112', 'SOL', 'DQyrAcCrDXQ7NeoqGgDCZwBvWDcYmFCjSb9JtteuvPpz', 'HLmqeL62xR1QoZ1HKKbXRrdN1p3ph9EHDW6o72a6WzGV', 9, 6)
-            ON CONFLICT (mint) DO NOTHING;
-        `);
+        // Seed only if pools table has symbol column
+        try {
+            await db.run(`
+                INSERT INTO pools (mint, symbol, base_vault, quote_vault, base_decimals, quote_decimals)
+                VALUES ('So11111111111111111111111111111111111111112', 'SOL', 'DQyrAcCrDXQ7NeoqGgDCZwBvWDcYmFCjSb9JtteuvPpz', 'HLmqeL62xR1QoZ1HKKbXRrdN1p3ph9EHDW6o72a6WzGV', 9, 6)
+                ON CONFLICT (mint) DO NOTHING;
+            `);
+        } catch (e) { /* seed may fail on incompatible schema */ }
         
     } catch (err) {
         console.error("❌ Database Schema Init Error:", err);

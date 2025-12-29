@@ -399,10 +399,10 @@ async function updateKScores(deps) {
     logger.info("[K-Score] Starting cycle...");
 
     try {
+        // Only calculate K-score for verified tokens to save Helius API credits
         const tokens = await db.all(`
             SELECT * FROM tokens
             WHERE hascommunityupdate = TRUE
-            OR volume24h > 5000
         `);
 
         if (!tokens || tokens.length === 0) {
