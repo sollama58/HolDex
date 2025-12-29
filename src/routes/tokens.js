@@ -41,10 +41,9 @@ function init(deps) {
         res.set('Cache-Control', 'public, max-age=10');
 
         try {
-            // First get the symbol from tokens or pools table
-            const token = await db.get(`SELECT ticker FROM tokens WHERE mint = $1`, [mint]);
+            // Get symbol from pools table (candles use symbol as key)
             const pool = await db.get(`SELECT symbol FROM pools WHERE mint = $1`, [mint]);
-            const symbol = token?.ticker || pool?.symbol;
+            const symbol = pool?.symbol;
 
             if (!symbol) {
                 return res.json([]);
@@ -74,10 +73,9 @@ function init(deps) {
         res.set('Cache-Control', 'public, max-age=10');
 
         try {
-            // Get symbol from tokens or pools
-            const token = await db.get(`SELECT ticker FROM tokens WHERE mint = $1`, [mint]);
+            // Get symbol from pools table (candles use symbol as key)
             const pool = await db.get(`SELECT symbol FROM pools WHERE mint = $1`, [mint]);
-            const symbol = token?.ticker || pool?.symbol;
+            const symbol = pool?.symbol;
 
             if (!symbol) {
                 return res.json({ success: true, candles: [] });
