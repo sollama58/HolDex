@@ -751,7 +751,7 @@
                 if (lpBody) {
                     if(t.pairs && t.pairs.length > 0) {
                         currentPoolAddress = t.pairs[0].address;
-                        lpBody.innerHTML = t.pairs.map(p => `<tr><td class="px-4 py-2 text-[#fb923c] font-bold text-xs">${p.dexId || p.dex || 'Unknown'}</td><td class="px-4 py-2 text-right text-xs font-mono">$${(p.priceUsd||0).toFixed(6)}</td><td class="px-4 py-2 text-right text-[#22c55e] text-xs font-mono">$${(p.liquidity?.usd||0).toLocaleString()}</td></tr>`).join('');
+                        lpBody.innerHTML = t.pairs.map(p => `<tr><td class="px-4 py-2 text-[#fb923c] font-bold text-xs">${p.dexId || p.dex || 'Unknown'}</td><td class="px-4 py-2 text-right text-xs font-mono">$${parseFloat(p.priceUsd||0).toFixed(6)}</td><td class="px-4 py-2 text-right text-[#22c55e] text-xs font-mono">$${parseFloat(p.liquidity?.usd||0).toLocaleString()}</td></tr>`).join('');
                         const poolNameEl = document.getElementById('chart-pool-name');
                         if (poolNameEl) poolNameEl.innerText = `-- ${(t.pairs[0].dex || t.pairs[0].dexId || "Unknown").toUpperCase()}`;
                     } else {
