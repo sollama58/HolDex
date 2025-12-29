@@ -288,7 +288,7 @@ async function calculateConviction(mint) {
 }
 
 // ============================================
-// K-SCORE CALCULATION v3 - 100% ON-CHAIN
+// K-SCORE CALCULATION v4 - WEIGHTED GEOMETRIC MEAN
 // ============================================
 
 /**
@@ -299,71 +299,95 @@ function clamp(val, min, max) {
 }
 
 /**
- * Logarithmic scale with bounds
- * Maps value from [min, max] to [0, maxPts] using log₁₀
- *
- * Formula: pts = maxPts × clamp(log₁₀(value/min) / log₁₀(max/min), 0, 1)
+ * Normalize value to 0-1 using logarithmic scale
+ * Maps value from [min, max] to [0, 1] using log₁₀
  */
-function logScale(value, min, max, maxPts) {
+function logNormalize(value, min, max) {
     if (value <= 0 || value < min) return 0;
     const logRange = Math.log10(max / min);
     const logValue = Math.log10(value / min);
-    return maxPts * clamp(logValue / logRange, 0, 1);
+    return clamp(logValue / logRange, 0, 1);
 }
 
 /**
- * K-Score v3 - Pure On-Chain Metrics
+ * K-Score v4 - Weighted Geometric Mean
  *
- * Breakdown (100 max):
- * - Conviction:  50 pts (holder behavior) - Linear 0-100%
- * - Volume:      25 pts (trading activity) - Log scale $1k → $1M
- * - Market Cap:  15 pts (project size)     - Log scale $10k → $100M
- * - Liquidity:   10 pts (trading depth)    - Log scale $1k → $1M
+ * Formula: K = 100 × C^w1 × V^w2 × M^w3 × L^w4
+ * Where w1 + w2 + w3 + w4 = 1
  *
- * NO verification bonus - that's a separate badge, not a score boost.
- * Philosophy: Let on-chain data speak for itself.
+ * Weights:
+ * - Conviction:  0.50 (dominant factor - holder behavior)
+ * - Volume:      0.20 (trading activity)
+ * - Market Cap:  0.15 (project size)
+ * - Liquidity:   0.15 (trading depth)
+ *
+ * Properties:
+ * - Zero in any metric → score approaches 0
+ * - Naturally balanced across all metrics
+ * - No arbitrary point thresholds
+ * - Mathematically elegant and scalable
  */
+const WEIGHTS = {
+    conviction: 0.50,
+    volume: 0.20,
+    mcap: 0.15,
+    liquidity: 0.15
+};
+
 async function computeScoreInternal(mint, dbData = null, skipConviction = false) {
-    let breakdown = { conviction: 0, volume: 0, mcap: 0, liquidity: 0 };
+    // Normalized values (0-1)
+    let normalized = { conviction: 0, volume: 0, mcap: 0, liquidity: 0 };
 
     try {
-        // 1. CONVICTION (Max 50 pts) - Linear: 0-100% → 0-50 pts
+        // 1. CONVICTION - Linear: 0-100% → 0-1
         let convictionData = null;
         if (!skipConviction && HELIUS_API_KEY) {
             convictionData = await calculateConviction(mint);
-            breakdown.conviction = convictionData.score * 0.5;
+            normalized.conviction = convictionData.score / 100;
         }
 
-        // 2. VOLUME 24H (Max 25 pts) - Log scale: $1k → $1M
+        // 2. VOLUME 24H - Log scale: $1k → $10M → 0-1
         if (dbData) {
             const vol = dbData.volume24h || 0;
-            breakdown.volume = logScale(vol, 1000, 1000000, 25);
+            normalized.volume = logNormalize(vol, 1000, 10000000);
         }
 
-        // 3. MARKET CAP (Max 15 pts) - Log scale: $10k → $100M
+        // 3. MARKET CAP - Log scale: $10k → $1B → 0-1
         if (dbData) {
             const mcap = dbData.marketCap || dbData.marketcap || 0;
-            breakdown.mcap = logScale(mcap, 10000, 100000000, 15);
+            normalized.mcap = logNormalize(mcap, 10000, 1000000000);
         }
 
-        // 4. LIQUIDITY (Max 10 pts) - Log scale: $1k → $1M
+        // 4. LIQUIDITY - Log scale: $1k → $10M → 0-1
         if (dbData) {
             const liq = dbData.liquidity || 0;
-            breakdown.liquidity = logScale(liq, 1000, 1000000, 10);
+            normalized.liquidity = logNormalize(liq, 1000, 10000000);
         }
 
-        // Round breakdown values for display
+        // Weighted Geometric Mean: K = 100 × C^w1 × V^w2 × M^w3 × L^w4
+        // Add small epsilon to avoid zero (allows partial scores)
+        const epsilon = 0.01;
+        const C = Math.max(normalized.conviction, epsilon);
+        const V = Math.max(normalized.volume, epsilon);
+        const M = Math.max(normalized.mcap, epsilon);
+        const L = Math.max(normalized.liquidity, epsilon);
+
+        const geometricScore = Math.pow(C, WEIGHTS.conviction) *
+                               Math.pow(V, WEIGHTS.volume) *
+                               Math.pow(M, WEIGHTS.mcap) *
+                               Math.pow(L, WEIGHTS.liquidity);
+
+        const score = Math.round(100 * geometricScore);
+
+        // Display breakdown as percentages
         const displayBreakdown = {
-            conviction: Math.round(breakdown.conviction * 10) / 10,
-            volume: Math.round(breakdown.volume * 10) / 10,
-            mcap: Math.round(breakdown.mcap * 10) / 10,
-            liquidity: Math.round(breakdown.liquidity * 10) / 10
+            conviction: Math.round(normalized.conviction * 100),
+            volume: Math.round(normalized.volume * 100),
+            mcap: Math.round(normalized.mcap * 100),
+            liquidity: Math.round(normalized.liquidity * 100)
         };
 
-        const total = breakdown.conviction + breakdown.volume + breakdown.mcap + breakdown.liquidity;
-        const score = Math.round(Math.min(total, 100));
-
-        logger.info(`[K-Score] ${mint.slice(0,8)}: ${score} pts (conv:${displayBreakdown.conviction} vol:${displayBreakdown.volume} mcap:${displayBreakdown.mcap} liq:${displayBreakdown.liquidity})`);
+        logger.info(`[K-Score] ${mint.slice(0,8)}: ${score} (C:${displayBreakdown.conviction}% V:${displayBreakdown.volume}% M:${displayBreakdown.mcap}% L:${displayBreakdown.liquidity}%)`);
 
         return {
             score,
@@ -373,7 +397,7 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false)
 
     } catch (e) {
         logger.error(`[K-Score] Calc error ${mint}: ${e.message}`);
-        return { score: 0, conviction: null, breakdown };
+        return { score: 0, conviction: null, breakdown: {} };
     }
 }
 
