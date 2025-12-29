@@ -23,7 +23,7 @@ const IGNORED_MINTS = new Set([
 const processedSigs = new Set();
 let subscriptionIds = [];
 let lastLogTime = Date.now();
-let logCounter = 0; // GLOBAL RAW LOG COUNTER
+let logCounter = 0; 
 let watchdogInterval = null;
 let statusInterval = null;
 let currentConnection = null;
@@ -32,8 +32,6 @@ function isIgnored(mint) {
     if (!mint) return true;
     const m = mint.toString().trim();
     if (IGNORED_MINTS.has(m)) return true;
-    // Relaxed validation: just check standard base58 chars and reasonable length
-    // Some valid mints might be slightly outside strict 32-44, but 30-45 is safe.
     if (m.length < 30 || m.length > 45) return true; 
     return false;
 }
@@ -50,53 +48,61 @@ async function processNewPoolTx(signature, connection, db, source) {
 
     try {
         let tx = null;
-        // RETRY LOOP: Wait up to 20s for the TX to be confirmed and visible on RPC
+        // RETRY LOOP: Wait up to 20s for the TX to be confirmed
         for (let i = 0; i < 10; i++) {
             try {
-                // Exponential backoff
                 await new Promise(r => setTimeout(r, 1000 + (i * 1000)));
-                
                 tx = await connection.getParsedTransaction(signature, {
                     maxSupportedTransactionVersion: 0,
                     commitment: 'confirmed' 
                 });
-            } catch (err) {
-                // Ignore network errors during polling
-            }
+            } catch (err) {}
             if (tx && tx.meta && !tx.meta.err) break;
         }
 
         if (!tx) {
-            logger.warn(`   ⚠️ Failed to fetch TX body for ${signature} after retries.`);
+            logger.warn(`   ⚠️ Failed to fetch TX body for ${signature}`);
             return;
         }
 
         const candidateMints = new Set();
 
-        // --- UNIVERSAL STRATEGY: Post Token Balances ---
-        // This is the most reliable method for both Raydium and Pump.fun.
-        // A "Create" event ALWAYS implies a minting or transfer of the new token.
-        // We look for any mint in postTokenBalances that matches our criteria.
+        // --- STRATEGY A: Post Token Balances ---
         if (tx.meta.postTokenBalances && tx.meta.postTokenBalances.length > 0) {
             tx.meta.postTokenBalances.forEach(bal => {
-                if (bal.mint && !isIgnored(bal.mint)) {
-                    // For Pump.fun, the mint usually has a large initial supply change or balance
-                    candidateMints.add(bal.mint);
-                }
+                if (bal.mint && !isIgnored(bal.mint)) candidateMints.add(bal.mint);
             });
         }
 
-        // --- FALLBACK STRATEGY: Account Keys (Pump.fun Specific) ---
-        // If postTokenBalances is empty (rare but possible with some RPC config), fallback to keys.
+        // --- STRATEGY B: Inner Instructions (MintTo / InitializeMint) ---
+        // This is robust for both Raydium and Pump.fun
+        if (tx.meta.innerInstructions) {
+             tx.meta.innerInstructions.forEach(inner => {
+                 inner.instructions.forEach(inst => {
+                     if (inst.program === 'spl-token' || inst.programId.toString() === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') {
+                         if (inst.parsed) {
+                             if (inst.parsed.type === 'initializeMint' || inst.parsed.type === 'mintTo') {
+                                 const mint = inst.parsed.info.mint;
+                                 if (mint && !isIgnored(mint)) candidateMints.add(mint);
+                             }
+                         }
+                     }
+                 });
+             });
+        }
+
+        // --- STRATEGY C: Account Keys (Pump.fun Fallback) ---
         if (candidateMints.size === 0 && source === 'Pump.fun') {
              const message = tx.transaction.message;
              const keyList = message.accountKeys.staticAccountKeys || message.accountKeys;
-
+             // In Pump.fun "create", the mint is a signer (index 1 or 2 typically)
              if (Array.isArray(keyList)) {
                  keyList.forEach((keyObj, index) => {
-                     if (index === 0) return; // Skip Payer
+                     if (index === 0) return; 
                      const pubkey = keyObj.pubkey ? keyObj.pubkey.toString() : keyObj.toString();
+                     const isSigner = typeof keyObj === 'object' ? keyObj.signer : false; // If simple string, assume not signer unless we parse header
                      
+                     // We just add all non-system accounts as candidates if they look like mints
                      if (pubkey && !isIgnored(pubkey)) {
                           candidateMints.add(pubkey);
                      }
@@ -104,25 +110,8 @@ async function processNewPoolTx(signature, connection, db, source) {
              }
         }
 
-        // --- FALLBACK STRATEGY: Inner Instructions (MintTo) ---
-        if (candidateMints.size === 0 && tx.meta.innerInstructions) {
-             tx.meta.innerInstructions.forEach(inner => {
-                 inner.instructions.forEach(inst => {
-                     if (inst.program === 'spl-token' && inst.parsed && inst.parsed.type === 'initializeMint') {
-                         const mint = inst.parsed.info.mint;
-                         if (mint && !isIgnored(mint)) candidateMints.add(mint);
-                     }
-                     // Also catch MintTo, as Pump.fun mints immediately after create
-                     if (inst.program === 'spl-token' && inst.parsed && inst.parsed.type === 'mintTo') {
-                         const mint = inst.parsed.info.mint;
-                         if (mint && !isIgnored(mint)) candidateMints.add(mint);
-                     }
-                 });
-             });
-        }
-
         if (candidateMints.size === 0) {
-            logger.debug(`   ❌ No candidate mints found in verified TX ${signature}`);
+            logger.debug(`   ❌ No candidate mints found in ${signature}`);
             return;
         }
 
@@ -133,16 +122,23 @@ async function processNewPoolTx(signature, connection, db, source) {
             
             // CHECK DATABASE DEDUPLICATION
             const exists = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
-            if (exists) continue;
+            if (exists) {
+                // logger.debug(`   Skipping existing mint: ${mint}`);
+                continue;
+            }
 
-            logger.info(`🚀 [NEW TOKEN DETECTED] ${mint} on ${source}`);
+            logger.info(`🚀 [NEW TOKEN FOUND] ${mint} on ${source}`);
 
             // 1. ADD TO DB IMMEDIATELY
-            await db.run(`
-                INSERT INTO tokens (mint, name, symbol, timestamp, k_score, marketCap, hasCommunityUpdate, updated_at) 
-                VALUES ($1, 'New Discovery', 'NEW', $2, 10, 0, FALSE, NOW()) 
-                ON CONFLICT (mint) DO NOTHING
-            `, [mint, Date.now()]);
+            try {
+                await db.run(`
+                    INSERT INTO tokens (mint, name, symbol, timestamp, k_score, marketCap, hasCommunityUpdate, updated_at) 
+                    VALUES ($1, 'New Discovery', 'NEW', $2, 10, 0, FALSE, NOW()) 
+                    ON CONFLICT (mint) DO NOTHING
+                `, [mint, Date.now()]);
+            } catch(dbErr) {
+                logger.error(`DB Insert Error for ${mint}: ${dbErr.message}`);
+            }
 
             // 2. TRIGGER INDEXER
             indexTokenOnChain(mint).catch(e => logger.error(`Indexer failed for ${mint}: ${e.message}`));
@@ -154,31 +150,25 @@ async function processNewPoolTx(signature, connection, db, source) {
             }
         }
     } catch (e) {
-        logger.error(`Listener Processing Error: ${e.message}`);
+        logger.error(`Listener Logic Error: ${e.message}`);
     }
 }
 
 async function setupSubscriptions(connection, db) {
     logger.info("📡 Setting up WebSocket Subscriptions...");
 
-    // RAYDIUM LISTENER
+    // RAYDIUM
     try {
         const id1 = connection.onLogs(
             RAYDIUM_PROGRAM_ID,
             async (logs, ctx) => {
                 logCounter++; 
                 lastLogTime = Date.now();
-                
                 const safeLogs = logs.logs || (logs.value && logs.value.logs) || [];
                 const safeSig = logs.signature || (logs.value && logs.value.signature) || null;
                 if (!safeSig) return;
 
-                const isInit = safeLogs.some(l => 
-                    l.includes('InitializeInstruction2') || 
-                    l.includes('initialize2') ||
-                    l.includes('InitializeMint')
-                );
-                
+                const isInit = safeLogs.some(l => l.includes('InitializeInstruction2') || l.includes('initialize2') || l.includes('InitializeMint'));
                 if (isInit) await processNewPoolTx(safeSig, connection, db, 'Raydium');
             },
             "processed"
@@ -187,25 +177,23 @@ async function setupSubscriptions(connection, db) {
         logger.info(`✅ Subscribed to Raydium (ID: ${id1})`);
     } catch (e) { logger.error(`Raydium Sub Error: ${e.message}`); }
 
-    // PUMP.FUN LISTENER
+    // PUMP.FUN
     try {
         const id2 = connection.onLogs(
             PUMP_PROGRAM_ID,
             async (logs, ctx) => {
                 logCounter++;
                 lastLogTime = Date.now();
-
                 const safeLogs = logs.logs || (logs.value && logs.value.logs) || [];
                 const safeSig = logs.signature || (logs.value && logs.value.signature) || null;
                 if (!safeSig) return;
 
-                // Broader check for Pump.fun creation events
-                // "Instruction: Create" is the standard, but sometimes it appears nested.
-                // We also check for "MintTo" which happens during creation.
+                // Broader check for Pump.fun events
+                // Pump.fun logs often contain "Instruction: Create" or "Program log: Create"
                 const isCreate = safeLogs.some(l => 
                     l.includes('Instruction: Create') || 
-                    l.includes('Program log: Instruction: Create') ||
-                    l.includes('Program log: Create')
+                    l.includes('Program log: Create') || 
+                    l.includes('MintTo') // Fallback
                 );
 
                 if (isCreate) await processNewPoolTx(safeSig, connection, db, 'Pump.fun');
@@ -230,37 +218,30 @@ async function startNewTokenListener() {
     
     // FORCE NEW CONNECTION
     if (currentConnection) {
-        try {
-            subscriptionIds.forEach(id => currentConnection.removeOnLogsListener(id));
-        } catch(e) {}
+        try { subscriptionIds.forEach(id => currentConnection.removeOnLogsListener(id)); } catch(e) {}
         subscriptionIds = [];
     }
 
     currentConnection = getSolanaConnection(true); 
-    logger.info(`🔌 Listener connected. Waiting for logs...`);
+    logger.info(`🔌 Listener connected to ${currentConnection.rpcEndpoint}`);
 
     await setupSubscriptions(currentConnection, db);
 
-    // STATUS LOGGER: Runs every 30 seconds
+    // STATUS LOGGER
     if (statusInterval) clearInterval(statusInterval);
     statusInterval = setInterval(() => {
         const timeSince = (Date.now() - lastLogTime) / 1000;
-        logger.info(`💓 Listener Status: ${logCounter} raw logs processed. Last activity: ${timeSince.toFixed(1)}s ago.`);
-        logCounter = 0; // Reset counter for rate calculation
+        logger.info(`💓 Listener Status: ${logCounter} logs processed. Last activity: ${timeSince.toFixed(1)}s ago.`);
+        logCounter = 0; 
     }, 30000);
 
-    // WATCHDOG: Reconnect if silence > 2 minutes
+    // WATCHDOG
     if (watchdogInterval) clearInterval(watchdogInterval);
     watchdogInterval = setInterval(async () => {
         const timeSinceLastLog = Date.now() - lastLogTime;
-        const mins = (timeSinceLastLog / 60000).toFixed(1);
-        
         if (timeSinceLastLog > 120000) { 
-            logger.warn(`⚠️ LISTENERS DEAD? No logs for ${mins} mins. Reconnecting...`);
-            try {
-                // Hard Restart
-                startNewTokenListener();
-            } catch (err) { logger.error(`❌ Reconnection Failed: ${err.message}`); }
+            logger.warn(`⚠️ LISTENERS DEAD? Reconnecting...`);
+            try { startNewTokenListener(); } catch (err) { logger.error(`❌ Reconnection Failed: ${err.message}`); }
         }
     }, 60000);
 }
