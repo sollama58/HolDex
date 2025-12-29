@@ -44,6 +44,16 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '..', 'homepage.html'));
 });
 
+// --- HEALTH CHECK ---
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        service: 'holdex-api',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime()
+    });
+});
+
 // --- REQUEST LOGGING ---
 app.use((req, res, next) => {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);

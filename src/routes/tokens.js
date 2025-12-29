@@ -249,6 +249,226 @@ function init(deps) {
         res.json(result);
     });
 
+    // --- POOLS ENDPOINT: LP info, DEX ---
+    router.get('/token/:mint/pools', async (req, res) => {
+        const { mint } = req.params;
+        const cacheKey = `api:pools:${mint}`;
+
+        try {
+            const result = await smartCache(cacheKey, 60, async () => {
+                const pools = await db.all(`
+                    SELECT address, dex, token_a, token_b,
+                           liquidity_usd, price_usd, volume_24h,
+                           reserve_a, reserve_b, symbol, created_at
+                    FROM pools
+                    WHERE mint = $1
+                    ORDER BY liquidity_usd DESC NULLS LAST
+                `, [mint]);
+
+                return {
+                    success: true,
+                    mint,
+                    pools: pools.map(p => ({
+                        address: p.address,
+                        dex: p.dex,
+                        symbol: p.symbol,
+                        tokenA: p.token_a,
+                        tokenB: p.token_b,
+                        reserveA: p.reserve_a || 0,
+                        reserveB: p.reserve_b || 0,
+                        liquidityUsd: p.liquidity_usd || 0,
+                        priceUsd: p.price_usd || 0,
+                        volume24h: p.volume_24h || 0,
+                        createdAt: p.created_at
+                    })),
+                    count: pools.length
+                };
+            });
+            res.json(result);
+        } catch (e) {
+            console.error('[API Error] /pools:', e.message);
+            res.status(500).json({ success: false, pools: [], error: 'Internal server error' });
+        }
+    });
+
+    // --- HOLDERS ENDPOINT: Top holders, distribution ---
+    router.get('/token/:mint/holders', async (req, res) => {
+        const { mint } = req.params;
+        const { limit = 20 } = req.query;
+        const limitVal = Math.min(parseInt(limit) || 20, 100);
+        const cacheKey = `api:holders:${mint}:${limitVal}`;
+
+        try {
+            const result = await smartCache(cacheKey, 120, async () => {
+                // Get token info for context
+                const token = await db.get(
+                    'SELECT holders, supply, decimals FROM tokens WHERE mint = $1',
+                    [mint]
+                );
+
+                // Get top holders (schema: holderpubkey, balance, rank)
+                const holders = await db.all(`
+                    SELECT holderpubkey, balance, rank, updatedat
+                    FROM token_holders
+                    WHERE mint = $1
+                    ORDER BY rank ASC NULLS LAST, balance DESC
+                    LIMIT $2
+                `, [mint, limitVal]);
+
+                // Calculate percentage from supply
+                const supply = token?.supply || 0;
+
+                return {
+                    success: true,
+                    mint,
+                    totalHolders: token?.holders || 0,
+                    supply: supply,
+                    holders: holders.map(h => ({
+                        wallet: h.holderpubkey,
+                        balance: h.balance,
+                        rank: h.rank,
+                        pct: supply > 0 ? Math.round((h.balance / supply) * 10000) / 100 : 0,
+                        lastUpdated: h.updatedat
+                    })),
+                    count: holders.length
+                };
+            });
+            res.json(result);
+        } catch (e) {
+            console.error('[API Error] /holders:', e.message);
+            res.status(500).json({ success: false, holders: [], error: 'Internal server error' });
+        }
+    });
+
+    // --- K-SCORE ENDPOINT: Full breakdown with pillars ---
+    router.get('/token/:mint/kscore', async (req, res) => {
+        const { mint } = req.params;
+        const cacheKey = `api:kscore:${mint}`;
+
+        try {
+            const result = await smartCache(cacheKey, 60, async () => {
+                const token = await db.get(`
+                    SELECT k_score, holders,
+                           conviction_score, conviction_accumulators, conviction_holders,
+                           conviction_reducers, conviction_extractors, conviction_analyzed,
+                           last_k_score_update, timestamp
+                    FROM tokens WHERE mint = $1
+                `, [mint]);
+
+                if (!token || token.k_score === null) {
+                    return { success: false, error: 'K-Score not calculated for this token' };
+                }
+
+                // Reconstruct pillar breakdown from stored data
+                const conviction = token.conviction_score || 0;
+                const accumulators = token.conviction_accumulators || 0;
+                const extractors = token.conviction_extractors || 0;
+                const holders = token.holders || 0;
+
+                // Normalized values (approximations from stored data)
+                const convictionPct = conviction;
+                const accExtRatio = extractors > 0 ? Math.min(accumulators / extractors, 10) : (accumulators > 0 ? 10 : 0);
+
+                return {
+                    success: true,
+                    mint,
+                    kScore: token.k_score,
+                    pillars: {
+                        diamondHands: {
+                            weight: '50%',
+                            components: {
+                                conviction: convictionPct,
+                                accExtRatio: Math.round(accExtRatio * 100) / 100
+                            }
+                        },
+                        organicGrowth: {
+                            weight: '35%',
+                            components: {
+                                holders: holders
+                            }
+                        },
+                        longevity: {
+                            weight: '15%',
+                            components: {
+                                ageDays: token.timestamp ?
+                                    Math.round((Date.now() - token.timestamp) / (1000 * 60 * 60 * 24) * 10) / 10 : 0
+                            }
+                        }
+                    },
+                    conviction: {
+                        score: convictionPct,
+                        accumulators: accumulators,
+                        holders: token.conviction_holders || 0,
+                        reducers: token.conviction_reducers || 0,
+                        extractors: extractors,
+                        analyzed: token.conviction_analyzed || 0
+                    },
+                    lastUpdate: token.last_k_score_update
+                };
+            });
+            res.json(result);
+        } catch (e) {
+            console.error('[API Error] /kscore:', e.message);
+            res.status(500).json({ success: false, error: 'Internal server error' });
+        }
+    });
+
+    // --- BATCH ENDPOINT: Multiple tokens in one call ---
+    router.post('/tokens/batch', async (req, res) => {
+        const { mints } = req.body;
+
+        if (!mints || !Array.isArray(mints)) {
+            return res.status(400).json({ success: false, error: 'mints array required' });
+        }
+
+        // Limit batch size
+        const mintList = mints.slice(0, 50);
+
+        if (mintList.length === 0) {
+            return res.json({ success: true, tokens: [] });
+        }
+
+        try {
+            // Build parameterized query
+            const placeholders = mintList.map((_, i) => `$${i + 1}`).join(', ');
+            const tokens = await db.all(
+                `SELECT * FROM tokens WHERE mint IN (${placeholders})`,
+                mintList
+            );
+
+            const tokenMap = new Map(tokens.map(t => [t.mint, t]));
+
+            res.json({
+                success: true,
+                tokens: mintList.map(mint => {
+                    const t = tokenMap.get(mint);
+                    if (!t) return { mint, found: false };
+                    return {
+                        mint: t.mint,
+                        found: true,
+                        name: t.name,
+                        ticker: t.symbol,
+                        image: t.image,
+                        priceUsd: t.priceusd || 0,
+                        marketCap: t.marketcap || 0,
+                        volume24h: t.volume24h || 0,
+                        change24h: t.change24h || 0,
+                        holders: t.holders || 0,
+                        kScore: t.k_score || 0,
+                        conviction: {
+                            score: t.conviction_score || 0,
+                            accumulators: t.conviction_accumulators || 0
+                        }
+                    };
+                }),
+                count: tokens.length
+            });
+        } catch (e) {
+            console.error('[API Error] /tokens/batch:', e.message);
+            res.status(500).json({ success: false, error: 'Internal server error' });
+        }
+    });
+
     return router;
 }
 
