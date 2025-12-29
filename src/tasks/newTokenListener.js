@@ -74,10 +74,22 @@ async function checkNewTokens(deps) {
             const createdAt = pair.pairCreatedAt || Date.now();
             
             await saveTokenData(null, mint, metadata, createdAt);
-            
+
             knownMints.add(mint);
             addedCount++;
-            
+
+            // Broadcast new token via WebSocket
+            if (deps.broadcast) {
+                deps.broadcast.newToken({
+                    mint,
+                    name: metadata.name,
+                    symbol: metadata.ticker,
+                    marketCap: mcap,
+                    liquidity,
+                    dex: pair.dexId
+                });
+            }
+
             logger.info(`💎 HIGH VALUE DETECT: ${pair.baseToken.symbol} on ${pair.dexId} | MC: $${Math.floor(mcap)} | Liq: $${Math.floor(liquidity)}`);
         }
 

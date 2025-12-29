@@ -32,7 +32,7 @@ async function startLoop(deps) {
 }
 
 async function updatePrices(deps) {
-    const { db } = deps;
+    const { db, broadcast } = deps;
 
     // 1. Fetch Pools Config
     // NOTE: This table MUST be populated by a separate task that resolves Vault addresses.
@@ -90,6 +90,7 @@ async function updatePrices(deps) {
     const queryValues = [];
     const placeholders = [];
     let paramIndex = 1;
+    const priceUpdates = []; // Collect price updates for broadcast
 
     pools.forEach(p => {
         const baseRaw = balances.get(p.base_vault);
@@ -98,7 +99,7 @@ async function updatePrices(deps) {
         if (baseRaw !== undefined && quoteRaw !== undefined) {
             const baseVal = baseRaw / (10 ** p.base_decimals);
             const quoteVal = quoteRaw / (10 ** p.quote_decimals);
-            
+
             // Basic CPMM Price = Quote / Base
             if (baseVal > 0) {
                 const price = quoteVal / baseVal;
@@ -108,8 +109,11 @@ async function updatePrices(deps) {
 
                 // ($1, $2, $3, $3, $3, $3) = (symbol, time, open, high, low, close)
                 placeholders.push(`($${paramIndex}, $${paramIndex+1}, $${paramIndex+2}, $${paramIndex+2}, $${paramIndex+2}, $${paramIndex+2})`);
-                
-                paramIndex += 3; 
+
+                paramIndex += 3;
+
+                // Collect for broadcast
+                priceUpdates.push({ mint: p.mint, price, symbol: p.symbol });
             }
         }
     });
@@ -128,6 +132,17 @@ async function updatePrices(deps) {
         try {
             await db.run(query, queryValues);
             logger.info(`[Indexer] Updated candles for ${placeholders.length} pools.`);
+
+            // Broadcast price updates via WebSocket
+            if (broadcast && priceUpdates.length > 0) {
+                for (const update of priceUpdates) {
+                    broadcast.priceUpdate(update.mint, {
+                        priceUsd: update.price,
+                        symbol: update.symbol,
+                        timestamp: Date.now()
+                    });
+                }
+            }
         } catch (err) {
             logger.error(`[Indexer] DB Write Failed: ${err.message}`);
         }

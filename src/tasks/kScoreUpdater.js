@@ -1138,7 +1138,7 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
  * Update single token score immediately (for admin approval)
  */
 async function updateSingleToken(deps, mint) {
-    const { db } = deps;
+    const { db, broadcast } = deps;
     try {
         const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
         if (!token) return;
@@ -1174,7 +1174,18 @@ async function updateSingleToken(deps, mint) {
             mint
         ]);
 
-        return result.score;
+        // Broadcast K-Score update via WebSocket
+        if (broadcast) {
+            broadcast.kscoreUpdate(mint, {
+                kScore: result.score,
+                conviction: conviction.score || 0,
+                accumulators: conviction.accumulators || 0,
+                holders: conviction.realHoldersCount || 0,
+                timestamp: Date.now()
+            });
+        }
+
+        return result;
     } catch (e) {
         logger.error(`[K-Score] Failed single update for ${mint}:`, e);
         return 0;
@@ -1185,7 +1196,7 @@ async function updateSingleToken(deps, mint) {
  * Batch update K-Scores (scheduled task)
  */
 async function updateKScores(deps) {
-    const { db } = deps;
+    const { db, broadcast } = deps;
 
     logger.info("[K-Score v5] Starting cycle...");
 
@@ -1235,6 +1246,18 @@ async function updateKScores(deps) {
                     Date.now().toString(),
                     t.mint
                 ]);
+
+                // Broadcast K-Score update via WebSocket
+                if (broadcast) {
+                    broadcast.kscoreUpdate(t.mint, {
+                        kScore: result.score,
+                        symbol: t.symbol,
+                        conviction: conviction.score || 0,
+                        accumulators: conviction.accumulators || 0,
+                        holders: conviction.realHoldersCount || 0,
+                        timestamp: Date.now()
+                    });
+                }
 
             } catch (err) {
                 logger.warn(`[K-Score] Failed for ${t.mint}: ${err.message}`);

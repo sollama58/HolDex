@@ -53,7 +53,7 @@ function getBestPair(pairs, mint) {
 }
 
 async function syncTokenData(deps, mint, pairs) {
-    const { db } = deps;
+    const { db, broadcast } = deps;
     if (!pairs || pairs.length === 0) return;
 
     // A. Calculate Aggregate Volume (Sum of ALL pools)
@@ -62,7 +62,7 @@ async function syncTokenData(deps, mint, pairs) {
 
     // B. Select "Best Pair" for Price & Market Cap
     const bestPair = getBestPair(pairs, mint);
-    
+
     if (!bestPair) return;
 
     // Prepare Data
@@ -70,7 +70,7 @@ async function syncTokenData(deps, mint, pairs) {
     // Fallback to marketCap property if FDV is missing.
     const marketCap = Number(bestPair.fdv || bestPair.marketCap || 0);
     const priceUsd = Number(bestPair.priceUsd || 0);
-    
+
     const change5m = Number(bestPair.priceChange?.m5 || 0);
     const change1h = Number(bestPair.priceChange?.h1 || 0);
     const change24h = Number(bestPair.priceChange?.h24 || 0);
@@ -99,6 +99,20 @@ async function syncTokenData(deps, mint, pairs) {
     ];
 
     await db.run(query, params);
+
+    // Broadcast price update via WebSocket
+    if (broadcast) {
+        broadcast.priceUpdate(mint, {
+            priceUsd,
+            marketCap,
+            volume24h: totalVolume,
+            liquidity,
+            change5m,
+            change1h,
+            change24h,
+            timestamp: Date.now()
+        });
+    }
 }
 
 /**
