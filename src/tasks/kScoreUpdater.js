@@ -218,30 +218,56 @@ function classifyRetention(retention) {
 }
 
 /**
- * Calculate conviction score for top 20 real holders
- * Returns 0-100 representing % of holders who maintained/accumulated
+ * Calculate conviction score AND real holders count
+ *
+ * @param {string} mint - Token mint address
+ * @param {number} priceUsd - Current token price in USD
+ * @param {number} decimals - Token decimals (default 9 for SPL)
+ * @returns {Object} { score, analyzed, accumulators, holders, reducers, extractors, realHoldersCount, totalHolders }
  */
-async function calculateConviction(mint) {
+async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9) {
     const TOP_HOLDERS = 20;
     const CANDIDATES = 50;
+    const MIN_USD_VALUE = 1; // $1 minimum to count as "real holder"
 
     try {
         // 1. Fetch all holders
         const allHolders = await fetchTokenHolders(mint);
-        if (allHolders.length === 0) return { score: 0, analyzed: 0 };
+        if (allHolders.length === 0) {
+            return { score: 0, analyzed: 0, realHoldersCount: 0, totalHolders: 0 };
+        }
 
-        // 2. Filter pools from top candidates
+        // 2. Calculate real holders ($1+ balance)
+        let realHoldersCount = 0;
+        if (priceUsd > 0) {
+            const divisor = Math.pow(10, decimals);
+            for (const h of allHolders) {
+                const usdValue = (h.balance / divisor) * priceUsd;
+                if (usdValue >= MIN_USD_VALUE) {
+                    realHoldersCount++;
+                }
+            }
+        } else {
+            // Fallback: count all holders with balance > 0
+            realHoldersCount = allHolders.length;
+        }
+
+        logger.info(`[Holders] ${mint.slice(0,8)}: ${realHoldersCount} real ($1+) / ${allHolders.length} total`);
+
+        // 3. Filter pools from top candidates for conviction analysis
         const candidates = allHolders.slice(0, CANDIDATES);
         const poolCheck = await batchCheckPools(candidates.map(h => h.address));
 
-        const realHolders = candidates.filter(h => !poolCheck.get(h.address));
-        const poolsFiltered = candidates.length - realHolders.length;
+        const realCandidates = candidates.filter(h => !poolCheck.get(h.address));
+        const poolsFiltered = candidates.length - realCandidates.length;
 
         logger.info(`[Conviction] ${mint.slice(0,8)}: ${poolsFiltered} pools filtered`);
 
-        // 3. Analyze top 20 real holders
-        const top20 = realHolders.slice(0, TOP_HOLDERS);
-        if (top20.length === 0) return { score: 0, analyzed: 0 };
+        // 4. Analyze top 20 real holders for conviction
+        const top20 = realCandidates.slice(0, TOP_HOLDERS);
+        if (top20.length === 0) {
+            return { score: 0, analyzed: 0, realHoldersCount, totalHolders: allHolders.length };
+        }
 
         let accumulators = 0;
         let holders = 0;
@@ -266,7 +292,9 @@ async function calculateConviction(mint) {
             }
         }
 
-        if (analyzed === 0) return { score: 0, analyzed: 0 };
+        if (analyzed === 0) {
+            return { score: 0, analyzed: 0, realHoldersCount, totalHolders: allHolders.length };
+        }
 
         const score = Math.round(((accumulators + holders) / analyzed) * 100);
 
@@ -278,17 +306,27 @@ async function calculateConviction(mint) {
             accumulators,
             holders,
             reducers,
-            extractors
+            extractors,
+            realHoldersCount,
+            totalHolders: allHolders.length
         };
 
     } catch (error) {
         logger.error(`[Conviction] Error for ${mint}: ${error.message}`);
-        return { score: 0, analyzed: 0, accumulators: 0, holders: 0, reducers: 0, extractors: 0 };
+        return {
+            score: 0, analyzed: 0, accumulators: 0, holders: 0,
+            reducers: 0, extractors: 0, realHoldersCount: 0, totalHolders: 0
+        };
     }
 }
 
+// Backwards compatibility alias
+async function calculateConviction(mint) {
+    return calculateConvictionAndHolders(mint, 0, 9);
+}
+
 // ============================================
-// K-SCORE CALCULATION v4 - WEIGHTED GEOMETRIC MEAN
+// K-SCORE CALCULATION v5 - WITH REAL HOLDERS
 // ============================================
 
 /**
@@ -310,46 +348,54 @@ function logNormalize(value, min, max) {
 }
 
 /**
- * K-Score v4 - Weighted Geometric Mean
+ * K-Score v5 - Weighted Geometric Mean with Real Holders
  *
- * Formula: K = 100 × C^w1 × V^w2 × M^w3 × L^w4
- * Where w1 + w2 + w3 + w4 = 1
+ * Formula: K = 100 × C^0.45 × H^0.20 × L^0.15 × M^0.10 × V^0.10
  *
- * Weights:
- * - Conviction:  0.50 (dominant factor - holder behavior)
- * - Volume:      0.20 (trading activity)
- * - Market Cap:  0.15 (project size)
- * - Liquidity:   0.15 (trading depth)
+ * Weights (sum = 1):
+ * - Conviction:    0.45 (on-chain, hard to fake)
+ * - Real Holders:  0.20 (on-chain, costly to fake)
+ * - Liquidity:     0.15 (on-chain)
+ * - Market Cap:    0.10 (on-chain)
+ * - Volume:        0.10 (DexScreener, can be wash traded)
  *
- * Properties:
- * - Zero in any metric → score approaches 0
- * - Naturally balanced across all metrics
- * - No arbitrary point thresholds
- * - Mathematically elegant and scalable
+ * Normalization ranges:
+ * - Conviction: 0-100% (linear)
+ * - Holders: 100 → 100k (log scale)
+ * - Liquidity: $1k → $10M (log scale)
+ * - Market Cap: $10k → $1B (log scale)
+ * - Volume: $1k → $10M (log scale)
  */
 const WEIGHTS = {
-    conviction: 0.50,
-    volume: 0.20,
-    mcap: 0.15,
-    liquidity: 0.15
+    conviction: 0.45,
+    holders: 0.20,
+    liquidity: 0.15,
+    mcap: 0.10,
+    volume: 0.10
 };
 
 async function computeScoreInternal(mint, dbData = null, skipConviction = false) {
     // Normalized values (0-1)
-    let normalized = { conviction: 0, volume: 0, mcap: 0, liquidity: 0 };
+    let normalized = { conviction: 0, holders: 0, liquidity: 0, mcap: 0, volume: 0 };
 
     try {
-        // 1. CONVICTION - Linear: 0-100% → 0-1
+        // Get price and decimals for holder calculation
+        const priceUsd = dbData?.priceusd || dbData?.priceUsd || 0;
+        const decimals = dbData?.decimals || 9;
+
+        // 1. CONVICTION + REAL HOLDERS (on-chain via Helius)
         let convictionData = null;
         if (!skipConviction && HELIUS_API_KEY) {
-            convictionData = await calculateConviction(mint);
+            convictionData = await calculateConvictionAndHolders(mint, priceUsd, decimals);
             normalized.conviction = convictionData.score / 100;
+            // Holders: 100 → 100,000 log scale
+            normalized.holders = logNormalize(convictionData.realHoldersCount, 100, 100000);
         }
 
-        // 2. VOLUME 24H - Log scale: $1k → $10M → 0-1
+        // 2. LIQUIDITY - Log scale: $1k → $10M → 0-1
         if (dbData) {
-            const vol = dbData.volume24h || 0;
-            normalized.volume = logNormalize(vol, 1000, 10000000);
+            const liq = dbData.liquidity || 0;
+            normalized.liquidity = logNormalize(liq, 1000, 10000000);
         }
 
         // 3. MARKET CAP - Log scale: $10k → $1B → 0-1
@@ -358,36 +404,39 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false)
             normalized.mcap = logNormalize(mcap, 10000, 1000000000);
         }
 
-        // 4. LIQUIDITY - Log scale: $1k → $10M → 0-1
+        // 4. VOLUME 24H - Log scale: $1k → $10M → 0-1 (DexScreener, lower weight)
         if (dbData) {
-            const liq = dbData.liquidity || 0;
-            normalized.liquidity = logNormalize(liq, 1000, 10000000);
+            const vol = dbData.volume24h || 0;
+            normalized.volume = logNormalize(vol, 1000, 10000000);
         }
 
-        // Weighted Geometric Mean: K = 100 × C^w1 × V^w2 × M^w3 × L^w4
+        // Weighted Geometric Mean: K = 100 × C^w1 × H^w2 × L^w3 × M^w4 × V^w5
         // Add small epsilon to avoid zero (allows partial scores)
         const epsilon = 0.01;
         const C = Math.max(normalized.conviction, epsilon);
-        const V = Math.max(normalized.volume, epsilon);
-        const M = Math.max(normalized.mcap, epsilon);
+        const H = Math.max(normalized.holders, epsilon);
         const L = Math.max(normalized.liquidity, epsilon);
+        const M = Math.max(normalized.mcap, epsilon);
+        const V = Math.max(normalized.volume, epsilon);
 
         const geometricScore = Math.pow(C, WEIGHTS.conviction) *
-                               Math.pow(V, WEIGHTS.volume) *
+                               Math.pow(H, WEIGHTS.holders) *
+                               Math.pow(L, WEIGHTS.liquidity) *
                                Math.pow(M, WEIGHTS.mcap) *
-                               Math.pow(L, WEIGHTS.liquidity);
+                               Math.pow(V, WEIGHTS.volume);
 
         const score = Math.round(100 * geometricScore);
 
         // Display breakdown as percentages
         const displayBreakdown = {
             conviction: Math.round(normalized.conviction * 100),
-            volume: Math.round(normalized.volume * 100),
+            holders: Math.round(normalized.holders * 100),
+            liquidity: Math.round(normalized.liquidity * 100),
             mcap: Math.round(normalized.mcap * 100),
-            liquidity: Math.round(normalized.liquidity * 100)
+            volume: Math.round(normalized.volume * 100)
         };
 
-        logger.info(`[K-Score] ${mint.slice(0,8)}: ${score} (C:${displayBreakdown.conviction}% V:${displayBreakdown.volume}% M:${displayBreakdown.mcap}% L:${displayBreakdown.liquidity}%)`);
+        logger.info(`[K-Score] ${mint.slice(0,8)}: ${score} (C:${displayBreakdown.conviction}% H:${displayBreakdown.holders}% L:${displayBreakdown.liquidity}% M:${displayBreakdown.mcap}% V:${displayBreakdown.volume}%)`);
 
         return {
             score,
@@ -414,7 +463,7 @@ async function updateSingleToken(deps, mint) {
         const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
         if (!token) return;
 
-        logger.info(`[K-Score] Immediate calc for ${token.ticker}`);
+        logger.info(`[K-Score] Immediate calc for ${token.name || token.ticker}`);
         const result = await computeScoreInternal(mint, token);
         const conviction = result.conviction || {};
 
@@ -427,8 +476,10 @@ async function updateSingleToken(deps, mint) {
                 conviction_holders = $5,
                 conviction_reducers = $6,
                 conviction_extractors = $7,
-                conviction_analyzed = $8
-            WHERE mint = $9
+                conviction_analyzed = $8,
+                holders = $9,
+                last_holder_check = $10
+            WHERE mint = $11
         `, [
             result.score,
             Date.now().toString(),
@@ -438,6 +489,8 @@ async function updateSingleToken(deps, mint) {
             conviction.reducers || 0,
             conviction.extractors || 0,
             conviction.analyzed || 0,
+            conviction.realHoldersCount || 0,
+            Date.now().toString(),
             mint
         ]);
 
@@ -454,7 +507,7 @@ async function updateSingleToken(deps, mint) {
 async function updateKScores(deps) {
     const { db } = deps;
 
-    logger.info("[K-Score v3] Starting cycle...");
+    logger.info("[K-Score v5] Starting cycle...");
 
     try {
         // Only calculate K-Score for verified tokens (saves Helius API credits)
@@ -485,8 +538,10 @@ async function updateKScores(deps) {
                         conviction_holders = $5,
                         conviction_reducers = $6,
                         conviction_extractors = $7,
-                        conviction_analyzed = $8
-                    WHERE mint = $9
+                        conviction_analyzed = $8,
+                        holders = $9,
+                        last_holder_check = $10
+                    WHERE mint = $11
                 `, [
                     result.score,
                     Date.now().toString(),
@@ -496,6 +551,8 @@ async function updateKScores(deps) {
                     conviction.reducers || 0,
                     conviction.extractors || 0,
                     conviction.analyzed || 0,
+                    conviction.realHoldersCount || 0,
+                    Date.now().toString(),
                     t.mint
                 ]);
 
@@ -506,7 +563,7 @@ async function updateKScores(deps) {
             await sleep(500); // Slower between tokens (conviction is heavy)
         }
 
-        logger.info("[K-Score] Cycle complete.");
+        logger.info("[K-Score v5] Cycle complete.");
 
     } catch (e) {
         logger.error("[K-Score] Cycle error", e);
