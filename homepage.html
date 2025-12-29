@@ -60,7 +60,8 @@
         .pill-green { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4); }
         .pill-red { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
         
-        .search-container { position: relative; width: 100%; display: flex; align-items: center; gap: 8px; }
+        /* IMPROVED RESPONSIVE SEARCH CONTAINER */
+        .search-container { position: relative; width: 100%; display: flex; align-items: center; gap: 8px; flex-shrink: 1; min-width: 0; }
         .search-box { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; padding: 10px 36px 10px 16px; border-radius: 8px; outline: none; width: 100%; font-family: 'JetBrains Mono'; transition: border-color 0.2s; font-size: 16px; /* Prevents iOS zoom */ }
         .search-box:focus { border-color: #ea580c; }
         .search-box::placeholder { color: #9a3412; }
@@ -70,7 +71,7 @@
         .nav-btn:hover { color: #fb923c; }
         .nav-btn.active { background: #451a03; color: #ea580c; border-color: #7c2d12; box-shadow: 0 4px 0 #2a1005; }
         
-        .filter-toggle { background: #451a03; border: 2px solid #7c2d12; color: #9a3412; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 11px; font-weight: 700; transition: all 0.2s; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+        .filter-toggle { background: #451a03; border: 2px solid #7c2d12; color: #9a3412; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 11px; font-weight: 700; transition: all 0.2s; display: flex; align-items: center; gap: 6px; white-space: nowrap; flex-shrink: 0; }
         .filter-toggle.active { border-color: #22c55e; color: #4ade80; background: rgba(34, 197, 94, 0.1); }
         
         .refresh-btn { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; transition: all 0.2s; flex-shrink: 0; }
@@ -152,6 +153,10 @@
         
         #detail-banner-container { width: 100%; overflow: hidden; position: relative; background: #000; border-radius: 12px; margin-bottom: 16px; }
         #detail-banner-img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; }
+
+        /* Sort Icon in Header */
+        .sort-icon { display: inline-block; transition: transform 0.2s; }
+        th[data-sort] { cursor: pointer; user-select: none; }
     </style>
 </head>
 <body>
@@ -174,7 +179,7 @@
         </div>
         
         <!-- Controls & Search -->
-        <div id="table-controls" class="flex flex-col md:flex-row md:items-center gap-3 w-full md:w-auto transition-opacity duration-300 md:ml-auto">
+        <div id="table-controls" class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 w-full md:w-auto transition-opacity duration-300 md:ml-auto">
             <!-- Search Row -->
             <div class="flex gap-2 w-full md:w-[400px]">
                 <div class="relative flex-grow search-container">
@@ -211,6 +216,12 @@
             <button onclick="navigateTo('')" class="bg-[#2a1005] border-2 border-[#7c2d12] text-[#9a3412] hover:text-[#ea580c] hover:border-[#ea580c] py-2 px-4 rounded-lg font-bold flex items-center justify-center gap-2 w-full md:w-auto transition"><i data-lucide="arrow-left" width="16"></i> Back to List</button>
         </div>
         
+        <!-- Desktop Connect -->
+        <div class="hidden md:block">
+            <button id="desktop-connect-btn" onclick="openWalletModal()" class="bg-[#451a03] border border-[#7c2d12] text-[#fb923c] px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-[#582206] transition">
+                <i data-lucide="wallet" width="14"></i> <span id="desktop-wallet-text">Connect Wallet</span>
+            </button>
+        </div>
     </div>
 </nav>
 
@@ -224,7 +235,11 @@
                     <thead>
                         <tr>
                             <th class="sort-header w-auto md:w-[30%]" data-sort="newest" onclick="setSort('newest')">Asset <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
-                            <th class="sort-header text-[#ea580c] border-b-[#ea580c] border-b-2 hidden md:table-cell cursor-pointer" onclick="toggleKScoreModal()">Score <i data-lucide="help-circle" width="12" class="inline ml-1"></i></th>
+                            <!-- K-SCORE HEADER: Updated to be sortable but keep help icon -->
+                            <th class="sort-header text-[#ea580c] border-b-[#ea580c] border-b-2 hidden md:table-cell cursor-pointer" data-sort="kscore" onclick="setSort('kscore')">
+                                Score <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i>
+                                <i data-lucide="help-circle" width="12" class="inline ml-1 text-[#9a3412] hover:text-white" onclick="event.stopPropagation(); toggleKScoreModal()"></i>
+                            </th>
                             <!-- PRICE COLUMN REMOVED -->
                             <th class="sort-header hidden md:table-cell" data-sort="1h" onclick="setSort('1h')">1h% <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
                             <th class="sort-header hidden md:table-cell" data-sort="24h" onclick="setSort('24h')">24h% <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
@@ -1281,8 +1296,8 @@
         const container = document.getElementById('holder-chart-container');
         if (container) container.innerHTML = ''; 
     }
-    
- // --- UPDATES & WALLET ---
+
+    // --- UPDATES & WALLET ---
     window.fetchTokenForUpdate = async (mint) => {
         if(!mint || mint.length < 32) return;
         document.getElementById('mint-check-spinner').classList.remove('hidden');
