@@ -419,13 +419,11 @@ async function updateKScores(deps) {
     logger.info("[K-Score v3] Starting cycle...");
 
     try {
-        // Update tokens with meaningful activity (volume or mcap)
-        // Prioritize by volume to focus on active tokens
+        // Only calculate K-Score for verified tokens (saves Helius API credits)
         const tokens = await db.all(`
             SELECT * FROM tokens
-            WHERE (volume24h > 1000 OR marketcap > 10000)
+            WHERE hascommunityupdate = TRUE
             ORDER BY volume24h DESC NULLS LAST
-            LIMIT 50
         `);
 
         if (!tokens || tokens.length === 0) {
