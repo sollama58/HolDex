@@ -288,58 +288,78 @@ async function calculateConviction(mint) {
 }
 
 // ============================================
-// K-SCORE CALCULATION
+// K-SCORE CALCULATION v3 - 100% ON-CHAIN
 // ============================================
 
 /**
- * Compute K-Score with conviction
+ * K-Score v3 - Pure On-Chain Metrics
  *
  * Breakdown (100 max):
- * - Verification:  30 pts (community verified)
- * - Volume:        20 pts (>100k = 20, >10k = 10)
- * - Conviction:    40 pts (scaled from 0-100 conviction)
- * - Market Cap:    10 pts (>100k)
+ * - Conviction:  50 pts (holder behavior - core metric)
+ * - Volume:      25 pts (trading activity)
+ * - Market Cap:  15 pts (project size)
+ * - Liquidity:   10 pts (trading depth)
+ *
+ * NO verification bonus - that's a separate badge, not a score boost.
+ * Philosophy: Let on-chain data speak for itself.
  */
 async function computeScoreInternal(mint, dbData = null, skipConviction = false) {
     let score = 0;
+    let breakdown = { conviction: 0, volume: 0, mcap: 0, liquidity: 0 };
 
     try {
-        // 1. Verification (Max 30 pts)
-        if (dbData && (dbData.hasCommunityUpdate || dbData.hascommunityupdate)) {
-            score += 30;
-        } else {
-            score += 5; // Base discovery
-        }
-
-        // 2. Volume (Max 20 pts)
-        if (dbData) {
-            const vol = dbData.volume24h || 0;
-            if (vol > 100000) score += 20;
-            else if (vol > 10000) score += 10;
-        }
-
-        // 3. Conviction (Max 40 pts) - Only if Helius configured
+        // 1. CONVICTION (Max 50 pts) - Core metric
         let convictionData = null;
         if (!skipConviction && HELIUS_API_KEY) {
             convictionData = await calculateConviction(mint);
-            // Scale: 100% conviction = 40 pts
-            score += Math.round(convictionData.score * 0.4);
+            // Scale: 100% conviction = 50 pts
+            breakdown.conviction = Math.round(convictionData.score * 0.5);
+            score += breakdown.conviction;
         }
 
-        // 4. Market Cap (Max 10 pts)
+        // 2. VOLUME 24H (Max 25 pts) - Graduated scale
+        if (dbData) {
+            const vol = dbData.volume24h || 0;
+            if (vol >= 500000) breakdown.volume = 25;      // 500k+
+            else if (vol >= 100000) breakdown.volume = 20; // 100k+
+            else if (vol >= 50000) breakdown.volume = 15;  // 50k+
+            else if (vol >= 10000) breakdown.volume = 10;  // 10k+
+            else if (vol >= 1000) breakdown.volume = 5;    // 1k+
+            score += breakdown.volume;
+        }
+
+        // 3. MARKET CAP (Max 15 pts) - Graduated scale
         if (dbData) {
             const mcap = dbData.marketCap || dbData.marketcap || 0;
-            if (mcap > 100000) score += 10;
+            if (mcap >= 10000000) breakdown.mcap = 15;     // 10M+
+            else if (mcap >= 1000000) breakdown.mcap = 12; // 1M+
+            else if (mcap >= 500000) breakdown.mcap = 10;  // 500k+
+            else if (mcap >= 100000) breakdown.mcap = 7;   // 100k+
+            else if (mcap >= 10000) breakdown.mcap = 3;    // 10k+
+            score += breakdown.mcap;
         }
+
+        // 4. LIQUIDITY (Max 10 pts) - Graduated scale
+        if (dbData) {
+            const liq = dbData.liquidity || 0;
+            if (liq >= 100000) breakdown.liquidity = 10;   // 100k+
+            else if (liq >= 50000) breakdown.liquidity = 8; // 50k+
+            else if (liq >= 10000) breakdown.liquidity = 5; // 10k+
+            else if (liq >= 1000) breakdown.liquidity = 2;  // 1k+
+            score += breakdown.liquidity;
+        }
+
+        logger.info(`[K-Score] ${mint.slice(0,8)}: ${score} pts (conv:${breakdown.conviction} vol:${breakdown.volume} mcap:${breakdown.mcap} liq:${breakdown.liquidity})`);
 
         return {
             score: Math.min(score, 100),
-            conviction: convictionData
+            conviction: convictionData,
+            breakdown
         };
 
     } catch (e) {
         logger.error(`[K-Score] Calc error ${mint}: ${e.message}`);
-        return { score: 10, conviction: null };
+        return { score: 0, conviction: null, breakdown };
     }
 }
 
@@ -396,13 +416,16 @@ async function updateSingleToken(deps, mint) {
 async function updateKScores(deps) {
     const { db } = deps;
 
-    logger.info("[K-Score] Starting cycle...");
+    logger.info("[K-Score v3] Starting cycle...");
 
     try {
-        // Only calculate K-score for verified tokens to save Helius API credits
+        // Update tokens with meaningful activity (volume or mcap)
+        // Prioritize by volume to focus on active tokens
         const tokens = await db.all(`
             SELECT * FROM tokens
-            WHERE hascommunityupdate = TRUE
+            WHERE (volume24h > 1000 OR marketcap > 10000)
+            ORDER BY volume24h DESC NULLS LAST
+            LIMIT 50
         `);
 
         if (!tokens || tokens.length === 0) {
