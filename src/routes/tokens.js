@@ -553,7 +553,6 @@ function init(deps) {
                 
                 if (!token) return { success: false, error: "Token not found" };
 
-                // NON-BLOCKING REFRESH: If stale, trigger update in background but return current data
                 const now = Date.now();
                 const isStale = !token.timestamp || (now - token.timestamp > 300000); 
                 if (isStale && pairs.length > 0 && !pendingRefreshes.has(mint)) {
@@ -585,11 +584,19 @@ function init(deps) {
                 const rawStatus = token.hasCommunityUpdate || token.hascommunityupdate;
                 tokenData.hasCommunityUpdate = (rawStatus === true || rawStatus === 1 || rawStatus === 'true');
 
+                // --- FORMAT PAIRS FOR FRONTEND ---
+                const formattedPairs = pairs.map(p => ({
+                    dexId: p.dex_id || p.dexId || 'unknown',
+                    priceUsd: p.price_usd || p.priceUsd || 0,
+                    liquidity: { usd: p.liquidity_usd || (p.liquidity && p.liquidity.usd) || 0 },
+                    address: p.address
+                }));
+
                 if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
                 if (tokenData.metadata) { try { const meta = typeof tokenData.metadata === 'string' ? JSON.parse(tokenData.metadata) : tokenData.metadata; const comm = meta.community || {}; tokenData.banner = comm.banner || meta.banner; tokenData.description = comm.description || meta.description; tokenData.twitter = comm.twitter || meta.twitter; tokenData.telegram = comm.telegram || meta.telegram; tokenData.website = comm.website || meta.website; } catch (e) {} }
                 if (pairs.length > 0) { const mainPool = pairs[0]; if (mainPool.price_usd > 0) tokenData.priceUsd = mainPool.price_usd; }
                 const holderHistory = await db.all(`SELECT count, timestamp FROM holders_history WHERE mint = $1 ORDER BY timestamp ASC LIMIT 100`, [mint]);
-                return { success: true, token: { ...tokenData, pairs, holderHistory } };
+                return { success: true, token: { ...tokenData, pairs: formattedPairs, holderHistory } };
             });
             res.json(result);
         } catch(e) { res.status(500).json({ success: false, error: e.message }); }
@@ -661,26 +668,23 @@ function init(deps) {
                 lastUpdate: Date.now(),
                 page,
                 limit,
-                tokens: rows.map(r => {
-                    const rawStatus = r.hasCommunityUpdate || r.hascommunityupdate;
-                    return {
-                        mint: r.mint, 
-                        name: r.name, 
-                        ticker: r.symbol, 
-                        image: r.image,
-                        marketCap: r.marketcap || r.marketCap || 0,
-                        volume24h: r.volume24h || 0,
-                        priceUsd: r.priceusd || r.priceUsd || 0,
-                        change24h: r.change24h || 0,
-                        change1h: r.change1h || 0,
-                        change5m: r.change5m || 0,
-                        liquidity: r.liquidity || 0,
-                        holders: r.holders || 0, 
-                        hasCommunityUpdate: (rawStatus === true || rawStatus === 1 || rawStatus === 'true'),
-                        timestamp: parseInt(r.timestamp),
-                        kScore: r.k_score || 0
-                    };
-                })
+                tokens: rows.map(r => ({
+                    mint: r.mint, 
+                    name: r.name, 
+                    ticker: r.symbol, 
+                    image: r.image,
+                    marketCap: r.marketcap || r.marketCap || 0,
+                    volume24h: r.volume24h || 0,
+                    priceUsd: r.priceusd || r.priceUsd || 0,
+                    change24h: r.change24h || 0,
+                    change1h: r.change1h || 0,
+                    change5m: r.change5m || 0,
+                    liquidity: r.liquidity || 0,
+                    holders: r.holders || 0, 
+                    hasCommunityUpdate: r.hasCommunityUpdate || r.hascommunityupdate || false,
+                    timestamp: parseInt(r.timestamp),
+                    kScore: r.k_score || 0
+                }))
             };
 
             if (isGenericView && redis) { try { await redis.set(cacheKey, JSON.stringify(responsePayload), 'EX', 3); } catch(e){} }
