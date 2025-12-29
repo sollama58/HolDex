@@ -28,6 +28,11 @@ app.use(express.json());
 // --- STATIC FILES (Frontend) ---
 app.use(express.static(path.join(__dirname, '..')));
 
+// Serve homepage.html for root
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, '..', 'homepage.html'));
+});
+
 // --- REQUEST LOGGING ---
 app.use((req, res, next) => {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
