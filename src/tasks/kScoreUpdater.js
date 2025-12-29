@@ -292,69 +292,83 @@ async function calculateConviction(mint) {
 // ============================================
 
 /**
+ * Clamp value between min and max
+ */
+function clamp(val, min, max) {
+    return Math.max(min, Math.min(max, val));
+}
+
+/**
+ * Logarithmic scale with bounds
+ * Maps value from [min, max] to [0, maxPts] using log₁₀
+ *
+ * Formula: pts = maxPts × clamp(log₁₀(value/min) / log₁₀(max/min), 0, 1)
+ */
+function logScale(value, min, max, maxPts) {
+    if (value <= 0 || value < min) return 0;
+    const logRange = Math.log10(max / min);
+    const logValue = Math.log10(value / min);
+    return maxPts * clamp(logValue / logRange, 0, 1);
+}
+
+/**
  * K-Score v3 - Pure On-Chain Metrics
  *
  * Breakdown (100 max):
- * - Conviction:  50 pts (holder behavior - core metric)
- * - Volume:      25 pts (trading activity)
- * - Market Cap:  15 pts (project size)
- * - Liquidity:   10 pts (trading depth)
+ * - Conviction:  50 pts (holder behavior) - Linear 0-100%
+ * - Volume:      25 pts (trading activity) - Log scale $1k → $1M
+ * - Market Cap:  15 pts (project size)     - Log scale $10k → $100M
+ * - Liquidity:   10 pts (trading depth)    - Log scale $1k → $1M
  *
  * NO verification bonus - that's a separate badge, not a score boost.
  * Philosophy: Let on-chain data speak for itself.
  */
 async function computeScoreInternal(mint, dbData = null, skipConviction = false) {
-    let score = 0;
     let breakdown = { conviction: 0, volume: 0, mcap: 0, liquidity: 0 };
 
     try {
-        // 1. CONVICTION (Max 50 pts) - Core metric
+        // 1. CONVICTION (Max 50 pts) - Linear: 0-100% → 0-50 pts
         let convictionData = null;
         if (!skipConviction && HELIUS_API_KEY) {
             convictionData = await calculateConviction(mint);
-            // Scale: 100% conviction = 50 pts
-            breakdown.conviction = Math.round(convictionData.score * 0.5);
-            score += breakdown.conviction;
+            breakdown.conviction = convictionData.score * 0.5;
         }
 
-        // 2. VOLUME 24H (Max 25 pts) - Graduated scale
+        // 2. VOLUME 24H (Max 25 pts) - Log scale: $1k → $1M
         if (dbData) {
             const vol = dbData.volume24h || 0;
-            if (vol >= 500000) breakdown.volume = 25;      // 500k+
-            else if (vol >= 100000) breakdown.volume = 20; // 100k+
-            else if (vol >= 50000) breakdown.volume = 15;  // 50k+
-            else if (vol >= 10000) breakdown.volume = 10;  // 10k+
-            else if (vol >= 1000) breakdown.volume = 5;    // 1k+
-            score += breakdown.volume;
+            breakdown.volume = logScale(vol, 1000, 1000000, 25);
         }
 
-        // 3. MARKET CAP (Max 15 pts) - Graduated scale
+        // 3. MARKET CAP (Max 15 pts) - Log scale: $10k → $100M
         if (dbData) {
             const mcap = dbData.marketCap || dbData.marketcap || 0;
-            if (mcap >= 10000000) breakdown.mcap = 15;     // 10M+
-            else if (mcap >= 1000000) breakdown.mcap = 12; // 1M+
-            else if (mcap >= 500000) breakdown.mcap = 10;  // 500k+
-            else if (mcap >= 100000) breakdown.mcap = 7;   // 100k+
-            else if (mcap >= 10000) breakdown.mcap = 3;    // 10k+
-            score += breakdown.mcap;
+            breakdown.mcap = logScale(mcap, 10000, 100000000, 15);
         }
 
-        // 4. LIQUIDITY (Max 10 pts) - Graduated scale
+        // 4. LIQUIDITY (Max 10 pts) - Log scale: $1k → $1M
         if (dbData) {
             const liq = dbData.liquidity || 0;
-            if (liq >= 100000) breakdown.liquidity = 10;   // 100k+
-            else if (liq >= 50000) breakdown.liquidity = 8; // 50k+
-            else if (liq >= 10000) breakdown.liquidity = 5; // 10k+
-            else if (liq >= 1000) breakdown.liquidity = 2;  // 1k+
-            score += breakdown.liquidity;
+            breakdown.liquidity = logScale(liq, 1000, 1000000, 10);
         }
 
-        logger.info(`[K-Score] ${mint.slice(0,8)}: ${score} pts (conv:${breakdown.conviction} vol:${breakdown.volume} mcap:${breakdown.mcap} liq:${breakdown.liquidity})`);
+        // Round breakdown values for display
+        const displayBreakdown = {
+            conviction: Math.round(breakdown.conviction * 10) / 10,
+            volume: Math.round(breakdown.volume * 10) / 10,
+            mcap: Math.round(breakdown.mcap * 10) / 10,
+            liquidity: Math.round(breakdown.liquidity * 10) / 10
+        };
+
+        const total = breakdown.conviction + breakdown.volume + breakdown.mcap + breakdown.liquidity;
+        const score = Math.round(Math.min(total, 100));
+
+        logger.info(`[K-Score] ${mint.slice(0,8)}: ${score} pts (conv:${displayBreakdown.conviction} vol:${displayBreakdown.volume} mcap:${displayBreakdown.mcap} liq:${displayBreakdown.liquidity})`);
 
         return {
-            score: Math.min(score, 100),
+            score,
             conviction: convictionData,
-            breakdown
+            breakdown: displayBreakdown
         };
 
     } catch (e) {
