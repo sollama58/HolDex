@@ -469,6 +469,31 @@ function init(deps) {
         }
     });
 
+    // --- TRIGGER K-SCORE RECALC (for testing/admin) ---
+    router.post('/token/:mint/recalc', async (req, res) => {
+        const { mint } = req.params;
+
+        try {
+            const kScore = require('../tasks/kScoreUpdater');
+            const result = await kScore.updateSingleToken(deps, mint);
+
+            if (!result) {
+                return res.status(404).json({ success: false, error: 'Token not found' });
+            }
+
+            res.json({
+                success: true,
+                mint,
+                kScore: result.kScore || result.score,
+                conviction: result.metrics?.conviction,
+                broadcasted: !!deps.broadcast
+            });
+        } catch (e) {
+            console.error('[API Error] /recalc:', e.message);
+            res.status(500).json({ success: false, error: 'Recalculation failed' });
+        }
+    });
+
     return router;
 }
 
