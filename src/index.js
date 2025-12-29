@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 const config = require('./config/env');
 const { initDB } = require('./services/database');
 const { initRedis } = require('./services/redis');
@@ -15,9 +16,23 @@ const app = express();
 app.set('trust proxy', 1);
 
 // --- SECURITY & MIDDLEWARE ---
-app.use(helmet());
-app.use(cors({ origin: config.CORS_ORIGINS }));
+app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginResourcePolicy: false,
+    crossOriginOpenerPolicy: false,
+    crossOriginEmbedderPolicy: false
+}));
+app.use(cors({ origin: '*', credentials: true }));
 app.use(express.json());
+
+// --- STATIC FILES (Frontend) ---
+app.use(express.static(path.join(__dirname, '..')));
+
+// --- REQUEST LOGGING ---
+app.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    next();
+});
 
 // --- RATE LIMITING ---
 

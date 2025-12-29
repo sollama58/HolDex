@@ -4,11 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HolDex | The Terminal Fire Explorer</title>
-    
-    <!-- ========================================== -->
-    <!-- 1. ESSENTIAL LIBRARIES                     -->
-    <!-- ========================================== -->
-    
+
     <!-- 1. Buffer (Browser Compatible) -->
     <script src="https://bundle.run/buffer@6.0.3"></script>
     <script>
@@ -20,14 +16,17 @@
     <!-- 2. Solana Web3.js -->
     <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
 
-    <!-- 3. Lightweight Charts (New Custom Charting Engine) -->
+    <!-- 3. Lightweight Charts -->
     <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 
-    <!-- 4. Styling & Icons -->
+    <!-- 4. Socket.IO -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+    <!-- 5. Styling & Icons -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-    
+
     <script>
         tailwind.config = {
             theme: {
@@ -80,28 +79,23 @@
         .view-section { display: none; }
         .view-section.active { display: block; animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-        
-        /* Chart Container */
-        .chart-container { width: 100%; height: 500px; background: #0f0502; border-radius: 16px; overflow: hidden; border: 2px solid #7c2d12; box-shadow: 0 10px 30px rgba(0,0,0,0.5); position: relative; }
+        .chart-container { width: 100%; height: 400px; background: #0f0502; border-radius: 16px; overflow: hidden; border: 2px solid #7c2d12; box-shadow: 0 10px 30px rgba(0,0,0,0.5); position: relative; }
         .chart-loader { position: absolute; inset: 0; background: rgba(15, 5, 2, 0.8); display: flex; align-items: center; justify-content: center; z-index: 10; font-family: 'JetBrains Mono'; color: #ea580c; font-weight: bold; }
-        
         .stat-card { background: rgba(69, 26, 3, 0.8); border: 2px solid #7c2d12; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 4px; box-shadow: 4px 4px 0 rgba(0,0,0,0.2); }
         .stat-label { font-size: 11px; color: #fb923c; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
         .stat-value { font-size: 18px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
         .modal-overlay { position: fixed; inset: 0; background: rgba(15, 5, 2, 0.95); backdrop-filter: blur(5px); z-index: 100; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
         .modal-overlay.open { opacity: 1; pointer-events: auto; }
-        .status-bar { position: fixed; bottom: 0; left: 0; width: 100%; background: #451a03; border-top: 2px solid #ea580c; padding: 0 16px; height: 50px; display: flex; justify-content: space-between; align-items: center; z-index: 50; transition: background 0.2s; box-shadow: 0 -5px 20px rgba(234, 88, 12, 0.2); }
-        .action-btn { background: #451a03; border: 2px solid #ea580c; color: #fb923c; padding: 12px 20px; border-radius: 12px; font-weight: 700; text-transform: uppercase; font-size: 13px; transition: all 0.2s; box-shadow: 4px 4px 0 #7c2d12; }
-        .action-btn:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 #7c2d12; background: #582206; color: #fff; }
         .back-btn { background: #2a1005; border: 2px solid #7c2d12; color: #9a3412; padding: 10px 16px; border-radius: 8px; font-weight: 700; transition: all 0.2s; }
         .back-btn:hover { border-color: #ea580c; color: #ea580c; }
         .sort-header { position: relative; cursor: pointer; user-select: none; }
         .sort-header:active { transform: translateY(1px); }
         .table-scroll-container { max-height: 70vh; overflow-y: auto; border-radius: 0 0 16px 16px; }
-        .form-input { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; padding: 12px; border-radius: 8px; width: 100%; font-family: 'JetBrains Mono'; margin-bottom: 16px; outline: none; transition: border-color 0.2s; }
-        .form-input:focus { border-color: #ea580c; }
-        .social-btn-lg { display: flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 14px; border: 2px solid #7c2d12; background: #451a03; color: #ea580c; transition: all 0.2s; }
-        .social-btn-lg:hover { border-color: #ea580c; color: #fff; background: #582206; transform: translateY(-2px); }
+        .res-btn { background: #2a1005; border: 1px solid #7c2d12; color: #9a3412; padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: bold; cursor: pointer; }
+        .res-btn.active { background: #ea580c; color: white; border-color: #ea580c; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; }
+        .status-dot.online { background: #22c55e; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
     </style>
 </head>
 <body>
@@ -113,18 +107,19 @@
                 <div class="w-12 h-12 rounded-xl flex items-center justify-center bg-[#451a03] text-orange-500 border-2 border-[#7c2d12] shadow-lg group-hover:border-orange-500 transition">
                     <i data-lucide="flame" width="24"></i>
                 </div>
-                <div>
+                <div class="flex items-center gap-2">
                     <h1 class="text-3xl brand-text tracking-tight font-sans">HolDex</h1>
+                    <div id="status-dot-nav" class="status-dot" title="API Status"></div>
                 </div>
             </div>
         </div>
 
         <div class="flex items-center bg-[#451a03]/50 p-1 rounded-lg border border-[#7c2d12]/50">
-            <button class="nav-btn active" onclick="navigateTo('')">Home</button>
-            <button class="nav-btn" onclick="navigateTo('about')">About</button>
-            <button class="nav-btn" onclick="navigateTo('update')">Update</button>
+            <button id="nav-home" class="nav-btn active" onclick="navigateTo('')">Home</button>
+            <button id="nav-about" class="nav-btn" onclick="navigateTo('about')">About</button>
+            <button id="nav-update" class="nav-btn" onclick="navigateTo('update')">Update</button>
         </div>
-        
+
         <div id="table-controls" class="flex items-center gap-3 w-full md:w-auto transition-opacity duration-300">
             <button id="filter-verified" onclick="toggleVerifiedFilter()" class="filter-toggle" title="Show only Verified Community Updates">
                 <i data-lucide="shield-check" width="16"></i> Verified
@@ -133,9 +128,14 @@
                 <i data-lucide="bar-chart-2" width="16"></i> Hide 0 Vol
             </button>
             <div class="relative w-full md:w-auto search-container">
-                <input type="text" id="search" placeholder="Search..." class="search-box" onkeyup="handleSearch(event)">
+                <input type="text" id="search" placeholder="Search..." class="search-box">
                 <i id="clear-search-btn" data-lucide="x" width="16" class="clear-search" onclick="clearSearch()"></i>
             </div>
+            <select id="limit-select" onchange="setLimit(this.value)" class="bg-[#451a03] border-2 border-[#7c2d12] text-[#fb923c] rounded-lg px-2 py-2 text-sm font-mono">
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+            </select>
             <button id="manual-refresh" onclick="handleManualRefresh()" class="refresh-btn" title="Refresh Data">
                 <i data-lucide="refresh-cw" width="18"></i>
             </button>
@@ -148,7 +148,7 @@
 </nav>
 
 <main class="max-w-[1800px] mx-auto px-0 md:px-6 py-4 md:py-8">
-    
+
     <!-- DASHBOARD VIEW -->
     <div id="view-dashboard" class="view-section active">
         <div class="bg-[#2a1005] border-y md:border-2 border-[#7c2d12] md:rounded-2xl overflow-hidden shadow-2xl flex flex-col">
@@ -156,13 +156,13 @@
                 <table class="holdex-table">
                     <thead>
                         <tr>
-                            <th width="40%" class="sort-header" onclick="setSort('newest')">Asset <i data-lucide="arrow-down-up" width="10" class="inline opacity-50 ml-1"></i></th>
-                            <th class="sort-header text-[#ea580c] border-b-[#ea580c] border-b-2" onclick="setSort('kscore')">K-Score</th>
-                            <th class="hidden md:table-cell sort-header" onclick="setSort('5m')">5m</th>
+                            <th width="30%" class="sort-header" onclick="setSort('newest')">Asset <i data-lucide="arrow-down-up" width="10" class="inline opacity-50 ml-1"></i></th>
+                            <th class="sort-header hidden md:table-cell" onclick="setSort('kscore')">K-Score</th>
                             <th class="hidden md:table-cell sort-header" onclick="setSort('1h')">1h</th>
                             <th class="sort-header" onclick="setSort('24h')">24h</th>
+                            <th class="sort-header" onclick="setSort('volume')">Vol (24h)</th>
                             <th class="sort-header" onclick="setSort('mcap')">Mkt Cap</th>
-                            <th class="sort-header" onclick="setSort('volume')">Vol (24h)</th> 
+                            <th class="hidden md:table-cell sort-header" onclick="setSort('holders')">Holders</th>
                             <th class="hidden md:table-cell sort-header" onclick="setSort('age')">Age</th>
                         </tr>
                     </thead>
@@ -171,7 +171,7 @@
                     </tbody>
                 </table>
             </div>
-            
+
             <div class="bg-[#451a03] p-4 border-t-2 border-[#7c2d12] flex justify-between items-center">
                 <div class="text-xs text-[#9a3412] font-mono font-bold uppercase tracking-wider hidden md:block">
                     Showing results
@@ -189,20 +189,25 @@
         </div>
     </div>
 
-    <!-- DETAIL VIEW (WITH CUSTOM CHARTS) -->
+    <!-- DETAIL VIEW -->
     <div id="view-detail" class="view-section px-4 md:px-0">
         <div id="detail-loading" class="text-center py-20 text-[#ea580c] font-mono animate-pulse hidden">Fetching Chain Data...</div>
-        <div id="detail-content">
-            <div id="detail-banner-container" class="hidden mb-6"></div>
+        <div id="detail-content" style="display:none">
+            <div id="detail-banner-container" class="hidden mb-6">
+                <img id="detail-banner-img" src="" class="w-full h-32 md:h-48 object-cover rounded-xl border-2 border-[#7c2d12]" onerror="this.parentElement.classList.add('hidden')">
+            </div>
 
             <div class="flex flex-col md:flex-row gap-6 mb-8 items-start">
                 <div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl">
-                    <img id="detail-img" src="" class="w-20 h-20 rounded-xl border-2 border-[#ea580c] object-cover bg-black shadow-lg">
+                    <div id="detail-media-container">
+                        <img id="detail-img" src="" class="w-16 h-16 rounded-lg border-2 border-[#ea580c] bg-black object-cover">
+                    </div>
                     <div class="flex-1 min-w-0">
                         <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mb-1">
                             <h2 id="detail-ticker" class="text-3xl md:text-4xl font-bold text-white tracking-tight truncate font-mono"></h2>
                             <span id="detail-name" class="text-[#fb923c] text-xs md:text-sm bg-[#2a1005] px-3 py-1 rounded-lg border border-[#7c2d12] truncate"></span>
                         </div>
+                        <div id="badge-container" class="mb-2"></div>
                         <div class="flex items-center gap-2 cursor-pointer group" onclick="copyMint()">
                             <span id="detail-mint" class="text-xs text-[#9a3412] font-mono group-hover:text-[#ea580c] transition truncate max-w-[200px] md:max-w-none"></span>
                             <i data-lucide="copy" width="12" class="text-[#9a3412] group-hover:text-[#ea580c] flex-shrink-0"></i>
@@ -213,18 +218,18 @@
                 <div class="flex-1"></div>
                 <div class="flex flex-wrap gap-3 w-full md:w-auto items-center justify-end" id="detail-actions"></div>
             </div>
-            
-            <div class="grid grid-cols-2 lg:grid-cols-6 gap-3 md:gap-4 mb-6">
-                <div class="stat-card border-[#ea580c] relative overflow-hidden col-span-2">
+
+            <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4 mb-6">
+                <div id="kscore-container" class="stat-card border-[#ea580c] relative overflow-hidden col-span-2">
                     <span class="stat-label text-[#ea580c]">K-Score</span>
                     <div class="flex items-center gap-4">
-                        <span id="stat-kscore" class="stat-value text-[#fb923c] text-2xl font-bold font-mono">🔒</span>
+                        <span id="stat-kscore" class="stat-value text-[#fb923c] text-2xl font-bold font-mono">--</span>
                         <div id="conviction-breakdown" class="hidden flex-1">
-                            <div class="flex gap-1 text-[10px] font-mono mb-1">
-                                <span class="text-green-400" title="Accumulators">📈 <span id="conv-acc">0</span></span>
-                                <span class="text-yellow-400" title="Holders">💎 <span id="conv-hold">0</span></span>
-                                <span class="text-orange-400" title="Reducers">📉 <span id="conv-red">0</span></span>
-                                <span class="text-red-400" title="Extractors">🏃 <span id="conv-ext">0</span></span>
+                            <div class="flex gap-2 text-[10px] font-mono mb-1">
+                                <span class="text-green-400" title="Accumulators">Acc: <span id="conv-acc">0</span></span>
+                                <span class="text-yellow-400" title="Holders">Hold: <span id="conv-hold">0</span></span>
+                                <span class="text-orange-400" title="Reducers">Red: <span id="conv-red">0</span></span>
+                                <span class="text-red-400" title="Extractors">Ext: <span id="conv-ext">0</span></span>
                             </div>
                             <div class="flex h-2 rounded overflow-hidden bg-[#2a1005]">
                                 <div id="bar-acc" class="bg-green-500 transition-all" style="width:0%"></div>
@@ -238,234 +243,681 @@
                 </div>
                 <div class="stat-card"><span class="stat-label">Price</span><span id="stat-price" class="stat-value text-[#ffedd5]">-</span></div>
                 <div class="stat-card"><span class="stat-label">MCap</span><span id="stat-mcap" class="stat-value text-[#ea580c]">-</span></div>
-                <div class="stat-card col-span-2 md:col-span-1"><span class="stat-label">24h Vol</span><span id="stat-vol" class="stat-value text-[#22c55e]">-</span></div>
-                <div class="stat-card"><span class="stat-label">1H</span><span id="stat-chg1h" class="stat-value">-</span></div>
-                <div class="stat-card"><span class="stat-label">24H</span><span id="stat-chg24h" class="stat-value">-</span></div>
+                <div class="stat-card"><span class="stat-label">Holders</span><span id="stat-holders" class="stat-value text-[#3b82f6]">-</span></div>
             </div>
-            
-            <!-- CUSTOM CHART CONTAINER -->
+
+            <div class="grid grid-cols-4 gap-3 mb-6">
+                <div class="stat-card"><span class="stat-label">5M</span><span id="stat-chg5m" class="stat-value text-xs">-</span></div>
+                <div class="stat-card"><span class="stat-label">1H</span><span id="stat-chg1h" class="stat-value text-xs">-</span></div>
+                <div class="stat-card"><span class="stat-label">24H</span><span id="stat-chg24h" class="stat-value text-xs">-</span></div>
+                <div class="stat-card"><span class="stat-label">Vol 24H</span><span id="stat-vol" class="stat-value text-xs text-[#22c55e]">-</span></div>
+            </div>
+
+            <!-- Chart Controls -->
+            <div class="flex items-center gap-2 mb-2 flex-wrap">
+                <span class="text-[#9a3412] text-xs font-bold">CHART:</span>
+                <button id="mode-mcap" class="res-btn active" onclick="setChartMode('mcap')">MCap</button>
+                <button id="mode-price" class="res-btn" onclick="setChartMode('price')">Price</button>
+                <span class="text-[#7c2d12]">|</span>
+                <button id="res-5" class="res-btn" onclick="setResolution('5')">5m</button>
+                <button id="res-60" class="res-btn active" onclick="setResolution('60')">1H</button>
+                <button id="res-D" class="res-btn" onclick="setResolution('D')">1D</button>
+                <span class="text-[#7c2d12]">|</span>
+                <button id="btn-scale" class="res-btn" onclick="toggleScale()">Log</button>
+                <span id="chart-pool-name" class="text-[10px] text-[#9a3412] ml-2"></span>
+            </div>
+
             <div class="chart-container" id="tv-chart">
                 <div id="chart-loader" class="chart-loader">LOADING MARKET DATA...</div>
             </div>
+
+            <!-- LP List -->
+            <div class="mt-6 bg-[#451a03] rounded-xl border-2 border-[#7c2d12] overflow-hidden">
+                <div class="px-4 py-2 border-b border-[#7c2d12] text-xs font-bold text-[#fb923c] uppercase">Liquidity Pools</div>
+                <table class="w-full text-sm">
+                    <thead class="bg-[#2a1005]">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-[#9a3412] text-xs">DEX</th>
+                            <th class="px-4 py-2 text-right text-[#9a3412] text-xs">Price</th>
+                            <th class="px-4 py-2 text-right text-[#9a3412] text-xs">Liquidity</th>
+                        </tr>
+                    </thead>
+                    <tbody id="lp-list-body">
+                        <tr><td colspan="3" class="text-center p-4 text-xs text-[#9a3412]">Loading pools...</td></tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
+
+    <!-- ABOUT VIEW -->
+    <div id="view-about" class="view-section px-4 md:px-0">
+        <div class="max-w-3xl mx-auto bg-[#451a03] rounded-2xl border-2 border-[#7c2d12] p-8">
+            <h2 class="text-3xl font-bold text-[#ea580c] mb-6">About HolDex</h2>
+            <div class="space-y-4 text-[#ffedd5]">
+                <p>HolDex is a conviction-based token explorer for Solana memecoins.</p>
+                <p>Our unique <strong class="text-[#fb923c]">K-Score</strong> algorithm analyzes the top 20 holders of each token to determine their conviction level:</p>
+                <ul class="list-disc list-inside space-y-2 ml-4">
+                    <li><span class="text-green-400">Accumulators</span> - Holders who have increased their position (150%+)</li>
+                    <li><span class="text-yellow-400">Holders</span> - Holders who maintained their position (100%+)</li>
+                    <li><span class="text-orange-400">Reducers</span> - Holders who reduced their position (50-99%)</li>
+                    <li><span class="text-red-400">Extractors</span> - Holders who sold most of their position (&lt;50%)</li>
+                </ul>
+                <p class="mt-6">K-Score formula: <code class="bg-[#2a1005] px-2 py-1 rounded text-[#fb923c]">Verification (30) + Volume (20) + Conviction (40) + MCap (10)</code></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- UPDATE VIEW -->
+    <div id="view-update" class="view-section px-4 md:px-0">
+        <div class="max-w-2xl mx-auto bg-[#451a03] rounded-2xl border-2 border-[#7c2d12] p-8">
+            <h2 class="text-2xl font-bold text-[#ea580c] mb-6">Submit Community Update</h2>
+            <p class="text-[#9a3412] mb-6">Update token metadata to earn verification badge and unlock K-Score.</p>
+            <div class="bg-[#2a1005] rounded-lg p-4 border border-[#7c2d12] text-center">
+                <p class="text-[#fb923c]">Feature coming soon...</p>
+            </div>
+        </div>
+    </div>
+
 </main>
 
+<!-- Holder History Modal -->
+<div id="holder-modal" class="modal-overlay hidden">
+    <div class="bg-[#451a03] rounded-2xl border-2 border-[#7c2d12] p-6 w-full max-w-2xl mx-4">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xl font-bold text-[#fb923c]">Holder History</h3>
+            <button onclick="closeHolderHistory()" class="text-[#9a3412] hover:text-[#ea580c]"><i data-lucide="x" width="24"></i></button>
+        </div>
+        <div id="holder-chart-container" class="w-full h-64 bg-[#0f0502] rounded-lg"></div>
+    </div>
+</div>
+
 <script>
-    const API_URL = 'http://localhost:3000'; // Adjust if needed
-    let pollingInterval;
-    let chartInstance = null;
-    let candleSeries = null;
-    
-    // --- State ---
+    // Auto-detect API URL
+    const API_URL = window.location.origin;
+    const FALLBACK_BANNER = "https://placehold.co/600x200/2a1005/7c2d12?text=HolDex";
+
+    // State
     let currentSort = 'kscore';
+    let currentDirection = 'desc';
     let searchQuery = '';
     let currentPage = 1;
+    let currentLimit = 20;
     let isVerifiedFilter = false;
     let isZeroVolHidden = true;
+    let currentMint = null;
+    let pollingInterval = null;
+    let isLogScale = false;
+    let currentResolution = '60';
+    let currentChartMode = 'mcap';
+    let currentPoolAddress = null;
+    let currentNormalizedSupply = 1;
+    let currentHolderHistory = [];
 
-    window.onload = () => { handleRoute(); };
+    // Charts
+    let chartInstance = null;
+    let candleSeries = null;
+    let holderChart = null;
+    let holderAreaSeries = null;
+    let chartResizeObserver = null;
+
+    // Socket
+    let socket = null;
+
+    const debounce = (func, delay) => {
+        let timeoutId;
+        return (...args) => { clearTimeout(timeoutId); timeoutId = setTimeout(() => func.apply(null, args), delay); };
+    };
+
+    const formatCompact = (v) => v ? '$' + new Intl.NumberFormat('en', {notation:'compact'}).format(v) : '-';
+    const formatMoney = (v) => { if(!v) return '$0.00'; return v < 0.01 ? '$'+v.toExponential(2) : '$'+v.toFixed(6); };
+    const formatPct = (v) => {
+        if (v === undefined || v === null) return '-';
+        const cls = v >= 0 ? 'text-[#4ade80]' : 'text-[#fca5a5]';
+        return `<span class="${cls}">${v >= 0 ? '+' : ''}${v.toFixed(2)}%</span>`;
+    };
+    const timeAgo = (ts) => {
+        if (!ts) return '-';
+        const now = Date.now();
+        const then = typeof ts === 'number' ? ts : new Date(ts).getTime();
+        const diff = now - then;
+        const mins = Math.floor(diff / 60000);
+        if (mins < 60) return `${mins}m`;
+        const hrs = Math.floor(mins / 60);
+        if (hrs < 24) return `${hrs}h`;
+        const days = Math.floor(hrs / 24);
+        return `${days}d`;
+    };
+
+    window.onload = async () => {
+        handleRoute();
+        lucide.createIcons();
+
+        // Socket.IO connection
+        try {
+            socket = io(API_URL, { path: '/socket.io', transports: ['websocket', 'polling'] });
+            socket.on('connect', () => {
+                const dot = document.getElementById('status-dot-nav');
+                if(dot) { dot.classList.remove('offline'); dot.classList.add('online'); }
+                console.log('[Socket] Connected');
+            });
+            socket.on('disconnect', () => {
+                const dot = document.getElementById('status-dot-nav');
+                if(dot) { dot.classList.add('offline'); dot.classList.remove('online'); }
+            });
+            socket.on('update', (data) => { if (currentMint) updateLiveStats(data); });
+        } catch(e) {
+            console.log('[Socket] Not available, using polling');
+        }
+
+        const searchInput = document.getElementById('search');
+        if (searchInput) searchInput.addEventListener('input', debounce((e) => handleSearch(e), 500));
+
+        // Chart resize observer
+        const chartContainer = document.getElementById('tv-chart');
+        if (chartContainer) {
+            chartResizeObserver = new ResizeObserver(entries => {
+                if (entries.length === 0 || !entries[0].contentRect) return;
+                const newRect = entries[0].contentRect;
+                if (chartInstance && newRect.width > 0 && newRect.height > 0) {
+                    chartInstance.applyOptions({ width: newRect.width, height: newRect.height });
+                }
+            });
+            chartResizeObserver.observe(chartContainer);
+        }
+    };
+
     window.addEventListener('hashchange', handleRoute);
 
+    function updateLiveStats(data) {
+        const safeSetText = (id, txt) => { const el = document.getElementById(id); if(el) el.innerText = txt; };
+        const safeSetHTML = (id, htm) => { const el = document.getElementById(id); if(el) el.innerHTML = htm; };
+        safeSetText('stat-price', formatMoney(data.priceUsd));
+        safeSetText('stat-mcap', formatCompact(data.marketCap));
+        safeSetHTML('stat-chg5m', formatPct(data.change5m));
+        safeSetHTML('stat-chg24h', formatPct(data.change24h));
+        safeSetText('stat-holders', (data.holders || 0).toLocaleString());
+    }
+
     function navigateTo(path) { window.location.hash = path; }
-    
+
     function handleRoute() {
         const hash = window.location.hash;
         document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
-        document.getElementById('table-controls').classList.add('hidden');
-        document.getElementById('detail-controls').classList.add('hidden');
-        
+        window.scrollTo(0,0);
+        document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+        const tableControls = document.getElementById('table-controls');
+        const detailControls = document.getElementById('detail-controls');
+        if (tableControls) tableControls.classList.add('hidden');
+        if (detailControls) detailControls.classList.add('hidden');
         if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
 
         if (hash === '' || hash === '#') {
             document.getElementById('view-dashboard').classList.add('active');
-            document.getElementById('table-controls').classList.remove('hidden');
+            document.getElementById('nav-home').classList.add('active');
+            if(tableControls) tableControls.classList.remove('hidden');
             fetchList();
             pollingInterval = setInterval(fetchList, 5000);
+        } else if (hash === '#about') {
+            document.getElementById('view-about').classList.add('active');
+            document.getElementById('nav-about').classList.add('active');
+        } else if (hash === '#update') {
+            document.getElementById('view-update').classList.add('active');
+            document.getElementById('nav-update').classList.add('active');
         } else if (hash.startsWith('#token/')) {
             showDetailView(hash.split('/')[1]);
         }
     }
 
-    // --- CHARTING LOGIC (Lightweight Charts) ---
-    async function initChart(mint) {
-        const container = document.getElementById('tv-chart');
-        const loader = document.getElementById('chart-loader');
-        
-        // Clear previous chart
-        if (chartInstance) {
-            chartInstance.remove();
-            chartInstance = null;
-        }
-        
-        loader.style.display = 'flex';
-        
+    // --- FETCH LIST ---
+    async function fetchList() {
         try {
-            // Fetch History
-            const res = await fetch(`${API_URL}/api/history/${mint}`);
+            const pDisplay = document.getElementById('page-display');
+            const prev = document.getElementById('btn-prev');
+            const next = document.getElementById('btn-next');
+            if(pDisplay) pDisplay.innerText = `Page ${currentPage}`;
+            if(prev) prev.disabled = currentPage <= 1;
+
+            let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&direction=${currentDirection}&search=${encodeURIComponent(searchQuery)}&limit=${currentLimit}&page=${currentPage}`;
+            if (isVerifiedFilter) endpoint += '&filter=verified';
+
+            console.log('[HolDex] Fetching:', endpoint);
+            const res = await fetch(endpoint);
             const data = await res.json();
-            
-            // Transform data for Lightweight Charts (requires sorted timestamps)
-            // Expecting backend: [{ time: UNIX_MS, open, high, low, close }]
-            // Library needs seconds for time
-            const chartData = data.map(d => ({
-                time: d.time / 1000, 
-                open: d.open,
-                high: d.high,
-                low: d.low,
-                close: d.close
-            })).sort((a, b) => a.time - b.time);
 
-            loader.style.display = 'none';
-
-            // Create Chart
-            chartInstance = LightweightCharts.createChart(container, {
-                width: container.clientWidth,
-                height: container.clientHeight,
-                layout: {
-                    background: { type: 'solid', color: '#0f0502' },
-                    textColor: '#9a3412',
-                },
-                grid: {
-                    vertLines: { color: '#2a1005' },
-                    horzLines: { color: '#2a1005' },
-                },
-                timeScale: {
-                    timeVisible: true,
-                    secondsVisible: false,
-                    borderColor: '#7c2d12',
-                },
-                rightPriceScale: {
-                    borderColor: '#7c2d12',
-                },
-            });
-
-            candleSeries = chartInstance.addCandlestickSeries({
-                upColor: '#22c55e',
-                downColor: '#ef4444',
-                borderVisible: false,
-                wickUpColor: '#22c55e',
-                wickDownColor: '#ef4444',
-            });
-
-            if (chartData.length > 0) {
-                candleSeries.setData(chartData);
+            if (data.success) {
+                renderTable(data.tokens);
+                if(next) next.disabled = data.tokens.length < currentLimit;
             }
-
-            // Handle Resize
-            window.addEventListener('resize', () => {
-                if(chartInstance) chartInstance.resize(container.clientWidth, container.clientHeight);
-            });
-
-        } catch (e) {
-            console.error("Chart Error:", e);
-            loader.innerText = "DATA UNAVAILABLE";
-        }
+        } catch (e) { console.error("API Error", e); }
     }
 
-    // --- DETAIL VIEW LOGIC ---
+    function renderTable(tokens) {
+        const tbody = document.getElementById('table-body');
+        if(!tbody) return;
+
+        let displayTokens = tokens;
+        if (isZeroVolHidden) { displayTokens = displayTokens.filter(t => (t.volume24h || 0) > 0); }
+
+        if (displayTokens.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-[#9a3412] font-mono">No tokens found.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = displayTokens.map(t => {
+            const isVerified = t.hasCommunityUpdate || t.has_community_update || t.hascommunityupdate;
+            const score = t.kScore || t.k_score || 0;
+            const kScoreDisplay = isVerified ? (score > 0 ? `<span class="text-[#ea580c]">${score}</span>` : `<span class="animate-pulse">...</span>`) : '<span class="text-gray-600">--</span>';
+            const img = t.image || `https://placehold.co/40x40/2a1005/7c2d12?text=${(t.ticker||'?')[0]}`;
+            const showDiamond = isVerified && score > 50;
+
+            return `
+            <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group border-b border-[#7c2d12]/30">
+                <td class="bg-[#2a1005]">
+                    <div class="flex items-center gap-2">
+                        <img src="${img}" class="img-token" onerror="this.src='https://placehold.co/40'">
+                        <div class="flex flex-col min-w-0">
+                            <div class="flex items-center gap-1">
+                                <span class="font-bold text-white text-xs truncate font-sans">${t.ticker || t.name || 'Unknown'}</span>
+                                ${isVerified ? '<i data-lucide="shield-check" width="12" class="text-green-500 fill-green-500/20"></i>' : ''}
+                                ${showDiamond ? '<span title="High Conviction">&#128142;</span>' : ''}
+                            </div>
+                            <span class="text-[10px] text-[#9a3412] truncate max-w-[80px]">${t.name || ''}</span>
+                        </div>
+                    </div>
+                </td>
+                <td class="text-right font-mono font-bold hidden md:table-cell">${kScoreDisplay}</td>
+                <td class="text-right hidden md:table-cell">${formatPct(t.change1h)}</td>
+                <td class="text-right">${formatPct(t.change24h)}</td>
+                <td class="text-right font-mono text-[#22c55e] text-xs">${formatCompact(t.volume24h)}</td>
+                <td class="text-right font-mono text-[#fb923c] text-xs">${formatCompact(t.marketCap || t.marketcap)}</td>
+                <td class="text-right font-mono text-[#3b82f6] text-xs hidden md:table-cell">${(t.holders||0).toLocaleString()}</td>
+                <td class="text-right text-[10px] text-[#9a3412] font-mono whitespace-nowrap hidden md:table-cell">${timeAgo(t.timestamp || t.created_at)}</td>
+            </tr>`;
+        }).join('');
+        lucide.createIcons();
+    }
+
+    // --- DETAIL VIEW ---
     async function showDetailView(mint) {
+        if (pollingInterval) clearInterval(pollingInterval);
+        document.getElementById('view-dashboard').classList.remove('active');
         document.getElementById('view-detail').classList.add('active');
         document.getElementById('detail-controls').classList.remove('hidden');
 
-        // Fetch basic token data
+        currentMint = mint;
+        currentHolderHistory = [];
+        cleanupHolderChart();
+
+        if(socket) socket.emit('subscribe', mint);
+
+        const loadingDiv = document.getElementById('detail-loading');
+        const contentDiv = document.getElementById('detail-content');
+        const bannerContainer = document.getElementById('detail-banner-container');
+        const bannerImg = document.getElementById('detail-banner-img');
+
+        if (loadingDiv) loadingDiv.classList.remove('hidden');
+        if (contentDiv) contentDiv.style.display = 'none';
+        if (loadingDiv) loadingDiv.innerText = 'Fetching Chain Data...';
+
         try {
             const res = await fetch(`${API_URL}/api/token/${mint}`);
             const data = await res.json();
-            if (data.success) {
+
+            if(data.success) {
                 const t = data.token;
-                document.getElementById('detail-ticker').innerText = t.ticker;
-                document.getElementById('detail-name').innerText = t.name;
-                document.getElementById('detail-mint').innerText = t.mint;
-                document.getElementById('detail-img').src = t.image || 'https://placehold.co/80';
+                const rawStatus = t.hasCommunityUpdate || t.has_community_update || t.hascommunityupdate;
+                const isVerified = (rawStatus === true || rawStatus === 1 || rawStatus === 'true');
 
-                // Update stats
-                document.getElementById('stat-price').innerText = `$${t.priceUsd || t.priceusd || 0}`;
-                document.getElementById('stat-mcap').innerText = `$${(t.marketCap || t.marketcap) ? (t.marketCap || t.marketcap).toLocaleString() : 0}`;
-                document.getElementById('stat-kscore').innerText = t.k_score || 0;
+                document.getElementById('detail-ticker').innerText = t.ticker || 'UNK';
+                document.getElementById('detail-name').innerText = t.name || 'Unknown';
+                document.getElementById('detail-mint').innerText = mint;
 
-                // Update conviction breakdown
-                const conv = t.conviction;
-                if (conv && conv.analyzed > 0) {
-                    document.getElementById('conviction-breakdown').classList.remove('hidden');
-                    document.getElementById('conv-acc').innerText = conv.accumulators;
-                    document.getElementById('conv-hold').innerText = conv.holders;
-                    document.getElementById('conv-red').innerText = conv.reducers;
-                    document.getElementById('conv-ext').innerText = conv.extractors;
-                    document.getElementById('conv-score').innerText = conv.score;
-                    document.getElementById('conv-analyzed').innerText = conv.analyzed;
+                document.getElementById('stat-price').innerText = formatMoney(t.priceUsd || t.priceusd);
+                document.getElementById('stat-mcap').innerText = formatCompact(t.marketCap || t.marketcap);
+                document.getElementById('stat-holders').innerText = (t.holders||0).toLocaleString();
+                document.getElementById('stat-vol').innerText = formatCompact(t.volume24h);
 
-                    // Update bars
-                    const total = conv.analyzed || 1;
-                    document.getElementById('bar-acc').style.width = `${(conv.accumulators / total) * 100}%`;
-                    document.getElementById('bar-hold').style.width = `${(conv.holders / total) * 100}%`;
-                    document.getElementById('bar-red').style.width = `${(conv.reducers / total) * 100}%`;
-                    document.getElementById('bar-ext').style.width = `${(conv.extractors / total) * 100}%`;
+                document.getElementById('stat-chg5m').innerHTML = formatPct(t.change5m);
+                document.getElementById('stat-chg1h').innerHTML = formatPct(t.change1h);
+                document.getElementById('stat-chg24h').innerHTML = formatPct(t.change24h);
+
+                // K-Score & Conviction
+                const kScoreContainer = document.getElementById('kscore-container');
+                const convBreakdown = document.getElementById('conviction-breakdown');
+                if (isVerified) {
+                    kScoreContainer.style.visibility = 'visible';
+                    document.getElementById('stat-kscore').innerText = t.kScore || t.k_score || '--';
+
+                    // Show conviction data if available
+                    const conv = t.conviction || {
+                        score: t.conviction_score,
+                        accumulators: t.conviction_accumulators,
+                        holders: t.conviction_holders,
+                        reducers: t.conviction_reducers,
+                        extractors: t.conviction_extractors,
+                        analyzed: t.conviction_analyzed
+                    };
+
+                    if (conv && conv.analyzed > 0) {
+                        convBreakdown.classList.remove('hidden');
+                        document.getElementById('conv-acc').innerText = conv.accumulators || 0;
+                        document.getElementById('conv-hold').innerText = conv.holders || 0;
+                        document.getElementById('conv-red').innerText = conv.reducers || 0;
+                        document.getElementById('conv-ext').innerText = conv.extractors || 0;
+                        document.getElementById('conv-score').innerText = conv.score || 0;
+                        document.getElementById('conv-analyzed').innerText = conv.analyzed || 0;
+
+                        const total = conv.analyzed || 1;
+                        document.getElementById('bar-acc').style.width = `${((conv.accumulators||0) / total) * 100}%`;
+                        document.getElementById('bar-hold').style.width = `${((conv.holders||0) / total) * 100}%`;
+                        document.getElementById('bar-red').style.width = `${((conv.reducers||0) / total) * 100}%`;
+                        document.getElementById('bar-ext').style.width = `${((conv.extractors||0) / total) * 100}%`;
+                    } else {
+                        convBreakdown.classList.add('hidden');
+                    }
                 } else {
-                    document.getElementById('conviction-breakdown').classList.add('hidden');
+                    kScoreContainer.style.visibility = 'hidden';
+                    convBreakdown.classList.add('hidden');
                 }
-            }
-        } catch (e) {}
 
-        // Initialize our Custom Indexer Chart
-        initChart(mint);
+                // Badge
+                const badgeContainer = document.getElementById('badge-container');
+                if(isVerified) {
+                    badgeContainer.innerHTML = `<span class="px-2 py-1 rounded bg-green-900/30 border border-green-500/30 text-green-500 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 w-fit"><i data-lucide="shield-check" width="12"></i> Community Verified</span>`;
+                } else {
+                    badgeContainer.innerHTML = `<span class="px-2 py-1 rounded bg-red-900/20 border border-red-500/30 text-red-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 w-fit"><i data-lucide="lock" width="12"></i> Not Verified</span>`;
+                }
+
+                // Supply for chart
+                const rawSupply = parseFloat(t.supply || '0');
+                const decimals = t.decimals || 9;
+                currentNormalizedSupply = rawSupply / Math.pow(10, decimals);
+                if (currentNormalizedSupply === 0) currentNormalizedSupply = 1000000000;
+
+                // Image
+                const media = document.getElementById('detail-media-container');
+                if (media) {
+                    media.innerHTML = `<img src="${t.image || 'https://placehold.co/80'}" class="w-16 h-16 rounded-lg border-2 border-[#ea580c] bg-black object-cover">`;
+                }
+
+                // Description
+                const descEl = document.getElementById('detail-desc');
+                if(t.description) { descEl.innerText = t.description; descEl.classList.remove('hidden'); }
+                else { descEl.innerText = ''; descEl.classList.add('hidden'); }
+
+                // Banner
+                if (t.banner && bannerContainer && bannerImg) {
+                    bannerImg.src = t.banner;
+                    bannerContainer.classList.remove('hidden');
+                } else if (bannerContainer) { bannerContainer.classList.add('hidden'); }
+
+                // Social Links
+                const actions = document.getElementById('detail-actions');
+                if (actions) {
+                    let links = '';
+                    if(t.twitter) links += `<a href="${t.twitter}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="twitter" width="16"></i></a>`;
+                    if(t.telegram) links += `<a href="${t.telegram}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="send" width="16"></i></a>`;
+                    if(t.website) links += `<a href="${t.website}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="globe" width="16"></i></a>`;
+                    actions.innerHTML = links + `<button onclick="shareToken()" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c] flex items-center gap-2 text-xs font-bold px-3"><i data-lucide="share-2" width="14"></i> Share</button>`;
+                }
+
+                // Holder history
+                if(t.holderHistory) currentHolderHistory = t.holderHistory;
+
+                // LP List
+                const lpBody = document.getElementById('lp-list-body');
+                if (lpBody) {
+                    if(t.pairs && t.pairs.length > 0) {
+                        currentPoolAddress = t.pairs[0].address;
+                        lpBody.innerHTML = t.pairs.map(p => `<tr><td class="px-4 py-2 text-[#fb923c] font-bold text-xs">${p.dexId || p.dex || 'Unknown'}</td><td class="px-4 py-2 text-right text-xs font-mono">$${(p.priceUsd||0).toFixed(6)}</td><td class="px-4 py-2 text-right text-[#22c55e] text-xs font-mono">$${(p.liquidity?.usd||0).toLocaleString()}</td></tr>`).join('');
+                        const poolNameEl = document.getElementById('chart-pool-name');
+                        if (poolNameEl) poolNameEl.innerText = `-- ${(t.pairs[0].dex || t.pairs[0].dexId || "Unknown").toUpperCase()}`;
+                    } else {
+                        lpBody.innerHTML = '<tr><td colspan="3" class="text-center p-4 text-xs text-[#9a3412]">No pools found</td></tr>';
+                        currentPoolAddress = null;
+                    }
+                }
+
+                if (loadingDiv) loadingDiv.classList.add('hidden');
+                if (contentDiv) contentDiv.style.display = 'block';
+                lucide.createIcons();
+
+                requestAnimationFrame(() => {
+                    initChart(mint, currentPoolAddress);
+                });
+            } else { if (loadingDiv) loadingDiv.innerText = 'Token not found.'; }
+        } catch(e) { console.error(e); if (loadingDiv) loadingDiv.innerText = 'Error fetching data.'; }
     }
 
-    // --- LIST FETCH LOGIC (Simplified for brevity) ---
-    async function fetchList() {
-        const tbody = document.getElementById('table-body');
+    // --- CHARTING ---
+    window.setResolution = (res) => {
+        currentResolution = res;
+        document.querySelectorAll('.res-btn').forEach(b => b.classList.remove('active'));
+        const btn = document.getElementById(`res-${res}`);
+        if(btn) btn.classList.add('active');
+        document.getElementById('mode-mcap').classList.toggle('active', currentChartMode === 'mcap');
+        document.getElementById('mode-price').classList.toggle('active', currentChartMode === 'price');
+        if(currentMint) fetchCandles(currentMint, currentPoolAddress);
+    };
+    window.setChartMode = (mode) => {
+        currentChartMode = mode;
+        document.getElementById('mode-price').classList.toggle('active', mode === 'price');
+        document.getElementById('mode-mcap').classList.toggle('active', mode === 'mcap');
+        if(currentMint) fetchCandles(currentMint, currentPoolAddress);
+    };
+    window.toggleScale = () => {
+        isLogScale = !isLogScale;
+        const btn = document.getElementById('btn-scale');
+        if(btn) btn.classList.toggle('active', isLogScale);
+        if(chartInstance) chartInstance.priceScale('right').applyOptions({ mode: isLogScale ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal });
+    };
+
+    function initChart(mint, poolAddress) {
+        if (chartInstance) {
+            fetchCandles(mint, poolAddress);
+            return;
+        }
+
+        const container = document.getElementById('tv-chart');
+        if(!container) return;
+
+        const rect = container.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) {
+            setTimeout(() => initChart(mint, poolAddress), 50);
+            return;
+        }
+
+        const loader = document.getElementById('chart-loader');
+        if(loader) loader.style.display = 'none';
+
+        container.innerHTML = '';
+
+        chartInstance = LightweightCharts.createChart(container, {
+            width: rect.width,
+            height: rect.height,
+            layout: { background: { type: 'solid', color: '#1a0a05' }, textColor: '#9a3412' },
+            grid: { vertLines: { color: '#2a1005' }, horzLines: { color: '#2a1005' } },
+            timeScale: { borderColor: '#7c2d12', timeVisible: true },
+            rightPriceScale: { borderColor: '#7c2d12', mode: isLogScale ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal },
+            autoSize: false,
+        });
+
+        candleSeries = chartInstance.addCandlestickSeries({ upColor: '#22c55e', downColor: '#ef4444', borderVisible: false, wickUpColor: '#22c55e', wickDownColor: '#ef4444' });
+
+        fetchCandles(mint, poolAddress);
+    }
+
+    async function fetchCandles(mint, poolAddress) {
+        if (!chartInstance || !candleSeries) return;
+        const loader = document.getElementById('chart-loader');
+        if(loader) loader.style.display = 'flex';
+
         try {
-            let url = `${API_URL}/api/tokens?sort=${currentSort}&limit=50&page=${currentPage}`;
-            if(searchQuery) url += `&search=${searchQuery}`;
-            if(isVerifiedFilter) url += `&filter=verified`;
+            const now = Math.floor(Date.now() / 1000);
+            let lookback = 30 * 24 * 60 * 60;
+            if (currentResolution === '5') lookback = 3 * 24 * 60 * 60;
+            if (currentResolution === '60') lookback = 30 * 24 * 60 * 60;
+            if (currentResolution === 'D') lookback = 365 * 24 * 60 * 60;
+            const from = now - lookback;
 
-            const res = await fetch(url);
+            let endpoint = `${API_URL}/api/token/${mint}/candles?resolution=${currentResolution}&from=${from}&to=${now}`;
+            if(poolAddress) endpoint += `&poolAddress=${poolAddress}`;
+
+            const res = await fetch(endpoint);
             const data = await res.json();
-            
-            if (data.success) {
-                let tokens = data.tokens;
-                if(isZeroVolHidden) tokens = tokens.filter(t => t.volume24h > 0);
-                
-                if(tokens.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-[#9a3412]">No tokens found.</td></tr>`;
-                    return;
-                }
 
-                tbody.innerHTML = tokens.map(t => `
-                    <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group">
-                        <td>
-                            <div class="flex items-center gap-3">
-                                <img src="${t.image || 'https://placehold.co/40'}" class="img-token">
-                                <div>
-                                    <div class="font-bold text-white">${t.ticker}</div>
-                                    <div class="text-[10px] text-[#9a3412] font-mono">${t.name}</div>
-                                </div>
-                            </div>
-                        </td>
-                        <td class="text-right text-[#fb923c]">${t.kScore || 0}</td>
-                        <td class="hidden md:table-cell text-right">${(t.change5m||0).toFixed(2)}%</td>
-                        <td class="hidden md:table-cell text-right">${(t.change1h||0).toFixed(2)}%</td>
-                        <td class="text-right">${(t.change24h||0).toFixed(2)}%</td>
-                        <td class="text-right text-[#fb923c]">$${(t.marketCap||0).toLocaleString()}</td>
-                        <td class="text-right text-[#22c55e]">$${(t.volume24h||0).toLocaleString()}</td>
-                        <td class="hidden md:table-cell text-right text-[#9a3412]">now</td>
-                    </tr>
-                `).join('');
-                lucide.createIcons();
+            if(loader) loader.style.display = 'none';
+
+            if(data.success && data.candles) {
+                let cleanData = data.candles.map(c => {
+                    let open = parseFloat(c.open), high = parseFloat(c.high), low = parseFloat(c.low), close = parseFloat(c.close), time = parseInt(c.time);
+                    if (!time || isNaN(open)) return null;
+                    if (currentChartMode === 'mcap') { open *= currentNormalizedSupply; high *= currentNormalizedSupply; low *= currentNormalizedSupply; close *= currentNormalizedSupply; }
+                    return { time, open, high, low, close };
+                }).filter(c => c !== null).sort((a,b) => a.time - b.time);
+
+                const unique = []; const times = new Set();
+                cleanData.forEach(c => { if(!times.has(c.time)){ times.add(c.time); unique.push(c); }});
+
+                candleSeries.setData(unique);
+                if (unique.length) chartInstance.timeScale().fitContent();
             }
-        } catch (e) {
+        } catch(e) {
             console.error(e);
+            if(loader) loader.innerText = 'Chart data unavailable';
         }
     }
 
-    // Helper stubs
-    window.setSort = (s) => { currentSort = s; fetchList(); };
-    window.toggleVerifiedFilter = () => { isVerifiedFilter = !isVerifiedFilter; fetchList(); };
-    window.toggleZeroVolFilter = () => { isZeroVolHidden = !isZeroVolHidden; fetchList(); };
-    window.handleSearch = (e) => { searchQuery = e.target.value; fetchList(); };
+    // --- HOLDER CHART ---
+    function openHolderHistory() {
+        document.getElementById('holder-modal').classList.remove('hidden');
+        setTimeout(() => {
+            document.getElementById('holder-modal').classList.add('open');
+            initHolderChart();
+        }, 10);
+    }
+
+    function closeHolderHistory() {
+        document.getElementById('holder-modal').classList.remove('open');
+        setTimeout(() => document.getElementById('holder-modal').classList.add('hidden'), 300);
+    }
+
+    function initHolderChart() {
+        if (holderChart) {
+            updateHolderChartData();
+            return;
+        }
+
+        const container = document.getElementById('holder-chart-container');
+        if(!container) return;
+
+        const rect = container.getBoundingClientRect();
+        if(rect.width === 0) {
+            setTimeout(initHolderChart, 50);
+            return;
+        }
+
+        container.innerHTML = '';
+
+        holderChart = LightweightCharts.createChart(container, {
+            width: rect.width,
+            height: rect.height,
+            layout: { background: { type: 'solid', color: '#1a0a05' }, textColor: '#9a3412' },
+            grid: { vertLines: { color: '#2a1005' }, horzLines: { color: '#2a1005' } },
+            rightPriceScale: { borderVisible: false },
+            timeScale: { borderVisible: false, timeVisible: true }
+        });
+
+        holderAreaSeries = holderChart.addAreaSeries({
+            lineColor: '#3b82f6',
+            topColor: 'rgba(59, 130, 246, 0.4)',
+            bottomColor: 'rgba(59, 130, 246, 0.0)',
+            lineWidth: 2
+        });
+
+        updateHolderChartData();
+    }
+
+    function updateHolderChartData() {
+        if (!holderAreaSeries || !currentHolderHistory || currentHolderHistory.length === 0) return;
+
+        try {
+            const data = currentHolderHistory.map(h => {
+                let ts = h.timestamp;
+                let timeVal;
+                if (String(ts).match(/^\d+$/)) ts = parseInt(ts);
+                if (typeof ts === 'number') {
+                    if (ts > 946684800000) timeVal = Math.floor(ts / 1000);
+                    else timeVal = ts;
+                } else {
+                    timeVal = Math.floor(new Date(ts).getTime() / 1000);
+                }
+                return { time: timeVal, value: parseInt(h.count) };
+            })
+            .filter(x => !isNaN(x.time) && !isNaN(x.value))
+            .sort((a,b) => a.time - b.time);
+
+            const unique = [];
+            const seen = new Set();
+            data.forEach(c => {
+                if(!seen.has(c.time)){
+                    seen.add(c.time);
+                    unique.push(c);
+                }
+            });
+
+            holderAreaSeries.setData(unique);
+            holderChart.timeScale().fitContent();
+        } catch(e) {
+            console.error("Holder Chart Error:", e);
+        }
+    }
+
+    function cleanupHolderChart() {
+        if (holderChart) {
+            holderChart.remove();
+            holderChart = null;
+            holderAreaSeries = null;
+        }
+        const container = document.getElementById('holder-chart-container');
+        if (container) container.innerHTML = '';
+    }
+
+    // --- HELPERS ---
+    window.setSort = (s) => {
+        if (currentSort === s) {
+            currentDirection = currentDirection === 'desc' ? 'asc' : 'desc';
+        } else {
+            currentSort = s;
+            currentDirection = 'desc';
+        }
+        fetchList();
+    };
+    window.setLimit = (l) => { currentLimit = parseInt(l); currentPage = 1; fetchList(); };
+    window.toggleVerifiedFilter = () => {
+        isVerifiedFilter = !isVerifiedFilter;
+        document.getElementById('filter-verified').classList.toggle('active', isVerifiedFilter);
+        fetchList();
+    };
+    window.toggleZeroVolFilter = () => {
+        isZeroVolHidden = !isZeroVolHidden;
+        document.getElementById('filter-zerovol').classList.toggle('active', isZeroVolHidden);
+        fetchList();
+    };
+    window.handleSearch = (e) => { searchQuery = e.target.value; currentPage = 1; fetchList(); };
     window.clearSearch = () => { searchQuery = ''; document.getElementById('search').value = ''; fetchList(); };
     window.changePage = (d) => { currentPage += d; if(currentPage<1) currentPage=1; fetchList(); };
     window.handleManualRefresh = fetchList;
+    window.copyMint = () => {
+        navigator.clipboard.writeText(currentMint);
+        alert('Mint address copied!');
+    };
+    window.shareToken = () => {
+        const url = window.location.href;
+        navigator.clipboard.writeText(url);
+        alert('Link copied!');
+    };
 </script>
 </body>
 </html>

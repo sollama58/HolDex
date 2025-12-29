@@ -362,7 +362,8 @@ async function updateSingleToken(deps, mint) {
 
         await db.run(`
             UPDATE tokens
-            SET k_score = $1, last_k_calc = $2,
+            SET k_score = $1,
+                last_k_score_update = $2,
                 conviction_score = $3,
                 conviction_accumulators = $4,
                 conviction_holders = $5,
@@ -372,7 +373,7 @@ async function updateSingleToken(deps, mint) {
             WHERE mint = $9
         `, [
             result.score,
-            Date.now(),
+            Date.now().toString(),
             conviction.score || 0,
             conviction.accumulators || 0,
             conviction.holders || 0,
@@ -400,7 +401,7 @@ async function updateKScores(deps) {
     try {
         const tokens = await db.all(`
             SELECT * FROM tokens
-            WHERE hasCommunityUpdate = 1
+            WHERE hascommunityupdate = TRUE
             OR volume24h > 5000
         `);
 
@@ -418,7 +419,8 @@ async function updateKScores(deps) {
 
                 await db.run(`
                     UPDATE tokens
-                    SET k_score = $1, last_k_calc = $2,
+                    SET k_score = $1,
+                        last_k_score_update = $2,
                         conviction_score = $3,
                         conviction_accumulators = $4,
                         conviction_holders = $5,
@@ -428,7 +430,7 @@ async function updateKScores(deps) {
                     WHERE mint = $9
                 `, [
                     result.score,
-                    Date.now(),
+                    Date.now().toString(),
                     conviction.score || 0,
                     conviction.accumulators || 0,
                     conviction.holders || 0,
