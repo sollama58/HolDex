@@ -29,10 +29,10 @@ let statusInterval = null;
 let currentConnection = null;
 
 function isIgnored(mint) {
-    if (!mint) return true;
+    if (!mint) return "Null Mint";
     const m = mint.toString().trim();
-    if (IGNORED_MINTS.has(m)) return true;
-    if (m.length < 30 || m.length > 45) return true; 
+    if (IGNORED_MINTS.has(m)) return "System Address";
+    if (m.length < 30 || m.length > 45) return "Invalid Length"; 
     return false;
 }
 
@@ -70,7 +70,10 @@ async function processNewPoolTx(signature, connection, db, source) {
         // --- STRATEGY A: Post Token Balances ---
         if (tx.meta.postTokenBalances && tx.meta.postTokenBalances.length > 0) {
             tx.meta.postTokenBalances.forEach(bal => {
-                if (bal.mint && !isIgnored(bal.mint)) candidateMints.add(bal.mint);
+                const ignoreReason = isIgnored(bal.mint);
+                if (bal.mint && !ignoreReason) {
+                    candidateMints.add(bal.mint);
+                }
             });
         }
 
@@ -82,7 +85,8 @@ async function processNewPoolTx(signature, connection, db, source) {
                          if (inst.parsed) {
                              if (inst.parsed.type === 'initializeMint' || inst.parsed.type === 'mintTo') {
                                  const mint = inst.parsed.info.mint;
-                                 if (mint && !isIgnored(mint)) candidateMints.add(mint);
+                                 const ignoreReason = isIgnored(mint);
+                                 if (mint && !ignoreReason) candidateMints.add(mint);
                              }
                          }
                      }
@@ -98,7 +102,8 @@ async function processNewPoolTx(signature, connection, db, source) {
                  keyList.forEach((keyObj, index) => {
                      if (index === 0) return; 
                      const pubkey = keyObj.pubkey ? keyObj.pubkey.toString() : keyObj.toString();
-                     if (pubkey && !isIgnored(pubkey)) {
+                     const ignoreReason = isIgnored(pubkey);
+                     if (pubkey && !ignoreReason) {
                           candidateMints.add(pubkey);
                      }
                  });
@@ -113,8 +118,9 @@ async function processNewPoolTx(signature, connection, db, source) {
         const redis = getClient();
         
         for (const mint of candidateMints) {
-            if (isIgnored(mint)) {
-                logger.info(`   🚫 [IGNORED] ${mint} (System/Invalid)`);
+            const ignoreReason = isIgnored(mint);
+            if (ignoreReason) {
+                logger.info(`   🚫 [IGNORED] ${mint} Reason: ${ignoreReason}`);
                 continue;
             }
             
@@ -186,6 +192,7 @@ async function setupSubscriptions(connection, db) {
                 const safeSig = logs.signature || (logs.value && logs.value.signature) || null;
                 if (!safeSig) return;
 
+                // Broader check for Pump.fun events
                 const isCreate = safeLogs.some(l => 
                     l.includes('Instruction: Create') || 
                     l.includes('Program log: Create') || 
