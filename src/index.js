@@ -17,12 +17,23 @@ app.set('trust proxy', 1);
 
 // --- SECURITY & MIDDLEWARE ---
 app.use(helmet({
-    contentSecurityPolicy: false,
-    crossOriginResourcePolicy: false,
-    crossOriginOpenerPolicy: false,
-    crossOriginEmbedderPolicy: false
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.socket.io"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            imgSrc: ["'self'", "data:", "https:"],
+            connectSrc: ["'self'", "wss:", "https:"],
+            fontSrc: ["'self'", "https:", "data:"]
+        }
+    },
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginOpenerPolicy: { policy: "same-origin" }
 }));
-app.use(cors({ origin: '*', credentials: true }));
+app.use(cors({
+    origin: process.env.CORS_ORIGIN || '*',
+    credentials: false  // Security: credentials only with specific origins
+}));
 app.use(express.json());
 
 // --- STATIC FILES (Frontend) ---

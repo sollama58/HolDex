@@ -8,11 +8,11 @@ const { Connection, PublicKey } = require('@solana/web3.js');
 const config = require('../config/env');
 const { logger } = require('../services');
 
-const HELIUS_RPC = config.HELIUS_API_KEY 
-    ? `https://mainnet.helius-rpc.com/?api-key=${config.HELIUS_API_KEY}` 
-    : config.SOLANA_RPC_URL;
-
-const connection = new Connection(HELIUS_RPC);
+// Security: Use public RPC for Connection (no API key exposure in URL)
+// For authenticated calls, use axios with header-based auth instead
+const connection = new Connection(
+    config.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
+);
 
 async function startLoop(deps) {
     try {

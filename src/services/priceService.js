@@ -16,12 +16,10 @@ const HELIUS_HEADERS = HELIUS_API_KEY
     ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${HELIUS_API_KEY}` }
     : { 'Content-Type': 'application/json' };
 
-// Note: @solana/web3.js Connection requires URL-based auth (library limitation)
-// Using fallback RPC if no API key to avoid exposing key in Connection URL
+// Security: Use public RPC for Connection (no API key exposure in URL)
+// Helius JSON-RPC calls use header auth via axios instead
 const connection = new Connection(
-    HELIUS_API_KEY
-        ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`
-        : config.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
+    config.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
 );
 
 const SOL_MINT = 'So11111111111111111111111111111111111111112';

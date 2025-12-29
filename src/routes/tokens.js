@@ -53,12 +53,18 @@ function init(deps) {
                 const params = [pool.address];
 
                 if (from) {
-                    query += ` AND timestamp >= $${params.length + 1}`;
-                    params.push(parseInt(from) * 1000);
+                    const fromTs = parseInt(from);
+                    if (!isNaN(fromTs)) {
+                        query += ` AND timestamp >= $${params.length + 1}`;
+                        params.push(fromTs * 1000);
+                    }
                 }
                 if (to) {
-                    query += ` AND timestamp <= $${params.length + 1}`;
-                    params.push(parseInt(to) * 1000);
+                    const toTs = parseInt(to);
+                    if (!isNaN(toTs)) {
+                        query += ` AND timestamp <= $${params.length + 1}`;
+                        params.push(toTs * 1000);
+                    }
                 }
 
                 query += ` ORDER BY timestamp DESC LIMIT ${Math.min(parseInt(limit) || 100, 2000)}`;
@@ -205,7 +211,10 @@ function init(deps) {
                 };
             });
             res.json(result);
-        } catch (e) { res.status(500).json({ success: false, tokens: [], error: e.message }); }
+        } catch (e) {
+            console.error('[API Error] /tokens:', e.message);
+            res.status(500).json({ success: false, tokens: [], error: 'Internal server error' });
+        }
     });
 
     router.get('/token/:mint', async (req, res) => {
