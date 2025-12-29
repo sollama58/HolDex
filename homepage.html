@@ -452,7 +452,24 @@
                          <div class="text-[10px] text-[#9a3412] uppercase font-bold flex justify-end items-center gap-1">Score <i data-lucide="help-circle" width="10"></i></div>
                     </div>
                 </div>
-                
+
+                <!-- Conviction Breakdown -->
+                <div id="conviction-breakdown" class="hidden bg-[#451a03] border border-[#7c2d12] rounded-xl p-3 mt-3">
+                    <div class="flex gap-3 text-[10px] font-mono mb-2">
+                        <span class="text-green-400" title="Accumulators">Acc: <span id="conv-acc">0</span></span>
+                        <span class="text-yellow-400" title="Holders">Hold: <span id="conv-hold">0</span></span>
+                        <span class="text-orange-400" title="Reducers">Red: <span id="conv-red">0</span></span>
+                        <span class="text-red-400" title="Extractors">Ext: <span id="conv-ext">0</span></span>
+                    </div>
+                    <div class="flex h-2 rounded overflow-hidden bg-[#2a1005]">
+                        <div id="bar-acc" class="bg-green-500 transition-all" style="width:0%"></div>
+                        <div id="bar-hold" class="bg-yellow-500 transition-all" style="width:0%"></div>
+                        <div id="bar-red" class="bg-orange-500 transition-all" style="width:0%"></div>
+                        <div id="bar-ext" class="bg-red-500 transition-all" style="width:0%"></div>
+                    </div>
+                    <div class="text-[9px] text-[#9a3412] mt-1">Conviction: <span id="conv-score">0</span>% (top <span id="conv-analyzed">0</span> holders)</div>
+                </div>
+
                 <div id="detail-desc" class="mt-3 text-sm text-[#ffedd5] leading-relaxed border-t border-[#7c2d12] pt-3 hidden whitespace-pre-wrap"></div>
                 
                 <div id="detail-actions" class="flex flex-wrap gap-2 mt-4 pt-2 border-t border-[#7c2d12]"></div>
@@ -1011,7 +1028,47 @@
                         kScoreContainer.style.visibility = 'hidden';
                     }
                 }
-                
+
+                // CONVICTION BREAKDOWN
+                const convBreakdown = document.getElementById('conviction-breakdown');
+                if (convBreakdown) {
+                    const conv = t.conviction || {
+                        score: t.conviction_score || 0,
+                        accumulators: t.conviction_accumulators || 0,
+                        holders: t.conviction_holders || 0,
+                        reducers: t.conviction_reducers || 0,
+                        extractors: t.conviction_extractors || 0,
+                        analyzed: t.conviction_analyzed || 0
+                    };
+
+                    if (conv && conv.analyzed > 0) {
+                        convBreakdown.classList.remove('hidden');
+                        document.getElementById('conv-acc').innerText = conv.accumulators || 0;
+                        document.getElementById('conv-hold').innerText = conv.holders || 0;
+                        document.getElementById('conv-red').innerText = conv.reducers || 0;
+                        document.getElementById('conv-ext').innerText = conv.extractors || 0;
+                        document.getElementById('conv-score').innerText = conv.score || 0;
+                        document.getElementById('conv-analyzed').innerText = conv.analyzed || 0;
+
+                        const total = conv.analyzed || 1;
+                        document.getElementById('bar-acc').style.width = `${((conv.accumulators||0) / total) * 100}%`;
+                        document.getElementById('bar-hold').style.width = `${((conv.holders||0) / total) * 100}%`;
+                        document.getElementById('bar-red').style.width = `${((conv.reducers||0) / total) * 100}%`;
+                        document.getElementById('bar-ext').style.width = `${((conv.extractors||0) / total) * 100}%`;
+                    } else {
+                        convBreakdown.classList.add('hidden');
+                    }
+                }
+
+                // TIER BADGE
+                const tier = getTier(mint, t.kScore || t.k_score || 0, isVerified);
+                const tierBadgeContainer = document.getElementById('badge-container');
+                if (tierBadgeContainer) {
+                    tierBadgeContainer.innerHTML = getTierBadge(tier) + (tier.accepted
+                        ? '<span class="ml-2 text-[10px] text-green-500 flex items-center gap-1"><i data-lucide="check-circle" width="12"></i> Accepted on GASdf</span>'
+                        : '<span class="ml-2 text-[10px] text-red-400 flex items-center gap-1"><i data-lucide="x-circle" width="12"></i> Not accepted</span>');
+                }
+
                 const c5m = t.change5m || 0;
                 const c5mEl = document.getElementById('stat-chg5m');
                 if (c5mEl) {
