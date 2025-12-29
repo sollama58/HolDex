@@ -245,6 +245,8 @@ async function calculateConviction(mint) {
 
         let accumulators = 0;
         let holders = 0;
+        let reducers = 0;
+        let extractors = 0;
         let analyzed = 0;
 
         for (const holder of top20) {
@@ -254,6 +256,8 @@ async function calculateConviction(mint) {
 
                 if (classification === 'accumulator') accumulators++;
                 else if (classification === 'holder') holders++;
+                else if (classification === 'reducer') reducers++;
+                else if (classification === 'extractor') extractors++;
 
                 analyzed++;
                 await sleep(100); // Rate limit
@@ -268,11 +272,18 @@ async function calculateConviction(mint) {
 
         logger.info(`[Conviction] ${mint.slice(0,8)}: ${score}% (${accumulators} acc, ${holders} hold, ${analyzed} total)`);
 
-        return { score, analyzed, accumulators, holders };
+        return {
+            score,
+            analyzed,
+            accumulators,
+            holders,
+            reducers,
+            extractors
+        };
 
     } catch (error) {
         logger.error(`[Conviction] Error for ${mint}: ${error.message}`);
-        return { score: 0, analyzed: 0 };
+        return { score: 0, analyzed: 0, accumulators: 0, holders: 0, reducers: 0, extractors: 0 };
     }
 }
 
@@ -308,10 +319,11 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false)
         }
 
         // 3. Conviction (Max 40 pts) - Only if Helius configured
+        let convictionData = null;
         if (!skipConviction && HELIUS_API_KEY) {
-            const conviction = await calculateConviction(mint);
+            convictionData = await calculateConviction(mint);
             // Scale: 100% conviction = 40 pts
-            score += Math.round(conviction.score * 0.4);
+            score += Math.round(convictionData.score * 0.4);
         }
 
         // 4. Market Cap (Max 10 pts)
@@ -320,11 +332,14 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false)
             if (mcap > 100000) score += 10;
         }
 
-        return Math.min(score, 100);
+        return {
+            score: Math.min(score, 100),
+            conviction: convictionData
+        };
 
     } catch (e) {
         logger.error(`[K-Score] Calc error ${mint}: ${e.message}`);
-        return 10;
+        return { score: 10, conviction: null };
     }
 }
 
@@ -342,15 +357,32 @@ async function updateSingleToken(deps, mint) {
         if (!token) return;
 
         logger.info(`[K-Score] Immediate calc for ${token.ticker}`);
-        const score = await computeScoreInternal(mint, token);
+        const result = await computeScoreInternal(mint, token);
+        const conviction = result.conviction || {};
 
         await db.run(`
             UPDATE tokens
-            SET k_score = $1, last_k_calc = $2
-            WHERE mint = $3
-        `, [score, Date.now(), mint]);
+            SET k_score = $1, last_k_calc = $2,
+                conviction_score = $3,
+                conviction_accumulators = $4,
+                conviction_holders = $5,
+                conviction_reducers = $6,
+                conviction_extractors = $7,
+                conviction_analyzed = $8
+            WHERE mint = $9
+        `, [
+            result.score,
+            Date.now(),
+            conviction.score || 0,
+            conviction.accumulators || 0,
+            conviction.holders || 0,
+            conviction.reducers || 0,
+            conviction.extractors || 0,
+            conviction.analyzed || 0,
+            mint
+        ]);
 
-        return score;
+        return result.score;
     } catch (e) {
         logger.error(`[K-Score] Failed single update for ${mint}:`, e);
         return 0;
@@ -381,13 +413,30 @@ async function updateKScores(deps) {
 
         for (const t of tokens) {
             try {
-                const score = await computeScoreInternal(t.mint, t);
+                const result = await computeScoreInternal(t.mint, t);
+                const conviction = result.conviction || {};
 
                 await db.run(`
                     UPDATE tokens
-                    SET k_score = $1, last_k_calc = $2
-                    WHERE mint = $3
-                `, [score, Date.now(), t.mint]);
+                    SET k_score = $1, last_k_calc = $2,
+                        conviction_score = $3,
+                        conviction_accumulators = $4,
+                        conviction_holders = $5,
+                        conviction_reducers = $6,
+                        conviction_extractors = $7,
+                        conviction_analyzed = $8
+                    WHERE mint = $9
+                `, [
+                    result.score,
+                    Date.now(),
+                    conviction.score || 0,
+                    conviction.accumulators || 0,
+                    conviction.holders || 0,
+                    conviction.reducers || 0,
+                    conviction.extractors || 0,
+                    conviction.analyzed || 0,
+                    t.mint
+                ]);
 
             } catch (err) {
                 logger.warn(`[K-Score] Failed for ${t.mint}: ${err.message}`);
@@ -417,6 +466,9 @@ function start(deps) {
 module.exports = {
     start,
     updateSingleToken,
-    calculateTokenScore: async (mint) => computeScoreInternal(mint, null, true),
+    calculateTokenScore: async (mint) => {
+        const result = await computeScoreInternal(mint, null, true);
+        return result.score;
+    },
     calculateConviction, // Exposed for testing
 };

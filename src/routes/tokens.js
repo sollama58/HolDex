@@ -145,7 +145,19 @@ function init(deps) {
         const result = await smartCache(cacheKey, 30, async () => {
             const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
             let tokenData = token || { mint, name: 'Unknown', ticker: 'Unknown' };
-            
+
+            // Add conviction breakdown
+            if (token) {
+                tokenData.conviction = {
+                    score: token.conviction_score || 0,
+                    accumulators: token.conviction_accumulators || 0,
+                    holders: token.conviction_holders || 0,
+                    reducers: token.conviction_reducers || 0,
+                    extractors: token.conviction_extractors || 0,
+                    analyzed: token.conviction_analyzed || 0
+                };
+            }
+
             // Still fetch pairs for metadata purposes if needed
             try {
                 const dexRes = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${mint}`, { timeout: 3000 });
@@ -153,7 +165,7 @@ function init(deps) {
                     tokenData.pairs = dexRes.data.pairs;
                 }
             } catch(e) {}
-            
+
             return { success: true, token: tokenData };
         });
         res.json(result);

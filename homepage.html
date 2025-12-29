@@ -215,9 +215,26 @@
             </div>
             
             <div class="grid grid-cols-2 lg:grid-cols-6 gap-3 md:gap-4 mb-6">
-                <div class="stat-card border-[#ea580c] relative overflow-hidden">
+                <div class="stat-card border-[#ea580c] relative overflow-hidden col-span-2">
                     <span class="stat-label text-[#ea580c]">K-Score</span>
-                    <span id="stat-kscore" class="stat-value text-[#fb923c] text-2xl font-bold font-mono">🔒</span>
+                    <div class="flex items-center gap-4">
+                        <span id="stat-kscore" class="stat-value text-[#fb923c] text-2xl font-bold font-mono">🔒</span>
+                        <div id="conviction-breakdown" class="hidden flex-1">
+                            <div class="flex gap-1 text-[10px] font-mono mb-1">
+                                <span class="text-green-400" title="Accumulators">📈 <span id="conv-acc">0</span></span>
+                                <span class="text-yellow-400" title="Holders">💎 <span id="conv-hold">0</span></span>
+                                <span class="text-orange-400" title="Reducers">📉 <span id="conv-red">0</span></span>
+                                <span class="text-red-400" title="Extractors">🏃 <span id="conv-ext">0</span></span>
+                            </div>
+                            <div class="flex h-2 rounded overflow-hidden bg-[#2a1005]">
+                                <div id="bar-acc" class="bg-green-500 transition-all" style="width:0%"></div>
+                                <div id="bar-hold" class="bg-yellow-500 transition-all" style="width:0%"></div>
+                                <div id="bar-red" class="bg-orange-500 transition-all" style="width:0%"></div>
+                                <div id="bar-ext" class="bg-red-500 transition-all" style="width:0%"></div>
+                            </div>
+                            <div class="text-[9px] text-[#9a3412] mt-1">Conviction: <span id="conv-score">0</span>% (top <span id="conv-analyzed">0</span> holders)</div>
+                        </div>
+                    </div>
                 </div>
                 <div class="stat-card"><span class="stat-label">Price</span><span id="stat-price" class="stat-value text-[#ffedd5]">-</span></div>
                 <div class="stat-card"><span class="stat-label">MCap</span><span id="stat-mcap" class="stat-value text-[#ea580c]">-</span></div>
@@ -361,10 +378,32 @@
                 document.getElementById('detail-name').innerText = t.name;
                 document.getElementById('detail-mint').innerText = t.mint;
                 document.getElementById('detail-img').src = t.image || 'https://placehold.co/80';
-                
+
                 // Update stats
-                document.getElementById('stat-price').innerText = `$${t.priceUsd || 0}`;
-                document.getElementById('stat-mcap').innerText = `$${t.marketCap ? t.marketCap.toLocaleString() : 0}`;
+                document.getElementById('stat-price').innerText = `$${t.priceUsd || t.priceusd || 0}`;
+                document.getElementById('stat-mcap').innerText = `$${(t.marketCap || t.marketcap) ? (t.marketCap || t.marketcap).toLocaleString() : 0}`;
+                document.getElementById('stat-kscore').innerText = t.k_score || 0;
+
+                // Update conviction breakdown
+                const conv = t.conviction;
+                if (conv && conv.analyzed > 0) {
+                    document.getElementById('conviction-breakdown').classList.remove('hidden');
+                    document.getElementById('conv-acc').innerText = conv.accumulators;
+                    document.getElementById('conv-hold').innerText = conv.holders;
+                    document.getElementById('conv-red').innerText = conv.reducers;
+                    document.getElementById('conv-ext').innerText = conv.extractors;
+                    document.getElementById('conv-score').innerText = conv.score;
+                    document.getElementById('conv-analyzed').innerText = conv.analyzed;
+
+                    // Update bars
+                    const total = conv.analyzed || 1;
+                    document.getElementById('bar-acc').style.width = `${(conv.accumulators / total) * 100}%`;
+                    document.getElementById('bar-hold').style.width = `${(conv.holders / total) * 100}%`;
+                    document.getElementById('bar-red').style.width = `${(conv.reducers / total) * 100}%`;
+                    document.getElementById('bar-ext').style.width = `${(conv.extractors / total) * 100}%`;
+                } else {
+                    document.getElementById('conviction-breakdown').classList.add('hidden');
+                }
             }
         } catch (e) {}
 

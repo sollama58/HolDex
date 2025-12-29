@@ -75,9 +75,25 @@ async function initSchema(db) {
                 last_k_calc BIGINT DEFAULT 0,
                 userPubkey TEXT,
                 hasCommunityUpdate BOOLEAN DEFAULT FALSE,
-                k_score INTEGER DEFAULT 0
+                k_score INTEGER DEFAULT 0,
+                conviction_score INTEGER DEFAULT 0,
+                conviction_accumulators INTEGER DEFAULT 0,
+                conviction_holders INTEGER DEFAULT 0,
+                conviction_reducers INTEGER DEFAULT 0,
+                conviction_extractors INTEGER DEFAULT 0,
+                conviction_analyzed INTEGER DEFAULT 0
             );
         `);
+
+        // Add conviction columns if they don't exist (migration for existing DBs)
+        try {
+            await db.exec(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_score INTEGER DEFAULT 0;`);
+            await db.exec(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_accumulators INTEGER DEFAULT 0;`);
+            await db.exec(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_holders INTEGER DEFAULT 0;`);
+            await db.exec(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_reducers INTEGER DEFAULT 0;`);
+            await db.exec(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_extractors INTEGER DEFAULT 0;`);
+            await db.exec(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_analyzed INTEGER DEFAULT 0;`);
+        } catch(e) { /* columns may already exist */ }
 
         // --- POOLS TABLE (Refactored) ---
         // Changed Primary Key to MINT.
