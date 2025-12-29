@@ -1,7 +1,8 @@
 /**
  * Token Routes
  * Platform: PostgreSQL
- * Updated: Candles queried by SYMBOL (production schema compatible)
+ * Updated: Candles queried from candles_1m via pool_address (production schema)
+ *          with DexScreener API fallback
  */
 const express = require('express');
 const axios = require('axios');
@@ -33,32 +34,74 @@ async function checkExternalRateLimit() {
 function init(deps) {
     const { db } = deps;
 
+    // --- HELPER: Fetch candles from DB or production API ---
+    async function fetchCandlesForMint(mint, from, to, limit = 100) {
+        // 1. Try local candles_1m table first
+        try {
+            const pool = await db.get(
+                `SELECT p.address FROM pools p
+                 LEFT JOIN (SELECT pool_address, COUNT(*) as candle_count FROM candles_1m GROUP BY pool_address) c
+                 ON p.address = c.pool_address
+                 WHERE p.mint = $1
+                 ORDER BY c.candle_count DESC NULLS LAST, p.liquidity_usd DESC NULLS LAST
+                 LIMIT 1`,
+                [mint]
+            );
+
+            if (pool?.address) {
+                let query = `SELECT timestamp as time, open, high, low, close, volume FROM candles_1m WHERE pool_address = $1`;
+                const params = [pool.address];
+
+                if (from) {
+                    query += ` AND timestamp >= $${params.length + 1}`;
+                    params.push(parseInt(from) * 1000);
+                }
+                if (to) {
+                    query += ` AND timestamp <= $${params.length + 1}`;
+                    params.push(parseInt(to) * 1000);
+                }
+
+                query += ` ORDER BY timestamp DESC LIMIT ${Math.min(parseInt(limit) || 100, 2000)}`;
+
+                const rows = await db.all(query, params);
+                if (rows && rows.length > 0) {
+                    return rows.map(r => ({
+                        time: Math.floor(parseInt(r.time) / 1000),
+                        open: r.open,
+                        high: r.high,
+                        low: r.low,
+                        close: r.close,
+                        volume: r.volume || 0
+                    })).reverse();
+                }
+            }
+        } catch (e) {
+            console.error("DB candles lookup failed:", e.message);
+        }
+
+        // 2. Fallback: fetch from production API
+        try {
+            const cacheKey = `prod:candles:${mint}`;
+            return await smartCache(cacheKey, 30, async () => {
+                const url = `https://asdev-backend.onrender.com/api/token/${mint}/candles`;
+                const res = await axios.get(url, { timeout: 5000 });
+                return res.data?.candles || [];
+            });
+        } catch (e) {
+            console.error("Production candles fetch failed:", e.message);
+        }
+
+        return [];
+    }
+
     // --- HISTORY ENDPOINT ---
-    // Fetches OHLC candles by MINT (translates to symbol for candles table)
     router.get('/history/:mint', async (req, res) => {
         const { mint } = req.params;
-
         res.set('Cache-Control', 'public, max-age=10');
 
         try {
-            // Get symbol from pools table (candles use symbol as key)
-            const pool = await db.get(`SELECT symbol FROM pools WHERE mint = $1`, [mint]);
-            const symbol = pool?.symbol;
-
-            if (!symbol) {
-                return res.json([]);
-            }
-
-            // Get candles by symbol
-            const candles = await db.all(`
-                SELECT time, open, high, low, close
-                FROM candles
-                WHERE symbol = $1
-                ORDER BY time ASC
-                LIMIT 2000
-            `, [symbol]);
-
-            res.json(candles || []);
+            const candles = await fetchCandlesForMint(mint);
+            res.json(candles);
         } catch (e) {
             console.error("History Error:", e);
             res.status(500).json({ error: 'DB Error' });
@@ -68,36 +111,13 @@ function init(deps) {
     // --- CANDLES ENDPOINT (for frontend compatibility) ---
     router.get('/token/:mint/candles', async (req, res) => {
         const { mint } = req.params;
-        const { resolution = '1', from, to } = req.query;
+        const { from, to, limit } = req.query;
 
         res.set('Cache-Control', 'public, max-age=10');
 
         try {
-            // Get symbol from pools table (candles use symbol as key)
-            const pool = await db.get(`SELECT symbol FROM pools WHERE mint = $1`, [mint]);
-            const symbol = pool?.symbol;
-
-            if (!symbol) {
-                return res.json({ success: true, candles: [] });
-            }
-
-            // Build query with optional time range
-            let query = `SELECT time, open, high, low, close FROM candles WHERE symbol = $1`;
-            const params = [symbol];
-
-            if (from) {
-                query += ` AND time >= $${params.length + 1}`;
-                params.push(parseInt(from));
-            }
-            if (to) {
-                query += ` AND time <= $${params.length + 1}`;
-                params.push(parseInt(to));
-            }
-
-            query += ` ORDER BY time ASC LIMIT 2000`;
-
-            const candles = await db.all(query, params);
-            res.json({ success: true, candles: candles || [] });
+            const candles = await fetchCandlesForMint(mint, from, to, limit);
+            res.json({ success: true, candles });
         } catch (e) {
             console.error("Candles Error:", e);
             res.status(500).json({ success: false, candles: [], error: 'DB Error' });
@@ -115,16 +135,17 @@ function init(deps) {
 
         try {
             const result = await smartCache(cacheKey, 5, async () => {
-                let orderByClause = 'ORDER BY timestamp DESC'; 
+                // Production uses lowercase column names
+                let orderByClause = 'ORDER BY timestamp DESC';
                 switch (sort) {
-                    case 'kscore': orderByClause = 'ORDER BY k_score DESC'; break;
-                    case 'mcap': orderByClause = 'ORDER BY marketCap DESC'; break;
-                    case 'volume': orderByClause = 'ORDER BY volume24h DESC'; break;
-                    case 'gainers': case '24h': orderByClause = 'ORDER BY change24h DESC'; break;
-                    case '1h': orderByClause = 'ORDER BY change1h DESC'; break;
-                    case '5m': orderByClause = 'ORDER BY change5m DESC'; break;
-                    case 'price': orderByClause = 'ORDER BY priceUsd DESC'; break;
-                    default: orderByClause = 'ORDER BY timestamp DESC'; break;
+                    case 'kscore': orderByClause = 'ORDER BY k_score DESC NULLS LAST'; break;
+                    case 'mcap': orderByClause = 'ORDER BY marketcap DESC NULLS LAST'; break;
+                    case 'volume': orderByClause = 'ORDER BY volume24h DESC NULLS LAST'; break;
+                    case 'gainers': case '24h': orderByClause = 'ORDER BY change24h DESC NULLS LAST'; break;
+                    case '1h': orderByClause = 'ORDER BY change1h DESC NULLS LAST'; break;
+                    case '5m': orderByClause = 'ORDER BY change5m DESC NULLS LAST'; break;
+                    case 'price': orderByClause = 'ORDER BY priceusd DESC NULLS LAST'; break;
+                    default: orderByClause = 'ORDER BY timestamp DESC NULLS LAST'; break;
                 }
 
                 let rows = [];
@@ -133,12 +154,13 @@ function init(deps) {
                         rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [searchTerm]);
                     } else {
                         const searchPattern = `%${searchTerm}%`;
-                        rows = await db.all(`SELECT * FROM tokens WHERE (ticker ILIKE $1 OR name ILIKE $1) ${filter === 'verified' ? 'AND hasCommunityUpdate = TRUE' : ''} ${orderByClause} LIMIT 50`, [searchPattern]);
+                        // Production uses 'symbol' column, not 'ticker'
+                        rows = await db.all(`SELECT * FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) ${filter === 'verified' ? 'AND hascommunityupdate = TRUE' : ''} ${orderByClause} LIMIT 50`, [searchPattern]);
                     }
                 } else {
                     let query = `SELECT * FROM tokens`;
                     let where = [];
-                    if (filter === 'verified') where.push(`hasCommunityUpdate = TRUE`);
+                    if (filter === 'verified') where.push(`hascommunityupdate = TRUE`);
                     if (where.length > 0) query += ` WHERE ${where.join(' AND ')}`;
                     query += ` ${orderByClause} LIMIT ${limitVal} OFFSET ${offsetVal}`;
                     rows = await db.all(query);
@@ -174,10 +196,11 @@ function init(deps) {
                 return {
                     success: true, page: pageVal, limit: limitVal,
                     tokens: rows.map(r => ({
-                        mint: r.mint, name: r.name, ticker: r.ticker, image: r.image,
+                        mint: r.mint, name: r.name, ticker: r.ticker || r.symbol, image: r.image,
                         marketCap: r.marketcap || r.marketCap || 0, volume24h: r.volume24h || 0, priceUsd: r.priceusd || r.priceUsd || 0,
                         timestamp: parseInt(r.timestamp), change5m: r.change5m || 0, change1h: r.change1h || 0, change24h: r.change24h || 0,
-                        hasCommunityUpdate: r.hascommunityupdate || r.hasCommunityUpdate || false, kScore: r.k_score || 0
+                        hasCommunityUpdate: r.hascommunityupdate || r.hasCommunityUpdate || false, kScore: r.k_score || 0,
+                        holders: r.holders || 0, liquidity: r.liquidity || 0
                     })), lastUpdate: Date.now()
                 };
             });

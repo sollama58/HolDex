@@ -2,10 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>HolDex | The Terminal Fire Explorer</title>
-
-    <!-- 1. Buffer (Browser Compatible) -->
+    
     <script src="https://bundle.run/buffer@6.0.3"></script>
     <script>
         if (typeof window.buffer !== 'undefined') {
@@ -13,20 +12,14 @@
         }
     </script>
 
-    <!-- 2. Solana Web3.js -->
     <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
-
-    <!-- 3. Lightweight Charts -->
-    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-
-    <!-- 4. Socket.IO -->
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-
-    <!-- 5. Styling & Icons -->
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/tweetnacl@1.0.3/nacl-fast.min.js"></script> 
     <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-
+    
     <script>
         tailwind.config = {
             theme: {
@@ -35,135 +28,219 @@
                         fire: { bg: '#2a1005', panel: '#451a03', border: '#7c2d12', accent: '#ea580c', text: '#ffedd5', highlight: '#fb923c' },
                         void: '#0f0502'
                     },
-                    fontFamily: { mono: ['JetBrains Mono', 'monospace'], sans: ['Comic Neue', 'cursive'] }
+                    fontFamily: { mono: ['JetBrains Mono', 'monospace'], sans: ['Comic Neue', 'cursive'] },
+                    screens: {
+                        'xs': '400px'
+                    }
                 }
             }
         }
     </script>
     <style>
-        body { background-color: #2a1005; color: #ffedd5; font-family: 'Comic Neue', cursive; min-height: 100vh; font-size: 14px; overflow-x: hidden; padding-bottom: 60px; }
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        body { background-color: #2a1005; color: #ffedd5; font-family: 'Comic Neue', cursive; min-height: 100vh; font-size: 14px; overflow-x: hidden; padding-bottom: 90px; /* Space for bottom nav */ }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
         ::-webkit-scrollbar-track { background: #2a1005; }
-        ::-webkit-scrollbar-thumb { background: #7c2d12; border-radius: 4px; border: 1px solid #451a03; }
+        ::-webkit-scrollbar-thumb { background: #7c2d12; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #ea580c; }
+        
         nav { background: rgba(42, 16, 5, 0.95); backdrop-filter: blur(12px); border-bottom: 2px solid #7c2d12; }
         .brand-text { color: #ea580c; text-shadow: 2px 2px 0px #451a03; font-weight: 800; letter-spacing: 1px; }
+        
+        /* Table Styles with Sticky Columns for Mobile */
         .holdex-table { width: 100%; border-collapse: separate; border-spacing: 0; }
-        .holdex-table th { background: #451a03; position: sticky; top: 0; z-index: 20; padding: 14px 12px; text-align: right; font-size: 12px; font-weight: 700; color: #fb923c; border-bottom: 2px solid #7c2d12; cursor: pointer; white-space: nowrap; text-transform: uppercase; transition: color 0.2s, background 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-        .holdex-table th:hover { background: #582206; color: #fff; }
-        .holdex-table th:first-child { text-align: left; padding-left: 20px; }
-        .holdex-table td { padding: 12px 12px; border-bottom: 1px solid rgba(124, 45, 18, 0.3); vertical-align: middle; font-family: 'JetBrains Mono', monospace; }
-        .holdex-table td:first-child { padding-left: 20px; }
+        .holdex-table th { background: #451a03; position: sticky; top: 0; z-index: 20; padding: 10px 8px; text-align: right; font-size: 11px; font-weight: 700; color: #fb923c; border-bottom: 2px solid #7c2d12; cursor: pointer; white-space: nowrap; text-transform: uppercase; transition: color 0.2s, background 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        .holdex-table th:first-child { text-align: left; padding-left: 12px; position: sticky; left: 0; z-index: 30; background: #451a03; border-right: 1px solid #7c2d12; }
+        .holdex-table td { padding: 8px 8px; border-bottom: 1px solid rgba(124, 45, 18, 0.3); vertical-align: middle; font-family: 'JetBrains Mono', monospace; white-space: nowrap; font-size: 12px; }
+        .holdex-table td:first-child { padding-left: 12px; position: sticky; left: 0; z-index: 10; background: #2a1005; border-right: 1px solid #7c2d12; }
         .holdex-table tr:hover td { background: rgba(234, 88, 12, 0.1); }
-        .img-token { width: 40px; height: 40px; border-radius: 8px; border: 2px solid #7c2d12; object-fit: cover; flex-shrink: 0; background: #000; }
-        .pill { padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono'; }
+        .holdex-table tr:hover td:first-child { background: #351408; } 
+
+        .img-token { width: 32px; height: 32px; border-radius: 6px; border: 2px solid #7c2d12; object-fit: cover; flex-shrink: 0; background: #000; }
+        .pill { padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; font-family: 'JetBrains Mono'; }
         .pill-green { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4); }
         .pill-red { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
-        .search-container { position: relative; width: 100%; }
-        .search-box { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; padding: 10px 36px 10px 16px; border-radius: 8px; outline: none; width: 100%; font-family: 'JetBrains Mono'; transition: border-color 0.2s; }
+        
+        /* IMPROVED RESPONSIVE SEARCH CONTAINER */
+        .search-container { position: relative; width: 100%; display: flex; align-items: center; gap: 8px; flex-shrink: 1; min-width: 0; }
+        .search-box { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; padding: 10px 36px 10px 16px; border-radius: 8px; outline: none; width: 100%; font-family: 'JetBrains Mono'; transition: border-color 0.2s; font-size: 16px; /* Prevents iOS zoom */ }
         .search-box:focus { border-color: #ea580c; }
         .search-box::placeholder { color: #9a3412; }
-        .clear-search { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #9a3412; cursor: pointer; display: none; }
-        .clear-search:hover { color: #ea580c; }
-        .nav-btn { background: transparent; color: #9a3412; padding: 8px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 800; transition: all 0.2s; border: 2px solid transparent; }
+        .clear-search { position: absolute; right: 46px; top: 50%; transform: translateY(-50%); color: #9a3412; cursor: pointer; display: none; }
+        
+        .nav-btn { background: transparent; color: #9a3412; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 800; transition: all 0.2s; border: 2px solid transparent; }
         .nav-btn:hover { color: #fb923c; }
         .nav-btn.active { background: #451a03; color: #ea580c; border-color: #7c2d12; box-shadow: 0 4px 0 #2a1005; }
-        .filter-toggle { background: #451a03; border: 2px solid #7c2d12; color: #9a3412; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; transition: all 0.2s; display: flex; align-items: center; gap: 6px; }
+        
+        .filter-toggle { background: #451a03; border: 2px solid #7c2d12; color: #9a3412; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 11px; font-weight: 700; transition: all 0.2s; display: flex; align-items: center; gap: 6px; white-space: nowrap; flex-shrink: 0; }
         .filter-toggle.active { border-color: #22c55e; color: #4ade80; background: rgba(34, 197, 94, 0.1); }
-        .refresh-btn { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; transition: all 0.2s; position: relative; }
-        .refresh-btn:hover:not(:disabled) { border-color: #ea580c; color: #fff; background: #582206; }
-        .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; border-color: #451a03; color: #7c2d12; }
-        .page-btn { background: #2a1005; border: 2px solid #7c2d12; color: #fb923c; padding: 8px 16px; border-radius: 8px; font-weight: bold; font-family: 'JetBrains Mono', monospace; transition: all 0.2s; cursor: pointer; }
-        .page-btn:hover:not(:disabled) { border-color: #ea580c; color: #fff; background: #451a03; }
-        .page-btn:disabled { opacity: 0.5; cursor: not-allowed; border-color: #451a03; color: #7c2d12; }
-        .view-section { display: none; }
-        .view-section.active { display: block; animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-        .chart-container { width: 100%; height: 400px; background: #0f0502; border-radius: 16px; overflow: hidden; border: 2px solid #7c2d12; box-shadow: 0 10px 30px rgba(0,0,0,0.5); position: relative; }
-        .chart-loader { position: absolute; inset: 0; background: rgba(15, 5, 2, 0.8); display: flex; align-items: center; justify-content: center; z-index: 10; font-family: 'JetBrains Mono'; color: #ea580c; font-weight: bold; }
-        .stat-card { background: rgba(69, 26, 3, 0.8); border: 2px solid #7c2d12; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 4px; box-shadow: 4px 4px 0 rgba(0,0,0,0.2); }
-        .stat-label { font-size: 11px; color: #fb923c; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
-        .stat-value { font-size: 18px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
-        .modal-overlay { position: fixed; inset: 0; background: rgba(15, 5, 2, 0.95); backdrop-filter: blur(5px); z-index: 100; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+        
+        .refresh-btn { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; transition: all 0.2s; flex-shrink: 0; }
+        .refresh-btn:disabled i { animation: spin 1s linear infinite; }
+        
+        /* Select Dropdown Style */
+        .limit-select {
+            background: #451a03;
+            border: 2px solid #7c2d12;
+            color: #9a3412;
+            padding: 8px 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 700;
+            outline: none;
+            transition: all 0.2s;
+            appearance: none; /* Remove default arrow */
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239a3412' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            padding-right: 24px;
+        }
+        .limit-select:focus { border-color: #ea580c; color: #fb923c; }
+
+        /* Chart Styles */
+        .chart-wrapper { width: 100%; height: 400px; background: #1a0a05; border-radius: 16px; overflow: hidden; border: 2px solid #7c2d12; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
+        @media (min-width: 768px) { .chart-wrapper { height: 600px; } }
+        
+        .res-btn { background: transparent; border: 1px solid transparent; color: #9a3412; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; cursor: pointer; transition: all 0.2s; }
+        .res-btn:hover { color: #fb923c; }
+        .res-btn.active { background: #451a03; border-color: #7c2d12; color: #ea580c; }
+
+        .stat-card { background: rgba(69, 26, 3, 0.8); border: 2px solid #7c2d12; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 4px; box-shadow: 4px 4px 0 rgba(0,0,0,0.2); }
+        .stat-value { font-size: 16px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; text-shadow: 0 2px 4px rgba(0,0,0,0.5); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        
+        /* Bottom Navigation */
+        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: #1a0a05; border-top: 2px solid #7c2d12; display: flex; justify-content: space-around; padding: 8px 0; z-index: 50; padding-bottom: env(safe-area-inset-bottom); }
+        .bottom-nav-item { display: flex; flex-direction: column; align-items: center; gap: 4px; color: #9a3412; font-size: 10px; font-weight: bold; width: 100%; background: none; border: none; }
+        .bottom-nav-item.active { color: #ea580c; }
+        .bottom-nav-item i { transition: transform 0.2s; }
+        .bottom-nav-item.active i { transform: translateY(-2px); }
+
+        /* Modal fixes for mobile */
+        .modal-overlay { position: fixed; inset: 0; background: rgba(15, 5, 2, 0.95); backdrop-filter: blur(5px); z-index: 100; display: flex; align-items: flex-end; padding: 16px; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
         .modal-overlay.open { opacity: 1; pointer-events: auto; }
-        .back-btn { background: #2a1005; border: 2px solid #7c2d12; color: #9a3412; padding: 10px 16px; border-radius: 8px; font-weight: 700; transition: all 0.2s; }
-        .back-btn:hover { border-color: #ea580c; color: #ea580c; }
-        .sort-header { position: relative; cursor: pointer; user-select: none; }
-        .sort-header:active { transform: translateY(1px); }
-        .table-scroll-container { max-height: 70vh; overflow-y: auto; border-radius: 0 0 16px 16px; }
-        .res-btn { background: #2a1005; border: 1px solid #7c2d12; color: #9a3412; padding: 4px 8px; border-radius: 4px; font-size: 10px; font-weight: bold; cursor: pointer; }
-        .res-btn.active { background: #ea580c; color: white; border-color: #ea580c; }
-        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; }
-        .status-dot.online { background: #22c55e; animation: pulse 2s infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @media (min-width: 768px) { .modal-overlay { align-items: center; justify-content: center; } }
+        
+        .modal-content { max-height: 85vh; overflow-y: auto; width: 100%; border-radius: 16px 16px 0 0; background: #2a1005; border: 2px solid #7c2d12; box-shadow: 0 -10px 40px rgba(0,0,0,0.5); }
+        @media (min-width: 768px) { .modal-content { border-radius: 16px; width: auto; min-width: 400px; max-width: 800px; } }
+
+        /* Animation */
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .status-dot.online { background: #22c55e; box-shadow: 0 0 5px #22c55e; animation: pulse 2s infinite; }
+        .status-dot.offline { background: #ef4444; box-shadow: 0 0 5px #ef4444; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+
+        .hidden-scrollbar::-webkit-scrollbar { display: none; }
+        .hidden-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        .social-btn { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 10px; border: 2px solid #7c2d12; background: #451a03; color: #ea580c; transition: all 0.2s; }
+        .social-btn:hover { border-color: #ea580c; color: #fff; background: #582206; transform: translateY(-2px); }
+        
+        .feature-box { background: #451a03; border: 2px solid #7c2d12; border-radius: 16px; padding: 24px; transition: transform 0.2s; display: flex; flex-direction: column; gap: 8px; }
+        .feature-box:hover { border-color: #ea580c; transform: translateY(-4px); }
+        
+        .action-btn { background: #451a03; border: 2px solid #ea580c; color: #fb923c; padding: 12px 20px; border-radius: 12px; font-weight: 700; text-transform: uppercase; font-size: 13px; transition: all 0.2s; box-shadow: 4px 4px 0 #7c2d12; }
+        .action-btn:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 #7c2d12; background: #582206; color: #fff; }
+        .action-btn:active { transform: translate(2px, 2px); box-shadow: 0 0 0; }
+        .action-btn:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(1); transform: none; box-shadow: none; }
+        
+        .form-input { background: #451a03; border: 2px solid #7c2d12; color: #fb923c; padding: 12px; border-radius: 8px; width: 100%; font-family: 'JetBrains Mono'; margin-bottom: 16px; outline: none; transition: border-color 0.2s; font-size: 14px; }
+        .form-input:focus { border-color: #ea580c; }
+        .form-label { display: block; color: #9a3412; font-size: 12px; font-weight: bold; margin-bottom: 6px; text-transform: uppercase; }
+        
+        .code-block { background: #0f0502; border: 1px solid #7c2d12; padding: 16px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #fb923c; overflow-x: auto; position: relative; }
+        
+        #detail-banner-container { width: 100%; overflow: hidden; position: relative; background: #000; border-radius: 12px; margin-bottom: 16px; }
+        #detail-banner-img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; }
+
+        /* Sort Icon in Header */
+        .sort-icon { display: inline-block; transition: transform 0.2s; }
+        th[data-sort] { cursor: pointer; user-select: none; }
     </style>
 </head>
 <body>
 
-<nav class="sticky top-0 z-40">
-    <div class="max-w-[1800px] mx-auto px-4 md:px-6 py-4 flex flex-col md:flex-row md:justify-between md:items-center gap-4">
-        <div class="flex items-center justify-between w-full md:w-auto">
-            <div class="flex items-center gap-4 cursor-pointer group" onclick="navigateTo('')">
-                <div class="w-12 h-12 rounded-xl flex items-center justify-center bg-[#451a03] text-orange-500 border-2 border-[#7c2d12] shadow-lg group-hover:border-orange-500 transition">
-                    <i data-lucide="flame" width="24"></i>
+<!-- TOP NAVIGATION -->
+<nav class="sticky top-0 z-40 px-3 py-3 md:px-6 md:py-4">
+    <div class="max-w-[1800px] mx-auto flex flex-col md:flex-row gap-3">
+        <!-- Header Row: Logo -->
+        <div class="flex justify-between items-center">
+            <div class="flex items-center gap-3 cursor-pointer group" onclick="navigateTo('')">
+                <div class="w-10 h-10 md:w-12 md:h-12 rounded-xl flex items-center justify-center bg-[#451a03] text-orange-500 border-2 border-[#7c2d12] shadow-lg group-hover:border-orange-500 transition relative">
+                    <i data-lucide="flame" width="20" class="md:w-6 md:h-6"></i>
+                    <!-- Status Dot Overlay -->
+                    <div id="status-dot-nav" class="absolute -top-1 -right-1 status-dot offline border border-[#2a1005]"></div>
                 </div>
-                <div class="flex items-center gap-2">
-                    <h1 class="text-3xl brand-text tracking-tight font-sans">HolDex</h1>
-                    <div id="status-dot-nav" class="status-dot" title="API Status"></div>
+                <div>
+                    <h1 class="text-2xl md:text-3xl brand-text tracking-tight font-sans">HolDex</h1>
                 </div>
             </div>
         </div>
-
-        <div class="flex items-center bg-[#451a03]/50 p-1 rounded-lg border border-[#7c2d12]/50">
-            <button id="nav-home" class="nav-btn active" onclick="navigateTo('')">Home</button>
-            <button id="nav-about" class="nav-btn" onclick="navigateTo('about')">About</button>
-            <button id="nav-update" class="nav-btn" onclick="navigateTo('update')">Update</button>
-        </div>
-
-        <div id="table-controls" class="flex items-center gap-3 w-full md:w-auto transition-opacity duration-300">
-            <button id="filter-verified" onclick="toggleVerifiedFilter()" class="filter-toggle" title="Show only Verified Community Updates">
-                <i data-lucide="shield-check" width="16"></i> Verified
-            </button>
-            <button id="filter-zerovol" onclick="toggleZeroVolFilter()" class="filter-toggle active" title="Hide tokens with 0 Volume">
-                <i data-lucide="bar-chart-2" width="16"></i> Hide 0 Vol
-            </button>
-            <div class="relative w-full md:w-auto search-container">
-                <input type="text" id="search" placeholder="Search..." class="search-box">
-                <i id="clear-search-btn" data-lucide="x" width="16" class="clear-search" onclick="clearSearch()"></i>
+        
+        <!-- Controls & Search -->
+        <div id="table-controls" class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 w-full md:w-auto transition-opacity duration-300 md:ml-auto">
+            <!-- Search Row -->
+            <div class="flex gap-2 w-full md:w-[400px]">
+                <div class="relative flex-grow search-container">
+                    <input type="text" id="search" placeholder="Search mint or ticker..." class="search-box">
+                    <i id="clear-search-btn" data-lucide="x" width="16" class="clear-search" onclick="clearSearch()"></i>
+                    <i id="help-btn" data-lucide="help-circle" width="18" class="absolute right-3 top-1/2 -translate-y-1/2 text-[#9a3412]" onclick="toggleHowItWorksModal()"></i>
+                </div>
+                <button id="manual-refresh" onclick="handleManualRefresh()" class="refresh-btn" title="Refresh Data">
+                    <i data-lucide="refresh-cw" width="18"></i>
+                </button>
             </div>
-            <select id="limit-select" onchange="setLimit(this.value)" class="bg-[#451a03] border-2 border-[#7c2d12] text-[#fb923c] rounded-lg px-2 py-2 text-sm font-mono">
-                <option value="20">20</option>
-                <option value="50">50</option>
-                <option value="100">100</option>
-            </select>
-            <button id="manual-refresh" onclick="handleManualRefresh()" class="refresh-btn" title="Refresh Data">
-                <i data-lucide="refresh-cw" width="18"></i>
-            </button>
+            <!-- Filter Row -->
+            <div class="flex gap-2 overflow-x-auto hidden-scrollbar pb-1 md:pb-0 items-center">
+                <button id="filter-verified" onclick="toggleVerifiedFilter()" class="filter-toggle" title="Show only Verified">
+                    <i data-lucide="shield-check" width="14"></i> Verified
+                </button>
+                <button id="filter-zerovol" onclick="toggleZeroVolFilter()" class="filter-toggle active" title="Hide 0 Volume">
+                    <i data-lucide="bar-chart-2" width="14"></i> >$0 Vol
+                </button>
+                
+                <!-- LIMIT SELECTOR -->
+                <select id="limit-select" onchange="changeLimit(this.value)" class="limit-select" title="Tokens per page">
+                    <option value="10">10</option>
+                    <option value="20" selected>20</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                </select>
+
+                <div class="md:hidden flex-shrink-0 w-4"></div> <!-- Spacer -->
+            </div>
         </div>
 
-        <div id="detail-controls" class="hidden w-full md:w-auto">
-            <button onclick="navigateTo('')" class="back-btn flex items-center justify-center gap-2 w-full md:w-auto"><i data-lucide="arrow-left" width="16"></i> Back</button>
+        <div id="detail-controls" class="hidden w-full md:w-auto md:ml-auto">
+            <button onclick="navigateTo('')" class="bg-[#2a1005] border-2 border-[#7c2d12] text-[#9a3412] hover:text-[#ea580c] hover:border-[#ea580c] py-2 px-4 rounded-lg font-bold flex items-center justify-center gap-2 w-full md:w-auto transition"><i data-lucide="arrow-left" width="16"></i> Back to List</button>
         </div>
+        
     </div>
 </nav>
 
-<main class="max-w-[1800px] mx-auto px-0 md:px-6 py-4 md:py-8">
-
+<main class="max-w-[1800px] mx-auto px-0 md:px-6 py-2 md:py-8">
+    
     <!-- DASHBOARD VIEW -->
     <div id="view-dashboard" class="view-section active">
-        <div class="bg-[#2a1005] border-y md:border-2 border-[#7c2d12] md:rounded-2xl overflow-hidden shadow-2xl flex flex-col">
-            <div class="table-scroll-container overflow-x-auto">
+        <div class="bg-[#2a1005] md:border-2 border-[#7c2d12] md:rounded-2xl shadow-2xl flex flex-col min-h-[60vh]">
+            <div class="overflow-x-auto">
                 <table class="holdex-table">
                     <thead>
                         <tr>
-                            <th width="30%" class="sort-header" onclick="setSort('newest')">Asset <i data-lucide="arrow-down-up" width="10" class="inline opacity-50 ml-1"></i></th>
-                            <th class="sort-header hidden md:table-cell" onclick="setSort('kscore')">K-Score</th>
-                            <th class="hidden md:table-cell sort-header" onclick="setSort('1h')">1h</th>
-                            <th class="sort-header" onclick="setSort('24h')">24h</th>
-                            <th class="sort-header" onclick="setSort('volume')">Vol (24h)</th>
-                            <th class="sort-header" onclick="setSort('mcap')">Mkt Cap</th>
-                            <th class="hidden md:table-cell sort-header" onclick="setSort('holders')">Holders</th>
-                            <th class="hidden md:table-cell sort-header" onclick="setSort('age')">Age</th>
+                            <th class="sort-header w-auto md:w-[30%]" data-sort="newest" onclick="setSort('newest')">Asset <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
+                            <!-- K-SCORE HEADER: Updated to be sortable but keep help icon -->
+                            <th class="sort-header text-[#ea580c] border-b-[#ea580c] border-b-2 hidden md:table-cell cursor-pointer" data-sort="kscore" onclick="setSort('kscore')">
+                                Score <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i>
+                                <i data-lucide="help-circle" width="12" class="inline ml-1 text-[#9a3412] hover:text-white" onclick="event.stopPropagation(); toggleKScoreModal()"></i>
+                            </th>
+                            <!-- PRICE COLUMN REMOVED -->
+                            <th class="sort-header hidden md:table-cell" data-sort="1h" onclick="setSort('1h')">1h% <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
+                            <th class="sort-header hidden md:table-cell" data-sort="24h" onclick="setSort('24h')">24h% <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
+                            <th class="sort-header" data-sort="volume" onclick="setSort('volume')">Vol <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th> 
+                            <th class="sort-header" data-sort="mcap" onclick="setSort('mcap')">MCap <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
+                            <th class="sort-header hidden md:table-cell" data-sort="holders" onclick="setSort('holders')">Holders <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
+                            <th class="sort-header hidden md:table-cell" data-sort="age" onclick="setSort('age')">Age <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
                         </tr>
                     </thead>
                     <tbody id="table-body">
@@ -171,241 +248,535 @@
                     </tbody>
                 </table>
             </div>
-
-            <div class="bg-[#451a03] p-4 border-t-2 border-[#7c2d12] flex justify-between items-center">
-                <div class="text-xs text-[#9a3412] font-mono font-bold uppercase tracking-wider hidden md:block">
-                    Showing results
-                </div>
-                <div class="flex items-center gap-4 mx-auto md:mx-0">
-                    <button id="btn-prev" onclick="changePage(-1)" class="page-btn flex items-center gap-2" disabled>
-                        <i data-lucide="chevron-left" width="16"></i> Previous
-                    </button>
-                    <span id="page-display" class="text-[#fb923c] font-mono font-bold text-lg">Page 1</span>
-                    <button id="btn-next" onclick="changePage(1)" class="page-btn flex items-center gap-2">
-                        Next <i data-lucide="chevron-right" width="16"></i>
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- DETAIL VIEW -->
-    <div id="view-detail" class="view-section px-4 md:px-0">
-        <div id="detail-loading" class="text-center py-20 text-[#ea580c] font-mono animate-pulse hidden">Fetching Chain Data...</div>
-        <div id="detail-content" style="display:none">
-            <div id="detail-banner-container" class="hidden mb-6">
-                <img id="detail-banner-img" src="" class="w-full h-32 md:h-48 object-cover rounded-xl border-2 border-[#7c2d12]" onerror="this.parentElement.classList.add('hidden')">
-            </div>
-
-            <div class="flex flex-col md:flex-row gap-6 mb-8 items-start">
-                <div class="flex items-center gap-6 w-full md:w-auto bg-[#451a03] p-4 rounded-2xl border-2 border-[#7c2d12] shadow-xl">
-                    <div id="detail-media-container">
-                        <img id="detail-img" src="" class="w-16 h-16 rounded-lg border-2 border-[#ea580c] bg-black object-cover">
-                    </div>
-                    <div class="flex-1 min-w-0">
-                        <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mb-1">
-                            <h2 id="detail-ticker" class="text-3xl md:text-4xl font-bold text-white tracking-tight truncate font-mono"></h2>
-                            <span id="detail-name" class="text-[#fb923c] text-xs md:text-sm bg-[#2a1005] px-3 py-1 rounded-lg border border-[#7c2d12] truncate"></span>
-                        </div>
-                        <div id="badge-container" class="mb-2"></div>
-                        <div class="flex items-center gap-2 cursor-pointer group" onclick="copyMint()">
-                            <span id="detail-mint" class="text-xs text-[#9a3412] font-mono group-hover:text-[#ea580c] transition truncate max-w-[200px] md:max-w-none"></span>
-                            <i data-lucide="copy" width="12" class="text-[#9a3412] group-hover:text-[#ea580c] flex-shrink-0"></i>
-                        </div>
-                        <div id="detail-desc" class="mt-3 text-sm text-[#ffedd5] font-sans leading-relaxed opacity-90 hidden"></div>
-                    </div>
-                </div>
-                <div class="flex-1"></div>
-                <div class="flex flex-wrap gap-3 w-full md:w-auto items-center justify-end" id="detail-actions"></div>
-            </div>
-
-            <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 md:gap-4 mb-6">
-                <div id="kscore-container" class="stat-card border-[#ea580c] relative overflow-hidden col-span-2">
-                    <span class="stat-label text-[#ea580c]">K-Score</span>
-                    <div class="flex items-center gap-4">
-                        <span id="stat-kscore" class="stat-value text-[#fb923c] text-2xl font-bold font-mono">--</span>
-                        <div id="conviction-breakdown" class="hidden flex-1">
-                            <div class="flex gap-2 text-[10px] font-mono mb-1">
-                                <span class="text-green-400" title="Accumulators">Acc: <span id="conv-acc">0</span></span>
-                                <span class="text-yellow-400" title="Holders">Hold: <span id="conv-hold">0</span></span>
-                                <span class="text-orange-400" title="Reducers">Red: <span id="conv-red">0</span></span>
-                                <span class="text-red-400" title="Extractors">Ext: <span id="conv-ext">0</span></span>
-                            </div>
-                            <div class="flex h-2 rounded overflow-hidden bg-[#2a1005]">
-                                <div id="bar-acc" class="bg-green-500 transition-all" style="width:0%"></div>
-                                <div id="bar-hold" class="bg-yellow-500 transition-all" style="width:0%"></div>
-                                <div id="bar-red" class="bg-orange-500 transition-all" style="width:0%"></div>
-                                <div id="bar-ext" class="bg-red-500 transition-all" style="width:0%"></div>
-                            </div>
-                            <div class="text-[9px] text-[#9a3412] mt-1">Conviction: <span id="conv-score">0</span>% (top <span id="conv-analyzed">0</span> holders)</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="stat-card"><span class="stat-label">Price</span><span id="stat-price" class="stat-value text-[#ffedd5]">-</span></div>
-                <div class="stat-card"><span class="stat-label">MCap</span><span id="stat-mcap" class="stat-value text-[#ea580c]">-</span></div>
-                <div class="stat-card"><span class="stat-label">Holders</span><span id="stat-holders" class="stat-value text-[#3b82f6]">-</span></div>
-            </div>
-
-            <div class="grid grid-cols-4 gap-3 mb-6">
-                <div class="stat-card"><span class="stat-label">5M</span><span id="stat-chg5m" class="stat-value text-xs">-</span></div>
-                <div class="stat-card"><span class="stat-label">1H</span><span id="stat-chg1h" class="stat-value text-xs">-</span></div>
-                <div class="stat-card"><span class="stat-label">24H</span><span id="stat-chg24h" class="stat-value text-xs">-</span></div>
-                <div class="stat-card"><span class="stat-label">Vol 24H</span><span id="stat-vol" class="stat-value text-xs text-[#22c55e]">-</span></div>
-            </div>
-
-            <!-- Chart Controls -->
-            <div class="flex items-center gap-2 mb-2 flex-wrap">
-                <span class="text-[#9a3412] text-xs font-bold">CHART:</span>
-                <button id="mode-mcap" class="res-btn active" onclick="setChartMode('mcap')">MCap</button>
-                <button id="mode-price" class="res-btn" onclick="setChartMode('price')">Price</button>
-                <span class="text-[#7c2d12]">|</span>
-                <button id="res-5" class="res-btn" onclick="setResolution('5')">5m</button>
-                <button id="res-60" class="res-btn active" onclick="setResolution('60')">1H</button>
-                <button id="res-D" class="res-btn" onclick="setResolution('D')">1D</button>
-                <span class="text-[#7c2d12]">|</span>
-                <button id="btn-scale" class="res-btn" onclick="toggleScale()">Log</button>
-                <span id="chart-pool-name" class="text-[10px] text-[#9a3412] ml-2"></span>
-            </div>
-
-            <div class="chart-container" id="tv-chart">
-                <div id="chart-loader" class="chart-loader">LOADING MARKET DATA...</div>
-            </div>
-
-            <!-- LP List -->
-            <div class="mt-6 bg-[#451a03] rounded-xl border-2 border-[#7c2d12] overflow-hidden">
-                <div class="px-4 py-2 border-b border-[#7c2d12] text-xs font-bold text-[#fb923c] uppercase">Liquidity Pools</div>
-                <table class="w-full text-sm">
-                    <thead class="bg-[#2a1005]">
-                        <tr>
-                            <th class="px-4 py-2 text-left text-[#9a3412] text-xs">DEX</th>
-                            <th class="px-4 py-2 text-right text-[#9a3412] text-xs">Price</th>
-                            <th class="px-4 py-2 text-right text-[#9a3412] text-xs">Liquidity</th>
-                        </tr>
-                    </thead>
-                    <tbody id="lp-list-body">
-                        <tr><td colspan="3" class="text-center p-4 text-xs text-[#9a3412]">Loading pools...</td></tr>
-                    </tbody>
-                </table>
+            
+            <!-- Pagination -->
+            <div class="bg-[#451a03] p-4 border-t-2 border-[#7c2d12] flex justify-between items-center mt-auto">
+                <button id="btn-prev" onclick="changePage(-1)" class="nav-btn flex items-center gap-2 disabled:opacity-50" disabled>
+                    <i data-lucide="chevron-left" width="16"></i>
+                </button>
+                <span id="page-display" class="text-[#fb923c] font-mono font-bold text-sm">Page 1</span>
+                <button id="btn-next" onclick="changePage(1)" class="nav-btn flex items-center gap-2">
+                    <i data-lucide="chevron-right" width="16"></i>
+                </button>
             </div>
         </div>
     </div>
 
     <!-- ABOUT VIEW -->
-    <div id="view-about" class="view-section px-4 md:px-0">
-        <div class="max-w-3xl mx-auto bg-[#451a03] rounded-2xl border-2 border-[#7c2d12] p-8">
-            <h2 class="text-3xl font-bold text-[#ea580c] mb-6">About HolDex</h2>
-            <div class="space-y-4 text-[#ffedd5]">
-                <p>HolDex is a conviction-based token explorer for Solana memecoins.</p>
-
-                <h3 class="text-xl font-bold text-[#fb923c] mt-8 mb-4">Tier System</h3>
-                <p>Tokens are classified by K-Score into tiers that determine acceptance on GASdf:</p>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
-                    <div class="flex items-center gap-3 p-3 rounded-lg" style="background:rgba(185,242,255,0.1);border:1px solid rgba(185,242,255,0.3)">
-                        <span class="text-2xl">💎</span>
-                        <div>
-                            <div class="font-bold" style="color:#b9f2ff">Diamond</div>
-                            <div class="text-xs text-[#9a3412]">Local tokens (SOL, USDC, $ASDF...)</div>
-                        </div>
-                        <span class="ml-auto text-green-500 text-xs">✓ Accepted</span>
-                    </div>
-                    <div class="flex items-center gap-3 p-3 rounded-lg" style="background:rgba(229,228,226,0.1);border:1px solid rgba(229,228,226,0.3)">
-                        <span class="text-2xl">🏆</span>
-                        <div>
-                            <div class="font-bold" style="color:#e5e4e2">Platinum</div>
-                            <div class="text-xs text-[#9a3412]">K-Score 80+</div>
-                        </div>
-                        <span class="ml-auto text-green-500 text-xs">✓ Accepted</span>
-                    </div>
-                    <div class="flex items-center gap-3 p-3 rounded-lg" style="background:rgba(255,215,0,0.1);border:1px solid rgba(255,215,0,0.3)">
-                        <span class="text-2xl">🥇</span>
-                        <div>
-                            <div class="font-bold" style="color:#ffd700">Gold</div>
-                            <div class="text-xs text-[#9a3412]">K-Score 50-79</div>
-                        </div>
-                        <span class="ml-auto text-green-500 text-xs">✓ Accepted</span>
-                    </div>
-                    <div class="flex items-center gap-3 p-3 rounded-lg" style="background:rgba(192,192,192,0.1);border:1px solid rgba(192,192,192,0.3)">
-                        <span class="text-2xl">🥈</span>
-                        <div>
-                            <div class="font-bold" style="color:#c0c0c0">Silver</div>
-                            <div class="text-xs text-[#9a3412]">K-Score 20-49</div>
-                        </div>
-                        <span class="ml-auto text-red-400 text-xs">✗ Not accepted</span>
-                    </div>
-                    <div class="flex items-center gap-3 p-3 rounded-lg" style="background:rgba(205,127,50,0.1);border:1px solid rgba(205,127,50,0.3)">
-                        <span class="text-2xl">🥉</span>
-                        <div>
-                            <div class="font-bold" style="color:#cd7f32">Bronze</div>
-                            <div class="text-xs text-[#9a3412]">K-Score 0-19</div>
-                        </div>
-                        <span class="ml-auto text-red-400 text-xs">✗ Not accepted</span>
+    <div id="view-about" class="view-section px-4 md:px-0 hidden">
+        <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 md:p-12 shadow-2xl max-w-5xl mx-auto space-y-12">
+            <div class="flex items-center gap-6 border-b-2 border-[#7c2d12] pb-8">
+                <div class="w-20 h-20 rounded-2xl flex items-center justify-center bg-[#451a03] text-orange-500 border-2 border-[#7c2d12] shadow-lg flex-shrink-0">
+                    <i data-lucide="flame" width="40"></i>
+                </div>
+                <div>
+                    <h2 class="text-3xl md:text-5xl font-bold text-white tracking-tight font-sans">About HolDex</h2>
+                    <p class="text-[#ea580c] font-mono text-sm md:text-lg mt-1">The High-Velocity Terminal for Solana Assets</p>
+                </div>
+            </div>
+            <div class="grid md:grid-cols-2 gap-8">
+                <div>
+                    <h3 class="text-2xl font-bold text-white mb-4">Core Philosophy</h3>
+                    <p class="text-[#ffedd5] leading-relaxed mb-4 text-sm md:text-base">
+                        HolDex is built for traders who demand raw speed and absolute truth. We provide a <strong>terminal-grade interface</strong> that cuts through the clutter, now enhanced with <strong>Daily Holder Tracking</strong> and deep historical analysis.
+                    </p>
+                    <p class="text-[#ffedd5] leading-relaxed text-sm md:text-base">
+                        We prioritize <strong>community verification</strong> and <strong>on-chain data integrity</strong>. Our proprietary indexing engine snapshots liquidity pools directly from the Solana RPC, ensuring you see price action as it happens.
+                    </p>
+                </div>
+                <div class="bg-[#451a03] p-6 rounded-xl border border-[#7c2d12] flex flex-col justify-center shadow-inner">
+                    <div class="flex items-center gap-3 mb-2"><i data-lucide="server" width="20" class="text-[#22c55e]"></i><span class="font-bold text-white">Direct RPC Sync</span></div>
+                    <p class="text-sm text-[#9a3412] mb-4">No third-party delays. We index Raydium and Pump.fun directly.</p>
+                    <div class="flex items-center gap-3 mb-2"><i data-lucide="bar-chart" width="20" class="text-[#3b82f6]"></i><span class="font-bold text-white">Holder Analytics</span></div>
+                    <p class="text-sm text-[#9a3412]">Track wallet growth over time with our daily snapshot engine.</p>
+                </div>
+            </div>
+            <div class="grid md:grid-cols-3 gap-6">
+                <div class="feature-box"><div class="text-[#fb923c] mb-2"><i data-lucide="lock" width="24"></i></div><h4 class="font-bold text-white text-lg">K-Score Protocol</h4><p class="text-sm text-[#9a3412]">Our "Conviction Score" analyzes holder distribution and token velocity to rate asset health.</p></div>
+                <div class="feature-box"><div class="text-[#22c55e] mb-2"><i data-lucide="users" width="24"></i></div><h4 class="font-bold text-white text-lg">Community Verified</h4><p class="text-sm text-[#9a3412]">Projects can verify their identity on-chain, earning the green badge and higher visibility.</p></div>
+                <div class="feature-box"><div class="text-[#a855f7] mb-2"><i data-lucide="zap" width="24"></i></div><h4 class="font-bold text-white text-lg">Zero Bloat</h4><p class="text-sm text-[#9a3412]">No ads. No trackers. Just data. Built for maximum performance on any device.</p></div>
+            </div>
+            <div class="bg-[#0f0502] border border-[#7c2d12] rounded-xl p-8 relative overflow-hidden group hover:border-[#ea580c] transition-colors">
+                <div class="absolute top-4 right-4 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><i data-lucide="code" width="100" class="text-[#ea580c]"></i></div>
+                <h3 class="text-2xl font-bold text-white mb-2">Developers & API</h3>
+                <p class="text-[#9a3412] mb-6 max-w-2xl text-sm">HolDex exposes a robust public API. Build trading bots, analytics platforms, or integrate real-time data into your dApp. API Keys are rate-limited to ensure fair usage.</p>
+                
+                <div id="api-section-unconnected">
+                    <div class="flex flex-col md:flex-row gap-4">
+                        <button onclick="toggleApiModal()" class="action-btn flex items-center justify-center gap-2"><i data-lucide="file-text" width="16"></i> Documentation</button>
+                        <button onclick="openWalletModal()" class="action-btn flex items-center justify-center gap-2 bg-[#2a1005] border-[#22c55e] text-[#22c55e] hover:bg-green-900/20"><i data-lucide="wallet" width="16"></i> Connect to Manage Keys</button>
                     </div>
                 </div>
 
-                <h3 class="text-xl font-bold text-[#fb923c] mt-8 mb-4">K-Score Breakdown</h3>
-                <p>Our unique <strong class="text-[#fb923c]">K-Score</strong> algorithm analyzes the top 20 holders:</p>
-                <ul class="list-disc list-inside space-y-2 ml-4 mt-3">
-                    <li><span class="text-green-400">Accumulators</span> - Increased position (150%+)</li>
-                    <li><span class="text-yellow-400">Holders</span> - Maintained position (100%+)</li>
-                    <li><span class="text-orange-400">Reducers</span> - Reduced position (50-99%)</li>
-                    <li><span class="text-red-400">Extractors</span> - Sold most (&lt;50%)</li>
-                </ul>
-                <p class="mt-4">Formula: <code class="bg-[#2a1005] px-2 py-1 rounded text-[#fb923c]">Verification (30) + Volume (20) + Conviction (40) + MCap (10)</code></p>
+                <div id="api-section-connected" class="hidden space-y-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <h4 class="text-[#fb923c] font-bold text-sm uppercase">Your API Keys</h4>
+                        <div class="flex gap-2">
+                            <button onclick="toggleApiModal()" class="text-xs text-[#9a3412] hover:text-[#fb923c] flex items-center gap-1 border border-[#7c2d12] px-2 py-1 rounded bg-[#2a1005]"><i data-lucide="file-text" width="12"></i> Docs</button>
+                            <button onclick="requestApiKey()" class="text-xs text-[#22c55e] border border-[#22c55e] px-2 py-1 rounded bg-[#2a1005] hover:bg-green-900/20 flex items-center gap-1"><i data-lucide="plus" width="12"></i> New Key</button>
+                        </div>
+                    </div>
+                    
+                    <div id="my-keys-list" class="space-y-2">
+                        <div class="text-center py-4 text-[#9a3412] text-xs font-mono">
+                            <button onclick="fetchMyKeys()" class="text-[#ea580c] underline hover:text-[#fb923c] font-bold">Sign to Reveal My Keys</button>
+                        </div>
+                    </div>
+                </div>
             </div>
+             <div class="border-t border-[#7c2d12] pt-8 flex justify-between items-center text-xs text-[#9a3412]"><div>&copy; 2025 HolDex Protocol. All rights reserved.</div><div class="font-mono">v2.5.0 (Stable)</div></div>
         </div>
     </div>
 
     <!-- UPDATE VIEW -->
-    <div id="view-update" class="view-section px-4 md:px-0">
-        <div class="max-w-2xl mx-auto bg-[#451a03] rounded-2xl border-2 border-[#7c2d12] p-8">
-            <h2 class="text-2xl font-bold text-[#ea580c] mb-6">Submit Community Update</h2>
-            <p class="text-[#9a3412] mb-6">Update token metadata to earn verification badge and unlock K-Score.</p>
-            <div class="bg-[#2a1005] rounded-lg p-4 border border-[#7c2d12] text-center">
-                <p class="text-[#fb923c]">Feature coming soon...</p>
+    <div id="view-update" class="view-section px-4 md:px-0 hidden">
+        <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-8 shadow-2xl max-w-2xl mx-auto">
+            <h2 class="text-2xl font-bold text-white mb-4 font-sans border-b border-[#7c2d12] pb-4">Update Token</h2>
+            
+            <div id="wallet-disconnected-msg" class="bg-[#451a03] p-4 rounded-xl border-l-4 border-[#ea580c] mb-6">
+                <p class="text-[#ffedd5] text-sm">Connect your wallet to pay fees and submit updates.</p>
+                <button onclick="openWalletModal()" class="mt-3 text-xs bg-[#ea580c] text-white px-3 py-2 rounded font-bold">Connect Now</button>
+            </div>
+            
+            <div id="fee-panel" class="hidden mb-6 p-4 border border-[#7c2d12] rounded bg-[#0f0502]">
+                 <div class="text-[#9a3412] text-xs uppercase font-bold mb-3 border-b border-[#7c2d12] pb-2 flex justify-between">
+                     <span>Protocol Fees</span>
+                     <span id="balance-check-status" class="text-[#ea580c] animate-pulse">Checking Balance...</span>
+                 </div>
+                 
+                 <!-- Fee Row: SOL -->
+                 <div class="flex justify-between items-center text-sm font-mono text-[#fb923c] mb-2">
+                     <div class="flex flex-col">
+                         <span>SOL Fee</span>
+                         <span class="text-[10px] text-[#9a3412]" id="user-sol-balance">Bal: --</span>
+                     </div>
+                     <span id="fee-sol">-- SOL</span>
+                 </div>
+                 
+                 <!-- Fee Row: Token -->
+                 <div class="flex justify-between items-center text-sm font-mono text-[#fb923c]">
+                     <div class="flex flex-col">
+                         <span id="fee-token-name">Token Fee</span>
+                         <span class="text-[10px] text-[#9a3412]" id="user-token-balance">Bal: --</span>
+                     </div>
+                     <span id="fee-token">--</span>
+                 </div>
+            </div>
+
+            <form onsubmit="submitUpdate(event)" class="space-y-4">
+                <div>
+                    <label class="form-label">Mint Address</label>
+                    <div class="relative">
+                        <input type="text" id="update-mint" class="form-input" placeholder="Enter Mint Address..." required onblur="fetchTokenForUpdate(this.value)">
+                        <div id="mint-check-spinner" class="absolute right-3 top-3 hidden"><i data-lucide="loader-2" class="animate-spin text-[#ea580c]" width="18"></i></div>
+                    </div>
+                </div>
+                
+                <div id="token-preview-info" class="p-4 bg-[#451a03] border border-[#7c2d12] rounded-lg hidden flex items-center gap-4 mb-4">
+                    <img id="update-token-img" src="" class="w-12 h-12 rounded-md bg-black object-cover">
+                    <div>
+                        <div class="font-bold text-white text-sm" id="update-token-name">Token</div>
+                        <div class="text-xs text-[#9a3412] font-mono" id="update-token-ticker">TICKER</div>
+                    </div>
+                </div>
+
+                <div id="update-cto-warning" class="hidden p-3 border border-red-900 bg-red-900/10 rounded-lg mb-4">
+                    <div class="text-red-400 text-xs font-bold mb-2">⚠️ Existing Data Found</div>
+                    <label class="form-label text-[10px] mb-1">CTO Username (Required)</label>
+                    <input type="text" id="update-cto-user" class="w-full bg-[#2a1005] border border-red-900 text-[#ffedd5] p-2 rounded text-xs" placeholder="@username">
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="form-label">Twitter</label><input type="url" id="update-twitter" class="form-input" placeholder="https://x.com/..."></div>
+                    <div><label class="form-label">Telegram</label><input type="url" id="update-telegram" class="form-input" placeholder="https://t.me/..."></div>
+                </div>
+                
+                <div><label class="form-label">Website</label><input type="url" id="update-website" class="form-input" placeholder="https://..."></div>
+                
+                <div>
+                    <div class="flex justify-between items-center mb-1">
+                        <label class="form-label mb-0">Banner URL</label>
+                        <button type="button" class="text-[#9a3412] hover:text-[#fb923c] text-xs flex items-center gap-1" onclick="toggleInfoModal()"><i data-lucide="help-circle" width="12"></i> Help</button>
+                    </div>
+                    <input type="url" id="update-banner" class="form-input" placeholder="https://...">
+                </div>
+
+                <div>
+                    <label class="form-label">Description</label>
+                    <textarea id="update-description" class="form-input h-24 resize-none" maxlength="250"></textarea>
+                    <div class="text-right text-[10px] text-[#9a3412]"><span id="char-count">0</span>/250</div>
+                </div>
+
+                <div class="flex gap-4 pt-4">
+                    <button type="button" onclick="openPreview()" class="flex-1 bg-[#451a03] border border-[#ea580c] text-[#fb923c] py-3 rounded-xl font-bold text-sm hover:bg-[#582206] transition">Preview</button>
+                    <button type="submit" id="submit-btn" class="flex-1 bg-[#2a1005] border border-[#22c55e] text-[#22c55e] py-3 rounded-xl font-bold text-sm disabled:opacity-50 disabled:grayscale hover:bg-green-900/20 transition" disabled>Pay & Submit</button>
+                </div>
+            </form>
+            <div id="update-status" class="mt-4 text-center text-sm font-mono hidden"></div>
+        </div>
+    </div>
+
+    <!-- DETAIL VIEW -->
+    <div id="view-detail" class="view-section px-2 md:px-0 hidden">
+        <div id="detail-loading" class="text-center py-20 text-[#ea580c] font-mono animate-pulse hidden">Fetching Chain Data...</div>
+        <div id="detail-content" style="display: none;">
+            
+            <div id="detail-banner-container" class="hidden h-32 md:h-48 rounded-xl border border-[#7c2d12] mb-4 shadow-lg">
+                <img id="detail-banner-img" src="" alt="Token Banner">
+            </div>
+
+            <!-- Mobile Header Stack -->
+            <div class="bg-[#451a03] rounded-xl border border-[#7c2d12] p-4 mb-4 shadow-lg relative z-10">
+                <div class="flex items-start gap-4">
+                    <div id="detail-media-container" class="flex-shrink-0">
+                        <!-- Image populated by JS -->
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex flex-col">
+                            <h2 id="detail-ticker" class="text-2xl font-bold text-white tracking-tight truncate font-mono">TICKER</h2>
+                            <div class="flex items-center gap-2 mt-1 flex-wrap">
+                                <span id="detail-name" class="text-[#fb923c] text-xs px-2 py-0.5 rounded border border-[#7c2d12] truncate max-w-[120px]">Name</span>
+                                <span id="detail-mint" class="hidden"></span>
+                                <i data-lucide="copy" width="12" class="text-[#9a3412] cursor-pointer" onclick="copyMint()"></i>
+                            </div>
+                            
+                            <!-- New Badge Section -->
+                            <div id="badge-container" class="mt-2">
+                                <!-- Populated dynamically: Verified Badge OR Lock Warning -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="text-right" onclick="toggleKScoreModal()" class="cursor-pointer" id="kscore-container">
+                         <div id="stat-kscore" class="text-2xl font-bold text-[#fb923c] font-mono">--</div>
+                         <div class="text-[10px] text-[#9a3412] uppercase font-bold flex justify-end items-center gap-1">Score <i data-lucide="help-circle" width="10"></i></div>
+                    </div>
+                </div>
+                
+                <div id="detail-desc" class="mt-3 text-sm text-[#ffedd5] leading-relaxed border-t border-[#7c2d12] pt-3 hidden whitespace-pre-wrap"></div>
+                
+                <div id="detail-actions" class="flex flex-wrap gap-2 mt-4 pt-2 border-t border-[#7c2d12]"></div>
+            </div>
+
+            <!-- Stats Grid -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
+                <div class="stat-card">
+                    <span class="text-[10px] text-[#9a3412] uppercase font-bold">Price USD</span>
+                    <span id="stat-price" class="stat-value text-white">$0.00</span>
+                </div>
+                <div class="stat-card">
+                    <span class="text-[10px] text-[#9a3412] uppercase font-bold">Mkt Cap</span>
+                    <span id="stat-mcap" class="stat-value text-[#ea580c]">$0</span>
+                </div>
+                <div class="stat-card" onclick="openHolderHistory()">
+                    <span class="text-[10px] text-[#9a3412] uppercase font-bold flex items-center gap-1">Holders <i data-lucide="bar-chart" width="10"></i></span>
+                    <span id="stat-holders" class="stat-value text-[#3b82f6]">0</span>
+                </div>
+                <div class="stat-card">
+                    <div class="flex justify-between">
+                         <div class="flex flex-col"><span class="text-[10px] text-[#9a3412] uppercase font-bold">5m</span><span id="stat-chg5m" class="text-xs font-mono">-</span></div>
+                         <div class="flex flex-col text-right"><span class="text-[10px] text-[#9a3412] uppercase font-bold">24h</span><span id="stat-chg24h" class="text-xs font-mono">-</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex justify-between items-center mb-2 px-1">
+                <div class="text-[#9a3412] text-xs font-bold uppercase"><i data-lucide="activity" width="12" class="inline"></i> Live Chart <span id="chart-pool-name" class="ml-2 text-[10px] text-gray-500"></span></div>
+                <button onclick="toggleLpModal()" class="text-[10px] bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] px-2 py-1 rounded">LP Info</button>
+            </div>
+
+            <div class="chart-wrapper">
+                <div class="flex items-center justify-between bg-[#2a1005] p-2 border-b border-[#7c2d12]">
+                     <div class="flex gap-1">
+                         <button onclick="setResolution('5')" class="res-btn active" id="res-5">5m</button>
+                         <button onclick="setResolution('60')" class="res-btn" id="res-60">1h</button>
+                         <button onclick="setResolution('D')" class="res-btn" id="res-D">1d</button>
+                     </div>
+                     <div class="flex gap-1">
+                         <button onclick="setChartMode('price')" class="res-btn active" id="mode-price">Price</button>
+                         <button onclick="setChartMode('mcap')" class="res-btn" id="mode-mcap">MCap</button>
+                         <button onclick="toggleScale()" class="res-btn" id="btn-scale">Log</button>
+                     </div>
+                </div>
+                <div id="tv-chart" style="flex-grow: 1; position: relative; width: 100%;"></div>
             </div>
         </div>
     </div>
 
 </main>
 
-<!-- Holder History Modal -->
-<div id="holder-modal" class="modal-overlay hidden">
-    <div class="bg-[#451a03] rounded-2xl border-2 border-[#7c2d12] p-6 w-full max-w-2xl mx-4">
-        <div class="flex justify-between items-center mb-4">
-            <h3 class="text-xl font-bold text-[#fb923c]">Holder History</h3>
-            <button onclick="closeHolderHistory()" class="text-[#9a3412] hover:text-[#ea580c]"><i data-lucide="x" width="24"></i></button>
+<!-- BOTTOM NAVIGATION -->
+<nav class="bottom-nav">
+    <button class="bottom-nav-item active" onclick="navigateTo('')" id="nav-home">
+        <i data-lucide="layout-grid" width="20"></i>
+        <span>Home</span>
+    </button>
+    <button class="bottom-nav-item" onclick="navigateTo('update')" id="nav-update">
+        <i data-lucide="upload-cloud" width="20"></i>
+        <span>Update</span>
+    </button>
+    <button class="bottom-nav-item" onclick="toggleAppsModal()" id="nav-apps">
+        <i data-lucide="grid" width="20"></i>
+        <span>Apps</span>
+    </button>
+    <button class="bottom-nav-item" onclick="navigateTo('about')" id="nav-about">
+        <i data-lucide="info" width="20"></i>
+        <span>About</span>
+    </button>
+    <button class="bottom-nav-item" onclick="toggleApiModal()">
+        <i data-lucide="code-2" width="20"></i>
+        <span>Dev</span>
+    </button>
+</nav>
+
+<!-- MODALS -->
+<div id="wallet-modal" class="modal-overlay hidden">
+    <div class="modal-content bg-[#2a1005] border-2 border-[#ea580c] p-6 shadow-2xl animate-[slideUp_0.3s_ease-out]">
+        <div class="flex justify-between items-center mb-6">
+            <h3 class="text-xl font-bold text-white">Connect Wallet</h3>
+            <button onclick="closeWalletModal()" class="text-[#9a3412]"><i data-lucide="x" width="24"></i></button>
         </div>
-        <div id="holder-chart-container" class="w-full h-64 bg-[#0f0502] rounded-lg"></div>
+        <div class="space-y-3">
+            <button onclick="connectProvider('phantom')" class="w-full bg-[#451a03] border border-[#7c2d12] p-4 rounded-xl flex items-center gap-4 hover:border-[#ea580c] transition">
+                <div class="w-8 h-8 rounded-full bg-[#ab9ff2] flex items-center justify-center"><i data-lucide="ghost" width="16" class="text-white"></i></div>
+                <span class="text-white font-bold">Phantom</span>
+            </button>
+            <button onclick="connectProvider('solflare')" class="w-full bg-[#451a03] border border-[#7c2d12] p-4 rounded-xl flex items-center gap-4 hover:border-[#ea580c] transition">
+                <div class="w-8 h-8 rounded-full bg-[#fc7226] flex items-center justify-center"><i data-lucide="flame" width="16" class="text-white"></i></div>
+                <span class="text-white font-bold">Solflare</span>
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="api-docs-modal" class="modal-overlay hidden">
+    <div class="modal-content bg-[#2a1005] border-2 border-[#7c2d12] p-6 shadow-2xl relative w-full max-w-3xl">
+        <button class="absolute top-4 right-4 text-[#9a3412]" onclick="toggleApiModal()"><i data-lucide="x" width="24"></i></button>
+        <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 bg-[#451a03] rounded-lg border border-[#7c2d12] text-[#ea580c]"><i data-lucide="terminal" width="24"></i></div>
+            <div>
+                <h3 class="text-xl font-bold text-white font-sans">HolDex API Documentation</h3>
+                <p class="text-xs text-[#9a3412] font-mono">v1.0 Public Endpoint</p>
+            </div>
+        </div>
+        
+        <div class="bg-[#0f0502] border border-[#7c2d12] p-4 rounded-lg mb-6">
+            <h4 class="text-[#ea580c] font-bold mb-2 text-sm uppercase">Authentication</h4>
+            <p class="text-sm text-[#ffedd5] mb-2">HolDex uses API keys for authentication. Include your key in the request header:</p>
+            <div class="code-block text-xs py-2 px-3">x-api-key: YOUR_KEY_HERE</div>
+            <p class="text-[10px] text-[#9a3412] mt-2 italic">Standard Rate Limit: 1,000 requests/day per key.</p>
+        </div>
+
+        <div class="space-y-6 overflow-y-auto max-h-[50vh] pr-2 custom-scrollbar">
+             <!-- Endpoint 1 -->
+             <div>
+                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/tokens</span></div>
+                 <p class="text-sm text-[#ffedd5] mb-2">Fetch a paginated list of top performing tokens.</p>
+                 <div class="code-block">
+<span class="text-[#9a3412]">// Response</span>
+{
+  "success": true,
+  "tokens": [
+    { "mint": "So111...", "ticker": "SOL", "priceUsd": 150.2, ... }
+  ]
+}
+                 </div>
+             </div>
+             
+             <!-- Endpoint 2 -->
+             <div>
+                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/token/:mint</span></div>
+                 <p class="text-sm text-[#ffedd5] mb-2">Get detailed metadata, K-Score, and pool info for a specific token.</p>
+             </div>
+
+             <!-- Endpoint 3 -->
+             <div>
+                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/token/:mint/candles</span></div>
+                 <p class="text-sm text-[#ffedd5] mb-2">Fetch OHLCV data. Params: <code class="text-[#ea580c]">resolution</code> (5, 60, D), <code class="text-[#ea580c]">from</code>, <code class="text-[#ea580c]">to</code> (unix timestamp).</p>
+             </div>
+        </div>
+        <button onclick="toggleApiModal()" class="w-full bg-[#451a03] text-[#fb923c] py-3 rounded-lg font-bold text-sm mt-4">Close Documentation</button>
+    </div>
+</div>
+
+<div id="preview-modal" class="modal-overlay hidden">
+    <div class="modal-content bg-[#2a1005] border-2 border-[#7c2d12] p-6 shadow-2xl relative w-full max-w-2xl">
+        <button class="absolute top-4 right-4 text-[#9a3412]" onclick="closePreview()"><i data-lucide="x" width="24"></i></button>
+        <h3 class="text-xl font-bold text-white mb-4">Preview</h3>
+        <div id="preview-container"></div>
+        <button onclick="closePreview()" class="w-full mt-4 bg-[#451a03] text-[#fb923c] py-3 rounded-lg font-bold text-sm">Close</button>
+    </div>
+</div>
+
+<div id="lp-modal" class="modal-overlay hidden">
+    <div class="modal-content bg-[#2a1005] border-2 border-[#7c2d12] p-6 shadow-2xl relative">
+        <button class="absolute top-4 right-4 text-[#9a3412]" onclick="toggleLpModal()"><i data-lucide="x" width="24"></i></button>
+        <h3 class="text-xl font-bold text-white mb-4">Liquidity Pools</h3>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm text-[#ffedd5]">
+                <thead class="text-[#9a3412] uppercase text-xs font-bold border-b border-[#7c2d12]">
+                    <tr><th class="px-2 py-2">DEX</th><th class="px-2 py-2 text-right">Price</th><th class="px-2 py-2 text-right">Liq</th></tr>
+                </thead>
+                <tbody id="lp-list-body"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div id="holder-modal" class="modal-overlay hidden">
+    <div class="modal-content bg-[#2a1005] border-2 border-[#7c2d12] p-6 shadow-2xl relative w-full max-w-2xl">
+        <button class="absolute top-4 right-4 text-[#9a3412]" onclick="closeHolderHistory()"><i data-lucide="x" width="24"></i></button>
+        <h3 class="text-xl font-bold text-white mb-2">Holder Growth</h3>
+        <div id="holder-chart-container" class="w-full h-64 bg-[#1a0a05] rounded-xl border border-[#7c2d12] overflow-hidden"></div>
+    </div>
+</div>
+
+<div id="kscore-modal" class="modal-overlay hidden">
+    <div class="modal-content bg-[#2a1005] border-2 border-[#7c2d12] p-6 shadow-2xl relative w-full max-w-md">
+        <button class="absolute top-4 right-4 text-[#9a3412]" onclick="toggleKScoreModal()"><i data-lucide="x" width="24"></i></button>
+        <h3 class="text-xl font-bold text-white mb-4">K-Score Explained</h3>
+        <p class="text-sm text-[#ffedd5] mb-4">Our proprietary metric for analyzing token health:</p>
+        <ul class="list-disc list-inside text-sm text-[#9a3412] space-y-2 mb-4">
+            <li><span class="text-[#ea580c] font-bold">Holder Distribution:</span> Are coins spread widely or concentrated?</li>
+            <li><span class="text-[#ea580c] font-bold">Velocity:</span> Is the token being traded actively or stagnant?</li>
+            <li><span class="text-[#ea580c] font-bold">Longevity:</span> How long have holders held their positions?</li>
+        </ul>
+        <p class="text-xs text-[#9a3412] italic">Higher scores indicate stronger community conviction.</p>
+        <button onclick="toggleKScoreModal()" class="w-full bg-[#451a03] text-[#fb923c] py-3 rounded-lg font-bold text-sm mt-4">Close</button>
+    </div>
+</div>
+
+<div id="how-it-works-modal" class="modal-overlay hidden">
+    <div class="modal-content bg-[#2a1005] border-2 border-[#7c2d12] p-6 shadow-2xl relative w-full max-w-lg">
+        <button class="absolute top-4 right-4 text-[#9a3412]" onclick="toggleHowItWorksModal()"><i data-lucide="x" width="24"></i></button>
+        <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 bg-[#451a03] rounded-lg border border-[#7c2d12] text-[#ea580c]"><i data-lucide="info" width="24"></i></div>
+            <div>
+                <h3 class="text-xl font-bold text-white font-sans">How HolDex Works</h3>
+            </div>
+        </div>
+        
+        <div class="space-y-6 text-sm text-[#ffedd5]">
+            <div class="flex gap-3">
+                <div class="text-[#ea580c] mt-1"><i data-lucide="radar" width="20"></i></div>
+                <div>
+                    <h4 class="font-bold text-white mb-1">Auto-Discovery</h4>
+                    <p class="text-[#9a3412]">We listen to the Solana blockchain. New pools on Raydium & Pump.fun are indexed instantly once they hit significant volume.</p>
+                </div>
+            </div>
+            <div class="flex gap-3">
+                <div class="text-[#22c55e] mt-1"><i data-lucide="search" width="20"></i></div>
+                <div>
+                    <h4 class="font-bold text-white mb-1">Instant Search</h4>
+                    <p class="text-[#9a3412]">Paste any CA (Contract Address) into the search bar to force-index a token instantly, regardless of volume.</p>
+                </div>
+            </div>
+            <div class="flex gap-3">
+                <div class="text-[#3b82f6] mt-1"><i data-lucide="shield-check" width="20"></i></div>
+                <div>
+                    <h4 class="font-bold text-white mb-1">Community Verification</h4>
+                    <p class="text-[#9a3412]">Devs can update social links via the Update tab. We verify these on-chain to give the green checkmark.</p>
+                </div>
+            </div>
+        </div>
+        
+        <button onclick="toggleHowItWorksModal()" class="w-full bg-[#451a03] text-[#fb923c] py-3 rounded-lg font-bold text-sm mt-6">Got it</button>
+    </div>
+</div>
+
+<div id="info-modal" class="modal-overlay hidden">
+    <div class="modal-content bg-[#2a1005] border-2 border-[#7c2d12] p-6 shadow-2xl relative w-full max-w-md">
+        <button class="absolute top-4 right-4 text-[#9a3412]" onclick="toggleInfoModal()"><i data-lucide="x" width="24"></i></button>
+        <h3 class="text-xl font-bold text-white mb-4">Banner Upload</h3>
+        <p class="text-sm text-[#ffedd5] mb-4">We do not host images. Use Imgur:</p>
+        <ol class="list-decimal list-inside text-sm text-[#9a3412] space-y-2 mb-4 font-mono">
+            <li>Go to <a href="https://imgur.com/upload" target="_blank" class="text-[#ea580c] underline">imgur.com</a></li>
+            <li>Upload your banner (1500x500px recommended).</li>
+            <li>Right click image -> "Copy Image Address".</li>
+            <li>Paste link here (must end in .jpg/.png).</li>
+        </ol>
+        <button onclick="toggleInfoModal()" class="w-full bg-[#451a03] text-[#fb923c] py-3 rounded-lg font-bold text-sm">Close</button>
+    </div>
+</div>
+
+<div id="key-modal" class="modal-overlay hidden">
+    <div class="modal-content bg-[#2a1005] border-2 border-[#ea580c] p-8 shadow-2xl relative text-center w-full max-w-md">
+        <button class="absolute top-4 right-4 text-[#9a3412]" onclick="closeKeyModal()"><i data-lucide="x" width="24"></i></button>
+        <div class="w-12 h-12 bg-[#451a03] rounded-full flex items-center justify-center mx-auto mb-4 border border-[#ea580c] text-[#ea580c]"><i data-lucide="key" width="24"></i></div>
+        <h3 class="text-2xl font-bold text-white mb-2">Your API Key</h3>
+        <p class="text-xs text-[#9a3412] mb-6">Keep this safe. It allows 1,000 reqs/day.</p>
+        
+        <div class="bg-[#0f0502] border border-[#7c2d12] p-4 rounded-lg mb-6 relative">
+            <div id="generated-key-display" class="font-mono text-[#fb923c] text-lg break-all">...</div>
+            <button onclick="copyKey()" class="absolute top-2 right-2 text-[#9a3412] hover:text-white"><i data-lucide="copy" width="16"></i></button>
+        </div>
+        
+        <button onclick="closeKeyModal()" class="w-full bg-[#451a03] border border-[#7c2d12] text-[#fb923c] py-2 rounded-lg text-xs font-bold">Done</button>
+    </div>
+</div>
+
+<div id="apps-modal" class="modal-overlay hidden">
+    <div class="modal-content bg-[#2a1005] border-2 border-[#7c2d12] p-6 shadow-2xl relative w-full max-w-sm">
+        <button class="absolute top-4 right-4 text-[#9a3412]" onclick="toggleAppsModal()"><i data-lucide="x" width="24"></i></button>
+        <h3 class="text-xl font-bold text-white mb-6 flex items-center gap-2">
+            <i data-lucide="grid" width="24" class="text-[#ea580c]"></i> Ecosystem
+        </h3>
+        <div class="space-y-3">
+            <a href="https://alonisthe.dev/ignition" target="_blank" class="block bg-[#451a03] border border-[#7c2d12] p-4 rounded-xl hover:border-[#ea580c] transition group">
+                <div class="font-bold text-white group-hover:text-[#ea580c]">Ignition</div>
+                <div class="text-xs text-[#9a3412]">Launchpad & Tools</div>
+            </a>
+            <a href="https://alonisthe.dev/asdforecast" target="_blank" class="block bg-[#451a03] border border-[#7c2d12] p-4 rounded-xl hover:border-[#ea580c] transition group">
+                <div class="font-bold text-white group-hover:text-[#ea580c]">ASDForecast</div>
+                <div class="text-xs text-[#9a3412]">Predictive Analytics</div>
+            </a>
+            <a href="https://alonisthe.dev/burns" target="_blank" class="block bg-[#451a03] border border-[#7c2d12] p-4 rounded-xl hover:border-[#ea580c] transition group">
+                <div class="font-bold text-white group-hover:text-[#ea580c]">Flywheel</div>
+                <div class="text-xs text-[#9a3412]">Burn Mechanisms</div>
+            </a>
+        </div>
     </div>
 </div>
 
 <script>
-    // Auto-detect API URL
-    const API_URL = window.location.origin;
+    const API_URL = 'https://asdev-backend.onrender.com';
     const FALLBACK_BANNER = "https://placehold.co/600x200/2a1005/7c2d12?text=HolDex";
+    const TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+    const ASSOCIATED_TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
 
-    // State
-    let currentSort = 'kscore';
+    let currentSort = 'kscore'; 
     let currentDirection = 'desc';
     let searchQuery = '';
     let currentPage = 1;
-    let currentLimit = 20;
+    let currentLimit = 20; // Correctly initialized
     let isVerifiedFilter = false;
-    let isZeroVolHidden = true;
+    let isZeroVolHidden = true; 
     let currentMint = null;
+    let walletAddress = null;
+    let walletProvider = null; 
     let pollingInterval = null;
     let isLogScale = false;
-    let currentResolution = '60';
-    let currentChartMode = 'mcap';
-    let currentPoolAddress = null;
-    let currentNormalizedSupply = 1;
-    let currentHolderHistory = [];
+    let currentUpdateTokenData = null;
+    
+    // Auth vars
+    let authSignature = null;
+    let authWallet = null;
+    
+    // Fee Config
+    let feeConfig = { solFee: 0.1, tokenFee: 1000, tokenMint: '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump', treasury: 'H8sMJqC9X8rJ8W1a6VjFq7X5gZ5fX9x8x8x8x8x8x8' };
+    let userSolBalance = 0;
+    let userTokenBalance = 0;
 
     // Charts
     let chartInstance = null;
     let candleSeries = null;
     let holderChart = null;
     let holderAreaSeries = null;
+    let currentResolution = '60';
+    let currentChartMode = 'mcap';
+    let currentPoolAddress = null;
+    let currentNormalizedSupply = 1;
+    let currentHolderHistory = [];
     let chartResizeObserver = null;
 
     // Socket
@@ -416,27 +787,809 @@
         return (...args) => { clearTimeout(timeoutId); timeoutId = setTimeout(() => func.apply(null, args), delay); };
     };
 
-    const formatCompact = (v) => v ? '$' + new Intl.NumberFormat('en', {notation:'compact'}).format(v) : '-';
-    const formatMoney = (v) => { if(!v) return '$0.00'; return v < 0.01 ? '$'+v.toExponential(2) : '$'+v.toFixed(6); };
-    const formatPct = (v) => {
-        if (v === undefined || v === null) return '-';
-        const cls = v >= 0 ? 'text-[#4ade80]' : 'text-[#fca5a5]';
-        return `<span class="${cls}">${v >= 0 ? '+' : ''}${v.toFixed(2)}%</span>`;
+    window.onload = async () => { 
+        handleRoute(); 
+        await fetchFees(); 
+        lucide.createIcons(); 
+        
+        socket = io(API_URL, { path: '/socket.io', transports: ['websocket'] });
+        socket.on('connect', () => {
+            const dot = document.getElementById('status-dot-nav');
+            if(dot) { dot.classList.remove('offline'); dot.classList.add('online'); }
+        });
+        socket.on('disconnect', () => {
+            const dot = document.getElementById('status-dot-nav');
+            if(dot) { dot.classList.add('offline'); dot.classList.remove('online'); }
+        });
+        socket.on('update', (data) => { if (currentMint) updateLiveStats(data); });
+
+        const searchInput = document.getElementById('search');
+        if (searchInput) searchInput.addEventListener('input', debounce((e) => handleSearch(e), 500));
+        
+        // Use ResizeObserver for robust chart resizing
+        const chartContainer = document.getElementById('tv-chart');
+        if (chartContainer) {
+            chartResizeObserver = new ResizeObserver(entries => {
+                if (entries.length === 0 || !entries[0].contentRect) return;
+                const newRect = entries[0].contentRect;
+                if (chartInstance && newRect.width > 0 && newRect.height > 0) {
+                    chartInstance.applyOptions({ width: newRect.width, height: newRect.height });
+                }
+            });
+            chartResizeObserver.observe(chartContainer);
+        }
     };
-    const timeAgo = (ts) => {
-        if (!ts) return '-';
-        const now = Date.now();
-        const then = typeof ts === 'number' ? ts : new Date(ts).getTime();
-        const diff = now - then;
-        const mins = Math.floor(diff / 60000);
-        if (mins < 60) return `${mins}m`;
-        const hrs = Math.floor(mins / 60);
-        if (hrs < 24) return `${hrs}h`;
-        const days = Math.floor(hrs / 24);
-        return `${days}d`;
+    
+    window.addEventListener('hashchange', handleRoute);
+
+    // --- LIVE UPDATES ---
+    function updateLiveStats(data) {
+        const safeSetText = (id, txt) => { const el = document.getElementById(id); if(el) el.innerText = txt; };
+        const safeSetHTML = (id, htm) => { const el = document.getElementById(id); if(el) el.innerHTML = htm; };
+        safeSetText('stat-price', formatMoney(data.priceUsd));
+        safeSetText('stat-mcap', formatCompact(data.marketCap));
+        safeSetHTML('stat-chg5m', formatPct(data.change5m));
+        safeSetHTML('stat-chg24h', formatPct(data.change24h));
+        safeSetText('stat-holders', (data.holders || 0).toLocaleString());
+    }
+
+    function navigateTo(path) { window.location.hash = path; }
+    
+    function handleRoute() { 
+        const hash = window.location.hash; 
+        document.querySelectorAll('.view-section').forEach(el => el.classList.add('hidden')); 
+        document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+        window.scrollTo(0,0);
+        document.querySelectorAll('.bottom-nav-item').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+        const tableControls = document.getElementById('table-controls'); 
+        const detailControls = document.getElementById('detail-controls'); 
+        if (tableControls) tableControls.classList.add('hidden'); 
+        if (detailControls) detailControls.classList.add('hidden'); 
+        if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
+
+        if (hash === '' || hash === '#') { 
+            document.getElementById('view-dashboard').classList.remove('hidden');
+            document.getElementById('view-dashboard').classList.add('active');
+            document.getElementById('nav-home').classList.add('active');
+            if(tableControls) tableControls.classList.remove('hidden'); 
+            fetchList(); 
+            pollingInterval = setInterval(fetchList, 5000); 
+        } else if (hash === '#about') { 
+            document.getElementById('view-about').classList.remove('hidden');
+            document.getElementById('nav-about').classList.add('active');
+        } else if (hash === '#update') { 
+            document.getElementById('view-update').classList.remove('hidden');
+            document.getElementById('nav-update').classList.add('active');
+            updateWalletUI(walletAddress !== null); 
+        } else if (hash.startsWith('#token/')) { 
+            showDetailView(hash.split('/')[1]); 
+        } 
+    }
+
+    // --- FETCH LIST ---
+    async function fetchList() { 
+        try { 
+            const pDisplay = document.getElementById('page-display'); 
+            const prev = document.getElementById('btn-prev'); 
+            const next = document.getElementById('btn-next'); 
+            if(pDisplay) pDisplay.innerText = `Page ${currentPage}`; 
+            if(prev) prev.disabled = currentPage <= 1; 
+            
+            // Explicitly use currentLimit variable set by dropdown
+            let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&direction=${currentDirection}&search=${encodeURIComponent(searchQuery)}&limit=${currentLimit}&page=${currentPage}`; 
+            if (isVerifiedFilter) endpoint += '&filter=verified'; 
+            
+            const res = await fetch(endpoint); 
+            const data = await res.json(); 
+            
+            if (data.success) { 
+                renderTable(data.tokens); 
+                // Ensure pagination respects dynamic limit
+                if(next) next.disabled = data.tokens.length < currentLimit; 
+            }
+        } catch (e) { console.error("API Error", e); } 
+    }
+
+    function renderTable(tokens) { 
+        const tbody = document.getElementById('table-body'); 
+        if(!tbody) return; 
+        
+        let displayTokens = tokens; 
+        if (isZeroVolHidden) { displayTokens = displayTokens.filter(t => (t.volume24h || 0) > 0); } 
+        
+        if (displayTokens.length === 0) { 
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-[#9a3412] font-mono">No tokens found.</td></tr>`; 
+            return; 
+        } 
+        
+        tbody.innerHTML = displayTokens.map(t => { 
+            // Handle both camelCase and snake_case for verification status
+            const isVerified = t.hasCommunityUpdate || t.has_community_update; 
+            const score = t.kScore || t.k_score || 0;
+            
+            const kScoreDisplay = isVerified ? (score > 0 ? `<span class="text-[#ea580c]">${score}</span>` : `<span class="animate-pulse">⏳</span>`) : '<span class="text-gray-600">🔒</span>'; 
+            const formatPct = (v) => (v !== undefined && v !== null) ? `<span class="pill ${v>0?'pill-green':'pill-red'}">${v.toFixed(1)}%</span>` : '-';
+            const formatVal = (v) => v ? '$'+ new Intl.NumberFormat('en',{notation:'compact'}).format(v) : '-';
+            // Price removed, keeping logic just in case needed elsewhere
+            const formatPrice = (v) => { if(!v) return '$0.00'; return v < 0.01 ? '$'+v.toExponential(2) : '$'+v.toFixed(4); };
+            const img = t.image || `https://placehold.co/40x40/2a1005/7c2d12?text=${t.ticker?.[0]||'?'}`;
+
+            // Diamond Logic: Verified + K-Score > 50
+            const showDiamond = isVerified && score > 50;
+
+            return `
+            <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group border-b border-[#7c2d12]/30">
+                <td class="bg-[#2a1005]">
+                    <div class="flex items-center gap-2">
+                        <img src="${img}" class="img-token" onerror="this.src='https://placehold.co/40'">
+                        <div class="flex flex-col min-w-0">
+                            <div class="flex items-center gap-1">
+                                <span class="font-bold text-white text-xs truncate font-sans">${t.ticker}</span>
+                                ${isVerified ? '<i data-lucide="shield-check" width="12" class="text-green-500 fill-green-500/20"></i>' : ''}
+                                ${showDiamond ? '<span title="High Conviction">💎</span>' : ''}
+                            </div>
+                            <span class="text-[10px] text-[#9a3412] truncate max-w-[80px]">${t.name}</span>
+                        </div>
+                    </div>
+                </td>
+                
+                <td class="text-right font-mono font-bold hidden md:table-cell">${kScoreDisplay}</td>
+                <!-- Price Removed, replaced with 1h% -->
+                <td class="text-right hidden md:table-cell">${formatPct(t.change1h)}</td>
+                <td class="text-right hidden md:table-cell">${formatPct(t.change24h)}</td>
+                
+                <td class="text-right font-mono text-[#22c55e] text-xs">${formatVal(t.volume24h)}</td>
+                <td class="text-right font-mono text-[#fb923c] text-xs">${formatVal(t.marketCap)}</td>
+                
+                <td class="text-right font-mono text-[#3b82f6] text-xs hidden md:table-cell">${(t.holders||0).toLocaleString()}</td>
+                <td class="text-right text-[10px] text-[#9a3412] font-mono whitespace-nowrap hidden md:table-cell">${timeAgo(t.timestamp)}</td>
+            </tr>`;
+        }).join(''); 
+        lucide.createIcons(); 
+    }
+
+    // --- DETAIL VIEW ---
+    async function showDetailView(mint) {
+        if (pollingInterval) clearInterval(pollingInterval);
+        document.getElementById('view-dashboard').classList.add('hidden');
+        document.getElementById('view-detail').classList.remove('hidden');
+        document.getElementById('view-detail').classList.add('active');
+        document.getElementById('detail-controls').classList.remove('hidden');
+        
+        currentMint = mint;
+        currentHolderHistory = []; // Reset history
+        cleanupHolderChart();      // Destroy previous chart instance
+        
+        if(socket) socket.emit('subscribe', mint);
+
+        const loadingDiv = document.getElementById('detail-loading');
+        const contentDiv = document.getElementById('detail-content');
+        const bannerContainer = document.getElementById('detail-banner-container');
+        const bannerImg = document.getElementById('detail-banner-img');
+        
+        if (loadingDiv) loadingDiv.classList.remove('hidden');
+        if (contentDiv) contentDiv.style.display = 'none';
+        if (loadingDiv) loadingDiv.innerText = 'Fetching Chain Data...';
+        
+        try {
+            const res = await fetch(`${API_URL}/api/token/${mint}`);
+            const data = await res.json();
+            
+            if(data.success) {
+                const t = data.token;
+                
+                // Handle mixed casing and normalization
+                // This ensures we always get a boolean regardless of 0/1/"true"/"false"
+                const rawStatus = t.hasCommunityUpdate || t.has_community_update;
+                const isVerified = (rawStatus === true || rawStatus === 1 || rawStatus === 'true');
+                console.log(`🔍 Verified Status for ${t.ticker}:`, isVerified, `(Raw: ${rawStatus})`); // Debug log
+
+                const tickerEl = document.getElementById('detail-ticker');
+                const nameEl = document.getElementById('detail-name');
+                if (tickerEl) tickerEl.innerText = t.ticker || 'UNK';
+                if (nameEl) nameEl.innerText = t.name || 'Unknown';
+                
+                const price = t.priceUsd || 0;
+                const priceEl = document.getElementById('stat-price');
+                if (priceEl) priceEl.innerText = (price < 0.01 && price > 0) ? '$'+price.toExponential(2) : '$'+price.toFixed(6);
+                
+                const mcapEl = document.getElementById('stat-mcap');
+                if (mcapEl) mcapEl.innerText = '$' + new Intl.NumberFormat('en', {notation:'compact'}).format(t.marketCap||0);
+                
+                const holdersEl = document.getElementById('stat-holders');
+                if (holdersEl) holdersEl.innerText = (t.holders||0).toLocaleString();
+                
+                // CONDITIONAL KSCORE DISPLAY
+                const kScoreContainer = document.getElementById('kscore-container');
+                if (kScoreContainer) {
+                    if (isVerified) {
+                        kScoreContainer.style.visibility = 'visible';
+                        const kScoreValEl = document.getElementById('stat-kscore');
+                        if (kScoreValEl) kScoreValEl.innerText = (t.kScore || t.k_score || '--');
+                    } else {
+                        kScoreContainer.style.visibility = 'hidden';
+                    }
+                }
+                
+                const c5m = t.change5m || 0;
+                const c5mEl = document.getElementById('stat-chg5m');
+                if (c5mEl) {
+                    c5mEl.innerHTML = (c5m>0?`+${c5m.toFixed(2)}%`:`${c5m.toFixed(2)}%`);
+                    c5mEl.className = c5m>=0?'text-[#4ade80] font-mono text-xs':'text-[#fca5a5] font-mono text-xs';
+                }
+                
+                const c24h = t.change24h || 0;
+                const c24hEl = document.getElementById('stat-chg24h');
+                if (c24hEl) {
+                    c24hEl.innerHTML = (c24h>0?`+${c24h.toFixed(2)}%`:`${c24h.toFixed(2)}%`);
+                    c24hEl.className = c24h>=0?'text-[#4ade80] font-mono text-xs':'text-[#fca5a5] font-mono text-xs';
+                }
+                
+                // BADGE LOGIC IN DESCRIPTION AREA
+                const badgeContainer = document.getElementById('badge-container');
+                // We use the new container for better placement
+                if(isVerified) {
+                    if (badgeContainer) badgeContainer.innerHTML = `<span class="px-2 py-1 rounded bg-green-900/30 border border-green-500/30 text-green-500 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 w-fit"><i data-lucide="shield-check" width="12"></i> Community Updated</span>`;
+                } else {
+                    if (badgeContainer) badgeContainer.innerHTML = `<span class="px-2 py-1 rounded bg-red-900/20 border border-red-500/30 text-red-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 w-fit"><i data-lucide="lock" width="12"></i> Community Update Required</span>`;
+                }
+                
+                const rawSupply = parseFloat(t.supply || '0');
+                const decimals = t.decimals || 9;
+                currentNormalizedSupply = rawSupply / Math.pow(10, decimals);
+                if (currentNormalizedSupply === 0) currentNormalizedSupply = 1000000000;
+
+                const media = document.getElementById('detail-media-container');
+                if (media) {
+                    const imgUrl = t.image || 'https://placehold.co/80';
+                    media.innerHTML = `<img src="${imgUrl}" class="w-16 h-16 rounded-lg border-2 border-[#ea580c] bg-black object-cover">`;
+                }
+
+                const descEl = document.getElementById('detail-desc');
+                if (descEl) {
+                    if(t.description) { descEl.innerText = t.description; descEl.classList.remove('hidden'); } else { descEl.innerText = ''; descEl.classList.add('hidden'); }
+                }
+                
+                if (t.banner && bannerContainer && bannerImg) {
+                    bannerImg.src = t.banner;
+                    bannerImg.onerror = function() { this.src = FALLBACK_BANNER; };
+                    bannerContainer.classList.remove('hidden');
+                } else if (bannerContainer) { bannerContainer.classList.add('hidden'); }
+
+                const actions = document.getElementById('detail-actions');
+                if (actions) {
+                    let links = '';
+                    if(t.twitter) links += `<a href="${t.twitter}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="twitter" width="16"></i></a>`;
+                    if(t.telegram) links += `<a href="${t.telegram}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="send" width="16"></i></a>`;
+                    if(t.website) links += `<a href="${t.website}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="globe" width="16"></i></a>`;
+                    if(links === '' && t.socials) {
+                        if(t.socials.twitter) links += `<a href="${t.socials.twitter}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="twitter" width="16"></i></a>`;
+                        if(t.socials.telegram) links += `<a href="${t.socials.telegram}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="send" width="16"></i></a>`;
+                        if(t.socials.website) links += `<a href="${t.socials.website}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="globe" width="16"></i></a>`;
+                    }
+                    actions.innerHTML = links + `<button onclick="shareToken()" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c] flex items-center gap-2 text-xs font-bold px-3"><i data-lucide="share-2" width="14"></i> Share</button>`;
+                }
+                
+                if(t.holderHistory) currentHolderHistory = t.holderHistory;
+
+                const lpBody = document.getElementById('lp-list-body');
+                if (lpBody) {
+                    if(t.pairs && t.pairs.length > 0) {
+                        currentPoolAddress = t.pairs[0].address;
+                        lpBody.innerHTML = t.pairs.map(p => `<tr><td class="px-2 py-2 text-[#fb923c] font-bold text-xs">${p.dexId}</td><td class="px-2 py-2 text-right text-xs font-mono">$${(p.priceUsd||0).toFixed(6)}</td><td class="px-2 py-2 text-right text-[#22c55e] text-xs font-mono">$${(p.liquidity?.usd||0).toLocaleString()}</td></tr>`).join('');
+                        const dexName = String(t.pairs[0].dex || t.pairs[0].dexId || "Unknown").toUpperCase();
+                        const poolNameEl = document.getElementById('chart-pool-name');
+                        if (poolNameEl) poolNameEl.innerText = `— ${dexName} (Largest Pool)`;
+                    } else {
+                        lpBody.innerHTML = '<tr><td colspan="3" class="text-center p-2 text-xs">No pools</td></tr>';
+                        currentPoolAddress = null;
+                    }
+                }
+
+                if (loadingDiv) loadingDiv.classList.add('hidden');
+                if (contentDiv) contentDiv.style.display = 'block';
+                lucide.createIcons();
+                
+                // Force a layout update before chart init to ensure container has dimensions
+                requestAnimationFrame(() => {
+                    initChart(mint, currentPoolAddress);
+                });
+            } else { if (loadingDiv) loadingDiv.innerText = 'Token not found.'; }
+        } catch(e) { console.error(e); if (loadingDiv) loadingDiv.innerText = 'Error fetching data.'; }
+    }
+
+    // --- CHARTING ---
+    window.setResolution = (res) => {
+        currentResolution = res;
+        document.querySelectorAll('.res-btn').forEach(b => b.classList.remove('active'));
+        const btn = document.getElementById(`res-${res}`);
+        if(btn) btn.classList.add('active');
+        if(currentMint) fetchCandles(currentMint, currentPoolAddress);
+    };
+    window.setChartMode = (mode) => {
+        currentChartMode = mode;
+        document.getElementById('mode-price').classList.toggle('active', mode === 'price');
+        document.getElementById('mode-mcap').classList.toggle('active', mode === 'mcap');
+        if(currentMint) fetchCandles(currentMint, currentPoolAddress);
+    };
+    window.toggleScale = () => {
+        isLogScale = !isLogScale;
+        const btn = document.getElementById('btn-scale');
+        if(btn) btn.style.color = isLogScale ? '#ea580c' : '#9a3412';
+        if(chartInstance) chartInstance.priceScale('right').applyOptions({ mode: isLogScale ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal });
     };
 
-    // Diamond tokens (local/stable - always accepted)
+    function initChart(mint, poolAddress) {
+        // If chart exists, just fetch data
+        if (chartInstance) {
+            fetchCandles(mint, poolAddress);
+            return;
+        }
+
+        const container = document.getElementById('tv-chart');
+        if(!container) return;
+        
+        // Ensure container has dimensions. If hidden or 0, wait.
+        const rect = container.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) {
+            // Retry briefly if layout hasn't settled
+            setTimeout(() => initChart(mint, poolAddress), 50);
+            return;
+        } 
+        
+        container.innerHTML = ''; // Clear any previous
+        
+        chartInstance = LightweightCharts.createChart(container, {
+            width: rect.width, 
+            height: rect.height,
+            layout: { background: { type: 'solid', color: '#1a0a05' }, textColor: '#9a3412' },
+            grid: { vertLines: { color: '#2a1005' }, horzLines: { color: '#2a1005' } },
+            timeScale: { borderColor: '#7c2d12', timeVisible: true },
+            rightPriceScale: { borderColor: '#7c2d12', mode: isLogScale ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal },
+            autoSize: false, // Managed by ResizeObserver
+        });
+        
+        candleSeries = chartInstance.addCandlestickSeries({ upColor: '#22c55e', downColor: '#ef4444', borderVisible: false, wickUpColor: '#22c55e', wickDownColor: '#ef4444' });
+        
+        fetchCandles(mint, poolAddress);
+    }
+    
+    async function fetchCandles(mint, poolAddress) {
+        if (!chartInstance || !candleSeries) return;
+        try {
+            const now = Math.floor(Date.now() / 1000);
+            let lookback = 30 * 24 * 60 * 60;
+            if (currentResolution === '5') lookback = 3 * 24 * 60 * 60;
+            if (currentResolution === '60') lookback = 30 * 24 * 60 * 60;
+            if (currentResolution === 'D') lookback = 365 * 24 * 60 * 60;
+            const from = now - lookback;
+            let endpoint = `${API_URL}/api/token/${mint}/candles?resolution=${currentResolution}&from=${from}&to=${now}&poolAddress=${poolAddress || ''}`;
+            const res = await fetch(endpoint);
+            const data = await res.json();
+            if(data.success && data.candles) {
+                let cleanData = data.candles.map(c => {
+                    let open = parseFloat(c.open), high = parseFloat(c.high), low = parseFloat(c.low), close = parseFloat(c.close), time = parseInt(c.time);
+                    if (!time || isNaN(open)) return null;
+                    if (currentChartMode === 'mcap') { open *= currentNormalizedSupply; high *= currentNormalizedSupply; low *= currentNormalizedSupply; close *= currentNormalizedSupply; }
+                    return { time, open, high, low, close };
+                }).filter(c => c !== null).sort((a,b) => a.time - b.time);
+                const unique = []; const times = new Set();
+                cleanData.forEach(c => { if(!times.has(c.time)){ times.add(c.time); unique.push(c); }});
+                chartInstance.applyOptions({ rightPriceScale: { autoScale: true, format: { type: currentChartMode === 'mcap' ? 'volume' : 'price', precision: currentChartMode === 'mcap' ? 0 : 6, minMove: currentChartMode === 'mcap' ? 1 : 0.000001 } } });
+                candleSeries.setData(unique);
+                if (unique.length) chartInstance.timeScale().fitContent();
+            }
+        } catch(e) { console.error(e); }
+    }
+
+    // --- HOLDER CHART FIX ---
+    function openHolderHistory() {
+        document.getElementById('holder-modal').classList.remove('hidden');
+        setTimeout(() => {
+            document.getElementById('holder-modal').classList.add('open');
+            initHolderChart();
+        }, 10);
+    }
+    
+    function closeHolderHistory() {
+        document.getElementById('holder-modal').classList.remove('open');
+        setTimeout(() => document.getElementById('holder-modal').classList.add('hidden'), 300);
+    }
+    
+    function initHolderChart() {
+        if (holderChart) {
+            // Already created, just verify size and update data if needed
+            const container = document.getElementById('holder-chart-container');
+            if(container) {
+                const rect = container.getBoundingClientRect();
+                if(rect.width > 0 && rect.height > 0) {
+                    holderChart.applyOptions({ width: rect.width, height: rect.height });
+                }
+            }
+            updateHolderChartData();
+            return;
+        }
+        
+        const container = document.getElementById('holder-chart-container');
+        if(!container) return;
+        
+        const rect = container.getBoundingClientRect();
+        if(rect.width === 0) {
+            setTimeout(initHolderChart, 50);
+            return;
+        }
+        
+        container.innerHTML = ''; 
+        
+        holderChart = LightweightCharts.createChart(container, {
+            width: rect.width,
+            height: rect.height,
+            layout: { background: { type: 'solid', color: '#1a0a05' }, textColor: '#9a3412' },
+            grid: { vertLines: { color: '#2a1005' }, horzLines: { color: '#2a1005' } },
+            rightPriceScale: { borderVisible: false },
+            timeScale: { borderVisible: false, timeVisible: true }
+        });
+        
+        holderAreaSeries = holderChart.addAreaSeries({ 
+            lineColor: '#3b82f6', 
+            topColor: 'rgba(59, 130, 246, 0.4)', 
+            bottomColor: 'rgba(59, 130, 246, 0.0)',
+            lineWidth: 2
+        });
+        
+        updateHolderChartData();
+    }
+
+    function updateHolderChartData() {
+        if (!holderAreaSeries || !currentHolderHistory || currentHolderHistory.length === 0) return;
+
+        try {
+            const data = currentHolderHistory.map(h => {
+                let ts = h.timestamp;
+                let timeVal;
+                // Parse timestamp robustly
+                if (String(ts).match(/^\d+$/)) ts = parseInt(ts);
+                
+                if (typeof ts === 'number') {
+                    // Assume MS if > year 2000 in seconds (~946mil) * 1000
+                    if (ts > 946684800000) timeVal = Math.floor(ts / 1000);
+                    else timeVal = ts;
+                } else {
+                    timeVal = Math.floor(new Date(ts).getTime() / 1000);
+                }
+                
+                return { time: timeVal, value: parseInt(h.count) };
+            })
+            .filter(x => !isNaN(x.time) && !isNaN(x.value))
+            .sort((a,b) => a.time - b.time);
+            
+            // Deduplicate by time to prevent LWCharts errors
+            const unique = []; 
+            const seen = new Set();
+            data.forEach(c => { 
+                if(!seen.has(c.time)){ 
+                    seen.add(c.time); 
+                    unique.push(c); 
+                }
+            });
+            
+            holderAreaSeries.setData(unique);
+            holderChart.timeScale().fitContent();
+        } catch(e) {
+            console.error("Holder Chart Error:", e);
+        }
+    }
+
+    function cleanupHolderChart() { 
+        if (holderChart) { 
+            holderChart.remove(); 
+            holderChart = null; 
+            holderAreaSeries = null; 
+        } 
+        const container = document.getElementById('holder-chart-container');
+        if (container) container.innerHTML = ''; 
+    }
+
+    // --- UPDATES & WALLET ---
+    window.fetchTokenForUpdate = async (mint) => {
+        if(!mint || mint.length < 32) return;
+        document.getElementById('mint-check-spinner').classList.remove('hidden');
+        try {
+            const res = await fetch(`${API_URL}/api/token/${mint}`);
+            const data = await res.json();
+            document.getElementById('mint-check-spinner').classList.add('hidden');
+            if(data.success && data.token) {
+                const t = data.token;
+                currentUpdateTokenData = t;
+                document.getElementById('token-preview-info').classList.remove('hidden');
+                document.getElementById('update-token-img').src = t.image || 'https://placehold.co/40';
+                document.getElementById('update-token-name').innerText = t.name;
+                document.getElementById('update-token-ticker').innerText = t.ticker;
+                if(t.twitter) document.getElementById('update-twitter').value = t.twitter;
+                if(t.telegram) document.getElementById('update-telegram').value = t.telegram;
+                if(t.website) document.getElementById('update-website').value = t.website;
+                if(t.description) document.getElementById('update-description').value = t.description;
+                if(t.hasCommunityUpdate) { document.getElementById('update-cto-warning').classList.remove('hidden'); document.getElementById('update-cto-user').required = true; } 
+                else { document.getElementById('update-cto-warning').classList.add('hidden'); document.getElementById('update-cto-user').required = false; }
+                
+                checkSubmitEligibility();
+            }
+        } catch(e) { console.error(e); document.getElementById('mint-check-spinner').classList.add('hidden'); }
+    };
+    
+    // FETCH FEES & UPDATE BALANCE CHECK
+    async function fetchFees() { 
+        try { 
+            const res = await fetch(`${API_URL}/api/config/fees`); 
+            const data = await res.json(); 
+            if (data.success) { 
+                feeConfig = data; 
+                const solEl = document.getElementById('fee-sol'); 
+                const tokEl = document.getElementById('fee-token'); 
+                
+                if (solEl) solEl.innerText = `${data.solFee} SOL`; 
+                if (tokEl) tokEl.innerText = `${data.tokenFee.toLocaleString()}`;
+                
+                // Try to get token name via backend proxy or just use ticker
+                // For now, hardcode "HDX" or similar if unknown, but better to fetch name
+                document.getElementById('fee-token-name').innerText = "Token Fee";
+                
+                if (walletAddress) { checkBalances(); }
+                document.getElementById('fee-panel').classList.remove('hidden'); 
+            } 
+        } catch (e) { console.error("Fee fetch failed", e); } 
+    }
+    
+    async function checkBalances() {
+        if (!walletAddress) return;
+        const statusEl = document.getElementById('balance-check-status');
+        const submitBtn = document.getElementById('submit-btn');
+        if(statusEl) statusEl.classList.remove('hidden');
+        
+        try {
+            const tokenMint = feeConfig.tokenMint;
+            const res = await fetch(`${API_URL}/api/proxy/balance/${walletAddress}?tokenMint=${tokenMint}`);
+            const data = await res.json();
+            
+            if (data.success) {
+                userSolBalance = data.sol || 0;
+                userTokenBalance = data.tokens || 0;
+                
+                document.getElementById('user-sol-balance').innerText = `Bal: ${userSolBalance.toFixed(4)}`;
+                document.getElementById('user-token-balance').innerText = `Bal: ${userTokenBalance.toLocaleString()}`;
+                
+                if (statusEl) statusEl.classList.add('hidden');
+                checkSubmitEligibility();
+            }
+        } catch(e) { console.error("Balance check failed", e); }
+    }
+    
+    function checkSubmitEligibility() {
+        const btn = document.getElementById('submit-btn');
+        if (!btn) return;
+        
+        const hasSol = userSolBalance >= feeConfig.solFee;
+        const hasTokens = userTokenBalance >= feeConfig.tokenFee;
+        
+        const solBalEl = document.getElementById('user-sol-balance');
+        const tokBalEl = document.getElementById('user-token-balance');
+        
+        if (solBalEl) solBalEl.style.color = hasSol ? '#22c55e' : '#ef4444';
+        if (tokBalEl) tokBalEl.style.color = hasTokens ? '#22c55e' : '#ef4444';
+
+        if (hasSol && hasTokens && currentUpdateTokenData) {
+            btn.disabled = false;
+            btn.classList.remove('grayscale', 'opacity-50');
+            btn.innerHTML = "Pay & Submit";
+        } else {
+            btn.disabled = true;
+            btn.classList.add('grayscale', 'opacity-50');
+            if (!currentUpdateTokenData) btn.innerHTML = "Select Token First";
+            else if (!hasSol) btn.innerHTML = "Insufficient SOL";
+            else if (!hasTokens) btn.innerHTML = "Insufficient Fee Tokens";
+        }
+    }
+
+    window.submitUpdate = async (e) => {
+        e.preventDefault();
+        const statusDiv = document.getElementById('update-status');
+        if (!walletAddress || !walletProvider) { alert("Please connect wallet first"); return; }
+        
+        // Final Client-Side Balance Check
+        if (userSolBalance < feeConfig.solFee || userTokenBalance < feeConfig.tokenFee) {
+            alert("Insufficient balance for fees.");
+            return;
+        }
+
+        statusDiv.innerText = "Initiating..."; statusDiv.classList.remove('hidden');
+        try {
+            const bhRes = await fetch(`${API_URL}/api/proxy/blockhash`);
+            const bhData = await bhRes.json();
+            if(!bhData.success) throw new Error("Network Busy");
+            
+            const fromPubkey = new solanaWeb3.PublicKey(walletAddress); 
+            const toPubkey = new solanaWeb3.PublicKey(feeConfig.treasury); 
+            const tokenMintPubkey = new solanaWeb3.PublicKey(feeConfig.tokenMint);
+            
+            // Helper for ATA
+            const getATA = async (owner, mint) => { 
+                const [addr] = await solanaWeb3.PublicKey.findProgramAddress([owner.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mint.toBytes()], ASSOCIATED_TOKEN_PROGRAM_ID); 
+                return addr; 
+            };
+            const fromTokenAccount = await getATA(fromPubkey, tokenMintPubkey);
+            const toTokenAccount = await getATA(toPubkey, tokenMintPubkey);
+
+            const transaction = new solanaWeb3.Transaction();
+            
+            // 1. SOL Transfer
+            transaction.add(solanaWeb3.SystemProgram.transfer({ fromPubkey, toPubkey, lamports: Math.round(feeConfig.solFee * solanaWeb3.LAMPORTS_PER_SOL) }));
+            
+            // 2. Token Transfer
+            const decimals = 6; // Assuming 6 for custom token, ideally fetch from chain but hardcode for now based on known mint
+            const rawAmount = BigInt(Math.floor(feeConfig.tokenFee * Math.pow(10, decimals)));
+            const dataLayout = new Uint8Array(9);
+            dataLayout[0] = 3; // Transfer instruction
+            let remaining = rawAmount;
+            for (let i = 0; i < 8; i++) { dataLayout[i + 1] = Number(remaining & 0xFFn); remaining >>= 8n; }
+            
+            const transferIx = new solanaWeb3.TransactionInstruction({ 
+                keys: [{ pubkey: fromTokenAccount, isSigner: false, isWritable: true }, { pubkey: toTokenAccount, isSigner: false, isWritable: true }, { pubkey: fromPubkey, isSigner: true, isWritable: false }], 
+                programId: TOKEN_PROGRAM_ID, 
+                data: dataLayout 
+            }); 
+            transaction.add(transferIx);
+
+            transaction.recentBlockhash = bhData.blockhash; transaction.feePayer = fromPubkey; 
+            
+            statusDiv.innerText = "Please Sign in Wallet...";
+            const signedTx = await walletProvider.signTransaction(transaction);
+            const base64Tx = window.Buffer.from(signedTx.serialize()).toString('base64');
+            
+            statusDiv.innerText = "Broadcasting...";
+            const sendRes = await fetch(`${API_URL}/api/proxy/send-tx`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signedTx: base64Tx }) });
+            const sendData = await sendRes.json();
+            if(!sendData.success) throw new Error("Transaction Failed");
+            
+            statusDiv.innerText = "Verifying...";
+            const payload = {
+                mint: document.getElementById('update-mint').value,
+                twitter: document.getElementById('update-twitter').value,
+                website: document.getElementById('update-website').value,
+                telegram: document.getElementById('update-telegram').value,
+                banner: document.getElementById('update-banner').value,
+                description: document.getElementById('update-description').value,
+                signature: sendData.signature,
+                userPublicKey: walletAddress,
+                ctoUser: document.getElementById('update-cto-user').value
+            };
+            const res = await fetch(`${API_URL}/api/request-update`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const final = await res.json();
+            if(final.success) { statusDiv.innerText = "✅ Success! Queued."; statusDiv.className = "mt-4 text-center text-sm font-mono text-green-500"; } else { throw new Error(final.error); }
+        } catch(err) { statusDiv.innerText = `❌ Error: ${err.message}`; statusDiv.className = "mt-4 text-center text-sm font-mono text-red-500"; }
+    };
+
+    window.openPreview = () => {
+        const desc = document.getElementById('update-description').value;
+        const prevContainer = document.getElementById('preview-container');
+        prevContainer.innerHTML = `<div class="p-4 bg-[#1a0a05] rounded-lg border border-[#7c2d12]"><h4 class="text-orange-500 font-bold mb-2">Preview</h4><p class="text-white text-sm whitespace-pre-wrap">${desc || 'No description...'}</p></div>`;
+        toggleModal('preview-modal');
+    };
+    
+    // API KEY LOGIC
+    async function getAuthSignature() {
+        if (authSignature && authWallet === walletAddress) return authSignature;
+        if (!walletProvider) throw new Error("Wallet not connected");
+        const message = "Request HolDex API Key";
+        const encodedMessage = new TextEncoder().encode(message);
+        const signedMessage = await walletProvider.signMessage(encodedMessage, 'utf8');
+        authSignature = signedMessage.signature ? window.buffer.Buffer.from(signedMessage.signature).toString('base64') : window.buffer.Buffer.from(signedMessage).toString('base64');
+        authWallet = walletAddress;
+        return authSignature;
+    }
+
+    async function requestApiKey() {
+        if (!walletAddress) { openWalletModal(); return; }
+        try {
+            const signature = await getAuthSignature();
+            const res = await fetch(`${API_URL}/api/request-api-key`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wallet: walletAddress, signature }) });
+            const data = await res.json();
+            if (data.success) { document.getElementById('generated-key-display').innerText = data.key; toggleModal('key-modal'); fetchMyKeys(); } else { alert(data.error); }
+        } catch (e) { alert("Sign failed"); }
+    }
+    
+    async function fetchMyKeys() {
+        if (!walletAddress) return;
+        const listDiv = document.getElementById('my-keys-list');
+        try {
+            const signature = await getAuthSignature();
+            const res = await fetch(`${API_URL}/api/request-my-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wallet: walletAddress, signature }) });
+            const data = await res.json();
+            if (data.success && listDiv) { listDiv.innerHTML = data.keys.map(k => `<div class="bg-black p-2 rounded text-[#fb923c] font-mono text-xs mb-1">${k.key} (${k.requests_today}/${k.requests_limit})</div>`).join(''); }
+        } catch (e) {}
+    }
+
+    window.requestApiKey = requestApiKey; window.fetchMyKeys = fetchMyKeys; window.closeKeyModal = () => toggleModal('key-modal');
+    window.copyKey = () => { navigator.clipboard.writeText(document.getElementById('generated-key-display').innerText); alert('Copied'); };
+
+    // Standard Helpers
+    function changePage(d) { currentPage += d; if(currentPage<1) currentPage=1; fetchList(); }
+    window.setSort = (s) => { if(currentSort===s) currentDirection = currentDirection==='desc'?'asc':'desc'; else { currentSort=s; currentDirection='desc'; } currentPage=1; fetchList(); };
+    window.toggleVerifiedFilter = () => { isVerifiedFilter=!isVerifiedFilter; document.getElementById('filter-verified').classList.toggle('active'); fetchList(); };
+    window.toggleZeroVolFilter = () => { isZeroVolHidden=!isZeroVolHidden; document.getElementById('filter-zerovol').classList.toggle('active'); fetchList(); };
+    window.handleManualRefresh = () => fetchList();
+    window.clearSearch = () => { document.getElementById('search').value=''; searchQuery=''; fetchList(); };
+    window.handleSearch = (e) => { searchQuery = e.target.value; fetchList(); };
+    window.copyMint = () => { if(currentMint) navigator.clipboard.writeText(currentMint).then(()=>alert('Mint copied')); };
+    window.changeLimit = (val) => { currentLimit = parseInt(val); currentPage = 1; fetchList(); };
+    
+    // Modal Toggles
+    const toggleModal = (id) => { 
+        const el = document.getElementById(id); 
+        if(el.classList.contains('hidden')) { el.classList.remove('hidden'); setTimeout(() => el.classList.add('open'), 10); } 
+        else { el.classList.remove('open'); setTimeout(() => el.classList.add('hidden'), 300); }
+    };
+    
+    window.openWalletModal = () => toggleModal('wallet-modal'); window.closeWalletModal = () => toggleModal('wallet-modal');
+    window.toggleApiModal = () => toggleModal('api-docs-modal'); window.toggleLpModal = () => toggleModal('lp-modal');
+    window.toggleHowItWorksModal = () => toggleModal('how-it-works-modal'); window.closePreview = () => toggleModal('preview-modal');
+    window.toggleKScoreModal = () => toggleModal('kscore-modal'); window.toggleInfoModal = () => toggleModal('info-modal');
+    
+    // --- NEW FUNCTIONS: Apps & Share ---
+    window.toggleAppsModal = () => toggleModal('apps-modal');
+    window.shareToken = () => {
+        const url = window.location.href;
+        navigator.clipboard.writeText(url).then(() => {
+            // Simple visual feedback could be added here, but alert is standard
+            const btn = document.querySelector('button[onclick="shareToken()"]');
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = `<i data-lucide="check" width="14"></i> Copied!`;
+            setTimeout(() => { btn.innerHTML = originalHTML; lucide.createIcons(); }, 2000);
+        }).catch(err => alert('Failed to copy link'));
+    };
+    
+    // Connect Dummy
+    window.connectProvider = async (p) => { 
+        let provider = null;
+        if (p === 'phantom' && window.solana?.isPhantom) provider = window.solana;
+        else if (p === 'solflare' && window.solflare) provider = window.solflare;
+        if (!provider) { alert("Wallet not found"); return; }
+        try {
+            const resp = await provider.connect();
+            walletAddress = resp.publicKey.toString();
+            walletProvider = provider;
+            updateWalletUI(true);
+            closeWalletModal();
+            checkBalances(); // Check balances on connect
+        } catch (e) { console.error(e); }
+    };
+    
+    function updateWalletUI(connected) {
+        const txt = document.getElementById('mobile-wallet-text');
+        const txtDesk = document.getElementById('desktop-wallet-text');
+        const apiUn = document.getElementById('api-section-unconnected');
+        const apiConn = document.getElementById('api-section-connected');
+        if(connected) {
+            if(txt) txt.innerText = 'Connected';
+            if(txtDesk) txtDesk.innerText = walletAddress.slice(0,4) + '...';
+            if(apiUn) apiUn.classList.add('hidden');
+            if(apiConn) apiConn.classList.remove('hidden');
+            document.getElementById('wallet-disconnected-msg')?.classList.add('hidden');
+        } else {
+            if(txt) txt.innerText = 'Connect';
+            if(txtDesk) txtDesk.innerText = 'Connect Wallet';
+            if(apiUn) apiUn.classList.remove('hidden');
+            if(apiConn) apiConn.classList.add('hidden');
+            document.getElementById('wallet-disconnected-msg')?.classList.remove('hidden');
+        }
+    }
+    
+    function timeAgo(ts) { if(!ts) return ''; const s = Math.floor((Date.now()-ts)/1000); if(s<60)return'Just now'; if(s<3600)return Math.floor(s/60)+'m'; if(s<86400)return Math.floor(s/3600)+'h'; return Math.floor(s/86400)+'d'; }
+    const formatMoney = (val) => { if (val === undefined || val === null || isNaN(val)) return "$0.00"; return val < 0.01 ? '$' + val.toExponential(2) : '$' + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }); };
+    const formatCompact = (val) => { if (val === undefined || val === null || isNaN(val)) return "$0"; return '$' + new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val); };
+    const formatPct = (val) => { if (val === undefined || val === null || isNaN(val)) return `<span class="text-[#9a3412]">-</span>`; const cls = val > 0 ? 'pill-green' : (val < 0 ? 'pill-red' : 'text-gray-400'); return `<span class="pill ${cls}">${val > 0 ? '+' : ''}${val.toFixed(2)}%</span>`; };
+
+    // Diamond tokens (local/stable - always accepted on GASdf)
     const DIAMOND_TOKENS = new Set([
         'So11111111111111111111111111111111111111112',  // SOL
         'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
@@ -446,7 +1599,7 @@
         '2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv', // $ASDF
     ]);
 
-    // Tier system based on K-Score
+    // Tier system based on K-Score for GASdf integration
     const getTier = (mint, kScore, isVerified) => {
         if (DIAMOND_TOKENS.has(mint)) {
             return { name: 'Diamond', icon: '💎', color: '#b9f2ff', bg: 'rgba(185,242,255,0.15)', border: 'rgba(185,242,255,0.4)', accepted: true };
@@ -471,534 +1624,19 @@
         return `<span class="${size} rounded font-bold uppercase tracking-wider flex items-center gap-1 w-fit" style="background:${tier.bg};border:1px solid ${tier.border};color:${tier.color}">${tier.icon} ${tier.name}</span>`;
     };
 
-    window.onload = async () => {
-        handleRoute();
-        lucide.createIcons();
-
-        // Socket.IO connection
-        try {
-            socket = io(API_URL, { path: '/socket.io', transports: ['websocket', 'polling'] });
-            socket.on('connect', () => {
-                const dot = document.getElementById('status-dot-nav');
-                if(dot) { dot.classList.remove('offline'); dot.classList.add('online'); }
-                console.log('[Socket] Connected');
-            });
-            socket.on('disconnect', () => {
-                const dot = document.getElementById('status-dot-nav');
-                if(dot) { dot.classList.add('offline'); dot.classList.remove('online'); }
-            });
-            socket.on('update', (data) => { if (currentMint) updateLiveStats(data); });
-        } catch(e) {
-            console.log('[Socket] Not available, using polling');
-        }
-
-        const searchInput = document.getElementById('search');
-        if (searchInput) searchInput.addEventListener('input', debounce((e) => handleSearch(e), 500));
-
-        // Chart resize observer
-        const chartContainer = document.getElementById('tv-chart');
-        if (chartContainer) {
-            chartResizeObserver = new ResizeObserver(entries => {
-                if (entries.length === 0 || !entries[0].contentRect) return;
-                const newRect = entries[0].contentRect;
-                if (chartInstance && newRect.width > 0 && newRect.height > 0) {
-                    chartInstance.applyOptions({ width: newRect.width, height: newRect.height });
-                }
-            });
-            chartResizeObserver.observe(chartContainer);
-        }
-    };
-
-    window.addEventListener('hashchange', handleRoute);
-
-    function updateLiveStats(data) {
-        const safeSetText = (id, txt) => { const el = document.getElementById(id); if(el) el.innerText = txt; };
-        const safeSetHTML = (id, htm) => { const el = document.getElementById(id); if(el) el.innerHTML = htm; };
-        safeSetText('stat-price', formatMoney(data.priceUsd));
-        safeSetText('stat-mcap', formatCompact(data.marketCap));
-        safeSetHTML('stat-chg5m', formatPct(data.change5m));
-        safeSetHTML('stat-chg24h', formatPct(data.change24h));
-        safeSetText('stat-holders', (data.holders || 0).toLocaleString());
-    }
-
-    function navigateTo(path) { window.location.hash = path; }
-
-    function handleRoute() {
-        const hash = window.location.hash;
-        document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
-        window.scrollTo(0,0);
-        document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
-        const tableControls = document.getElementById('table-controls');
-        const detailControls = document.getElementById('detail-controls');
-        if (tableControls) tableControls.classList.add('hidden');
-        if (detailControls) detailControls.classList.add('hidden');
-        if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
-
-        if (hash === '' || hash === '#') {
-            document.getElementById('view-dashboard').classList.add('active');
-            document.getElementById('nav-home').classList.add('active');
-            if(tableControls) tableControls.classList.remove('hidden');
-            fetchList();
-            pollingInterval = setInterval(fetchList, 5000);
-        } else if (hash === '#about') {
-            document.getElementById('view-about').classList.add('active');
-            document.getElementById('nav-about').classList.add('active');
-        } else if (hash === '#update') {
-            document.getElementById('view-update').classList.add('active');
-            document.getElementById('nav-update').classList.add('active');
-        } else if (hash.startsWith('#token/')) {
-            showDetailView(hash.split('/')[1]);
-        }
-    }
-
-    // --- FETCH LIST ---
-    async function fetchList() {
-        try {
-            const pDisplay = document.getElementById('page-display');
-            const prev = document.getElementById('btn-prev');
-            const next = document.getElementById('btn-next');
-            if(pDisplay) pDisplay.innerText = `Page ${currentPage}`;
-            if(prev) prev.disabled = currentPage <= 1;
-
-            let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&direction=${currentDirection}&search=${encodeURIComponent(searchQuery)}&limit=${currentLimit}&page=${currentPage}`;
-            if (isVerifiedFilter) endpoint += '&filter=verified';
-
-            console.log('[HolDex] Fetching:', endpoint);
-            const res = await fetch(endpoint);
-            const data = await res.json();
-
-            if (data.success) {
-                renderTable(data.tokens);
-                if(next) next.disabled = data.tokens.length < currentLimit;
-            }
-        } catch (e) { console.error("API Error", e); }
-    }
-
-    function renderTable(tokens) {
-        const tbody = document.getElementById('table-body');
-        if(!tbody) return;
-
-        let displayTokens = tokens;
-        if (isZeroVolHidden) { displayTokens = displayTokens.filter(t => (t.volume24h || 0) > 0); }
-
-        if (displayTokens.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-[#9a3412] font-mono">No tokens found.</td></tr>`;
-            return;
-        }
-
-        tbody.innerHTML = displayTokens.map(t => {
-            const isVerified = t.hasCommunityUpdate || t.has_community_update || t.hascommunityupdate;
-            const score = t.kScore || t.k_score || 0;
-            const tier = getTier(t.mint, score, isVerified);
-            const kScoreDisplay = isVerified ? (score > 0 ? `<span style="color:${tier.color}">${score}</span>` : `<span class="animate-pulse">...</span>`) : '<span class="text-gray-600">--</span>';
-            const img = t.image || `https://placehold.co/40x40/2a1005/7c2d12?text=${(t.ticker||'?')[0]}`;
-
-            return `
-            <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group border-b border-[#7c2d12]/30">
-                <td class="bg-[#2a1005]">
-                    <div class="flex items-center gap-2">
-                        <img src="${img}" class="img-token" onerror="this.src='https://placehold.co/40'">
-                        <div class="flex flex-col min-w-0">
-                            <div class="flex items-center gap-1">
-                                <span class="font-bold text-white text-xs truncate font-sans">${t.ticker || t.name || 'Unknown'}</span>
-                                <span title="${tier.name}" style="font-size:12px">${tier.icon}</span>
-                                ${tier.accepted ? '<i data-lucide="check-circle" width="10" class="text-green-500"></i>' : ''}
-                            </div>
-                            <span class="text-[10px] text-[#9a3412] truncate max-w-[80px]">${t.name || ''}</span>
-                        </div>
-                    </div>
-                </td>
-                <td class="text-right font-mono font-bold hidden md:table-cell">${kScoreDisplay}</td>
-                <td class="text-right hidden md:table-cell">${formatPct(t.change1h)}</td>
-                <td class="text-right">${formatPct(t.change24h)}</td>
-                <td class="text-right font-mono text-[#22c55e] text-xs">${formatCompact(t.volume24h)}</td>
-                <td class="text-right font-mono text-[#fb923c] text-xs">${formatCompact(t.marketCap || t.marketcap)}</td>
-                <td class="text-right font-mono text-[#3b82f6] text-xs hidden md:table-cell">${(t.holders||0).toLocaleString()}</td>
-                <td class="text-right text-[10px] text-[#9a3412] font-mono whitespace-nowrap hidden md:table-cell">${timeAgo(t.timestamp || t.created_at)}</td>
-            </tr>`;
-        }).join('');
-        lucide.createIcons();
-    }
-
-    // --- DETAIL VIEW ---
-    async function showDetailView(mint) {
-        if (pollingInterval) clearInterval(pollingInterval);
-        document.getElementById('view-dashboard').classList.remove('active');
-        document.getElementById('view-detail').classList.add('active');
-        document.getElementById('detail-controls').classList.remove('hidden');
-
-        currentMint = mint;
-        currentHolderHistory = [];
-        cleanupHolderChart();
-
-        if(socket) socket.emit('subscribe', mint);
-
-        const loadingDiv = document.getElementById('detail-loading');
-        const contentDiv = document.getElementById('detail-content');
-        const bannerContainer = document.getElementById('detail-banner-container');
-        const bannerImg = document.getElementById('detail-banner-img');
-
-        if (loadingDiv) loadingDiv.classList.remove('hidden');
-        if (contentDiv) contentDiv.style.display = 'none';
-        if (loadingDiv) loadingDiv.innerText = 'Fetching Chain Data...';
-
-        try {
-            const res = await fetch(`${API_URL}/api/token/${mint}`);
-            const data = await res.json();
-
-            if(data.success) {
-                const t = data.token;
-                const rawStatus = t.hasCommunityUpdate || t.has_community_update || t.hascommunityupdate;
-                const isVerified = (rawStatus === true || rawStatus === 1 || rawStatus === 'true');
-
-                document.getElementById('detail-ticker').innerText = t.ticker || 'UNK';
-                document.getElementById('detail-name').innerText = t.name || 'Unknown';
-                document.getElementById('detail-mint').innerText = mint;
-
-                document.getElementById('stat-price').innerText = formatMoney(t.priceUsd || t.priceusd);
-                document.getElementById('stat-mcap').innerText = formatCompact(t.marketCap || t.marketcap);
-                document.getElementById('stat-holders').innerText = (t.holders||0).toLocaleString();
-                document.getElementById('stat-vol').innerText = formatCompact(t.volume24h);
-
-                document.getElementById('stat-chg5m').innerHTML = formatPct(t.change5m);
-                document.getElementById('stat-chg1h').innerHTML = formatPct(t.change1h);
-                document.getElementById('stat-chg24h').innerHTML = formatPct(t.change24h);
-
-                // K-Score & Conviction
-                const kScoreContainer = document.getElementById('kscore-container');
-                const convBreakdown = document.getElementById('conviction-breakdown');
-                if (isVerified) {
-                    kScoreContainer.style.visibility = 'visible';
-                    document.getElementById('stat-kscore').innerText = t.kScore || t.k_score || '--';
-
-                    // Show conviction data if available
-                    const conv = t.conviction || {
-                        score: t.conviction_score,
-                        accumulators: t.conviction_accumulators,
-                        holders: t.conviction_holders,
-                        reducers: t.conviction_reducers,
-                        extractors: t.conviction_extractors,
-                        analyzed: t.conviction_analyzed
-                    };
-
-                    if (conv && conv.analyzed > 0) {
-                        convBreakdown.classList.remove('hidden');
-                        document.getElementById('conv-acc').innerText = conv.accumulators || 0;
-                        document.getElementById('conv-hold').innerText = conv.holders || 0;
-                        document.getElementById('conv-red').innerText = conv.reducers || 0;
-                        document.getElementById('conv-ext').innerText = conv.extractors || 0;
-                        document.getElementById('conv-score').innerText = conv.score || 0;
-                        document.getElementById('conv-analyzed').innerText = conv.analyzed || 0;
-
-                        const total = conv.analyzed || 1;
-                        document.getElementById('bar-acc').style.width = `${((conv.accumulators||0) / total) * 100}%`;
-                        document.getElementById('bar-hold').style.width = `${((conv.holders||0) / total) * 100}%`;
-                        document.getElementById('bar-red').style.width = `${((conv.reducers||0) / total) * 100}%`;
-                        document.getElementById('bar-ext').style.width = `${((conv.extractors||0) / total) * 100}%`;
-                    } else {
-                        convBreakdown.classList.add('hidden');
-                    }
-                } else {
-                    kScoreContainer.style.visibility = 'hidden';
-                    convBreakdown.classList.add('hidden');
-                }
-
-                // Tier Badge
-                const tier = getTier(mint, t.kScore || t.k_score || 0, isVerified);
-                const badgeContainer = document.getElementById('badge-container');
-                badgeContainer.innerHTML = getTierBadge(tier) + (tier.accepted
-                    ? '<span class="ml-2 text-[10px] text-green-500 flex items-center gap-1"><i data-lucide="check-circle" width="12"></i> Accepted on GASdf</span>'
-                    : '<span class="ml-2 text-[10px] text-red-400 flex items-center gap-1"><i data-lucide="x-circle" width="12"></i> Not accepted</span>');
-
-                // Supply for chart
-                const rawSupply = parseFloat(t.supply || '0');
-                const decimals = t.decimals || 9;
-                currentNormalizedSupply = rawSupply / Math.pow(10, decimals);
-                if (currentNormalizedSupply === 0) currentNormalizedSupply = 1000000000;
-
-                // Image
-                const media = document.getElementById('detail-media-container');
-                if (media) {
-                    media.innerHTML = `<img src="${t.image || 'https://placehold.co/80'}" class="w-16 h-16 rounded-lg border-2 border-[#ea580c] bg-black object-cover">`;
-                }
-
-                // Description
-                const descEl = document.getElementById('detail-desc');
-                if(t.description) { descEl.innerText = t.description; descEl.classList.remove('hidden'); }
-                else { descEl.innerText = ''; descEl.classList.add('hidden'); }
-
-                // Banner
-                if (t.banner && bannerContainer && bannerImg) {
-                    bannerImg.src = t.banner;
-                    bannerContainer.classList.remove('hidden');
-                } else if (bannerContainer) { bannerContainer.classList.add('hidden'); }
-
-                // Social Links
-                const actions = document.getElementById('detail-actions');
-                if (actions) {
-                    let links = '';
-                    if(t.twitter) links += `<a href="${t.twitter}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="twitter" width="16"></i></a>`;
-                    if(t.telegram) links += `<a href="${t.telegram}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="send" width="16"></i></a>`;
-                    if(t.website) links += `<a href="${t.website}" target="_blank" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="globe" width="16"></i></a>`;
-                    actions.innerHTML = links + `<button onclick="shareToken()" class="bg-[#2a1005] border border-[#7c2d12] text-[#fb923c] p-2 rounded hover:border-[#ea580c] flex items-center gap-2 text-xs font-bold px-3"><i data-lucide="share-2" width="14"></i> Share</button>`;
-                }
-
-                // Holder history
-                if(t.holderHistory) currentHolderHistory = t.holderHistory;
-
-                // LP List
-                const lpBody = document.getElementById('lp-list-body');
-                if (lpBody) {
-                    if(t.pairs && t.pairs.length > 0) {
-                        currentPoolAddress = t.pairs[0].address;
-                        lpBody.innerHTML = t.pairs.map(p => `<tr><td class="px-4 py-2 text-[#fb923c] font-bold text-xs">${p.dexId || p.dex || 'Unknown'}</td><td class="px-4 py-2 text-right text-xs font-mono">$${parseFloat(p.priceUsd||0).toFixed(6)}</td><td class="px-4 py-2 text-right text-[#22c55e] text-xs font-mono">$${parseFloat(p.liquidity?.usd||0).toLocaleString()}</td></tr>`).join('');
-                        const poolNameEl = document.getElementById('chart-pool-name');
-                        if (poolNameEl) poolNameEl.innerText = `-- ${(t.pairs[0].dex || t.pairs[0].dexId || "Unknown").toUpperCase()}`;
-                    } else {
-                        lpBody.innerHTML = '<tr><td colspan="3" class="text-center p-4 text-xs text-[#9a3412]">No pools found</td></tr>';
-                        currentPoolAddress = null;
-                    }
-                }
-
-                if (loadingDiv) loadingDiv.classList.add('hidden');
-                if (contentDiv) contentDiv.style.display = 'block';
-                lucide.createIcons();
-
-                requestAnimationFrame(() => {
-                    initChart(mint, currentPoolAddress);
-                });
-            } else { if (loadingDiv) loadingDiv.innerText = 'Token not found.'; }
-        } catch(e) { console.error(e); if (loadingDiv) loadingDiv.innerText = 'Error fetching data.'; }
-    }
-
-    // --- CHARTING ---
-    window.setResolution = (res) => {
-        currentResolution = res;
-        document.querySelectorAll('.res-btn').forEach(b => b.classList.remove('active'));
-        const btn = document.getElementById(`res-${res}`);
-        if(btn) btn.classList.add('active');
-        document.getElementById('mode-mcap').classList.toggle('active', currentChartMode === 'mcap');
-        document.getElementById('mode-price').classList.toggle('active', currentChartMode === 'price');
-        if(currentMint) fetchCandles(currentMint, currentPoolAddress);
-    };
-    window.setChartMode = (mode) => {
-        currentChartMode = mode;
-        document.getElementById('mode-price').classList.toggle('active', mode === 'price');
-        document.getElementById('mode-mcap').classList.toggle('active', mode === 'mcap');
-        if(currentMint) fetchCandles(currentMint, currentPoolAddress);
-    };
-    window.toggleScale = () => {
-        isLogScale = !isLogScale;
-        const btn = document.getElementById('btn-scale');
-        if(btn) btn.classList.toggle('active', isLogScale);
-        if(chartInstance) chartInstance.priceScale('right').applyOptions({ mode: isLogScale ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal });
-    };
-
-    function initChart(mint, poolAddress) {
-        if (chartInstance) {
-            fetchCandles(mint, poolAddress);
-            return;
-        }
-
-        const container = document.getElementById('tv-chart');
-        if(!container) return;
-
-        const rect = container.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) {
-            setTimeout(() => initChart(mint, poolAddress), 50);
-            return;
-        }
-
-        const loader = document.getElementById('chart-loader');
-        if(loader) loader.style.display = 'none';
-
-        container.innerHTML = '';
-
-        chartInstance = LightweightCharts.createChart(container, {
-            width: rect.width,
-            height: rect.height,
-            layout: { background: { type: 'solid', color: '#1a0a05' }, textColor: '#9a3412' },
-            grid: { vertLines: { color: '#2a1005' }, horzLines: { color: '#2a1005' } },
-            timeScale: { borderColor: '#7c2d12', timeVisible: true },
-            rightPriceScale: { borderColor: '#7c2d12', mode: isLogScale ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal },
-            autoSize: false,
-        });
-
-        candleSeries = chartInstance.addCandlestickSeries({ upColor: '#22c55e', downColor: '#ef4444', borderVisible: false, wickUpColor: '#22c55e', wickDownColor: '#ef4444' });
-
-        fetchCandles(mint, poolAddress);
-    }
-
-    async function fetchCandles(mint, poolAddress) {
-        if (!chartInstance || !candleSeries) return;
-        const loader = document.getElementById('chart-loader');
-        if(loader) loader.style.display = 'flex';
-
-        try {
-            const now = Math.floor(Date.now() / 1000);
-            let lookback = 30 * 24 * 60 * 60;
-            if (currentResolution === '5') lookback = 3 * 24 * 60 * 60;
-            if (currentResolution === '60') lookback = 30 * 24 * 60 * 60;
-            if (currentResolution === 'D') lookback = 365 * 24 * 60 * 60;
-            const from = now - lookback;
-
-            let endpoint = `${API_URL}/api/token/${mint}/candles?resolution=${currentResolution}&from=${from}&to=${now}`;
-            if(poolAddress) endpoint += `&poolAddress=${poolAddress}`;
-
-            const res = await fetch(endpoint);
-            const data = await res.json();
-
-            if(loader) loader.style.display = 'none';
-
-            if(data.success && data.candles) {
-                let cleanData = data.candles.map(c => {
-                    let open = parseFloat(c.open), high = parseFloat(c.high), low = parseFloat(c.low), close = parseFloat(c.close), time = parseInt(c.time);
-                    if (!time || isNaN(open)) return null;
-                    if (currentChartMode === 'mcap') { open *= currentNormalizedSupply; high *= currentNormalizedSupply; low *= currentNormalizedSupply; close *= currentNormalizedSupply; }
-                    return { time, open, high, low, close };
-                }).filter(c => c !== null).sort((a,b) => a.time - b.time);
-
-                const unique = []; const times = new Set();
-                cleanData.forEach(c => { if(!times.has(c.time)){ times.add(c.time); unique.push(c); }});
-
-                candleSeries.setData(unique);
-                if (unique.length) chartInstance.timeScale().fitContent();
-            }
-        } catch(e) {
-            console.error(e);
-            if(loader) loader.innerText = 'Chart data unavailable';
-        }
-    }
-
-    // --- HOLDER CHART ---
-    function openHolderHistory() {
-        document.getElementById('holder-modal').classList.remove('hidden');
-        setTimeout(() => {
-            document.getElementById('holder-modal').classList.add('open');
-            initHolderChart();
-        }, 10);
-    }
-
-    function closeHolderHistory() {
-        document.getElementById('holder-modal').classList.remove('open');
-        setTimeout(() => document.getElementById('holder-modal').classList.add('hidden'), 300);
-    }
-
-    function initHolderChart() {
-        if (holderChart) {
-            updateHolderChartData();
-            return;
-        }
-
+    function cleanupChart() { if (chartInstance) { chartInstance.remove(); chartInstance = null; candleSeries = null; } document.getElementById('tv-chart').innerHTML = ''; }
+    
+    // Updated cleanup function
+    function cleanupHolderChart() { 
+        if (holderChart) { 
+            holderChart.remove(); 
+            holderChart = null; 
+            holderAreaSeries = null; 
+        } 
         const container = document.getElementById('holder-chart-container');
-        if(!container) return;
-
-        const rect = container.getBoundingClientRect();
-        if(rect.width === 0) {
-            setTimeout(initHolderChart, 50);
-            return;
-        }
-
-        container.innerHTML = '';
-
-        holderChart = LightweightCharts.createChart(container, {
-            width: rect.width,
-            height: rect.height,
-            layout: { background: { type: 'solid', color: '#1a0a05' }, textColor: '#9a3412' },
-            grid: { vertLines: { color: '#2a1005' }, horzLines: { color: '#2a1005' } },
-            rightPriceScale: { borderVisible: false },
-            timeScale: { borderVisible: false, timeVisible: true }
-        });
-
-        holderAreaSeries = holderChart.addAreaSeries({
-            lineColor: '#3b82f6',
-            topColor: 'rgba(59, 130, 246, 0.4)',
-            bottomColor: 'rgba(59, 130, 246, 0.0)',
-            lineWidth: 2
-        });
-
-        updateHolderChartData();
+        if (container) container.innerHTML = ''; 
     }
 
-    function updateHolderChartData() {
-        if (!holderAreaSeries || !currentHolderHistory || currentHolderHistory.length === 0) return;
-
-        try {
-            const data = currentHolderHistory.map(h => {
-                let ts = h.timestamp;
-                let timeVal;
-                if (String(ts).match(/^\d+$/)) ts = parseInt(ts);
-                if (typeof ts === 'number') {
-                    if (ts > 946684800000) timeVal = Math.floor(ts / 1000);
-                    else timeVal = ts;
-                } else {
-                    timeVal = Math.floor(new Date(ts).getTime() / 1000);
-                }
-                return { time: timeVal, value: parseInt(h.count) };
-            })
-            .filter(x => !isNaN(x.time) && !isNaN(x.value))
-            .sort((a,b) => a.time - b.time);
-
-            const unique = [];
-            const seen = new Set();
-            data.forEach(c => {
-                if(!seen.has(c.time)){
-                    seen.add(c.time);
-                    unique.push(c);
-                }
-            });
-
-            holderAreaSeries.setData(unique);
-            holderChart.timeScale().fitContent();
-        } catch(e) {
-            console.error("Holder Chart Error:", e);
-        }
-    }
-
-    function cleanupHolderChart() {
-        if (holderChart) {
-            holderChart.remove();
-            holderChart = null;
-            holderAreaSeries = null;
-        }
-        const container = document.getElementById('holder-chart-container');
-        if (container) container.innerHTML = '';
-    }
-
-    // --- HELPERS ---
-    window.setSort = (s) => {
-        if (currentSort === s) {
-            currentDirection = currentDirection === 'desc' ? 'asc' : 'desc';
-        } else {
-            currentSort = s;
-            currentDirection = 'desc';
-        }
-        fetchList();
-    };
-    window.setLimit = (l) => { currentLimit = parseInt(l); currentPage = 1; fetchList(); };
-    window.toggleVerifiedFilter = () => {
-        isVerifiedFilter = !isVerifiedFilter;
-        document.getElementById('filter-verified').classList.toggle('active', isVerifiedFilter);
-        fetchList();
-    };
-    window.toggleZeroVolFilter = () => {
-        isZeroVolHidden = !isZeroVolHidden;
-        document.getElementById('filter-zerovol').classList.toggle('active', isZeroVolHidden);
-        fetchList();
-    };
-    window.handleSearch = (e) => { searchQuery = e.target.value; currentPage = 1; fetchList(); };
-    window.clearSearch = () => { searchQuery = ''; document.getElementById('search').value = ''; fetchList(); };
-    window.changePage = (d) => { currentPage += d; if(currentPage<1) currentPage=1; fetchList(); };
-    window.handleManualRefresh = fetchList;
-    window.copyMint = () => {
-        navigator.clipboard.writeText(currentMint);
-        alert('Mint address copied!');
-    };
-    window.shareToken = () => {
-        const url = window.location.href;
-        navigator.clipboard.writeText(url);
-        alert('Link copied!');
-    };
 </script>
 </body>
 </html>
