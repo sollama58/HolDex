@@ -105,19 +105,16 @@ async function heliusRpc(method, params) {
 async function getEnhancedTransactions(address, options = {}) {
     if (!HELIUS_API_KEY) return [];
 
-    const params = new URLSearchParams();
+    // Note: Enhanced Transactions API (v0) requires API key in query string
+    // Header auth returns 401 - this is a Helius API limitation
+    const params = new URLSearchParams({ 'api-key': HELIUS_API_KEY });
     if (options.limit) params.append('limit', options.limit.toString());
     if (options.before) params.append('before', options.before);
 
-    const queryString = params.toString();
-    const url = `https://api-mainnet.helius-rpc.com/v0/addresses/${address}/transactions${queryString ? '?' + queryString : ''}`;
+    const url = `https://api-mainnet.helius-rpc.com/v0/addresses/${address}/transactions?${params}`;
 
     try {
-        // Security: API key in header, not URL
-        const response = await rateLimitedFetch(url, {
-            method: 'GET',
-            headers: { 'Authorization': `Bearer ${HELIUS_API_KEY}` }
-        });
+        const response = await rateLimitedFetch(url, { method: 'GET' });
         if (!response.ok) return [];
         return await response.json();
     } catch (error) {
