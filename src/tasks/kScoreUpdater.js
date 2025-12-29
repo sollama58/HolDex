@@ -1057,10 +1057,35 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         );
 
         // ============================================
-        // APPLY SECURITY CAP (ELIMINATORY)
+        // LEGACY FLOOR (harmonic, asymptotic)
         // ============================================
+        // "The rock still shines even when under dirt" - Dior
+        //
+        // Reuses existing normalized values (scales to infinity):
+        //   A = age normalization (asymptotic)
+        //   H = holders normalization (asymptotic)
+        //
+        // LegacyStrength = sqrt(A * H)  [geometric mean of survival factors]
+        // LegacyFloor = MAX_FLOOR * LegacyStrength
+        //
+        // Applied BEFORE security cap (security always wins)
+
+        const LEGACY_MAX_FLOOR = 55;  // Asymptotic maximum floor
+
+        const legacyStrength = Math.sqrt(normalized.A * normalized.H);
+        const legacyFloor = Math.round(LEGACY_MAX_FLOOR * legacyStrength);
 
         const uncappedScore = score;
+
+        if (score < legacyFloor) {
+            logger.info(`[Legacy] ${mint.slice(0,8)}: ${score} -> ${legacyFloor} (strength: ${(legacyStrength * 100).toFixed(0)}%)`);
+            score = legacyFloor;
+        }
+
+        // ============================================
+        // APPLY SECURITY CAP (ELIMINATORY)
+        // ============================================
+        // Security ALWAYS wins - applied AFTER legacy floor
 
         // 1. Authority cap (mint/freeze)
         const authorityCap = securityData?.maxScore || 100;
@@ -1073,32 +1098,6 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
 
         if (score > finalCap) {
             score = finalCap;
-        }
-
-        // ============================================
-        // LEGACY FLOOR (for battle-tested tokens)
-        // ============================================
-        // A token that survived 6+ months with 5k+ real holders
-        // has proven its legitimacy - deserves minimum respect
-        // "The rock still shines even when under dirt"
-
-        const LEGACY_AGE_THRESHOLD = 180;      // 6 months
-        const LEGACY_HOLDERS_THRESHOLD = 5000;  // 5k real holders
-        const LEGACY_BASE_FLOOR = 40;
-        const LEGACY_MAX_BONUS = 15;            // Up to +15 based on holders
-
-        if (raw.ageDays >= LEGACY_AGE_THRESHOLD && raw.holders >= LEGACY_HOLDERS_THRESHOLD) {
-            // Calculate legacy floor: 40 + up to 15 based on holder count
-            // 5k holders = +0, 50k holders = +15
-            const holderBonus = Math.min(LEGACY_MAX_BONUS,
-                LEGACY_MAX_BONUS * Math.log10(raw.holders / LEGACY_HOLDERS_THRESHOLD) / Math.log10(10)
-            );
-            const legacyFloor = Math.round(LEGACY_BASE_FLOOR + holderBonus);
-
-            if (score < legacyFloor) {
-                logger.info(`[Legacy] ${mint.slice(0,8)}: ${score} → ${legacyFloor} (${raw.ageDays.toFixed(0)}d, ${raw.holders} holders)`);
-                score = legacyFloor;
-            }
         }
 
         // Log breakdown
