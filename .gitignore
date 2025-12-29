@@ -40,5 +40,5 @@ tmp/
 temp/
 *.tmp
 
-# Package lock (optional - uncomment if needed)
-# package-lock.json
+# Package lock
+package-lock.json
