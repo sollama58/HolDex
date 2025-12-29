@@ -75,7 +75,6 @@ async function processNewPoolTx(signature, connection, db, source) {
         }
 
         // --- STRATEGY B: Inner Instructions (MintTo / InitializeMint) ---
-        // This is robust for both Raydium and Pump.fun
         if (tx.meta.innerInstructions) {
              tx.meta.innerInstructions.forEach(inner => {
                  inner.instructions.forEach(inst => {
@@ -95,14 +94,10 @@ async function processNewPoolTx(signature, connection, db, source) {
         if (candidateMints.size === 0 && source === 'Pump.fun') {
              const message = tx.transaction.message;
              const keyList = message.accountKeys.staticAccountKeys || message.accountKeys;
-             // In Pump.fun "create", the mint is a signer (index 1 or 2 typically)
              if (Array.isArray(keyList)) {
                  keyList.forEach((keyObj, index) => {
                      if (index === 0) return; 
                      const pubkey = keyObj.pubkey ? keyObj.pubkey.toString() : keyObj.toString();
-                     const isSigner = typeof keyObj === 'object' ? keyObj.signer : false; // If simple string, assume not signer unless we parse header
-                     
-                     // We just add all non-system accounts as candidates if they look like mints
                      if (pubkey && !isIgnored(pubkey)) {
                           candidateMints.add(pubkey);
                      }
@@ -118,16 +113,19 @@ async function processNewPoolTx(signature, connection, db, source) {
         const redis = getClient();
         
         for (const mint of candidateMints) {
-            if (isIgnored(mint)) continue;
+            if (isIgnored(mint)) {
+                logger.info(`   🚫 [IGNORED] ${mint} (System/Invalid)`);
+                continue;
+            }
             
             // CHECK DATABASE DEDUPLICATION
             const exists = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
             if (exists) {
-                // logger.debug(`   Skipping existing mint: ${mint}`);
+                logger.info(`   ⚠️ [SKIPPED] ${mint} (Already tracked)`);
                 continue;
             }
 
-            logger.info(`🚀 [NEW TOKEN FOUND] ${mint} on ${source}`);
+            logger.info(`🚀 [ADDING TO PENDING] ${mint} from ${source}`);
 
             // 1. ADD TO DB IMMEDIATELY
             try {
@@ -188,12 +186,10 @@ async function setupSubscriptions(connection, db) {
                 const safeSig = logs.signature || (logs.value && logs.value.signature) || null;
                 if (!safeSig) return;
 
-                // Broader check for Pump.fun events
-                // Pump.fun logs often contain "Instruction: Create" or "Program log: Create"
                 const isCreate = safeLogs.some(l => 
                     l.includes('Instruction: Create') || 
                     l.includes('Program log: Create') || 
-                    l.includes('MintTo') // Fallback
+                    l.includes('MintTo') 
                 );
 
                 if (isCreate) await processNewPoolTx(safeSig, connection, db, 'Pump.fun');
