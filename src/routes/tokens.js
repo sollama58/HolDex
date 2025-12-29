@@ -215,7 +215,7 @@ function init(deps) {
             const defaultLimit = 1000;
             const defaultTier = 'free';
             
-            await db.run(`INSERT INTO api_keys (key, owner, tier, requests_limit, created_at) VALUES ($1, $2, $3, $4, $5)`, [key, wallet, defaultTier, defaultLimit, Date.now()]);
+            await db.run(`INSERT INTO api_keys (key, owner, tier, requests_limit, created_at) VALUES ($1, $2, $3, $4, $5)`, [key, owner, defaultTier, defaultLimit, Date.now()]);
             
             res.json({ 
                 success: true, 
@@ -553,18 +553,24 @@ function init(deps) {
                 
                 if (!token) return { success: false, error: "Token not found" };
 
+                // NON-BLOCKING REFRESH: If stale, trigger update in background but return current data
                 const now = Date.now();
                 const isStale = !token.timestamp || (now - token.timestamp > 300000); 
                 if (isStale && pairs.length > 0 && !pendingRefreshes.has(mint)) {
                     pendingRefreshes.add(mint);
-                    try {
-                        const poolAddresses = pairs.map(p => p.address);
-                        await snapshotPools(poolAddresses);
-                        await aggregateAndSaveToken(db, mint);
-                        token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
-                        pairs = await db.all('SELECT * FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC', [mint]);
-                    } catch (err) { logger.warn(`Lazy refresh failed for ${mint}: ${err.message}`); } 
-                    finally { pendingRefreshes.delete(mint); }
+                    
+                    // FIRE-AND-FORGET
+                    (async () => {
+                        try {
+                            const poolAddresses = pairs.map(p => p.address);
+                            await snapshotPools(poolAddresses);
+                            await aggregateAndSaveToken(db, mint);
+                        } catch (err) { 
+                            logger.warn(`Lazy refresh failed for ${mint}: ${err.message}`); 
+                        } finally { 
+                            pendingRefreshes.delete(mint); 
+                        }
+                    })();
                 }
 
                 let tokenData = { ...token };
