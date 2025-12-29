@@ -25,9 +25,12 @@ const priceService = require('../services/priceService');
 // ============================================
 
 const HELIUS_API_KEY = config.HELIUS_API_KEY;
-const HELIUS_RPC = HELIUS_API_KEY
-    ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`
-    : null;
+const HELIUS_RPC_URL = 'https://mainnet.helius-rpc.com/';
+
+// Security: API key passed via header, not URL querystring
+const HELIUS_HEADERS = HELIUS_API_KEY
+    ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${HELIUS_API_KEY}` }
+    : { 'Content-Type': 'application/json' };
 
 // Rate limiting
 const RATE_LIMIT = 50;
@@ -82,12 +85,12 @@ async function rateLimitedFetch(url, options) {
 }
 
 async function heliusRpc(method, params) {
-    if (!HELIUS_RPC) return null;
+    if (!HELIUS_API_KEY) return null;
 
     try {
-        const response = await rateLimitedFetch(HELIUS_RPC, {
+        const response = await rateLimitedFetch(HELIUS_RPC_URL, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: HELIUS_HEADERS,
             body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method, params }),
         });
         const data = await response.json();
@@ -102,14 +105,19 @@ async function heliusRpc(method, params) {
 async function getEnhancedTransactions(address, options = {}) {
     if (!HELIUS_API_KEY) return [];
 
-    const params = new URLSearchParams({ 'api-key': HELIUS_API_KEY });
+    const params = new URLSearchParams();
     if (options.limit) params.append('limit', options.limit.toString());
     if (options.before) params.append('before', options.before);
 
-    const url = `https://api-mainnet.helius-rpc.com/v0/addresses/${address}/transactions?${params}`;
+    const queryString = params.toString();
+    const url = `https://api-mainnet.helius-rpc.com/v0/addresses/${address}/transactions${queryString ? '?' + queryString : ''}`;
 
     try {
-        const response = await rateLimitedFetch(url, { method: 'GET' });
+        // Security: API key in header, not URL
+        const response = await rateLimitedFetch(url, {
+            method: 'GET',
+            headers: { 'Authorization': `Bearer ${HELIUS_API_KEY}` }
+        });
         if (!response.ok) return [];
         return await response.json();
     } catch (error) {
@@ -569,19 +577,12 @@ async function checkLPStatus(db, mint) {
             return result;
         }
 
-        // Check if token is community verified (manual vetting passed)
+        // Don't trust, verify: Community verification is a hint, not proof
+        // We still check LP status on-chain below, but reduce penalty for verified tokens
         const tokenCheck = await db.get(`
             SELECT hascommunityupdate FROM tokens WHERE mint = $1
         `, [mint]);
-
-        if (tokenCheck?.hascommunityupdate) {
-            // Community verified = assume LP is secure (vetted)
-            result.lpBurnPct = 100;
-            result.lpStatus = 'verified';
-            result.maxScoreModifier = 0;
-            logger.info(`[LP] ${mint.slice(0,8)}: ✓ Community verified (LP assumed secure)`);
-            return result;
-        }
+        const isCommunityVerified = tokenCheck?.hascommunityupdate || false;
 
         // Get main pools for other checks
         const pools = await db.all(`
@@ -611,23 +612,25 @@ async function checkLPStatus(db, mint) {
             }
         }
 
-        // Determine score modifier based on LP status
+        // Determine score modifier based on LP status (on-chain verification)
         const totalSecured = result.lpBurnPct + result.lpLockedPct;
         if (totalSecured >= 90) {
             result.lpStatus = 'secured';
-            result.maxScoreModifier = 0;  // No penalty
+            result.maxScoreModifier = 0;
         } else if (totalSecured >= 50) {
             result.lpStatus = 'partial';
-            result.maxScoreModifier = -10;  // -10 cap
+            result.maxScoreModifier = -10;
         } else if (totalSecured > 0) {
             result.lpStatus = 'low';
-            result.maxScoreModifier = -20;  // -20 cap
+            result.maxScoreModifier = -20;
         } else {
             result.lpStatus = 'unsecured';
-            result.maxScoreModifier = -30;  // -30 cap
+            // Community verification reduces penalty but doesn't bypass on-chain check
+            result.maxScoreModifier = isCommunityVerified ? -15 : -30;
         }
 
-        logger.info(`[LP] ${mint.slice(0,8)}: ${result.lpBurnPct.toFixed(0)}% burn, ${result.lpLockedPct.toFixed(0)}% locked → ${result.lpStatus}`);
+        const verifiedNote = isCommunityVerified ? ' (community verified, reduced penalty)' : '';
+        logger.info(`[LP] ${mint.slice(0,8)}: ${result.lpBurnPct.toFixed(0)}% burn, ${result.lpLockedPct.toFixed(0)}% locked → ${result.lpStatus}${verifiedNote}`);
 
         return result;
 

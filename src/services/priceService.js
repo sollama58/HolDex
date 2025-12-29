@@ -8,11 +8,21 @@ const axios = require('axios');
 const { Connection, PublicKey } = require('@solana/web3.js');
 const config = require('../config/env');
 
-const HELIUS_RPC = config.HELIUS_API_KEY
-    ? `https://mainnet.helius-rpc.com/?api-key=${config.HELIUS_API_KEY}`
-    : config.SOLANA_RPC_URL;
+const HELIUS_API_KEY = config.HELIUS_API_KEY;
+const HELIUS_RPC_URL = 'https://mainnet.helius-rpc.com/';
 
-const connection = new Connection(HELIUS_RPC);
+// Security: API key in header for axios calls
+const HELIUS_HEADERS = HELIUS_API_KEY
+    ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${HELIUS_API_KEY}` }
+    : { 'Content-Type': 'application/json' };
+
+// Note: @solana/web3.js Connection requires URL-based auth (library limitation)
+// Using fallback RPC if no API key to avoid exposing key in Connection URL
+const connection = new Connection(
+    HELIUS_API_KEY
+        ? `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`
+        : config.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
+);
 
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -166,12 +176,13 @@ async function getOnChainPrice(db, mint, decimals = 9) {
 async function getPoolVaults(poolAddress, dex) {
     try {
         // Use Helius DAS API to get pool info
-        const response = await axios.post(HELIUS_RPC, {
+        // Security: API key in header, not URL
+        const response = await axios.post(HELIUS_RPC_URL, {
             jsonrpc: '2.0',
             id: 'vault-lookup',
             method: 'getAsset',
             params: { id: poolAddress }
-        }, { timeout: 5000 });
+        }, { headers: HELIUS_HEADERS, timeout: 5000 });
 
         // Most AMM pools store vault info in content.metadata
         const content = response.data?.result?.content;
