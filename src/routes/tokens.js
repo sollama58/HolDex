@@ -586,7 +586,7 @@ function init(deps) {
 
                 // --- FORMAT PAIRS FOR FRONTEND ---
                 const formattedPairs = pairs.map(p => ({
-                    dexId: p.dex_id || p.dexId || 'unknown',
+                    dexId: p.dex || p.dex_id || p.dexId || 'unknown',
                     priceUsd: p.price_usd || p.priceUsd || 0,
                     liquidity: { usd: p.liquidity_usd || (p.liquidity && p.liquidity.usd) || 0 },
                     address: p.address
