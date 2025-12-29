@@ -427,7 +427,6 @@
                             <h2 id="detail-ticker" class="text-2xl font-bold text-white tracking-tight truncate font-mono">TICKER</h2>
                             <div class="flex items-center gap-2 mt-1 flex-wrap">
                                 <span id="detail-name" class="text-[#fb923c] text-xs px-2 py-0.5 rounded border border-[#7c2d12] truncate max-w-[120px]">Name</span>
-                                <span id="detail-verified" class="hidden ml-2 px-2 py-0.5 rounded bg-green-900/30 border border-green-500/30 text-green-500 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1"><i data-lucide="shield-check" width="10"></i> Community Updated</span>
                                 <span id="detail-mint" class="hidden"></span>
                                 <i data-lucide="copy" width="12" class="text-[#9a3412] cursor-pointer" onclick="copyMint()"></i>
                             </div>
@@ -1020,15 +1019,11 @@
                 
                 // BADGE LOGIC IN DESCRIPTION AREA
                 const badgeContainer = document.getElementById('badge-container');
-                const verEl = document.getElementById('detail-verified'); // Original hidden badge in header
-                
                 // We use the new container for better placement
                 if(isVerified) {
                     if (badgeContainer) badgeContainer.innerHTML = `<span class="px-2 py-1 rounded bg-green-900/30 border border-green-500/30 text-green-500 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 w-fit"><i data-lucide="shield-check" width="12"></i> Community Updated</span>`;
-                    if (verEl) verEl.classList.remove('hidden'); // Show checkmark in title if verified
                 } else {
                     if (badgeContainer) badgeContainer.innerHTML = `<span class="px-2 py-1 rounded bg-red-900/20 border border-red-500/30 text-red-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 w-fit"><i data-lucide="lock" width="12"></i> Community Update Required</span>`;
-                    if (verEl) verEl.classList.add('hidden');
                 }
                 
                 const rawSupply = parseFloat(t.supply || '0');
@@ -1286,8 +1281,8 @@
         const container = document.getElementById('holder-chart-container');
         if (container) container.innerHTML = ''; 
     }
-
-    // --- UPDATES & WALLET ---
+    
+ // --- UPDATES & WALLET ---
     window.fetchTokenForUpdate = async (mint) => {
         if(!mint || mint.length < 32) return;
         document.getElementById('mint-check-spinner').classList.remove('hidden');
