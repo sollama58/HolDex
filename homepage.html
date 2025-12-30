@@ -157,6 +157,16 @@
         /* Sort Icon in Header */
         .sort-icon { display: inline-block; transition: transform 0.2s; }
         th[data-sort] { cursor: pointer; user-select: none; }
+
+        /* K-Score Metal Rank Badges */
+        .k-rank { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono'; }
+        .k-rank-rust { background: rgba(139, 69, 19, 0.3); color: #cd853f; border: 1px solid rgba(139, 69, 19, 0.5); }
+        .k-rank-bronze { background: rgba(205, 127, 50, 0.2); color: #cd7f32; border: 1px solid rgba(205, 127, 50, 0.4); }
+        .k-rank-silver { background: rgba(192, 192, 192, 0.2); color: #c0c0c0; border: 1px solid rgba(192, 192, 192, 0.4); }
+        .k-rank-gold { background: rgba(255, 215, 0, 0.2); color: #ffd700; border: 1px solid rgba(255, 215, 0, 0.4); text-shadow: 0 0 8px rgba(255, 215, 0, 0.3); }
+        .k-rank-platinum { background: rgba(229, 228, 226, 0.2); color: #e5e4e2; border: 1px solid rgba(229, 228, 226, 0.5); text-shadow: 0 0 10px rgba(229, 228, 226, 0.4); }
+        .k-rank-diamond { background: rgba(185, 242, 255, 0.15); color: #b9f2ff; border: 1px solid rgba(185, 242, 255, 0.5); text-shadow: 0 0 12px rgba(185, 242, 255, 0.5); animation: diamond-glow 2s ease-in-out infinite; }
+        @keyframes diamond-glow { 0%, 100% { box-shadow: 0 0 5px rgba(185, 242, 255, 0.3); } 50% { box-shadow: 0 0 15px rgba(185, 242, 255, 0.6); } }
     </style>
 </head>
 <body>
@@ -767,6 +777,23 @@
     let userSolBalance = 0;
     let userTokenBalance = 0;
 
+    // K-Score Metal Ranks
+    function getKRank(score) {
+        if (score >= 90) return { rank: 'Diamond', icon: '💎', class: 'k-rank-diamond', tier: 6 };
+        if (score >= 80) return { rank: 'Platinum', icon: '💠', class: 'k-rank-platinum', tier: 5 };
+        if (score >= 60) return { rank: 'Gold', icon: '🥇', class: 'k-rank-gold', tier: 4 };
+        if (score >= 40) return { rank: 'Silver', icon: '🥈', class: 'k-rank-silver', tier: 3 };
+        if (score >= 20) return { rank: 'Bronze', icon: '🥉', class: 'k-rank-bronze', tier: 2 };
+        return { rank: 'Rust', icon: '🔩', class: 'k-rank-rust', tier: 1 };
+    }
+
+    function renderKScore(score, isVerified) {
+        if (!isVerified) return '<span class="text-gray-600" title="Verify token to unlock K-Score">🔒</span>';
+        if (score <= 0) return '<span class="animate-pulse" title="Calculating...">⏳</span>';
+        const { rank, icon, class: rankClass } = getKRank(score);
+        return `<span class="k-rank ${rankClass}" title="${rank} Tier (K=${score})">${icon} ${score}</span>`;
+    }
+
     // Charts
     let chartInstance = null;
     let candleSeries = null;
@@ -903,20 +930,15 @@
             return; 
         } 
         
-        tbody.innerHTML = displayTokens.map(t => { 
+        tbody.innerHTML = displayTokens.map(t => {
             // Handle both camelCase and snake_case for verification status
-            const isVerified = t.hasCommunityUpdate || t.has_community_update; 
+            const isVerified = t.hasCommunityUpdate || t.has_community_update;
             const score = t.kScore || t.k_score || 0;
-            
-            const kScoreDisplay = isVerified ? (score > 0 ? `<span class="text-[#ea580c]">${score}</span>` : `<span class="animate-pulse">⏳</span>`) : '<span class="text-gray-600">🔒</span>'; 
+
+            const kScoreDisplay = renderKScore(score, isVerified);
             const formatPct = (v) => (v !== undefined && v !== null) ? `<span class="pill ${v>0?'pill-green':'pill-red'}">${v.toFixed(1)}%</span>` : '-';
             const formatVal = (v) => v ? '$'+ new Intl.NumberFormat('en',{notation:'compact'}).format(v) : '-';
-            // Price removed, keeping logic just in case needed elsewhere
-            const formatPrice = (v) => { if(!v) return '$0.00'; return v < 0.01 ? '$'+v.toExponential(2) : '$'+v.toFixed(4); };
             const img = t.image || `https://placehold.co/40x40/2a1005/7c2d12?text=${t.ticker?.[0]||'?'}`;
-
-            // Diamond Logic: Verified + K-Score > 50
-            const showDiamond = isVerified && score > 50;
 
             return `
             <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group border-b border-[#7c2d12]/30">
@@ -927,13 +949,12 @@
                             <div class="flex items-center gap-1">
                                 <span class="font-bold text-white text-xs truncate font-sans">${t.ticker}</span>
                                 ${isVerified ? '<i data-lucide="shield-check" width="12" class="text-green-500 fill-green-500/20"></i>' : ''}
-                                ${showDiamond ? '<span title="High Conviction">💎</span>' : ''}
                             </div>
                             <span class="text-[10px] text-[#9a3412] truncate max-w-[80px]">${t.name}</span>
                         </div>
                     </div>
                 </td>
-                
+
                 <td class="text-right font-mono font-bold hidden md:table-cell">${kScoreDisplay}</td>
                 <!-- Price Removed, replaced with 1h% -->
                 <td class="text-right hidden md:table-cell">${formatPct(t.change1h)}</td>
@@ -1000,15 +1021,14 @@
                 const holdersEl = document.getElementById('stat-holders');
                 if (holdersEl) holdersEl.innerText = (t.holders||0).toLocaleString();
                 
-                // CONDITIONAL KSCORE DISPLAY
+                // CONDITIONAL KSCORE DISPLAY WITH METAL RANK
                 const kScoreContainer = document.getElementById('kscore-container');
                 if (kScoreContainer) {
-                    if (isVerified) {
-                        kScoreContainer.style.visibility = 'visible';
-                        const kScoreValEl = document.getElementById('stat-kscore');
-                        if (kScoreValEl) kScoreValEl.innerText = (t.kScore || t.k_score || '--');
-                    } else {
-                        kScoreContainer.style.visibility = 'hidden';
+                    kScoreContainer.style.visibility = 'visible';
+                    const kScoreValEl = document.getElementById('stat-kscore');
+                    const score = t.kScore || t.k_score || 0;
+                    if (kScoreValEl) {
+                        kScoreValEl.innerHTML = renderKScore(score, isVerified);
                     }
                 }
                 
