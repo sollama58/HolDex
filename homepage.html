@@ -158,14 +158,16 @@
         .sort-icon { display: inline-block; transition: transform 0.2s; }
         th[data-sort] { cursor: pointer; user-select: none; }
 
-        /* K-Score Metal Rank Badges */
+        /* K-Score Metal Rank Badges (aligned with Credit Grades) */
         .k-rank { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono'; }
-        .k-rank-rust { background: rgba(139, 69, 19, 0.3); color: #cd853f; border: 1px solid rgba(139, 69, 19, 0.5); }
-        .k-rank-bronze { background: rgba(205, 127, 50, 0.2); color: #cd7f32; border: 1px solid rgba(205, 127, 50, 0.4); }
-        .k-rank-silver { background: rgba(192, 192, 192, 0.2); color: #c0c0c0; border: 1px solid rgba(192, 192, 192, 0.4); }
-        .k-rank-gold { background: rgba(255, 215, 0, 0.2); color: #ffd700; border: 1px solid rgba(255, 215, 0, 0.4); text-shadow: 0 0 8px rgba(255, 215, 0, 0.3); }
-        .k-rank-platinum { background: rgba(229, 228, 226, 0.2); color: #e5e4e2; border: 1px solid rgba(229, 228, 226, 0.5); text-shadow: 0 0 10px rgba(229, 228, 226, 0.4); }
-        .k-rank-diamond { background: rgba(185, 242, 255, 0.15); color: #b9f2ff; border: 1px solid rgba(185, 242, 255, 0.5); text-shadow: 0 0 12px rgba(185, 242, 255, 0.5); animation: diamond-glow 2s ease-in-out infinite; }
+        .k-rank-rust { background: rgba(139, 69, 19, 0.3); color: #cd853f; border: 1px solid rgba(139, 69, 19, 0.5); }        /* D  [0-19] */
+        .k-rank-iron { background: rgba(68, 68, 68, 0.3); color: #888888; border: 1px solid rgba(68, 68, 68, 0.5); }          /* C  [20-39] */
+        .k-rank-copper { background: rgba(184, 115, 51, 0.25); color: #b87333; border: 1px solid rgba(184, 115, 51, 0.5); }   /* B3 [40-49] */
+        .k-rank-bronze { background: rgba(205, 127, 50, 0.2); color: #cd7f32; border: 1px solid rgba(205, 127, 50, 0.4); }    /* B2 [50-59] */
+        .k-rank-silver { background: rgba(192, 192, 192, 0.2); color: #c0c0c0; border: 1px solid rgba(192, 192, 192, 0.4); }  /* B1 [60-69] */
+        .k-rank-gold { background: rgba(255, 215, 0, 0.2); color: #ffd700; border: 1px solid rgba(255, 215, 0, 0.4); text-shadow: 0 0 8px rgba(255, 215, 0, 0.3); }  /* A3 [70-79] */
+        .k-rank-platinum { background: rgba(229, 228, 226, 0.2); color: #e5e4e2; border: 1px solid rgba(229, 228, 226, 0.5); text-shadow: 0 0 10px rgba(229, 228, 226, 0.4); }  /* A2 [80-89] */
+        .k-rank-diamond { background: rgba(185, 242, 255, 0.15); color: #b9f2ff; border: 1px solid rgba(185, 242, 255, 0.5); text-shadow: 0 0 12px rgba(185, 242, 255, 0.5); animation: diamond-glow 2s ease-in-out infinite; }  /* A1 [90-99] */
         @keyframes diamond-glow { 0%, 100% { box-shadow: 0 0 5px rgba(185, 242, 255, 0.3); } 50% { box-shadow: 0 0 15px rgba(185, 242, 255, 0.6); } }
 
         /* Credit Rating Badges - "Moody's for Memecoins" */
@@ -804,13 +806,16 @@
     let userTokenBalance = 0;
 
     // K-Score Metal Ranks
+    // K-Score: 0-99 for memecoins, 100 reserved for native tokens (SOL)
     function getKRank(score) {
-        if (score >= 90) return { rank: 'Diamond', icon: '💎', class: 'k-rank-diamond', tier: 6 };
-        if (score >= 80) return { rank: 'Platinum', icon: '💠', class: 'k-rank-platinum', tier: 5 };
-        if (score >= 60) return { rank: 'Gold', icon: '🥇', class: 'k-rank-gold', tier: 4 };
-        if (score >= 40) return { rank: 'Silver', icon: '🥈', class: 'k-rank-silver', tier: 3 };
-        if (score >= 20) return { rank: 'Bronze', icon: '🥉', class: 'k-rank-bronze', tier: 2 };
-        return { rank: 'Rust', icon: '🔩', class: 'k-rank-rust', tier: 1 };
+        if (score >= 90) return { rank: 'Diamond', icon: '💎', class: 'k-rank-diamond', tier: 8 };   // A1 [90-99]
+        if (score >= 80) return { rank: 'Platinum', icon: '💠', class: 'k-rank-platinum', tier: 7 }; // A2 [80-89]
+        if (score >= 70) return { rank: 'Gold', icon: '🥇', class: 'k-rank-gold', tier: 6 };         // A3 [70-79]
+        if (score >= 60) return { rank: 'Silver', icon: '🥈', class: 'k-rank-silver', tier: 5 };     // B1 [60-69]
+        if (score >= 50) return { rank: 'Bronze', icon: '🥉', class: 'k-rank-bronze', tier: 4 };     // B2 [50-59]
+        if (score >= 40) return { rank: 'Copper', icon: '🟤', class: 'k-rank-copper', tier: 3 };     // B3 [40-49]
+        if (score >= 20) return { rank: 'Iron', icon: '⚫', class: 'k-rank-iron', tier: 2 };         // C  [20-39]
+        return { rank: 'Rust', icon: '🔩', class: 'k-rank-rust', tier: 1 };                          // D  [0-19]
     }
 
     // Credit Rating System - "Moody's for Memecoins"

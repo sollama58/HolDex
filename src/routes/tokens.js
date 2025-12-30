@@ -18,12 +18,15 @@ const router = express.Router();
  * Returns rank metadata for a given K-Score
  */
 function getKRank(score) {
-    if (score >= 90) return { tier: 'Diamond', icon: '💎', level: 6 };
-    if (score >= 80) return { tier: 'Platinum', icon: '💠', level: 5 };
-    if (score >= 60) return { tier: 'Gold', icon: '🥇', level: 4 };
-    if (score >= 40) return { tier: 'Silver', icon: '🥈', level: 3 };
-    if (score >= 20) return { tier: 'Bronze', icon: '🥉', level: 2 };
-    return { tier: 'Rust', icon: '🔩', level: 1 };
+    // K-Score: 0-99 for memecoins, 100 reserved for native tokens (SOL)
+    if (score >= 90) return { tier: 'Diamond', icon: '💎', level: 8 };   // A1 [90-99]
+    if (score >= 80) return { tier: 'Platinum', icon: '💠', level: 7 };  // A2 [80-89]
+    if (score >= 70) return { tier: 'Gold', icon: '🥇', level: 6 };      // A3 [70-79]
+    if (score >= 60) return { tier: 'Silver', icon: '🥈', level: 5 };    // B1 [60-69]
+    if (score >= 50) return { tier: 'Bronze', icon: '🥉', level: 4 };    // B2 [50-59]
+    if (score >= 40) return { tier: 'Copper', icon: '🟤', level: 3 };    // B3 [40-49]
+    if (score >= 20) return { tier: 'Iron', icon: '⚫', level: 2 };      // C  [20-39]
+    return { tier: 'Rust', icon: '🔩', level: 1 };                       // D  [0-19]
 }
 
 /**
