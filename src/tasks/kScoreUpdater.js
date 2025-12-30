@@ -39,6 +39,23 @@ let lastRequestTime = 0;
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * Save holder history snapshot (one entry per day per token)
+ */
+async function saveHolderHistory(db, mint, totalHolders, realHolders) {
+    try {
+        await db.run(`
+            INSERT INTO holder_history (mint, date, holders, real_holders)
+            VALUES ($1, CURRENT_DATE, $2, $3)
+            ON CONFLICT (mint, date) DO UPDATE SET
+                holders = EXCLUDED.holders,
+                real_holders = EXCLUDED.real_holders
+        `, [mint, totalHolders, realHolders]);
+    } catch (e) {
+        // Ignore errors (table might not exist on first run)
+    }
+}
+
 // ============================================
 // DEX PROGRAMS - Filter out pools from holders
 // ============================================
@@ -1174,6 +1191,9 @@ async function updateSingleToken(deps, mint) {
             mint
         ]);
 
+        // Save holder history snapshot (daily)
+        await saveHolderHistory(db, mint, conviction.totalHolders || 0, conviction.realHoldersCount || 0);
+
         // Broadcast K-Score update via WebSocket
         if (broadcast) {
             broadcast.kscoreUpdate(mint, {
@@ -1246,6 +1266,9 @@ async function updateKScores(deps) {
                     Date.now().toString(),
                     t.mint
                 ]);
+
+                // Save holder history snapshot (daily)
+                await saveHolderHistory(db, t.mint, conviction.totalHolders || 0, conviction.realHoldersCount || 0);
 
                 // Broadcast K-Score update via WebSocket
                 if (broadcast) {

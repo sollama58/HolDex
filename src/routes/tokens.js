@@ -224,6 +224,12 @@ function init(deps) {
             const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
             let tokenData = token || { mint, name: 'Unknown', ticker: 'Unknown' };
 
+            // Normalize field names for frontend compatibility
+            if (token) {
+                tokenData.hasCommunityUpdate = token.hascommunityupdate;
+                tokenData.ticker = token.symbol;
+            }
+
             // Add conviction breakdown
             if (token) {
                 tokenData.conviction = {
@@ -234,6 +240,24 @@ function init(deps) {
                     extractors: token.conviction_extractors || 0,
                     analyzed: token.conviction_analyzed || 0
                 };
+
+                // Add holder history (last 30 days) - format: { timestamp, count, realCount }
+                try {
+                    const history = await db.all(`
+                        SELECT date, holders, real_holders
+                        FROM holder_history
+                        WHERE mint = $1
+                        ORDER BY date DESC
+                        LIMIT 30
+                    `, [mint]);
+                    tokenData.holderHistory = history.reverse().map(h => ({
+                        timestamp: String(new Date(h.date).getTime()),
+                        count: h.holders || 0,           // Total holders (for chart)
+                        realCount: h.real_holders || 0   // $1+ holders (for breakdown)
+                    }));
+                } catch (e) {
+                    tokenData.holderHistory = [];
+                }
             }
 
             // Still fetch pairs for metadata purposes if needed
