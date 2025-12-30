@@ -53,7 +53,7 @@ function getBestPair(pairs, mint) {
 }
 
 async function syncTokenData(deps, mint, pairs) {
-    const { db } = deps;
+    const { db, broadcast } = deps;
     if (!pairs || pairs.length === 0) return;
 
     // A. Calculate Aggregate Volume (Sum of ALL pools)
@@ -62,7 +62,7 @@ async function syncTokenData(deps, mint, pairs) {
 
     // B. Select "Best Pair" for Price & Market Cap
     const bestPair = getBestPair(pairs, mint);
-    
+
     if (!bestPair) return;
 
     // Prepare Data
@@ -70,16 +70,20 @@ async function syncTokenData(deps, mint, pairs) {
     // Fallback to marketCap property if FDV is missing.
     const marketCap = Number(bestPair.fdv || bestPair.marketCap || 0);
     const priceUsd = Number(bestPair.priceUsd || 0);
-    
+
     const change5m = Number(bestPair.priceChange?.m5 || 0);
     const change1h = Number(bestPair.priceChange?.h1 || 0);
     const change24h = Number(bestPair.priceChange?.h24 || 0);
 
+    // Get liquidity from best pair
+    const liquidity = Number(bestPair.liquidity?.usd || 0);
+
     const query = `
-        UPDATE tokens SET 
-        volume24h = $1, marketCap = $2, priceUsd = $3, 
-        change5m = $4, change1h = $5, change24h = $6, 
-        lastUpdated = $7 
+        UPDATE tokens SET
+        volume24h = $1, marketcap = $2, priceusd = $3,
+        liquidity = $4,
+        change5m = $5, change1h = $6, change24h = $7,
+        updated_at = NOW()
         WHERE mint = $8
     `;
 
@@ -87,14 +91,28 @@ async function syncTokenData(deps, mint, pairs) {
         totalVolume,
         marketCap,
         priceUsd,
+        liquidity,
         change5m,
         change1h,
         change24h,
-        Date.now(),
         mint
     ];
 
     await db.run(query, params);
+
+    // Broadcast price update via WebSocket
+    if (broadcast) {
+        broadcast.priceUpdate(mint, {
+            priceUsd,
+            marketCap,
+            volume24h: totalVolume,
+            liquidity,
+            change5m,
+            change1h,
+            change24h,
+            timestamp: Date.now()
+        });
+    }
 }
 
 /**

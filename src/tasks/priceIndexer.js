@@ -1,6 +1,6 @@
 /**
  * Price Indexer (Refactored for Stability)
- * - Uses 'mint' as key instead of 'symbol'
+ * - Uses 'symbol' as key for candles (matches production schema)
  * - Handles empty pool tables gracefully
  * - Batches RPC calls efficiently
  */
@@ -8,11 +8,11 @@ const { Connection, PublicKey } = require('@solana/web3.js');
 const config = require('../config/env');
 const { logger } = require('../services');
 
-const HELIUS_RPC = config.HELIUS_API_KEY 
-    ? `https://mainnet.helius-rpc.com/?api-key=${config.HELIUS_API_KEY}` 
-    : config.SOLANA_RPC_URL;
-
-const connection = new Connection(HELIUS_RPC);
+// Security: Use public RPC for Connection (no API key exposure in URL)
+// For authenticated calls, use axios with header-based auth instead
+const connection = new Connection(
+    config.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
+);
 
 async function startLoop(deps) {
     try {
@@ -32,7 +32,7 @@ async function startLoop(deps) {
 }
 
 async function updatePrices(deps) {
-    const { db } = deps;
+    const { db, broadcast } = deps;
 
     // 1. Fetch Pools Config
     // NOTE: This table MUST be populated by a separate task that resolves Vault addresses.
@@ -90,6 +90,7 @@ async function updatePrices(deps) {
     const queryValues = [];
     const placeholders = [];
     let paramIndex = 1;
+    const priceUpdates = []; // Collect price updates for broadcast
 
     pools.forEach(p => {
         const baseRaw = balances.get(p.base_vault);
@@ -98,18 +99,21 @@ async function updatePrices(deps) {
         if (baseRaw !== undefined && quoteRaw !== undefined) {
             const baseVal = baseRaw / (10 ** p.base_decimals);
             const quoteVal = quoteRaw / (10 ** p.quote_decimals);
-            
+
             // Basic CPMM Price = Quote / Base
             if (baseVal > 0) {
                 const price = quoteVal / baseVal;
 
-                // Push flatten values
-                queryValues.push(p.mint, timeBucket, price);
-                
-                // ($1, $2, $3, $3, $3, $3) = (mint, time, open, high, low, close)
+                // Push flatten values (use symbol for candles table)
+                queryValues.push(p.symbol, timeBucket, price);
+
+                // ($1, $2, $3, $3, $3, $3) = (symbol, time, open, high, low, close)
                 placeholders.push(`($${paramIndex}, $${paramIndex+1}, $${paramIndex+2}, $${paramIndex+2}, $${paramIndex+2}, $${paramIndex+2})`);
-                
-                paramIndex += 3; 
+
+                paramIndex += 3;
+
+                // Collect for broadcast
+                priceUpdates.push({ mint: p.mint, price, symbol: p.symbol });
             }
         }
     });
@@ -117,9 +121,9 @@ async function updatePrices(deps) {
     // 5. Bulk Upsert
     if (placeholders.length > 0) {
         const query = `
-            INSERT INTO candles (mint, time, open, high, low, close)
+            INSERT INTO candles (symbol, time, open, high, low, close)
             VALUES ${placeholders.join(', ')}
-            ON CONFLICT (mint, time) DO UPDATE SET
+            ON CONFLICT (symbol, time) DO UPDATE SET
                 high = GREATEST(candles.high, EXCLUDED.high),
                 low = LEAST(candles.low, EXCLUDED.low),
                 close = EXCLUDED.close;
@@ -128,6 +132,17 @@ async function updatePrices(deps) {
         try {
             await db.run(query, queryValues);
             logger.info(`[Indexer] Updated candles for ${placeholders.length} pools.`);
+
+            // Broadcast price updates via WebSocket
+            if (broadcast && priceUpdates.length > 0) {
+                for (const update of priceUpdates) {
+                    broadcast.priceUpdate(update.mint, {
+                        priceUsd: update.price,
+                        symbol: update.symbol,
+                        timestamp: Date.now()
+                    });
+                }
+            }
         } catch (err) {
             logger.error(`[Indexer] DB Write Failed: ${err.message}`);
         }
