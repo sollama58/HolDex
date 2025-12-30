@@ -224,10 +224,16 @@ function init(deps) {
             const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
             let tokenData = token || { mint, name: 'Unknown', ticker: 'Unknown' };
 
-            // Normalize field names for frontend compatibility
+            // Normalize field names for frontend compatibility (DB lowercase -> camelCase)
             if (token) {
                 tokenData.hasCommunityUpdate = token.hascommunityupdate;
                 tokenData.ticker = token.symbol;
+                tokenData.priceUsd = token.priceusd;
+                tokenData.marketCap = token.marketcap;
+                tokenData.volume24h = token.volume24h;
+                tokenData.change24h = token.change24h;
+                tokenData.change1h = token.change1h;
+                tokenData.change5m = token.change5m;
             }
 
             // Add conviction breakdown
