@@ -13,6 +13,19 @@ const config = require('../config/env');
 
 const router = express.Router();
 
+/**
+ * K-Score Metal Rank Tiers
+ * Returns rank metadata for a given K-Score
+ */
+function getKRank(score) {
+    if (score >= 90) return { tier: 'Diamond', icon: '💎', level: 6 };
+    if (score >= 80) return { tier: 'Platinum', icon: '💠', level: 5 };
+    if (score >= 60) return { tier: 'Gold', icon: '🥇', level: 4 };
+    if (score >= 40) return { tier: 'Silver', icon: '🥈', level: 3 };
+    if (score >= 20) return { tier: 'Bronze', icon: '🥉', level: 2 };
+    return { tier: 'Rust', icon: '🔩', level: 1 };
+}
+
 async function checkExternalRateLimit() {
     try {
         const redis = getClient();
@@ -201,13 +214,17 @@ function init(deps) {
 
                 return {
                     success: true, page: pageVal, limit: limitVal,
-                    tokens: rows.map(r => ({
-                        mint: r.mint, name: r.name, ticker: r.ticker || r.symbol, image: r.image,
-                        marketCap: r.marketcap || r.marketCap || 0, volume24h: r.volume24h || 0, priceUsd: r.priceusd || r.priceUsd || 0,
-                        timestamp: parseInt(r.timestamp), change5m: r.change5m || 0, change1h: r.change1h || 0, change24h: r.change24h || 0,
-                        hasCommunityUpdate: r.hascommunityupdate || r.hasCommunityUpdate || false, kScore: r.k_score || 0,
-                        holders: r.holders || 0, liquidity: r.liquidity || 0
-                    })), lastUpdate: Date.now()
+                    tokens: rows.map(r => {
+                        const score = r.k_score || 0;
+                        return {
+                            mint: r.mint, name: r.name, ticker: r.ticker || r.symbol, image: r.image,
+                            marketCap: r.marketcap || r.marketCap || 0, volume24h: r.volume24h || 0, priceUsd: r.priceusd || r.priceUsd || 0,
+                            timestamp: parseInt(r.timestamp), change5m: r.change5m || 0, change1h: r.change1h || 0, change24h: r.change24h || 0,
+                            hasCommunityUpdate: r.hascommunityupdate || r.hasCommunityUpdate || false,
+                            kScore: score, kRank: getKRank(score),
+                            holders: r.holders || 0, liquidity: r.liquidity || 0
+                        };
+                    }), lastUpdate: Date.now()
                 };
             });
             res.json(result);
@@ -234,6 +251,10 @@ function init(deps) {
                 tokenData.change24h = token.change24h;
                 tokenData.change1h = token.change1h;
                 tokenData.change5m = token.change5m;
+                // K-Score with metal rank
+                const score = token.k_score || 0;
+                tokenData.kScore = score;
+                tokenData.kRank = getKRank(score);
             }
 
             // Add conviction breakdown
@@ -403,6 +424,7 @@ function init(deps) {
                     success: true,
                     mint,
                     kScore: token.k_score,
+                    kRank: getKRank(token.k_score),
                     pillars: {
                         diamondHands: {
                             weight: '50%',
@@ -473,6 +495,7 @@ function init(deps) {
                 tokens: mintList.map(mint => {
                     const t = tokenMap.get(mint);
                     if (!t) return { mint, found: false };
+                    const score = t.k_score || 0;
                     return {
                         mint: t.mint,
                         found: true,
@@ -484,7 +507,8 @@ function init(deps) {
                         volume24h: t.volume24h || 0,
                         change24h: t.change24h || 0,
                         holders: t.holders || 0,
-                        kScore: t.k_score || 0,
+                        kScore: score,
+                        kRank: getKRank(score),
                         conviction: {
                             score: t.conviction_score || 0,
                             accumulators: t.conviction_accumulators || 0
@@ -522,10 +546,12 @@ function init(deps) {
                 return res.status(404).json({ success: false, error: 'Token not found' });
             }
 
+            const score = result.kScore || result.score || 0;
             res.json({
                 success: true,
                 mint,
-                kScore: result.kScore || result.score,
+                kScore: score,
+                kRank: getKRank(score),
                 conviction: result.metrics?.conviction,
                 broadcasted: !!deps.broadcast
             });
