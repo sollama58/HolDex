@@ -136,11 +136,24 @@ async function initSchema(db) {
             );
         `);
 
+        // --- K-SCORE HISTORY TABLE (daily snapshots for credit rating trajectory) ---
+        await db.exec(`
+            CREATE TABLE IF NOT EXISTS k_score_history (
+                mint TEXT,
+                date DATE,
+                k_score INTEGER DEFAULT 0,
+                conviction_score INTEGER DEFAULT 0,
+                holders INTEGER DEFAULT 0,
+                PRIMARY KEY (mint, date)
+            );
+        `);
+
         try {
             await db.exec(`CREATE INDEX IF NOT EXISTS idx_candles_symbol_time ON candles(symbol, time DESC);`);
             await db.exec(`CREATE INDEX IF NOT EXISTS idx_pools_mint ON pools(mint);`);
             await db.exec(`CREATE INDEX IF NOT EXISTS idx_pools_liquidity ON pools(liquidity_usd DESC);`);
             await db.exec(`CREATE INDEX IF NOT EXISTS idx_holder_history_mint ON holder_history(mint, date DESC);`);
+            await db.exec(`CREATE INDEX IF NOT EXISTS idx_kscore_history_mint ON k_score_history(mint, date DESC);`);
         } catch (e) { /* index may already exist */ }
 
         await db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score);`);

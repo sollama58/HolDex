@@ -56,6 +56,25 @@ async function saveHolderHistory(db, mint, totalHolders, realHolders) {
     }
 }
 
+/**
+ * Save K-Score history snapshot (one entry per day per token)
+ * Used for credit rating trajectory analysis (30/60/90 day trends)
+ */
+async function saveKScoreHistory(db, mint, kScore, convictionScore, holders) {
+    try {
+        await db.run(`
+            INSERT INTO k_score_history (mint, date, k_score, conviction_score, holders)
+            VALUES ($1, CURRENT_DATE, $2, $3, $4)
+            ON CONFLICT (mint, date) DO UPDATE SET
+                k_score = EXCLUDED.k_score,
+                conviction_score = EXCLUDED.conviction_score,
+                holders = EXCLUDED.holders
+        `, [mint, kScore, convictionScore, holders]);
+    } catch (e) {
+        // Ignore errors (table might not exist on first run)
+    }
+}
+
 // ============================================
 // DEX PROGRAMS - Filter out pools from holders
 // ============================================
@@ -1229,6 +1248,9 @@ async function updateSingleToken(deps, mint) {
         // Save holder history snapshot (daily)
         await saveHolderHistory(db, mint, conviction.totalHolders || 0, conviction.realHoldersCount || 0);
 
+        // Save K-Score history snapshot (daily) for credit rating trajectory
+        await saveKScoreHistory(db, mint, smoothedScore, conviction.score || 0, conviction.realHoldersCount || 0);
+
         // Broadcast K-Score update via WebSocket (use smoothed score)
         if (broadcast) {
             broadcast.kscoreUpdate(mint, {
@@ -1311,6 +1333,9 @@ async function updateKScores(deps) {
 
                 // Save holder history snapshot (daily)
                 await saveHolderHistory(db, t.mint, conviction.totalHolders || 0, conviction.realHoldersCount || 0);
+
+                // Save K-Score history snapshot (daily) for credit rating trajectory
+                await saveKScoreHistory(db, t.mint, smoothedScore, conviction.score || 0, conviction.realHoldersCount || 0);
 
                 // Broadcast K-Score update via WebSocket (use smoothed score)
                 if (broadcast) {

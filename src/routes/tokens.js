@@ -465,6 +465,68 @@ function init(deps) {
         }
     });
 
+    // --- K-SCORE HISTORY ENDPOINT: For credit rating trajectory ---
+    router.get('/token/:mint/kscore/history', async (req, res) => {
+        const { mint } = req.params;
+        const { days = 90 } = req.query;
+        const cacheKey = `api:kscore:history:${mint}:${days}`;
+
+        try {
+            const result = await smartCache(cacheKey, 300, async () => {
+                const history = await db.all(`
+                    SELECT date, k_score, conviction_score, holders
+                    FROM k_score_history
+                    WHERE mint = $1
+                    ORDER BY date DESC
+                    LIMIT $2
+                `, [mint, Math.min(parseInt(days) || 90, 365)]);
+
+                if (!history || history.length === 0) {
+                    return { success: true, mint, history: [], trajectory: null };
+                }
+
+                // Calculate trajectory (trend over period)
+                const scores = history.map(h => h.k_score).reverse();
+                const oldest = scores[0];
+                const newest = scores[scores.length - 1];
+                const change = newest - oldest;
+
+                // Calculate average
+                const avg = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+
+                // Determine trend direction
+                let trend = 'stable';
+                if (change >= 10) trend = 'improving';
+                else if (change >= 5) trend = 'slightly_improving';
+                else if (change <= -10) trend = 'declining';
+                else if (change <= -5) trend = 'slightly_declining';
+
+                return {
+                    success: true,
+                    mint,
+                    history: history.reverse().map(h => ({
+                        date: h.date,
+                        kScore: h.k_score,
+                        conviction: h.conviction_score,
+                        holders: h.holders
+                    })),
+                    trajectory: {
+                        trend,
+                        change,
+                        oldestScore: oldest,
+                        newestScore: newest,
+                        average: avg,
+                        days: history.length
+                    }
+                };
+            });
+            res.json(result);
+        } catch (e) {
+            console.error('[API Error] /kscore/history:', e.message);
+            res.status(500).json({ success: false, error: 'Internal server error' });
+        }
+    });
+
     // --- BATCH ENDPOINT: Multiple tokens in one call ---
     router.post('/tokens/batch', async (req, res) => {
         const { mints } = req.body;
