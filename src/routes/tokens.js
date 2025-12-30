@@ -469,6 +469,17 @@ function init(deps) {
         }
     });
 
+    // --- FEE CONFIG (for frontend) ---
+    router.get('/config/fees', (req, res) => {
+        res.json({
+            success: true,
+            solFee: config.FEE_SOL || 0.025,
+            tokenFee: config.FEE_TOKEN_AMOUNT || 100000,
+            tokenMint: config.FEE_TOKEN_MINT || '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump',
+            treasury: config.TREASURY_WALLET || '4AkNoCdhsGLwmYcYgwXXEoNtExQhEkzsxynsLfWjpRKg'
+        });
+    });
+
     // --- TRIGGER K-SCORE RECALC (for testing/admin) ---
     router.post('/token/:mint/recalc', async (req, res) => {
         const { mint } = req.params;

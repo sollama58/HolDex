@@ -36,12 +36,13 @@ app.use(helmet({
             scriptSrc: [
                 "'self'",
                 "'unsafe-inline'",
-                "'unsafe-eval'",  // Required for some libraries
+                "'unsafe-eval'",
                 "https://cdn.socket.io",
                 "https://unpkg.com",
                 "https://bundle.run",
                 "https://cdn.tailwindcss.com"
             ],
+            scriptSrcAttr: ["'unsafe-inline'"],  // Allow onclick handlers
             styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
             imgSrc: ["'self'", "data:", "https:", "blob:"],
             connectSrc: ["'self'", "wss:", "https:"],

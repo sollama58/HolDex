@@ -739,7 +739,7 @@
 </div>
 
 <script>
-    const API_URL = 'https://asdev-backend.onrender.com';
+    const API_URL = window.location.origin; // Dynamic: uses localhost or production
     const FALLBACK_BANNER = "https://placehold.co/600x200/2a1005/7c2d12?text=HolDex";
     const TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
     const ASSOCIATED_TOKEN_PROGRAM_ID = new solanaWeb3.PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
@@ -1077,7 +1077,7 @@
                 if (lpBody) {
                     if(t.pairs && t.pairs.length > 0) {
                         currentPoolAddress = t.pairs[0].address;
-                        lpBody.innerHTML = t.pairs.map(p => `<tr><td class="px-2 py-2 text-[#fb923c] font-bold text-xs">${p.dexId}</td><td class="px-2 py-2 text-right text-xs font-mono">$${(p.priceUsd||0).toFixed(6)}</td><td class="px-2 py-2 text-right text-[#22c55e] text-xs font-mono">$${(p.liquidity?.usd||0).toLocaleString()}</td></tr>`).join('');
+                        lpBody.innerHTML = t.pairs.map(p => `<tr><td class="px-2 py-2 text-[#fb923c] font-bold text-xs">${p.dexId}</td><td class="px-2 py-2 text-right text-xs font-mono">$${(parseFloat(p.priceUsd)||0).toFixed(6)}</td><td class="px-2 py-2 text-right text-[#22c55e] text-xs font-mono">$${(parseFloat(p.liquidity?.usd)||0).toLocaleString()}</td></tr>`).join('');
                         const dexName = String(t.pairs[0].dex || t.pairs[0].dexId || "Unknown").toUpperCase();
                         const poolNameEl = document.getElementById('chart-pool-name');
                         if (poolNameEl) poolNameEl.innerText = `— ${dexName} (Largest Pool)`;
