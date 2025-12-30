@@ -919,6 +919,37 @@ if (Math.abs(WEIGHT_SUM - 1.0) > 0.001) {
     throw new Error(`K-Score weights must sum to 1.0, got ${WEIGHT_SUM}`);
 }
 
+// EMA Smoothing config
+// newScore = α × calculated + (1-α) × previous
+// α = 0.3 means 30% new data, 70% historical (smooth but responsive)
+const EMA_ALPHA = 0.3;
+
+/**
+ * Apply Exponential Moving Average smoothing to K-Score
+ * Prevents wild swings from single data point changes
+ *
+ * @param {number} calculated - Newly calculated score
+ * @param {number} previous - Previous stored score
+ * @param {number} alpha - Smoothing factor (0-1), higher = more reactive
+ * @returns {number} Smoothed score
+ */
+function applyEMA(calculated, previous, alpha = EMA_ALPHA) {
+    // First calculation or no previous score
+    if (!previous || previous <= 0) {
+        return calculated;
+    }
+
+    const smoothed = Math.round(alpha * calculated + (1 - alpha) * previous);
+
+    // Log significant smoothing adjustments
+    const diff = Math.abs(calculated - previous);
+    if (diff >= 5) {
+        logger.info(`[EMA] Smoothed ${calculated} → ${smoothed} (prev: ${previous}, Δ${diff})`);
+    }
+
+    return smoothed;
+}
+
 async function computeScoreInternal(mint, dbData = null, skipConviction = false, db = null) {
     // Raw metrics
     let raw = {
@@ -1164,6 +1195,10 @@ async function updateSingleToken(deps, mint) {
         const result = await computeScoreInternal(mint, token, false, db);
         const conviction = result.conviction || {};
 
+        // Apply EMA smoothing to prevent wild swings
+        const previousScore = token.k_score || 0;
+        const smoothedScore = applyEMA(result.score, previousScore);
+
         await db.run(`
             UPDATE tokens
             SET k_score = $1,
@@ -1178,7 +1213,7 @@ async function updateSingleToken(deps, mint) {
                 last_holder_check = $10
             WHERE mint = $11
         `, [
-            result.score,
+            smoothedScore,
             Date.now().toString(),
             conviction.score || 0,
             conviction.accumulators || 0,
@@ -1194,10 +1229,10 @@ async function updateSingleToken(deps, mint) {
         // Save holder history snapshot (daily)
         await saveHolderHistory(db, mint, conviction.totalHolders || 0, conviction.realHoldersCount || 0);
 
-        // Broadcast K-Score update via WebSocket
+        // Broadcast K-Score update via WebSocket (use smoothed score)
         if (broadcast) {
             broadcast.kscoreUpdate(mint, {
-                kScore: result.score,
+                kScore: smoothedScore,
                 conviction: conviction.score || 0,
                 accumulators: conviction.accumulators || 0,
                 holders: conviction.realHoldersCount || 0,
@@ -1205,6 +1240,9 @@ async function updateSingleToken(deps, mint) {
             });
         }
 
+        // Return with smoothed score
+        result.score = smoothedScore;
+        result.rawScore = result.uncappedScore; // Keep raw for debugging
         return result;
     } catch (e) {
         logger.error(`[K-Score] Failed single update for ${mint}:`, e);
@@ -1240,6 +1278,10 @@ async function updateKScores(deps) {
                 const result = await computeScoreInternal(t.mint, t, false, db);
                 const conviction = result.conviction || {};
 
+                // Apply EMA smoothing to prevent wild swings
+                const previousScore = t.k_score || 0;
+                const smoothedScore = applyEMA(result.score, previousScore);
+
                 await db.run(`
                     UPDATE tokens
                     SET k_score = $1,
@@ -1254,7 +1296,7 @@ async function updateKScores(deps) {
                         last_holder_check = $10
                     WHERE mint = $11
                 `, [
-                    result.score,
+                    smoothedScore,
                     Date.now().toString(),
                     conviction.score || 0,
                     conviction.accumulators || 0,
@@ -1270,10 +1312,10 @@ async function updateKScores(deps) {
                 // Save holder history snapshot (daily)
                 await saveHolderHistory(db, t.mint, conviction.totalHolders || 0, conviction.realHoldersCount || 0);
 
-                // Broadcast K-Score update via WebSocket
+                // Broadcast K-Score update via WebSocket (use smoothed score)
                 if (broadcast) {
                     broadcast.kscoreUpdate(t.mint, {
-                        kScore: result.score,
+                        kScore: smoothedScore,
                         symbol: t.symbol,
                         conviction: conviction.score || 0,
                         accumulators: conviction.accumulators || 0,
