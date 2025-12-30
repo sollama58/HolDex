@@ -240,6 +240,12 @@ async function startServer() {
 
         app.use('/api', tokenRoutes.init(deps));
 
+        // SPA fallback - serve homepage.html for all non-API routes
+        // This enables client-side routing for /about, /token/:mint, etc.
+        app.get('*', (req, res) => {
+            res.sendFile(path.join(__dirname, '..', 'homepage.html'));
+        });
+
         // 4. Start HTTP + WebSocket Server
         server.listen(config.PORT, () => {
             console.log(`🔥 HolDex API Node Online on port ${config.PORT}`);
