@@ -26,6 +26,91 @@ function getKRank(score) {
     return { tier: 'Rust', icon: '🔩', level: 1 };
 }
 
+/**
+ * Credit Rating System - "Moody's for Memecoins"
+ *
+ * Grades:
+ *   A1  Prime Quality      [90-100]  Institutional-grade
+ *   A2  Excellent          [80-89]   Strong conviction
+ *   A3  Good               [70-79]   Solid fundamentals
+ *   B1  Fair               [60-69]   Mixed signals
+ *   B2  Speculative        [50-59]   High risk
+ *   B3  Very Speculative   [40-49]   Probable issues
+ *   C   Substantial Risk   [20-39]   Coordinated patterns
+ *   D   Default            [0-19]    Dead/Rugged
+ *
+ * Trajectory modifiers:
+ *   improving:          +5 bonus (can upgrade grade)
+ *   slightly_improving: +2 bonus
+ *   stable:             no change
+ *   slightly_declining: -2 penalty
+ *   declining:          -5 penalty (can downgrade grade)
+ *
+ * @param {number} kScore - Current K-Score (0-100)
+ * @param {string|null} trajectory - Trend direction from history
+ * @returns {Object} Credit rating details
+ */
+function getCreditRating(kScore, trajectory = null) {
+    // Trajectory bonus/malus
+    let trajectoryModifier = 0;
+    let trajectoryLabel = 'stable';
+
+    if (trajectory === 'improving') {
+        trajectoryModifier = 5;
+        trajectoryLabel = '↗️ Improving';
+    } else if (trajectory === 'slightly_improving') {
+        trajectoryModifier = 2;
+        trajectoryLabel = '↗ Slightly Up';
+    } else if (trajectory === 'declining') {
+        trajectoryModifier = -5;
+        trajectoryLabel = '↘️ Declining';
+    } else if (trajectory === 'slightly_declining') {
+        trajectoryModifier = -2;
+        trajectoryLabel = '↘ Slightly Down';
+    } else {
+        trajectoryLabel = '→ Stable';
+    }
+
+    // Adjusted score for grade calculation
+    const adjustedScore = Math.max(0, Math.min(100, kScore + trajectoryModifier));
+
+    // Grade mapping
+    let grade, label, risk;
+    if (adjustedScore >= 90) {
+        grade = 'A1'; label = 'Prime Quality'; risk = 'minimal';
+    } else if (adjustedScore >= 80) {
+        grade = 'A2'; label = 'Excellent'; risk = 'very_low';
+    } else if (adjustedScore >= 70) {
+        grade = 'A3'; label = 'Good'; risk = 'low';
+    } else if (adjustedScore >= 60) {
+        grade = 'B1'; label = 'Fair'; risk = 'moderate';
+    } else if (adjustedScore >= 50) {
+        grade = 'B2'; label = 'Speculative'; risk = 'high';
+    } else if (adjustedScore >= 40) {
+        grade = 'B3'; label = 'Very Speculative'; risk = 'very_high';
+    } else if (adjustedScore >= 20) {
+        grade = 'C'; label = 'Substantial Risk'; risk = 'severe';
+    } else {
+        grade = 'D'; label = 'Default'; risk = 'extreme';
+    }
+
+    // Outlook based on trajectory
+    let outlook = 'stable';
+    if (trajectoryModifier > 0) outlook = 'positive';
+    else if (trajectoryModifier < 0) outlook = 'negative';
+
+    return {
+        grade,
+        label,
+        risk,
+        outlook,
+        trajectory: trajectoryLabel,
+        baseScore: kScore,
+        adjustedScore,
+        modifier: trajectoryModifier
+    };
+}
+
 async function checkExternalRateLimit() {
     try {
         const redis = getClient();
@@ -221,7 +306,7 @@ function init(deps) {
                             marketCap: r.marketcap || r.marketCap || 0, volume24h: r.volume24h || 0, priceUsd: r.priceusd || r.priceUsd || 0,
                             timestamp: parseInt(r.timestamp), change5m: r.change5m || 0, change1h: r.change1h || 0, change24h: r.change24h || 0,
                             hasCommunityUpdate: r.hascommunityupdate || r.hasCommunityUpdate || false,
-                            kScore: score, kRank: getKRank(score),
+                            kScore: score, kRank: getKRank(score), creditRating: getCreditRating(score),
                             holders: r.holders || 0, liquidity: r.liquidity || 0
                         };
                     }), lastUpdate: Date.now()
@@ -255,6 +340,26 @@ function init(deps) {
                 const score = token.k_score || 0;
                 tokenData.kScore = score;
                 tokenData.kRank = getKRank(score);
+
+                // Get K-Score trajectory for credit rating
+                let trajectory = null;
+                try {
+                    const kHistory = await db.all(`
+                        SELECT k_score FROM k_score_history
+                        WHERE mint = $1 ORDER BY date DESC LIMIT 30
+                    `, [mint]);
+                    if (kHistory && kHistory.length >= 7) {
+                        const scores = kHistory.map(h => h.k_score).reverse();
+                        const change = scores[scores.length - 1] - scores[0];
+                        if (change >= 10) trajectory = 'improving';
+                        else if (change >= 5) trajectory = 'slightly_improving';
+                        else if (change <= -10) trajectory = 'declining';
+                        else if (change <= -5) trajectory = 'slightly_declining';
+                        else trajectory = 'stable';
+                    }
+                } catch (e) { /* no history yet */ }
+
+                tokenData.creditRating = getCreditRating(score, trajectory);
             }
 
             // Add conviction breakdown
@@ -420,11 +525,30 @@ function init(deps) {
                 const convictionPct = conviction;
                 const accExtRatio = extractors > 0 ? Math.min(accumulators / extractors, 10) : (accumulators > 0 ? 10 : 0);
 
+                // Get trajectory for credit rating
+                let trajectory = null;
+                try {
+                    const kHistory = await db.all(`
+                        SELECT k_score FROM k_score_history
+                        WHERE mint = $1 ORDER BY date DESC LIMIT 30
+                    `, [mint]);
+                    if (kHistory && kHistory.length >= 7) {
+                        const scores = kHistory.map(h => h.k_score).reverse();
+                        const change = scores[scores.length - 1] - scores[0];
+                        if (change >= 10) trajectory = 'improving';
+                        else if (change >= 5) trajectory = 'slightly_improving';
+                        else if (change <= -10) trajectory = 'declining';
+                        else if (change <= -5) trajectory = 'slightly_declining';
+                        else trajectory = 'stable';
+                    }
+                } catch (e) { /* no history yet */ }
+
                 return {
                     success: true,
                     mint,
                     kScore: token.k_score,
                     kRank: getKRank(token.k_score),
+                    creditRating: getCreditRating(token.k_score, trajectory),
                     pillars: {
                         diamondHands: {
                             weight: '50%',
@@ -571,6 +695,7 @@ function init(deps) {
                         holders: t.holders || 0,
                         kScore: score,
                         kRank: getKRank(score),
+                        creditRating: getCreditRating(score),
                         conviction: {
                             score: t.conviction_score || 0,
                             accumulators: t.conviction_accumulators || 0
@@ -614,6 +739,7 @@ function init(deps) {
                 mint,
                 kScore: score,
                 kRank: getKRank(score),
+                creditRating: getCreditRating(score),
                 conviction: result.metrics?.conviction,
                 broadcasted: !!deps.broadcast
             });
