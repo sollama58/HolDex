@@ -112,6 +112,13 @@ const subscriptions = {
 io.on('connection', (socket) => {
     console.log(`[WS] Client connected: ${socket.id}`);
 
+    // --- LEGACY: Frontend uses 'subscribe' with mint ---
+    socket.on('subscribe', (mint) => {
+        if (!mint || typeof mint !== 'string') return;
+        socket.join(`token:${mint}`);
+        console.log(`[WS] ${socket.id} subscribed to token:${mint.slice(0,8)}`);
+    });
+
     // Subscribe to all token updates (new tokens, price changes)
     socket.on('subscribe:tokens', () => {
         subscriptions.tokens.add(socket.id);
@@ -194,12 +201,16 @@ function broadcastNewToken(token) {
 function broadcastPriceUpdate(mint, data) {
     io.to('tokens').emit('token:price', { mint, ...data });
     io.to(`price:${mint}`).emit('price:update', { mint, ...data });
+    // Legacy: frontend expects 'update' event
+    io.to(`token:${mint}`).emit('update', { mint, ...data });
 }
 
 // Broadcast K-Score update for a token
 function broadcastKScoreUpdate(mint, data) {
     io.to('tokens').emit('token:kscore', { mint, ...data });
     io.to(`kscore:${mint}`).emit('kscore:update', { mint, ...data });
+    // Legacy: frontend expects 'update' event
+    io.to(`token:${mint}`).emit('update', { mint, ...data });
 }
 
 // Export broadcast functions for use in workers/tasks
