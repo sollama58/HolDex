@@ -197,7 +197,13 @@ function init(deps) {
     // PUBLIC: Candle Chart
     router.get('/token/:mint/candles', cacheControl(30, 60), apiKeyAuth(false), async (req, res) => {
         const { mint } = req.params;
-        const { resolution = '5', from, to, poolAddress } = req.query; 
+        const { resolution = '5', from, to, poolAddress } = req.query;
+
+        // SECURITY: Validate mint address
+        if (!isValidPubkey(mint)) {
+            return res.status(400).json({ success: false, error: 'Invalid mint address' });
+        }
+
         try {
             const resMinutes = parseInt(resolution === 'D' ? 1440 : resolution);
             const resMs = resMinutes * 60 * 1000;
@@ -278,7 +284,10 @@ function init(deps) {
     router.post('/request-update', async (req, res) => {
         const { mint, twitter, website, telegram, banner, description, signature, userPublicKey, ctoUser } = req.body;
         try {
-            if (!mint || mint.length < 30) return res.status(400).json({ success: false, error: "Invalid Mint" });
+            // SECURITY: Validate mint address properly
+            if (!mint || !isValidPubkey(mint)) {
+                return res.status(400).json({ success: false, error: "Invalid mint address" });
+            }
             
             try { await verifyPayment(signature, userPublicKey); } catch (payErr) { return res.status(402).json({ success: false, error: payErr.message }); }
             
@@ -425,11 +434,12 @@ function init(deps) {
     });
 
     router.post('/admin/reject-update', requireAdmin, async (req, res) => { const { id } = req.body; try { await db.run(`UPDATE token_updates SET status = 'rejected' WHERE id = $1`, [id]); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.get('/admin/token/:mint', requireAdmin, async (req, res) => { const { mint } = req.params; try { const token = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]); if (!token) return res.status(404).json({ success: false, error: "Token not found" }); let meta = {}; try { if (typeof token.metadata === 'string') meta = JSON.parse(token.metadata); else meta = token.metadata || {}; } catch(e) {} const community = meta.community || {}; res.json({ success: true, token: { ...token, ticker: token.symbol, twitter: community.twitter || meta.twitter, website: community.website || meta.website, telegram: community.telegram || meta.telegram, banner: community.banner || meta.banner, description: community.description || meta.description } }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    router.get('/admin/token/:mint', requireAdmin, async (req, res) => { const { mint } = req.params; if (!isValidPubkey(mint)) return res.status(400).json({ success: false, error: "Invalid mint" }); try { const token = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]); if (!token) return res.status(404).json({ success: false, error: "Token not found" }); let meta = {}; try { if (typeof token.metadata === 'string') meta = JSON.parse(token.metadata); else meta = token.metadata || {}; } catch(e) {} const community = meta.community || {}; res.json({ success: true, token: { ...token, ticker: token.symbol, twitter: community.twitter || meta.twitter, website: community.website || meta.website, telegram: community.telegram || meta.telegram, banner: community.banner || meta.banner, description: community.description || meta.description } }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     
-    router.post('/admin/update-token', requireAdmin, async (req, res) => { 
-        const { mint, twitter, website, telegram, banner, description } = req.body; 
-        try { 
+    router.post('/admin/update-token', requireAdmin, async (req, res) => {
+        const { mint, twitter, website, telegram, banner, description } = req.body;
+        if (!mint || !isValidPubkey(mint)) return res.status(400).json({ success: false, error: "Invalid mint" });
+        try {
             const token = await db.get(`SELECT metadata FROM tokens WHERE mint = $1`, [mint]); 
             let currentMeta = {}; 
             if (token && token.metadata) { 
@@ -452,9 +462,10 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
     });
     
-    router.post('/admin/delete-token', requireAdmin, async (req, res) => { 
-        const { mint } = req.body; 
-        try { 
+    router.post('/admin/delete-token', requireAdmin, async (req, res) => {
+        const { mint } = req.body;
+        if (!mint || !isValidPubkey(mint)) return res.status(400).json({ success: false, error: "Invalid mint" });
+        try {
             const pools = await db.all(`SELECT address FROM pools WHERE mint = $1`, [mint]); 
             const poolAddresses = pools.map(p => p.address); 
             
@@ -476,7 +487,7 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
     });
     
-    router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => { const { mint } = req.body; try { const newScore = await updateSingleToken({ db }, mint); res.json({ success: true, message: `K-Score Updated: ${newScore}` }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => { const { mint } = req.body; if (!mint || !isValidPubkey(mint)) return res.status(400).json({ success: false, error: "Invalid mint" }); try { const newScore = await updateSingleToken({ db }, mint); res.json({ success: true, message: `K-Score Updated: ${newScore}` }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
 
     // --- API KEY ADMIN ---
     router.get('/admin/keys', requireAdmin, async (req, res) => {
@@ -696,6 +707,12 @@ function init(deps) {
 
     router.get('/token/:mint', cacheControl(3, 5), apiKeyAuth(false), async (req, res) => {
         const { mint } = req.params;
+
+        // SECURITY: Validate mint address
+        if (!isValidPubkey(mint)) {
+            return res.status(400).json({ success: false, error: 'Invalid mint address' });
+        }
+
         const cacheKey = `token:detail:${mint}`;
         try {
             const result = await smartCache(cacheKey, 5, async () => {
@@ -798,6 +815,12 @@ function init(deps) {
     // --- TOP HOLDERS (for Orb AI integration) ---
     router.get('/token/:mint/top-holders', cacheControl(60, 120), apiKeyAuth(false), async (req, res) => {
         const { mint } = req.params;
+
+        // SECURITY: Validate mint address
+        if (!isValidPubkey(mint)) {
+            return res.status(400).json({ success: false, error: 'Invalid mint address' });
+        }
+
         try {
             // Get token decimals for proper balance formatting
             const token = await db.get('SELECT decimals FROM tokens WHERE mint = $1', [mint]);

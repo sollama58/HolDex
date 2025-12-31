@@ -4,12 +4,21 @@
  *
  * SECURITY: Webhooks are verified using HMAC-SHA256 signatures
  * from Helius (X-Helius-Signature header)
+ *
+ * CRITICAL: In production, WEBHOOK_SECRET is REQUIRED.
+ * Requests will be rejected if signature verification fails.
  */
 const express = require('express');
 const router = express.Router();
 const logger = require('../services/logger');
 const config = require('../config/env');
 const { verifyWebhookSignature } = require('../services/heliusWebhook');
+const { isValidSolanaAddress, sanitizeError, isValidTimestamp } = require('../utils/validation');
+
+// Security: Track processed signatures to prevent replay attacks
+const processedSignatures = new Map(); // signature -> timestamp
+const REPLAY_WINDOW_MS = 300000; // 5 minutes
+const MAX_CACHED_SIGNATURES = 10000;
 
 // Known DEX/AMM pool programs to exclude from holder tracking
 const POOL_PROGRAMS = new Set([
@@ -73,27 +82,60 @@ function init(deps) {
      */
     router.post('/transfers', async (req, res) => {
         try {
-            // SECURITY: Verify Helius signature if WEBHOOK_SECRET is configured
-            // Note: req.rawBody must be set by middleware (see index.js)
+            // ============================================
+            // SECURITY: Signature Verification (REQUIRED in production)
+            // ============================================
             if (config.WEBHOOK_SECRET) {
                 const signature = req.headers['x-helius-signature'];
                 const rawBody = req.rawBody || JSON.stringify(req.body);
 
                 if (!verifyWebhookSignature(rawBody, signature, config.WEBHOOK_SECRET)) {
                     logger.warn('⚠️  Webhook signature verification FAILED');
-                    return res.status(401).json({ error: 'Invalid signature' });
+                    return res.status(401).json({ error: 'Unauthorized' });
                 }
             } else if (process.env.NODE_ENV === 'production') {
-                // Warn in production if no secret configured
-                logger.warn('⚠️  WEBHOOK_SECRET not set - signature verification disabled');
+                // CRITICAL: Block requests in production without secret
+                logger.error('❌ WEBHOOK_SECRET not configured - rejecting webhook');
+                return res.status(503).json({ error: 'Webhook not configured' });
             }
 
             const events = Array.isArray(req.body) ? req.body : [req.body];
             let processed = 0;
+            let skipped = 0;
 
             for (const event of events) {
                 // Skip non-transfer events
                 if (event.type !== 'TRANSFER') continue;
+
+                // ============================================
+                // SECURITY: Replay Attack Protection
+                // ============================================
+                const txSignature = event.signature;
+                if (txSignature) {
+                    // Check if already processed
+                    if (processedSignatures.has(txSignature)) {
+                        skipped++;
+                        continue;
+                    }
+
+                    // Check timestamp (reject old events)
+                    if (event.timestamp && !isValidTimestamp(event.timestamp, REPLAY_WINDOW_MS)) {
+                        logger.debug(`[Webhook] Rejecting stale event: ${txSignature.slice(0, 8)}...`);
+                        skipped++;
+                        continue;
+                    }
+
+                    // Track this signature
+                    processedSignatures.set(txSignature, Date.now());
+
+                    // Cleanup old signatures if cache is too large
+                    if (processedSignatures.size > MAX_CACHED_SIGNATURES) {
+                        const cutoff = Date.now() - REPLAY_WINDOW_MS;
+                        for (const [sig, ts] of processedSignatures) {
+                            if (ts < cutoff) processedSignatures.delete(sig);
+                        }
+                    }
+                }
 
                 const transfers = event.tokenTransfers || [];
 
@@ -101,6 +143,14 @@ function init(deps) {
                     const { mint, fromUserAccount, toUserAccount, tokenAmount } = transfer;
 
                     if (!mint) continue;
+
+                    // ============================================
+                    // SECURITY: Validate all addresses
+                    // ============================================
+                    if (!isValidSolanaAddress(mint)) {
+                        logger.debug(`[Webhook] Invalid mint address: ${String(mint).slice(0, 8)}...`);
+                        continue;
+                    }
 
                     // Check if this token is tracked (verified)
                     const token = await db.get(
@@ -113,8 +163,8 @@ function init(deps) {
                     const now = Date.now();
                     const amount = parseInt(tokenAmount) || 0;
 
-                    // Update buyer (if not a pool)
-                    if (toUserAccount && !isPoolAddress(toUserAccount)) {
+                    // Update buyer (if not a pool and valid address)
+                    if (toUserAccount && !isPoolAddress(toUserAccount) && isValidSolanaAddress(toUserAccount)) {
                         await db.run(`
                             INSERT INTO holder_snapshots (mint, holder, buy_count, net_flow, balance, updated_at)
                             VALUES ($1, $2, 1, $3, $3, $4)
@@ -146,8 +196,8 @@ function init(deps) {
                         }
                     }
 
-                    // Update seller (if not a pool)
-                    if (fromUserAccount && !isPoolAddress(fromUserAccount)) {
+                    // Update seller (if not a pool and valid address)
+                    if (fromUserAccount && !isPoolAddress(fromUserAccount) && isValidSolanaAddress(fromUserAccount)) {
                         await db.run(`
                             INSERT INTO holder_snapshots (mint, holder, sell_count, net_flow, balance, updated_at)
                             VALUES ($1, $2, 1, $3, 0, $4)
@@ -184,15 +234,16 @@ function init(deps) {
                 }
             }
 
-            if (processed > 0) {
-                logger.debug(`📥 Webhook: Processed ${processed} transfers`);
+            if (processed > 0 || skipped > 0) {
+                logger.debug(`📥 Webhook: Processed ${processed}, Skipped ${skipped} transfers`);
             }
 
-            res.status(200).json({ received: true, processed });
+            res.status(200).json({ received: true, processed, skipped });
 
         } catch (error) {
+            // SECURITY: Log full error internally, return sanitized message externally
             logger.error(`❌ Webhook Error: ${error.message}`);
-            res.status(500).json({ error: error.message });
+            res.status(500).json({ error: sanitizeError(error) });
         }
     });
 

@@ -1,5 +1,65 @@
 require('dotenv').config();
 
+// ============================================
+// ENVIRONMENT VALIDATION
+// ============================================
+
+/**
+ * Validate required environment variables at startup
+ * CRITICAL: Fail fast if production config is missing
+ */
+function validateEnv() {
+    const isProduction = process.env.NODE_ENV === 'production';
+    const errors = [];
+    const warnings = [];
+
+    // CRITICAL: Database is always required
+    if (!process.env.DATABASE_URL) {
+        errors.push('DATABASE_URL is required');
+    }
+
+    // CRITICAL: Admin password required in production
+    if (isProduction && !process.env.ADMIN_PASSWORD) {
+        errors.push('ADMIN_PASSWORD is required in production');
+    }
+
+    // HIGH: Webhook secret required in production if using webhooks
+    if (isProduction && (process.env.WEBHOOK_URL || process.env.API_URL) && !process.env.WEBHOOK_SECRET) {
+        errors.push('WEBHOOK_SECRET is required when webhooks are enabled in production');
+    }
+
+    // MEDIUM: Warn about missing optional but recommended vars
+    if (!process.env.HELIUS_API_KEY) {
+        warnings.push('HELIUS_API_KEY not set - some features will be limited');
+    }
+
+    if (isProduction && !process.env.CORS_ORIGINS) {
+        warnings.push('CORS_ORIGINS not set - using default whitelist');
+    }
+
+    // Log warnings
+    for (const warn of warnings) {
+        console.warn(`⚠️  [ENV] ${warn}`);
+    }
+
+    // Fail on errors
+    if (errors.length > 0) {
+        console.error('❌ [ENV] Configuration errors:');
+        for (const err of errors) {
+            console.error(`   - ${err}`);
+        }
+        if (isProduction) {
+            console.error('❌ [ENV] Cannot start in production with missing configuration');
+            process.exit(1);
+        } else {
+            console.warn('⚠️  [ENV] Running in development mode with incomplete config');
+        }
+    }
+}
+
+// Run validation on module load
+validateEnv();
+
 // Helper to parse comma-separated lists
 const parseCors = (val) => {
     const defaults = [

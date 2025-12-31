@@ -33,6 +33,9 @@ const HELIUS_HEADERS = HELIUS_API_KEY
     ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${HELIUS_API_KEY}` }
     : { 'Content-Type': 'application/json' };
 
+// Request timeout (10 seconds)
+const API_TIMEOUT_MS = 10000;
+
 // Rate limiting with adaptive throttling
 const BASE_RATE_LIMIT = 50; // requests per second
 let currentRateLimit = BASE_RATE_LIMIT;
@@ -40,6 +43,67 @@ let requestInterval = 1000 / currentRateLimit;
 let lastRequestTime = 0;
 let rateLimitRemaining = BASE_RATE_LIMIT;
 let rateLimitResetTime = 0;
+
+// ============================================
+// CIRCUIT BREAKER PATTERN
+// ============================================
+const circuitBreaker = {
+    failures: 0,
+    lastFailure: 0,
+    state: 'closed', // closed, open, half-open
+    threshold: 5,    // Open circuit after 5 consecutive failures
+    cooldown: 30000, // Wait 30s before trying again
+    halfOpenRequests: 0,
+    halfOpenMax: 2   // Allow 2 test requests in half-open state
+};
+
+function checkCircuitBreaker() {
+    const now = Date.now();
+
+    if (circuitBreaker.state === 'open') {
+        // Check if cooldown period passed
+        if (now - circuitBreaker.lastFailure > circuitBreaker.cooldown) {
+            circuitBreaker.state = 'half-open';
+            circuitBreaker.halfOpenRequests = 0;
+            logger.info('[CircuitBreaker] State: half-open (testing)');
+            return true; // Allow request
+        }
+        return false; // Circuit is open, block request
+    }
+
+    if (circuitBreaker.state === 'half-open') {
+        if (circuitBreaker.halfOpenRequests >= circuitBreaker.halfOpenMax) {
+            return false; // Too many test requests pending
+        }
+        circuitBreaker.halfOpenRequests++;
+        return true;
+    }
+
+    return true; // Circuit is closed, allow request
+}
+
+function recordSuccess() {
+    if (circuitBreaker.state === 'half-open') {
+        circuitBreaker.state = 'closed';
+        circuitBreaker.failures = 0;
+        logger.info('[CircuitBreaker] State: closed (recovered)');
+    } else {
+        circuitBreaker.failures = 0; // Reset on success
+    }
+}
+
+function recordFailure() {
+    circuitBreaker.failures++;
+    circuitBreaker.lastFailure = Date.now();
+
+    if (circuitBreaker.state === 'half-open') {
+        circuitBreaker.state = 'open';
+        logger.warn('[CircuitBreaker] State: open (failed during recovery)');
+    } else if (circuitBreaker.failures >= circuitBreaker.threshold) {
+        circuitBreaker.state = 'open';
+        logger.warn(`[CircuitBreaker] State: open (${circuitBreaker.failures} consecutive failures)`);
+    }
+}
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -369,7 +433,12 @@ const POOL_CACHE_TTL = 3600000; // 1 hour
 // HELIUS API FUNCTIONS
 // ============================================
 
-async function rateLimitedFetch(url, options) {
+async function rateLimitedFetch(url, options = {}) {
+    // SECURITY: Check circuit breaker before making request
+    if (!checkCircuitBreaker()) {
+        throw new Error('Circuit breaker is open - API temporarily unavailable');
+    }
+
     const now = Date.now();
 
     // Wait for rate limit reset if exhausted
@@ -386,12 +455,36 @@ async function rateLimitedFetch(url, options) {
     }
     lastRequestTime = Date.now();
 
-    const response = await fetch(url, options);
+    // SECURITY: Add timeout to prevent hanging requests
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
-    // Parse rate limit headers for adaptive throttling
-    parseRateLimitHeaders(response);
+    try {
+        const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+        });
 
-    return response;
+        clearTimeout(timeoutId);
+
+        // Parse rate limit headers for adaptive throttling
+        parseRateLimitHeaders(response);
+
+        // Record success for circuit breaker
+        recordSuccess();
+
+        return response;
+    } catch (error) {
+        clearTimeout(timeoutId);
+
+        // Record failure for circuit breaker
+        recordFailure();
+
+        if (error.name === 'AbortError') {
+            throw new Error(`Request timeout after ${API_TIMEOUT_MS}ms`);
+        }
+        throw error;
+    }
 }
 
 async function heliusRpc(method, params) {
@@ -477,11 +570,16 @@ async function batchCheckPools(addresses) {
 // CONVICTION CALCULATION (asdf-oracle logic)
 // ============================================
 
+// SECURITY: Limit holder count to prevent memory exhaustion
+const MAX_HOLDERS_PER_TOKEN = 10000; // 10k holders max
+const MAX_HOLDER_PAGES = 10; // Max 10 pages of 1000 = 10k
+
 async function fetchTokenHolders(mint) {
     const holders = [];
     let cursor = null;
+    let pageCount = 0;
 
-    while (true) {
+    while (pageCount < MAX_HOLDER_PAGES) {
         const params = { mint, limit: 1000 };
         if (cursor) params.cursor = cursor;
 
@@ -492,9 +590,18 @@ async function fetchTokenHolders(mint) {
             if (acc.amount > 0) {
                 holders.push({ address: acc.owner, balance: acc.amount });
             }
+
+            // SECURITY: Hard limit on total holders
+            if (holders.length >= MAX_HOLDERS_PER_TOKEN) {
+                logger.warn(`[Holders] ${mint.slice(0,8)}: Hit limit of ${MAX_HOLDERS_PER_TOKEN}`);
+                break;
+            }
         }
 
+        if (holders.length >= MAX_HOLDERS_PER_TOKEN) break;
+
         cursor = result.cursor;
+        pageCount++;
         if (!cursor) break;
     }
 
