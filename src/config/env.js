@@ -54,7 +54,7 @@ module.exports = {
     
     METADATA_UPDATE_INTERVAL: parseInt(process.env.METADATA_UPDATE_INTERVAL) || 300000, 
     HOLDER_SCAN_INTERVAL: parseInt(process.env.HOLDER_SCAN_INTERVAL) || 300000,
-    ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'admin123',
+    ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || null, // REQUIRED - no default
     HELIUS_API_KEY: heliusKey || '',
 
     // --- PAYMENT CONFIGURATION ---

@@ -61,9 +61,8 @@ const corsOptions = {
         if (isConfigAllowed || isDomainAllowed) {
             return callback(null, true);
         } else {
-            // logger.warn(`⚠️ CORS Blocked Origin: ${origin}`);
-            // Allow anyway for now to prevent frontend breakage, rely on key/rate limits
-            return callback(null, true);
+            logger.warn(`⚠️ CORS Blocked Origin: ${origin}`);
+            return callback(new Error('CORS not allowed'), false);
         }
     },
     credentials: true,

@@ -51,6 +51,11 @@ function getCreditRating(score) {
 }
 
 const requireAdmin = (req, res, next) => {
+    // Reject if ADMIN_PASSWORD not configured
+    if (!config.ADMIN_PASSWORD) {
+        logger.error('❌ Admin endpoint called but ADMIN_PASSWORD not set');
+        return res.status(503).json({ success: false, error: 'Admin not configured' });
+    }
     const authHeader = req.headers['x-admin-auth'];
     if (!authHeader || authHeader !== config.ADMIN_PASSWORD) {
         return res.status(403).json({ success: false, error: 'Unauthorized' });
