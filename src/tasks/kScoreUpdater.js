@@ -1797,6 +1797,8 @@ function start(deps) {
         logger.warn("[K-Score] No HELIUS_API_KEY - conviction analysis disabled");
     }
 
+    logger.info("🟢 K-Score Updater Started (every 10 min)");
+
     // Run every 10 minutes
     setInterval(() => updateKScores(deps), 600000);
     // Run once after startup (delay 30s to let other services init)

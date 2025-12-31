@@ -9,7 +9,8 @@ const config = require('./config/env');
 const logger = require('./services/logger');
 const { initDB, getDB } = require('./services/database');
 const { connectRedis } = require('./services/redis');
-const { startSnapshotter } = require('./indexer/tasks/snapshotter'); 
+const { startSnapshotter } = require('./indexer/tasks/snapshotter');
+const kScoreUpdater = require('./tasks/kScoreUpdater'); 
 // REMOVED: const { startNewTokenListener } = require('./services/new_token_listener'); 
 const { initSocket } = require('./services/socket'); 
 const tokensRoutes = require('./routes/tokens');
@@ -181,8 +182,9 @@ async function startServer() {
         // Start WebSocket Server
         initSocket(server, allowedOrigins);
 
-        // Start Background Tasks (Snapshotter remains here for now, or move to worker too)
+        // Start Background Tasks
         startSnapshotter();
+        kScoreUpdater.start({ db: getDB() });
         
         // Initialize Routes
         app.use('/api', tokensRoutes.init({ db: getDB() }));

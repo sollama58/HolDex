@@ -221,8 +221,8 @@ async function aggregateAndSaveToken(db, mint) {
         const lastCheck = parseInt(tokenRow?.last_holder_check || 0);
         
         let holderCount = null;
-        // Check every 2 Hours
-        if (now - lastCheck > 7200000) {
+        // Check holders every 30 minutes
+        if (now - lastCheck > 1800000) {
             try {
                 // Fetch from RPC
                 const count = await getHolderCountFromRPC(mint);

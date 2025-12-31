@@ -121,12 +121,11 @@ async function getHolderCountFromRPC(mintAddress) {
             const HELIUS_RPC = `https://mainnet.helius-rpc.com/?api-key=${config.HELIUS_API_KEY}`;
             const headers = { 'Content-Type': 'application/json' };
 
-            // Paginate through holders (max 100 pages = 100k holders)
-            // For tokens with millions of holders, this gives a representative count
-            const MAX_PAGES = 100;
+            // Paginate through all holders (no limit)
+            // Timeout protection via caller, not here
             let page = 0;
 
-            while (page < MAX_PAGES) {
+            while (true) {
                 const params = { mint: cleanMint, limit: 1000 };
                 if (cursor) params.cursor = cursor;
 
@@ -152,11 +151,6 @@ async function getHolderCountFromRPC(mintAddress) {
                 cursor = data.result.cursor;
                 page++;
                 if (!cursor) break;
-            }
-
-            // If we hit the limit, log it
-            if (page >= MAX_PAGES && cursor) {
-                logger.info(`[Holders] ${cleanMint.slice(0,8)}: ${count}+ holders (limit reached)`);
             }
 
             if (count > 0) {
