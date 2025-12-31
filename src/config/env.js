@@ -58,7 +58,7 @@ module.exports = {
     HELIUS_API_KEY: heliusKey || '',
 
     // --- PAYMENT CONFIGURATION ---
-    TREASURY_WALLET: process.env.TREASURY_WALLET || 'EbZ4wYq4bYq4bYq4bYq4bYq4bYq4bYq4bYq4bYq4bYq4', 
+    TREASURY_WALLET: process.env.TREASURY_WALLET || null, // REQUIRED - set in production 
     FEE_SOL: parseFloat(process.env.FEE_SOL) || 0.1, 
     FEE_TOKEN_AMOUNT: parseFloat(process.env.FEE_TOKEN_AMOUNT) || 5000,
     FEE_TOKEN_MINT: process.env.FEE_TOKEN_MINT || '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump',
