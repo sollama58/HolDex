@@ -929,47 +929,92 @@ async function checkTokenSecurity(mint) {
 // BURN CALCULATION (on-chain)
 // ============================================
 
+// Pump.fun tokens always start with 1 billion supply (with 6 decimals)
+const PUMP_INITIAL_SUPPLY = 1_000_000_000_000_000n; // 1B * 10^6
+
+// Known burn address patterns
+const BURN_PATTERNS = [
+    '1111111',           // Starts with 7+ ones
+    '1nc1nerator',       // Incinerator
+    'burn',              // Contains 'burn' (case insensitive check)
+    'dead',              // Contains 'dead'
+];
+
+function isBurnAddress(address) {
+    if (!address) return false;
+    const lower = address.toLowerCase();
+    return BURN_PATTERNS.some(p => lower.includes(p.toLowerCase()));
+}
+
 /**
  * Calculate burn percentage from on-chain data
- * Checks for tokens held by burn addresses
+ *
+ * Two methods of burning on Solana:
+ * 1. SPL Token `burn` instruction - removes tokens from supply
+ * 2. Send to burn address - tokens still in supply but inaccessible
+ *
+ * For pump.fun tokens: initial supply is always 1 billion
+ * Burn % = (initial - current + tokens_in_burn_addresses) / initial * 100
  */
 async function calculateBurn(mint, allHolders = null) {
     try {
-        // Get total supply
+        // Get current supply from chain
         const supply = await heliusRpc('getTokenSupply', [mint]);
-        if (!supply) return { burnPct: 0, burned: 0, totalSupply: 0 };
+        if (!supply) return { burnPct: 0, burned: 0, totalSupply: 0, initialSupply: 0 };
 
-        const totalSupply = Number(supply.value.amount);
+        const currentSupply = BigInt(supply.value.amount);
         const decimals = supply.value.decimals;
+        const divisor = Math.pow(10, decimals);
 
         // Use provided holders or fetch them
         const holders = allHolders || (await fetchTokenHolders(mint));
 
-        // Find burned tokens (held by burn addresses)
-        let burnedAmount = 0;
+        // Find tokens held in burn addresses
+        let burnedInAddresses = 0n;
         for (const h of holders) {
-            const owner = h.address;
-            // Check burn address patterns
-            if (owner.startsWith('1111111') ||
-                owner === '11111111111111111111111111111111' ||
-                owner.includes('1nc1nerator')) {
-                burnedAmount += h.balance;
+            if (isBurnAddress(h.address)) {
+                burnedInAddresses += BigInt(Math.floor(h.balance));
             }
         }
 
-        const burnPct = totalSupply > 0 ? (burnedAmount / totalSupply) * 100 : 0;
+        // Determine initial supply
+        let initialSupply;
+        const isPumpFun = mint.endsWith('pump');
 
-        logger.info(`[Burn] ${mint.slice(0,8)}: ${burnPct.toFixed(2)}% burned`);
+        if (isPumpFun) {
+            // Pump.fun tokens always start with 1 billion
+            initialSupply = PUMP_INITIAL_SUPPLY;
+        } else {
+            // For non-pump.fun, we can't know initial supply
+            // Just report tokens in burn addresses relative to current supply
+            initialSupply = currentSupply + burnedInAddresses;
+        }
+
+        // Calculate total burned
+        // burnedViaInstruction = initialSupply - currentSupply (already removed from supply)
+        // burnedInAddresses = tokens still in supply but in burn addresses
+        const burnedViaInstruction = initialSupply > currentSupply ? initialSupply - currentSupply : 0n;
+        const totalBurned = burnedViaInstruction + burnedInAddresses;
+
+        const burnPct = initialSupply > 0n
+            ? (Number(totalBurned) / Number(initialSupply)) * 100
+            : 0;
+
+        logger.info(`[Burn] ${mint.slice(0,8)}: ${burnPct.toFixed(2)}% burned${isPumpFun ? ' (pump.fun)' : ''}`);
 
         return {
             burnPct,
-            burned: burnedAmount / Math.pow(10, decimals),
-            totalSupply: totalSupply / Math.pow(10, decimals),
-            decimals
+            burned: Number(totalBurned) / divisor,
+            burnedViaInstruction: Number(burnedViaInstruction) / divisor,
+            burnedInAddresses: Number(burnedInAddresses) / divisor,
+            totalSupply: Number(currentSupply) / divisor,
+            initialSupply: Number(initialSupply) / divisor,
+            decimals,
+            isPumpFun
         };
     } catch (e) {
         logger.error(`[Burn] Error for ${mint}: ${e.message}`);
-        return { burnPct: 0, burned: 0, totalSupply: 0 };
+        return { burnPct: 0, burned: 0, totalSupply: 0, initialSupply: 0 };
     }
 }
 
