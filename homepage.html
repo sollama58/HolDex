@@ -1426,6 +1426,8 @@
             const data = await res.json();
 
             if (data.success && data.holders.length > 0) {
+                const decimals = data.decimals || 6;
+
                 tbody.innerHTML = data.holders.map((h, i) => `
                     <tr class="border-b border-[#7c2d12]/30 hover:bg-[#451a03]/50">
                         <td class="px-2 py-2 text-[#9a3412] font-mono text-xs">${i + 1}</td>
@@ -1435,7 +1437,7 @@
                                 <button onclick="copyToClipboard('${h.address}')" class="text-[#9a3412] hover:text-[#fb923c]"><i data-lucide="copy" width="10"></i></button>
                             </div>
                         </td>
-                        <td class="px-2 py-2 text-right font-mono text-xs">${formatHolderBalance(h.balance)}</td>
+                        <td class="px-2 py-2 text-right font-mono text-xs">${formatHolderBalance(h.balance, decimals)}</td>
                         <td class="px-2 py-2 text-center font-mono text-[10px]">
                             <span class="text-[#4ade80]">${h.buys}</span>/<span class="text-[#ef4444]">${h.sells}</span>
                         </td>
@@ -1466,13 +1468,14 @@
         }
     }
 
-    function formatHolderBalance(balance) {
-        if (!balance) return '0';
-        const num = parseFloat(balance);
+    function formatHolderBalance(rawBalance, decimals = 6) {
+        if (!rawBalance) return '0';
+        // Convert raw balance to actual token amount
+        const num = parseFloat(rawBalance) / Math.pow(10, decimals);
         if (num >= 1e9) return (num / 1e9).toFixed(2) + 'B';
         if (num >= 1e6) return (num / 1e6).toFixed(2) + 'M';
         if (num >= 1e3) return (num / 1e3).toFixed(2) + 'K';
-        return num.toLocaleString();
+        return num.toLocaleString(undefined, {maximumFractionDigits: 2});
     }
 
     function copyToClipboard(text) {

@@ -695,6 +695,10 @@ function init(deps) {
     router.get('/token/:mint/top-holders', cacheControl(60, 120), apiKeyAuth(false), async (req, res) => {
         const { mint } = req.params;
         try {
+            // Get token decimals for proper balance formatting
+            const token = await db.get('SELECT decimals FROM tokens WHERE mint = $1', [mint]);
+            const decimals = token?.decimals || 6;
+
             const holders = await db.all(`
                 SELECT
                     holder,
@@ -713,6 +717,7 @@ function init(deps) {
             res.json({
                 success: true,
                 mint,
+                decimals,
                 count: holders.length,
                 holders: holders.map(h => ({
                     address: h.holder,
