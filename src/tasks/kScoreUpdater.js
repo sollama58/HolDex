@@ -19,6 +19,7 @@
 const config = require('../config/env');
 const { logger } = require('../services');
 const priceService = require('../services/priceService');
+const bs58 = require('bs58');
 
 // ============================================
 // HELIUS CONFIG
@@ -739,12 +740,15 @@ async function checkTokenSecurity(mint) {
         if (mintAuthOption === 0) {
             security.mintAuthorityRevoked = true;
         } else {
-            // Extract pubkey (32 bytes at offset 4)
-            const mintAuthPubkey = data.slice(4, 36).toString('hex');
-            // Convert to base58 (simplified - just check against known addresses)
-            security.mintAuthority = mintAuthPubkey;
-            // For now, assume any active authority is a concern unless we can verify
-            // TODO: proper base58 encoding to check against TRUSTED_AUTHORITIES
+            // Extract pubkey (32 bytes at offset 4) and convert to base58
+            const mintAuthBytes = data.slice(4, 36);
+            const mintAuthBase58 = bs58.encode(mintAuthBytes);
+            security.mintAuthority = mintAuthBase58;
+
+            // Check if authority is a known trusted program
+            if (TRUSTED_AUTHORITIES.has(mintAuthBase58)) {
+                security.mintAuthorityTrusted = true;
+            }
         }
 
         // Parse freeze authority (offset 46-82)
@@ -752,31 +756,39 @@ async function checkTokenSecurity(mint) {
         if (freezeAuthOption === 0) {
             security.freezeAuthorityRevoked = true;
         } else {
-            const freezeAuthPubkey = data.slice(50, 82).toString('hex');
-            security.freezeAuthority = freezeAuthPubkey;
+            // Extract pubkey (32 bytes at offset 50) and convert to base58
+            const freezeAuthBytes = data.slice(50, 82);
+            const freezeAuthBase58 = bs58.encode(freezeAuthBytes);
+            security.freezeAuthority = freezeAuthBase58;
+
+            // Check if authority is a known trusted program
+            if (TRUSTED_AUTHORITIES.has(freezeAuthBase58)) {
+                security.freezeAuthorityTrusted = true;
+            }
         }
 
         // Determine security level
-        // For now: be lenient - only penalize if BOTH are active (non-revoked)
-        // Because most PumpFun tokens have mint authority during bonding curve
-        const mintSafe = security.mintAuthorityRevoked;
-        const freezeSafe = security.freezeAuthorityRevoked;
+        // Safe = revoked OR trusted program (PumpFun, Raydium, etc.)
+        const mintSafe = security.mintAuthorityRevoked || security.mintAuthorityTrusted;
+        const freezeSafe = security.freezeAuthorityRevoked || security.freezeAuthorityTrusted;
 
         if (mintSafe && freezeSafe) {
             security.isSecure = true;
             security.maxScore = 100;
-            logger.info(`[Security] ${mint.slice(0,8)}: ✓ FULLY SECURE (both revoked)`);
+            const reason = security.mintAuthorityRevoked && security.freezeAuthorityRevoked
+                ? 'both revoked'
+                : 'trusted programs';
+            logger.info(`[Security] ${mint.slice(0,8)}: ✓ FULLY SECURE (${reason})`);
         } else if (mintSafe && !freezeSafe) {
-            // Freeze authority active - moderate risk
+            // Freeze authority active and untrusted - moderate risk
             security.maxScore = 70;
-            logger.info(`[Security] ${mint.slice(0,8)}: ⚠ Freeze active → cap 70`);
+            logger.info(`[Security] ${mint.slice(0,8)}: ⚠ Freeze active (${security.freezeAuthority?.slice(0,8)}) → cap 70`);
         } else if (!mintSafe && freezeSafe) {
-            // Mint authority active - could be PumpFun bonding curve
-            // Be lenient for now (many legit tokens have this)
+            // Mint authority active and untrusted - could be unknown program
             security.maxScore = 80;
-            logger.info(`[Security] ${mint.slice(0,8)}: ⚠ Mint active (may be bonding curve) → cap 80`);
+            logger.info(`[Security] ${mint.slice(0,8)}: ⚠ Mint active (${security.mintAuthority?.slice(0,8)}) → cap 80`);
         } else {
-            // Both active - higher risk
+            // Both active and untrusted - higher risk
             security.maxScore = 50;
             logger.info(`[Security] ${mint.slice(0,8)}: ⚠ Both authorities active → cap 50`);
         }
