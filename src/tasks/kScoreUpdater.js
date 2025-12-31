@@ -1094,13 +1094,14 @@ async function getTokenAccountBalance(vaultAddress) {
 
 /**
  * Calculate on-chain liquidity for a token
- * Uses vault balances from the highest liquidity pool
+ * Uses vault reserves from pools (reserve_a, reserve_b)
+ * Falls back to cached liquidity_usd if reserves unavailable
  */
 async function calculateOnChainLiquidity(db, mint, solPrice) {
     try {
-        // Get pools for this token paired with SOL/USDC/USDT
+        // Get pools for this token paired with SOL/USDC/USDT (with reserves)
         const pools = await db.all(`
-            SELECT address, dex, token_a, token_b, liquidity_usd
+            SELECT address, dex, token_a, token_b, liquidity_usd, reserve_a, reserve_b
             FROM pools
             WHERE mint = $1
               AND (token_b = $2 OR token_b = $3 OR token_b = $4
@@ -1115,15 +1116,52 @@ async function calculateOnChainLiquidity(db, mint, solPrice) {
             return { liquidity: token?.liquidity || 0, source: 'db_cache' };
         }
 
-        // For now, use the cached liquidity_usd from pools (DexScreener sync)
-        // TODO: Calculate from vault balances when we have vault addresses
-        const totalLiquidity = pools.reduce((sum, p) => sum + (p.liquidity_usd || 0), 0);
+        let totalLiquidity = 0;
+        let source = 'pools_cached';
 
-        logger.info(`[Liquidity] ${mint.slice(0,8)}: $${totalLiquidity.toFixed(0)} (${pools.length} pools)`);
+        for (const pool of pools) {
+            // Try to calculate from reserves first
+            if (pool.reserve_a && pool.reserve_b && solPrice > 0) {
+                let poolLiquidity = 0;
+
+                // Determine which side is the quote (SOL/USDC/USDT)
+                const isQuoteB = [SOL_MINT, USDC_MINT, USDT_MINT].includes(pool.token_b);
+                const isQuoteA = [SOL_MINT, USDC_MINT, USDT_MINT].includes(pool.token_a);
+
+                if (isQuoteB) {
+                    // token_b is quote (SOL/stable), use reserve_b
+                    if (pool.token_b === SOL_MINT) {
+                        poolLiquidity = pool.reserve_b * solPrice * 2;
+                    } else {
+                        // Stablecoin - reserve is in USD
+                        poolLiquidity = pool.reserve_b * 2;
+                    }
+                    source = 'reserves';
+                } else if (isQuoteA) {
+                    // token_a is quote
+                    if (pool.token_a === SOL_MINT) {
+                        poolLiquidity = pool.reserve_a * solPrice * 2;
+                    } else {
+                        poolLiquidity = pool.reserve_a * 2;
+                    }
+                    source = 'reserves';
+                }
+
+                if (poolLiquidity > 0) {
+                    totalLiquidity += poolLiquidity;
+                    continue;
+                }
+            }
+
+            // Fallback to cached liquidity_usd
+            totalLiquidity += pool.liquidity_usd || 0;
+        }
+
+        logger.info(`[Liquidity] ${mint.slice(0,8)}: $${totalLiquidity.toFixed(0)} (${pools.length} pools, ${source})`);
 
         return {
             liquidity: totalLiquidity,
-            source: 'pools',
+            source,
             poolCount: pools.length
         };
     } catch (e) {
