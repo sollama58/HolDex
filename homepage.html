@@ -181,6 +181,14 @@
         .credit-c { background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.5); }
         .credit-d { background: rgba(127, 29, 29, 0.3); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.4); animation: danger-pulse 1.5s ease-in-out infinite; }
         @keyframes danger-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+
+        /* Conviction Class Colors (Metal Ranks) */
+        .conviction-accumulator { color: #b9f2ff; background: rgba(185, 242, 255, 0.15); border: 1px solid rgba(185, 242, 255, 0.4); text-shadow: 0 0 8px rgba(185, 242, 255, 0.4); } /* Diamond */
+        .conviction-holder { color: #c0c0c0; background: rgba(192, 192, 192, 0.15); border: 1px solid rgba(192, 192, 192, 0.4); } /* Silver */
+        .conviction-reducer { color: #b87333; background: rgba(184, 115, 51, 0.15); border: 1px solid rgba(184, 115, 51, 0.4); } /* Copper */
+        .conviction-extractor { color: #cd853f; background: rgba(139, 69, 19, 0.2); border: 1px solid rgba(139, 69, 19, 0.5); } /* Rust */
+        .conviction-unknown { color: #888888; background: rgba(68, 68, 68, 0.15); border: 1px solid rgba(68, 68, 68, 0.4); } /* Iron */
+        .conviction-pill { padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: 700; text-transform: uppercase; }
     </style>
 </head>
 <body>
@@ -492,8 +500,14 @@
                     <span class="text-[10px] text-[#9a3412] uppercase font-bold">Mkt Cap</span>
                     <span id="stat-mcap" class="stat-value text-[#ea580c]">$0</span>
                 </div>
-                <div class="stat-card" onclick="openHolderHistory()">
-                    <span class="text-[10px] text-[#9a3412] uppercase font-bold flex items-center gap-1">Holders <i data-lucide="bar-chart" width="10"></i></span>
+                <div class="stat-card">
+                    <div class="flex justify-between items-center">
+                        <span class="text-[10px] text-[#9a3412] uppercase font-bold">Holders</span>
+                        <div class="flex gap-1">
+                            <button onclick="openHolderHistory()" class="text-[#9a3412] hover:text-[#fb923c] p-1" title="Holder Growth"><i data-lucide="bar-chart" width="12"></i></button>
+                            <button onclick="toggleTopHoldersModal()" class="text-[#9a3412] hover:text-[#fb923c] p-1" title="Top Holders"><i data-lucide="users" width="12"></i></button>
+                        </div>
+                    </div>
                     <span id="stat-holders" class="stat-value text-[#3b82f6]">0</span>
                 </div>
                 <div class="stat-card">
@@ -681,6 +695,46 @@
         </ul>
         <p class="text-xs text-[#9a3412] italic">Higher grades = stronger community conviction.</p>
         <button onclick="toggleKScoreModal()" class="w-full bg-[#451a03] text-[#fb923c] py-3 rounded-lg font-bold text-sm mt-4">Close</button>
+    </div>
+</div>
+
+<!-- TOP HOLDERS MODAL (Orb AI Integration) -->
+<div id="top-holders-modal" class="modal-overlay hidden">
+    <div class="modal-content bg-[#2a1005] border-2 border-[#7c2d12] p-6 shadow-2xl relative w-full max-w-2xl">
+        <button class="absolute top-4 right-4 text-[#9a3412]" onclick="toggleTopHoldersModal()"><i data-lucide="x" width="24"></i></button>
+        <div class="flex items-center gap-3 mb-4">
+            <div class="p-2 bg-[#451a03] rounded-lg border border-[#7c2d12] text-[#ea580c]"><i data-lucide="users" width="24"></i></div>
+            <div>
+                <h3 class="text-xl font-bold text-white">Top 20 Holders</h3>
+                <p class="text-xs text-[#9a3412]">Click wallet to analyze on Orb</p>
+            </div>
+        </div>
+
+        <div id="top-holders-loading" class="text-center py-8 text-[#9a3412]">
+            <i data-lucide="loader-2" width="32" class="animate-spin mx-auto mb-2"></i>
+            Loading holder data...
+        </div>
+
+        <div id="top-holders-content" class="hidden">
+            <div class="overflow-x-auto max-h-[60vh]">
+                <table class="w-full text-left text-sm">
+                    <thead class="text-[#9a3412] uppercase text-[10px] font-bold border-b border-[#7c2d12] sticky top-0 bg-[#2a1005]">
+                        <tr>
+                            <th class="px-2 py-2">#</th>
+                            <th class="px-2 py-2">Address</th>
+                            <th class="px-2 py-2 text-right">Balance</th>
+                            <th class="px-2 py-2 text-center">B/S</th>
+                            <th class="px-2 py-2 text-center">Class</th>
+                            <th class="px-2 py-2 text-center">Analyze</th>
+                        </tr>
+                    </thead>
+                    <tbody id="top-holders-body" class="text-[#ffedd5]"></tbody>
+                </table>
+            </div>
+            <p class="text-[10px] text-[#9a3412] mt-4 text-center italic">Powered by Orb (Helius) - AI wallet analysis</p>
+        </div>
+
+        <button onclick="toggleTopHoldersModal()" class="w-full bg-[#451a03] text-[#fb923c] py-3 rounded-lg font-bold text-sm mt-4">Close</button>
     </div>
 </div>
 
@@ -1342,6 +1396,90 @@
         } catch(e) {
             console.error("Holder Chart Error:", e);
         }
+    }
+
+    // --- TOP HOLDERS (Orb AI Integration) ---
+    async function toggleTopHoldersModal() {
+        const modal = document.getElementById('top-holders-modal');
+        if (modal.classList.contains('hidden')) {
+            modal.classList.remove('hidden');
+            setTimeout(() => modal.classList.add('open'), 10);
+            await loadTopHolders();
+        } else {
+            modal.classList.remove('open');
+            setTimeout(() => modal.classList.add('hidden'), 300);
+        }
+    }
+
+    async function loadTopHolders() {
+        if (!currentMint) return;
+
+        const loadingEl = document.getElementById('top-holders-loading');
+        const contentEl = document.getElementById('top-holders-content');
+        const tbody = document.getElementById('top-holders-body');
+
+        loadingEl.classList.remove('hidden');
+        contentEl.classList.add('hidden');
+
+        try {
+            const res = await fetch(`${API_URL}/api/token/${currentMint}/top-holders`);
+            const data = await res.json();
+
+            if (data.success && data.holders.length > 0) {
+                tbody.innerHTML = data.holders.map((h, i) => `
+                    <tr class="border-b border-[#7c2d12]/30 hover:bg-[#451a03]/50">
+                        <td class="px-2 py-2 text-[#9a3412] font-mono text-xs">${i + 1}</td>
+                        <td class="px-2 py-2">
+                            <div class="flex items-center gap-1">
+                                <span class="font-mono text-xs" title="${h.address}">${h.address.slice(0,4)}...${h.address.slice(-4)}</span>
+                                <button onclick="copyToClipboard('${h.address}')" class="text-[#9a3412] hover:text-[#fb923c]"><i data-lucide="copy" width="10"></i></button>
+                            </div>
+                        </td>
+                        <td class="px-2 py-2 text-right font-mono text-xs">${formatHolderBalance(h.balance)}</td>
+                        <td class="px-2 py-2 text-center font-mono text-[10px]">
+                            <span class="text-[#4ade80]">${h.buys}</span>/<span class="text-[#ef4444]">${h.sells}</span>
+                        </td>
+                        <td class="px-2 py-2 text-center">
+                            <span class="conviction-pill conviction-${h.class}">${h.class}</span>
+                        </td>
+                        <td class="px-2 py-2 text-center">
+                            <a href="${h.orbUrl}" target="_blank" class="text-[#ea580c] hover:text-white text-xs font-bold flex items-center justify-center gap-1">
+                                <i data-lucide="external-link" width="12"></i> Orb
+                            </a>
+                        </td>
+                    </tr>
+                `).join('');
+
+                loadingEl.classList.add('hidden');
+                contentEl.classList.remove('hidden');
+                lucide.createIcons();
+            } else {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-[#9a3412]">No holder data available. Run K-Score update first.</td></tr>';
+                loadingEl.classList.add('hidden');
+                contentEl.classList.remove('hidden');
+            }
+        } catch (e) {
+            console.error('Top Holders Error:', e);
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-[#ef4444]">Failed to load holder data</td></tr>';
+            loadingEl.classList.add('hidden');
+            contentEl.classList.remove('hidden');
+        }
+    }
+
+    function formatHolderBalance(balance) {
+        if (!balance) return '0';
+        const num = parseFloat(balance);
+        if (num >= 1e9) return (num / 1e9).toFixed(2) + 'B';
+        if (num >= 1e6) return (num / 1e6).toFixed(2) + 'M';
+        if (num >= 1e3) return (num / 1e3).toFixed(2) + 'K';
+        return num.toLocaleString();
+    }
+
+    function copyToClipboard(text) {
+        navigator.clipboard.writeText(text).then(() => {
+            // Optional: show toast notification
+            console.log('Copied:', text);
+        });
     }
 
     function cleanupHolderChart() { 

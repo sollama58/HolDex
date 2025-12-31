@@ -691,6 +691,44 @@ function init(deps) {
         } catch(e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
+    // --- TOP HOLDERS (for Orb AI integration) ---
+    router.get('/token/:mint/top-holders', cacheControl(60, 120), apiKeyAuth(false), async (req, res) => {
+        const { mint } = req.params;
+        try {
+            const holders = await db.all(`
+                SELECT
+                    holder,
+                    balance,
+                    conviction_class,
+                    buy_count,
+                    sell_count,
+                    net_flow,
+                    updated_at
+                FROM holder_snapshots
+                WHERE mint = $1
+                ORDER BY balance DESC
+                LIMIT 20
+            `, [mint]);
+
+            res.json({
+                success: true,
+                mint,
+                count: holders.length,
+                holders: holders.map(h => ({
+                    address: h.holder,
+                    balance: h.balance,
+                    class: h.conviction_class || 'unknown',
+                    buys: h.buy_count || 0,
+                    sells: h.sell_count || 0,
+                    netFlow: h.net_flow || 0,
+                    orbUrl: `https://orbmarkets.io/address/${h.holder}`
+                }))
+            });
+        } catch(e) {
+            res.status(500).json({ success: false, error: e.message });
+        }
+    });
+
     router.get('/tokens', cacheControl(2, 5), apiKeyAuth(false), async (req, res) => {
         let { search = '', sort = 'kscore', page = 1, filter, direction = 'desc', limit = 20 } = req.query;
         try {
