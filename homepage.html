@@ -954,7 +954,7 @@
         safeSetText('stat-mcap', formatCompact(data.marketCap));
         safeSetHTML('stat-chg5m', formatPct(data.change5m));
         safeSetHTML('stat-chg24h', formatPct(data.change24h));
-        safeSetText('stat-holders', (data.holders || 0).toLocaleString());
+        safeSetText('stat-holders', formatHolders(data.holders));
     }
 
     function navigateTo(path) { window.location.hash = path; }
@@ -1060,7 +1060,7 @@
                 <td class="text-right font-mono text-[#22c55e] text-xs">${formatVal(t.volume24h)}</td>
                 <td class="text-right font-mono text-[#fb923c] text-xs">${formatVal(t.marketCap)}</td>
                 
-                <td class="text-right font-mono text-[#3b82f6] text-xs hidden md:table-cell">${(t.holders||0).toLocaleString()}</td>
+                <td class="text-right font-mono text-[#3b82f6] text-xs hidden md:table-cell">${formatHolders(t.holders)}</td>
                 <td class="text-right text-[10px] text-[#9a3412] font-mono whitespace-nowrap hidden md:table-cell">${timeAgo(t.timestamp)}</td>
             </tr>`;
         }).join(''); 
@@ -1116,7 +1116,7 @@
                 if (mcapEl) mcapEl.innerText = '$' + new Intl.NumberFormat('en', {notation:'compact'}).format(t.marketCap||0);
                 
                 const holdersEl = document.getElementById('stat-holders');
-                if (holdersEl) holdersEl.innerText = (t.holders||0).toLocaleString();
+                if (holdersEl) holdersEl.innerText = formatHolders(t.holders);
                 
                 // CONDITIONAL KSCORE DISPLAY WITH METAL RANK
                 const kScoreContainer = document.getElementById('kscore-container');
@@ -1466,6 +1466,15 @@
             loadingEl.classList.add('hidden');
             contentEl.classList.remove('hidden');
         }
+    }
+
+    // Format holder count - show "+100k" for 100k+
+    function formatHolders(count) {
+        if (!count || count <= 0) return '-';
+        if (count >= 100000) return '+100k';
+        if (count >= 10000) return (count / 1000).toFixed(0) + 'k';
+        if (count >= 1000) return (count / 1000).toFixed(1) + 'k';
+        return count.toLocaleString();
     }
 
     function formatHolderBalance(rawBalance, decimals = 6) {
