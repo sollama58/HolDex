@@ -1631,6 +1631,39 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
 // ============================================
 
 /**
+ * Detect if token is from PumpFun and if bonding curve is complete
+ */
+async function detectTokenCategory(db, mint) {
+    const category = {
+        isPumpFun: false,
+        bondingCurveComplete: false
+    };
+
+    // Check if mint ends with 'pump' (PumpFun convention)
+    if (mint.endsWith('pump')) {
+        category.isPumpFun = true;
+    }
+
+    // Check if token has pumpswap pool (= graduated from bonding curve)
+    try {
+        const pumpPool = await db.get(`
+            SELECT dex FROM pools
+            WHERE mint = $1 AND dex IN ('pumpswap', 'pump-fun')
+            LIMIT 1
+        `, [mint]);
+
+        if (pumpPool) {
+            category.isPumpFun = true;
+            category.bondingCurveComplete = true;
+        }
+    } catch (e) {
+        // Ignore errors
+    }
+
+    return category;
+}
+
+/**
  * Update single token score immediately (for admin approval)
  */
 async function updateSingleToken(deps, mint) {
@@ -1642,10 +1675,19 @@ async function updateSingleToken(deps, mint) {
         logger.info(`[K-Score] Immediate calc for ${token.name || token.symbol}`);
         const result = await computeScoreInternal(mint, token, false, db);
         const conviction = result.conviction || {};
+        const burn = result.burn || {};
 
         // Apply EMA smoothing to prevent wild swings
         const previousScore = token.k_score || 0;
         const smoothedScore = applyEMA(result.score, previousScore);
+
+        // Detect token category (PumpFun, bonding curve)
+        const category = await detectTokenCategory(db, mint);
+
+        // Calculate initial supply (total supply before burns)
+        const currentSupply = burn.totalSupply || 0;
+        const burnedAmount = burn.burned || 0;
+        const initialSupply = currentSupply + burnedAmount;
 
         await db.run(`
             UPDATE tokens
@@ -1658,8 +1700,13 @@ async function updateSingleToken(deps, mint) {
                 conviction_extractors = $7,
                 conviction_analyzed = $8,
                 holders = $9,
-                last_holder_check = $10
-            WHERE mint = $11
+                last_holder_check = $10,
+                burned_amount = $11,
+                burned_percent = $12,
+                initial_supply = $13,
+                is_pump_fun = $14,
+                bonding_curve_complete = $15
+            WHERE mint = $16
         `, [
             smoothedScore,
             Date.now().toString(),
@@ -1671,6 +1718,11 @@ async function updateSingleToken(deps, mint) {
             conviction.analyzed || 0,
             conviction.realHoldersCount || 0,
             Date.now().toString(),
+            burnedAmount,
+            burn.burnPct || 0,
+            initialSupply > 0 ? initialSupply.toString() : null,
+            category.isPumpFun,
+            category.bondingCurveComplete,
             mint
         ]);
 
@@ -1728,10 +1780,19 @@ async function updateKScores(deps) {
             try {
                 const result = await computeScoreInternal(t.mint, t, false, db);
                 const conviction = result.conviction || {};
+                const burn = result.burn || {};
 
                 // Apply EMA smoothing to prevent wild swings
                 const previousScore = t.k_score || 0;
                 const smoothedScore = applyEMA(result.score, previousScore);
+
+                // Detect token category (PumpFun, bonding curve)
+                const category = await detectTokenCategory(db, t.mint);
+
+                // Calculate initial supply (total supply before burns)
+                const currentSupply = burn.totalSupply || 0;
+                const burnedAmount = burn.burned || 0;
+                const initialSupply = currentSupply + burnedAmount;
 
                 await db.run(`
                     UPDATE tokens
@@ -1744,8 +1805,13 @@ async function updateKScores(deps) {
                         conviction_extractors = $7,
                         conviction_analyzed = $8,
                         holders = $9,
-                        last_holder_check = $10
-                    WHERE mint = $11
+                        last_holder_check = $10,
+                        burned_amount = $11,
+                        burned_percent = $12,
+                        initial_supply = $13,
+                        is_pump_fun = $14,
+                        bonding_curve_complete = $15
+                    WHERE mint = $16
                 `, [
                     smoothedScore,
                     Date.now().toString(),
@@ -1757,6 +1823,11 @@ async function updateKScores(deps) {
                     conviction.analyzed || 0,
                     conviction.realHoldersCount || 0,
                     Date.now().toString(),
+                    burnedAmount,
+                    burn.burnPct || 0,
+                    initialSupply > 0 ? initialSupply.toString() : null,
+                    category.isPumpFun,
+                    category.bondingCurveComplete,
                     t.mint
                 ]);
 

@@ -63,6 +63,66 @@ function getCreditRating(score) {
     return { grade: 'D', label: 'Junk', color: '#ff0000' };
 }
 
+/**
+ * Calculate K-Score trajectory from historical data
+ * Returns: 'improving' | 'stable' | 'declining'
+ *
+ * Analyzes 30-day trend to determine trajectory
+ * - improving: score increased >5 points
+ * - declining: score decreased >5 points
+ * - stable: within ±5 points
+ */
+async function calculateTrajectory(db, mint, currentScore) {
+    try {
+        // Get K-Score history for last 30 days
+        const history = await db.all(`
+            SELECT k_score, date
+            FROM k_score_history
+            WHERE mint = $1
+              AND date >= CURRENT_DATE - INTERVAL '30 days'
+            ORDER BY date ASC
+            LIMIT 30
+        `, [mint]);
+
+        if (!history || history.length < 3) {
+            // Not enough data for trajectory
+            return { trajectory: 'stable', delta30d: 0, dataPoints: 0 };
+        }
+
+        // Calculate average of first week vs current score
+        const oldScores = history.slice(0, Math.min(7, Math.floor(history.length / 3)));
+        const avgOldScore = oldScores.reduce((sum, h) => sum + (h.k_score || 0), 0) / oldScores.length;
+        const delta = currentScore - avgOldScore;
+
+        let trajectory = 'stable';
+        if (delta > 5) trajectory = 'improving';
+        else if (delta < -5) trajectory = 'declining';
+
+        return {
+            trajectory,
+            delta30d: Math.round(delta * 10) / 10,
+            dataPoints: history.length
+        };
+    } catch (e) {
+        return { trajectory: 'stable', delta30d: 0, dataPoints: 0 };
+    }
+}
+
+/**
+ * Get Credit Rating with Trajectory (for GASdf integration)
+ */
+async function getCreditRatingWithTrajectory(db, mint, score) {
+    const base = getCreditRating(score);
+    const { trajectory, delta30d, dataPoints } = await calculateTrajectory(db, mint, score);
+
+    return {
+        ...base,
+        trajectory,
+        delta30d,
+        dataPoints
+    };
+}
+
 const requireAdmin = (req, res, next) => {
     // Reject if ADMIN_PASSWORD not configured
     if (!config.ADMIN_PASSWORD) {
@@ -678,7 +738,28 @@ function init(deps) {
                 tokenData.holders = tokenData.holders || 0;
                 tokenData.kScore = tokenData.k_score || tokenData.kScore || 0;
                 tokenData.kRank = getKRank(tokenData.kScore);
-                tokenData.creditRating = getCreditRating(tokenData.kScore);
+                tokenData.creditRating = await getCreditRatingWithTrajectory(db, mint, tokenData.kScore);
+
+                // GASdf Integration Fields
+                // Burn data
+                tokenData.burnedAmount = token.burned_amount || 0;
+                tokenData.burnedPercent = token.burned_percent || 0;
+                tokenData.initialSupply = token.initial_supply || token.supply;
+
+                // Token category
+                tokenData.isPumpFun = token.is_pump_fun || false;
+                tokenData.bondingCurveComplete = token.bonding_curve_complete || false;
+                tokenData.launchDate = token.timestamp ? new Date(parseInt(token.timestamp)).toISOString() : null;
+
+                // Conviction breakdown (for GASdf)
+                tokenData.conviction = {
+                    score: token.conviction_score || 0,
+                    accumulators: token.conviction_accumulators || 0,
+                    holders: token.conviction_holders || 0,
+                    reducers: token.conviction_reducers || 0,
+                    extractors: token.conviction_extractors || 0,
+                    analyzed: token.conviction_analyzed || 0
+                };
 
                 // --- NORMALIZE UPDATED STATUS ---
                 // Force boolean conversion for frontend consistency
@@ -813,9 +894,9 @@ function init(deps) {
                 page,
                 limit,
                 tokens: rows.map(r => ({
-                    mint: r.mint, 
-                    name: r.name, 
-                    ticker: r.symbol, 
+                    mint: r.mint,
+                    name: r.name,
+                    ticker: r.symbol,
                     image: r.image,
                     marketCap: r.marketcap || r.marketCap || 0,
                     volume24h: r.volume24h || 0,
@@ -824,12 +905,16 @@ function init(deps) {
                     change1h: r.change1h || 0,
                     change5m: r.change5m || 0,
                     liquidity: r.liquidity || 0,
-                    holders: r.holders || 0, 
+                    holders: r.holders || 0,
                     hasCommunityUpdate: r.hasCommunityUpdate || r.hascommunityupdate || false,
                     timestamp: parseInt(r.timestamp),
                     kScore: r.k_score || 0,
                     kRank: getKRank(r.k_score || 0),
-                    creditRating: getCreditRating(r.k_score || 0)
+                    creditRating: getCreditRating(r.k_score || 0),
+                    // GASdf fields (lightweight version for list)
+                    burnedPercent: r.burned_percent || 0,
+                    isPumpFun: r.is_pump_fun || false,
+                    convictionScore: r.conviction_score || 0
                 }))
             };
 

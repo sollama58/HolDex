@@ -131,7 +131,49 @@ async function initDB() {
                     created_at BIGINT DEFAULT 0,
                     UNIQUE(mint)
                 );
+
+                -- K-Score history for trajectory analysis (30/60/90 day trends)
+                CREATE TABLE IF NOT EXISTS k_score_history (
+                    mint TEXT NOT NULL,
+                    date DATE NOT NULL,
+                    k_score DOUBLE PRECISION,
+                    conviction_score DOUBLE PRECISION,
+                    holders INTEGER,
+                    PRIMARY KEY (mint, date)
+                );
+
+                -- Holder history for trend analysis
+                CREATE TABLE IF NOT EXISTS holder_history (
+                    mint TEXT NOT NULL,
+                    date DATE NOT NULL,
+                    holders INTEGER,
+                    real_holders INTEGER,
+                    PRIMARY KEY (mint, date)
+                );
             `);
+
+            // Add new columns if they don't exist (migration-safe)
+            const migrations = [
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS initial_supply TEXT`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS burned_amount DOUBLE PRECISION DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS burned_percent DOUBLE PRECISION DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS is_pump_fun BOOLEAN DEFAULT FALSE`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS bonding_curve_complete BOOLEAN DEFAULT FALSE`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_score DOUBLE PRECISION DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_accumulators INTEGER DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_holders INTEGER DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_reducers INTEGER DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_extractors INTEGER DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_analyzed INTEGER DEFAULT 0`,
+            ];
+
+            for (const sql of migrations) {
+                try {
+                    await primaryPool.query(sql);
+                } catch (e) {
+                    // Column might already exist, ignore
+                }
+            }
 
             dbWrapper = {
                 query: (text, params) => (text.trim().toUpperCase().startsWith('SELECT') ? readPool : primaryPool).query(text, params),
