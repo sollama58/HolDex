@@ -977,7 +977,8 @@ async function checkLPStatus(db, mint) {
 
 /**
  * Check Raydium pool LP burn status
- * Raydium AMM v4 pool layout has lpMint at specific offset
+ * Raydium AMM v4 pool layout:
+ *   - lpMint: Pubkey at offset 432 (32 bytes)
  */
 async function checkRaydiumLPBurn(poolAddress) {
     try {
@@ -990,19 +991,32 @@ async function checkRaydiumLPBurn(poolAddress) {
 
         const data = Buffer.from(poolInfo.value.data[0], 'base64');
 
-        // Raydium AMM v4: lpMint is at offset 400 (32 bytes)
-        // This is approximate - may need adjustment
-        if (data.length < 432) {
+        // Raydium AMM v4: lpMint is at offset 432 (32 bytes)
+        // Layout: status(8) + nonce(8) + ... + lpMint(32)
+        const LP_MINT_OFFSET = 432;
+        if (data.length < LP_MINT_OFFSET + 32) {
             return null;
         }
 
-        // Extract LP mint pubkey (simplified - need proper base58 encoding)
-        // For now, try to get LP holders directly if we know the LP mint
-        // TODO: Implement proper Raydium pool parsing
+        // Extract LP mint pubkey and convert to base58
+        const lpMintBytes = data.slice(LP_MINT_OFFSET, LP_MINT_OFFSET + 32);
+        const lpMint = bs58.encode(lpMintBytes);
 
-        return null; // Fallback for now
+        // Validate it looks like a real pubkey (not all zeros)
+        if (lpMint.startsWith('1111111')) {
+            return null;
+        }
+
+        // Check LP holders for burn/lock status
+        const lpStatus = await checkLPHolders(lpMint);
+        if (lpStatus) {
+            lpStatus.lpMint = lpMint;
+        }
+
+        return lpStatus;
 
     } catch (e) {
+        logger.warn(`[LP] Raydium parse error: ${e.message}`);
         return null;
     }
 }
