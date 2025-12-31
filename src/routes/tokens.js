@@ -22,6 +22,34 @@ const solanaConnection = getSolanaConnection();
 
 const pendingRefreshes = new Set();
 
+/**
+ * K-Score Metal Rank Tiers (aligned with Credit Grades)
+ */
+function getKRank(score) {
+    if (score >= 90) return { tier: 'Diamond', icon: '💎', level: 8 };
+    if (score >= 80) return { tier: 'Platinum', icon: '💠', level: 7 };
+    if (score >= 70) return { tier: 'Gold', icon: '🥇', level: 6 };
+    if (score >= 60) return { tier: 'Silver', icon: '🥈', level: 5 };
+    if (score >= 50) return { tier: 'Bronze', icon: '🥉', level: 4 };
+    if (score >= 40) return { tier: 'Copper', icon: '🟤', level: 3 };
+    if (score >= 20) return { tier: 'Iron', icon: '⚫', level: 2 };
+    return { tier: 'Rust', icon: '🔩', level: 1 };
+}
+
+/**
+ * Credit Rating System - "Moody's for Memecoins"
+ */
+function getCreditRating(score) {
+    if (score >= 90) return { grade: 'A1', label: 'Prime', color: '#00ff88' };
+    if (score >= 80) return { grade: 'A2', label: 'Excellent', color: '#00dd77' };
+    if (score >= 70) return { grade: 'A3', label: 'Good', color: '#00bb66' };
+    if (score >= 60) return { grade: 'B1', label: 'Fair', color: '#ffcc00' };
+    if (score >= 50) return { grade: 'B2', label: 'Speculative', color: '#ffaa00' };
+    if (score >= 40) return { grade: 'B3', label: 'Risky', color: '#ff8800' };
+    if (score >= 20) return { grade: 'C', label: 'High Risk', color: '#ff4400' };
+    return { grade: 'D', label: 'Junk', color: '#ff0000' };
+}
+
 const requireAdmin = (req, res, next) => {
     const authHeader = req.headers['x-admin-auth'];
     if (!authHeader || authHeader !== config.ADMIN_PASSWORD) {
@@ -578,7 +606,9 @@ function init(deps) {
                 tokenData.volume24h = tokenData.volume24h || 0;
                 tokenData.holders = tokenData.holders || 0;
                 tokenData.kScore = tokenData.k_score || tokenData.kScore || 0;
-                
+                tokenData.kRank = getKRank(tokenData.kScore);
+                tokenData.creditRating = getCreditRating(tokenData.kScore);
+
                 // --- NORMALIZE UPDATED STATUS ---
                 // Force boolean conversion for frontend consistency
                 const rawStatus = token.hasCommunityUpdate || token.hascommunityupdate;
@@ -683,7 +713,9 @@ function init(deps) {
                     holders: r.holders || 0, 
                     hasCommunityUpdate: r.hasCommunityUpdate || r.hascommunityupdate || false,
                     timestamp: parseInt(r.timestamp),
-                    kScore: r.k_score || 0
+                    kScore: r.k_score || 0,
+                    kRank: getKRank(r.k_score || 0),
+                    creditRating: getCreditRating(r.k_score || 0)
                 }))
             };
 
