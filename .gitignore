@@ -43,6 +43,10 @@ temp/
 *.tmp
 *.bak
 
+# Redis
+*.rdb
+dump.rdb
+
 # Claude Code
 .claude/
 
