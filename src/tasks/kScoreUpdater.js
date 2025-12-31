@@ -86,8 +86,25 @@ const SNAPSHOT_TTL = 3600000; // 1 hour - use delta if snapshot is newer
  */
 async function saveHolderSnapshots(db, mint, holders) {
     const now = Date.now();
+    let saved = 0;
+    let failed = 0;
+
     for (const h of holders) {
         try {
+            // Ensure all values are valid (convert BigInt, handle undefined)
+            const address = h.address || '';
+            const lastSig = h.lastSignature || null;
+            const buyCount = Math.floor(Number(h.buyCount)) || 0;
+            const sellCount = Math.floor(Number(h.sellCount)) || 0;
+            const netFlow = Math.floor(Number(h.netFlow)) || 0;
+            const convClass = h.convictionClass || 'holder';
+            const balance = Math.floor(Number(h.balance)) || 0; // Truncate decimals for BIGINT
+
+            if (!address) {
+                failed++;
+                continue;
+            }
+
             await db.run(`
                 INSERT INTO holder_snapshots (mint, holder, last_signature, buy_count, sell_count, net_flow, conviction_class, balance, updated_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -99,11 +116,19 @@ async function saveHolderSnapshots(db, mint, holders) {
                     conviction_class = EXCLUDED.conviction_class,
                     balance = EXCLUDED.balance,
                     updated_at = EXCLUDED.updated_at
-            `, [mint, h.address, h.lastSignature, h.buyCount, h.sellCount, h.netFlow, h.convictionClass, h.balance, now]);
+            `, [mint, address, lastSig, buyCount, sellCount, netFlow, convClass, balance, now]);
+            saved++;
         } catch (e) {
-            // Ignore individual errors
+            logger.warn(`[Snapshot] Failed to save ${h.address?.slice(0,8)}: ${e.message}`);
+            failed++;
         }
     }
+
+    if (failed > 0) {
+        logger.warn(`[Snapshot] ${mint.slice(0,8)}: ${saved} saved, ${failed} failed`);
+    }
+
+    return { saved, failed };
 }
 
 /**
@@ -608,8 +633,8 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
 
         // 5. Save snapshots for future delta analysis
         if (db && snapshotData.length > 0) {
-            await saveHolderSnapshots(db, mint, snapshotData);
-            logger.info(`[Snapshot] ${mint.slice(0,8)}: Saved ${snapshotData.length} holder snapshots`);
+            const { saved, failed } = await saveHolderSnapshots(db, mint, snapshotData);
+            logger.info(`[Snapshot] ${mint.slice(0,8)}: Saved ${saved}/${snapshotData.length} holder snapshots${failed > 0 ? ` (${failed} failed)` : ''}`);
         }
 
         const score = Math.round(((accumulators + holders) / analyzed) * 100);
