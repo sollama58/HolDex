@@ -38,12 +38,13 @@ async function calculateDeepScore(db, token) {
         if (p.reserve_b) excludeList.push(p.reserve_b);
     });
 
-    // 2. Heavy Analysis (RPC Call)
+    // 2. Heavy Analysis (RPC Call) - Hold time + Conviction
     let avgHoldHours = 0;
-    if (excludeList.length > 0) {
-        const analysis = await analyzeTokenHolders(token.mint, excludeList);
-        avgHoldHours = analysis.avgHoldHours || 0;
-    }
+    let conviction = { score: 0, accumulators: 0, holders: 0, reducers: 0, extractors: 0, analyzed: 0 };
+
+    const analysis = await analyzeTokenHolders(token.mint, excludeList);
+    avgHoldHours = analysis.avgHoldHours || 0;
+    conviction = analysis.conviction || conviction;
 
     // 3. Holder Trend (SQL Only)
     let holderGrowthPct = 0;
@@ -58,60 +59,64 @@ async function calculateDeepScore(db, token) {
         holderGrowthPct = ((token.holders - historyRow.count) / historyRow.count) * 100;
     }
 
-    // --- SCORING BREAKDOWN ---
+    // --- SCORING BREAKDOWN (Rebalanced with Conviction) ---
+    // A. CONVICTION (35 pts) - Top 20 holders' behavior
+    // B. HOLD TIME (25 pts) - Average hold duration
+    // C. AGE (10 pts) - Token survival
+    // D. ACTIVITY (15 pts) - Volume & Liquidity
+    // E. TREND (15 pts) - Holder growth
+    // Total: 100 pts max
+
     let logMsg = `K-Score [${token.symbol}]:`;
 
-    // A. DIAMOND HANDS (Log Scale) - Max 45 pts
-    // Previous: 20 * log10(hours+1) -> Too easy.
-    // New: 15 * log10(hours+1)
-    // 1 week (168h) -> 15 * 2.22 = 33 pts
-    // 1 month (720h) -> 15 * 2.85 = 42 pts
-    // 6 months (4380h) -> 15 * 3.6 = 54 (Capped at 45)
-    const holdScore = 15 * Math.log10(avgHoldHours + 1);
-    const cappedHold = Math.min(Math.max(holdScore, 0), 45);
+    // A. CONVICTION (Top 20 Holders) - Max 35 pts
+    // conviction.score = % of accumulators + holders (diamond hands)
+    const convictionPts = (conviction.score / 100) * 35;
+    score += convictionPts;
+    logMsg += ` Conv(${conviction.score}%->+${convictionPts.toFixed(1)})`;
+    if (conviction.analyzed > 0) {
+        logMsg += `[${conviction.accumulators}A/${conviction.holders}H/${conviction.reducers}R/${conviction.extractors}E]`;
+    }
+
+    // B. HOLD TIME (Log Scale) - Max 25 pts
+    // 1 week (168h) -> ~15 pts, 1 month (720h) -> ~21 pts
+    const holdScore = 11 * Math.log10(avgHoldHours + 1);
+    const cappedHold = Math.min(Math.max(holdScore, 0), 25);
     score += cappedHold;
-    logMsg += ` Hold(${avgHoldHours.toFixed(1)}h->+${cappedHold.toFixed(1)})`;
+    logMsg += ` Hold(${avgHoldHours.toFixed(0)}h->+${cappedHold.toFixed(1)})`;
 
-    // B. TOKEN AGE (Log Scale) - Max 15 pts (Reduced from 30)
-    // Survival is good, but not the only metric.
-    // 1 week -> 16 pts (Capped at 15)
-    // Basically, if it survives a week, it gets the full "Age" bonus.
-    const ageScore = 7 * Math.log10(ageHours + 1);
-    const cappedAge = Math.min(Math.max(ageScore, 0), 15);
+    // C. TOKEN AGE (Log Scale) - Max 10 pts
+    const ageScore = 5 * Math.log10(ageHours + 1);
+    const cappedAge = Math.min(Math.max(ageScore, 0), 10);
     score += cappedAge;
-    logMsg += ` Age(${ageHours.toFixed(1)}h->+${cappedAge.toFixed(1)})`;
+    logMsg += ` Age(${(ageHours/24).toFixed(0)}d->+${cappedAge.toFixed(1)})`;
 
-    // C. ACTIVITY (Volume & Liquidity) - Max 20 pts (NEW)
-    // Differentiates "Old & Dead" from "Old & Active".
-    // Dormant tokens (low vol) will miss these points, dropping them from 80s to 60s.
+    // D. ACTIVITY (Volume & Liquidity) - Max 15 pts
     let activityScore = 0;
-    if (vol > 100000) activityScore += 10;
-    else if (vol > 10000) activityScore += 5;
-    
-    if (liq > 100000) activityScore += 10;
-    else if (liq > 20000) activityScore += 5;
-    
-    score += activityScore;
-    logMsg += ` Active(Vol/Liq->+${activityScore})`;
+    if (vol > 100000) activityScore += 7;
+    else if (vol > 10000) activityScore += 4;
 
-    // D. VIRALITY (Trend) - Max 20 pts
-    if (holderGrowthPct > 20) { score += 20; logMsg += ' Trend(>20%->+20)'; }
-    else if (holderGrowthPct > 5) { score += 10; logMsg += ' Trend(>5%->+10)'; }
-    else if (holderGrowthPct > 0) { score += 2; logMsg += ' Trend(>0%->+2)'; }
-    else if (holderGrowthPct < -10) { score -= 10; logMsg += ' Trend(Dump->-10)'; }
-    
-    // E. PENALTIES
-    // Bot volume detection
+    if (liq > 100000) activityScore += 8;
+    else if (liq > 20000) activityScore += 4;
+
+    score += activityScore;
+    logMsg += ` Active(+${activityScore})`;
+
+    // E. TREND (Holder Growth) - Max 15 pts
+    if (holderGrowthPct > 20) { score += 15; logMsg += ' Trend(+15)'; }
+    else if (holderGrowthPct > 5) { score += 8; logMsg += ' Trend(+8)'; }
+    else if (holderGrowthPct > 0) { score += 2; logMsg += ' Trend(+2)'; }
+    else if (holderGrowthPct < -10) { score -= 10; logMsg += ' Trend(-10)'; }
+
+    // F. PENALTIES
     if (vol > 1000000 && avgHoldHours < 1) {
         score -= 40;
         logMsg += ' BotPenalty(-40)';
     }
-    
-    // Removed Zombie Penalty as requested - old tokens with diamond hands should score well.
 
     // Final Clamp 0-99
     const finalScore = Math.min(Math.max(Math.floor(score), 0), 99);
-    
+
     logger.info(`${logMsg} = ${finalScore}`);
 
     return finalScore;
