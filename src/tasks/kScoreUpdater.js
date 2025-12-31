@@ -76,6 +76,205 @@ async function saveKScoreHistory(db, mint, kScore, convictionScore, holders) {
 }
 
 // ============================================
+// DELTA ANALYSIS - Incremental conviction updates
+// ============================================
+
+const SNAPSHOT_TTL = 3600000; // 1 hour - use delta if snapshot is newer
+
+/**
+ * Save holder snapshots for delta analysis
+ */
+async function saveHolderSnapshots(db, mint, holders) {
+    const now = Date.now();
+    for (const h of holders) {
+        try {
+            await db.run(`
+                INSERT INTO holder_snapshots (mint, holder, last_signature, buy_count, sell_count, net_flow, conviction_class, balance, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                ON CONFLICT (mint, holder) DO UPDATE SET
+                    last_signature = EXCLUDED.last_signature,
+                    buy_count = EXCLUDED.buy_count,
+                    sell_count = EXCLUDED.sell_count,
+                    net_flow = EXCLUDED.net_flow,
+                    conviction_class = EXCLUDED.conviction_class,
+                    balance = EXCLUDED.balance,
+                    updated_at = EXCLUDED.updated_at
+            `, [mint, h.address, h.lastSignature, h.buyCount, h.sellCount, h.netFlow, h.convictionClass, h.balance, now]);
+        } catch (e) {
+            // Ignore individual errors
+        }
+    }
+}
+
+/**
+ * Load existing holder snapshots for a token
+ */
+async function loadHolderSnapshots(db, mint) {
+    try {
+        const snapshots = await db.all(
+            'SELECT * FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC',
+            [mint]
+        );
+        return snapshots || [];
+    } catch (e) {
+        return [];
+    }
+}
+
+/**
+ * Get NEW transactions for a holder since last snapshot
+ */
+async function getNewTransactions(wallet, lastSignature, mint) {
+    const newTxs = [];
+    let before = null;
+
+    for (let page = 0; page < 3; page++) { // Max 3 pages of new txs
+        const txs = await getEnhancedTransactions(wallet, { limit: 50, before });
+        if (!txs || txs.length === 0) break;
+
+        let foundLast = false;
+        for (const tx of txs) {
+            // Stop if we've reached the last analyzed signature
+            if (tx.signature === lastSignature) {
+                foundLast = true;
+                break;
+            }
+
+            // Check if this tx involves our mint
+            if (tx.tokenTransfers) {
+                for (const transfer of tx.tokenTransfers) {
+                    if (transfer.mint === mint) {
+                        newTxs.push({
+                            signature: tx.signature,
+                            amount: transfer.tokenAmount || 0,
+                            isBuy: transfer.toUserAccount === wallet,
+                            isSell: transfer.fromUserAccount === wallet
+                        });
+                    }
+                }
+            }
+        }
+
+        if (foundLast) break;
+        before = txs[txs.length - 1]?.signature;
+        if (!before || txs.length < 50) break;
+    }
+
+    return newTxs;
+}
+
+/**
+ * Classify holder from buy/sell counts
+ */
+function classifyFromCounts(buyCount, sellCount, netFlow) {
+    if (buyCount === 0 && sellCount === 0) return 'holder';
+
+    const ratio = sellCount > 0 ? buyCount / sellCount : buyCount > 0 ? 10 : 1;
+
+    if (ratio >= 2) return 'accumulator';   // 2x more buys than sells
+    if (ratio >= 0.8) return 'holder';       // Roughly balanced
+    if (ratio >= 0.3) return 'reducer';      // More sells
+    return 'extractor';                       // Heavy selling
+}
+
+/**
+ * Delta analysis - update conviction from new transactions only
+ * Returns null if snapshots too old or don't exist (triggers full analysis)
+ */
+async function deltaConvictionAnalysis(db, mint) {
+    const snapshots = await loadHolderSnapshots(db, mint);
+
+    if (snapshots.length === 0) {
+        logger.info(`[Delta] ${mint.slice(0,8)}: No snapshots, need full analysis`);
+        return null;
+    }
+
+    // Check if snapshots are fresh enough
+    const newestSnapshot = Math.max(...snapshots.map(s => s.updated_at || 0));
+    if (Date.now() - newestSnapshot > SNAPSHOT_TTL) {
+        logger.info(`[Delta] ${mint.slice(0,8)}: Snapshots stale (${Math.round((Date.now() - newestSnapshot) / 60000)}min old), need full analysis`);
+        return null;
+    }
+
+    logger.info(`[Delta] ${mint.slice(0,8)}: Using delta analysis (${snapshots.length} holders cached)`);
+
+    let updated = 0;
+    let accumulators = 0;
+    let holders = 0;
+    let reducers = 0;
+    let extractors = 0;
+
+    for (const snap of snapshots) {
+        try {
+            // Get only NEW transactions since last check
+            const newTxs = await getNewTransactions(snap.holder, snap.last_signature, mint);
+
+            if (newTxs.length > 0) {
+                // Update counts incrementally
+                let buyCount = snap.buy_count || 0;
+                let sellCount = snap.sell_count || 0;
+                let netFlow = snap.net_flow || 0;
+                let newLastSig = newTxs[0].signature; // Most recent
+
+                for (const tx of newTxs) {
+                    if (tx.isBuy) {
+                        buyCount++;
+                        netFlow += tx.amount;
+                    }
+                    if (tx.isSell) {
+                        sellCount++;
+                        netFlow -= tx.amount;
+                    }
+                }
+
+                // Reclassify based on updated counts
+                const newClass = classifyFromCounts(buyCount, sellCount, netFlow);
+
+                // Save updated snapshot
+                await db.run(`
+                    UPDATE holder_snapshots
+                    SET buy_count = $1, sell_count = $2, net_flow = $3,
+                        conviction_class = $4, last_signature = $5, updated_at = $6
+                    WHERE mint = $7 AND holder = $8
+                `, [buyCount, sellCount, netFlow, newClass, newLastSig, Date.now(), mint, snap.holder]);
+
+                snap.conviction_class = newClass;
+                updated++;
+
+                logger.debug(`[Delta] ${snap.holder.slice(0,8)}: +${newTxs.length} txs → ${newClass}`);
+            }
+
+            // Count by class
+            switch (snap.conviction_class) {
+                case 'accumulator': accumulators++; break;
+                case 'holder': holders++; break;
+                case 'reducer': reducers++; break;
+                case 'extractor': extractors++; break;
+            }
+
+            await sleep(50); // Light rate limiting
+        } catch (e) {
+            // Skip failed holders
+        }
+    }
+
+    const analyzed = snapshots.length;
+    const score = analyzed > 0 ? Math.round(((accumulators + holders) / analyzed) * 100) : 0;
+
+    logger.info(`[Delta] ${mint.slice(0,8)}: ${score}% (${updated} updated, ${accumulators} acc, ${holders} hold)`);
+
+    return {
+        score,
+        analyzed,
+        accumulators,
+        holders,
+        reducers,
+        extractors,
+        isDelta: true
+    };
+}
+
+// ============================================
 // DEX PROGRAMS - Filter out pools from holders
 // ============================================
 
@@ -232,10 +431,19 @@ async function getHolderRetention(wallet, mint) {
     let firstBuyAmount = 0;
     let currentBalance = 0;
     let before = null;
+    let buyCount = 0;
+    let sellCount = 0;
+    let netFlow = 0;
+    let lastSignature = null;
 
     for (let page = 0; page < 5; page++) {
         const txs = await getEnhancedTransactions(wallet, { limit: 100, before });
         if (!txs || txs.length === 0) break;
+
+        // Capture the most recent signature (first tx on first page)
+        if (page === 0 && txs.length > 0) {
+            lastSignature = txs[0].signature;
+        }
 
         for (const tx of txs) {
             if (!tx.tokenTransfers) continue;
@@ -246,9 +454,13 @@ async function getHolderRetention(wallet, mint) {
                 if (transfer.toUserAccount === wallet) {
                     currentBalance += amount;
                     firstBuyAmount = amount; // Going backwards, last seen = first buy
+                    buyCount++;
+                    netFlow += amount;
                 }
                 if (transfer.fromUserAccount === wallet) {
                     currentBalance -= amount;
+                    sellCount++;
+                    netFlow -= amount;
                 }
             }
         }
@@ -258,10 +470,19 @@ async function getHolderRetention(wallet, mint) {
     }
 
     if (currentBalance < 0) currentBalance = 0;
-    return firstBuyAmount > 0 ? currentBalance / firstBuyAmount : 0;
+    const retention = firstBuyAmount > 0 ? currentBalance / firstBuyAmount : 0;
+
+    return {
+        retention,
+        buyCount,
+        sellCount,
+        netFlow,
+        lastSignature
+    };
 }
 
-function classifyRetention(retention) {
+function classifyRetention(retentionData) {
+    const retention = typeof retentionData === 'object' ? retentionData.retention : retentionData;
     if (retention >= 1.5) return 'accumulator';
     if (retention >= 1.0) return 'holder';
     if (retention >= 0.5) return 'reducer';
@@ -274,15 +495,41 @@ function classifyRetention(retention) {
  * @param {string} mint - Token mint address
  * @param {number} priceUsd - Current token price in USD
  * @param {number} decimals - Token decimals (default 9 for SPL)
+ * @param {Object} db - Database connection (for saving snapshots)
  * @returns {Object} { score, analyzed, accumulators, holders, reducers, extractors, realHoldersCount, totalHolders }
  */
-async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9) {
+async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, db = null) {
     const TOP_HOLDERS = 20;
     const CANDIDATES = 50;
     const MIN_USD_VALUE = 1; // $1 minimum to count as "real holder"
 
     try {
-        // 1. Fetch all holders
+        // 0. Try delta analysis first (if snapshots exist and are fresh)
+        if (db) {
+            const deltaResult = await deltaConvictionAnalysis(db, mint);
+            if (deltaResult) {
+                // Delta succeeded, we still need holder counts
+                const allHolders = await fetchTokenHolders(mint);
+                let realHoldersCount = 0;
+                if (priceUsd > 0) {
+                    const divisor = Math.pow(10, decimals);
+                    for (const h of allHolders) {
+                        const usdValue = (h.balance / divisor) * priceUsd;
+                        if (usdValue >= MIN_USD_VALUE) realHoldersCount++;
+                    }
+                } else {
+                    realHoldersCount = allHolders.length;
+                }
+                return {
+                    ...deltaResult,
+                    realHoldersCount,
+                    totalHolders: allHolders.length,
+                    allHolders
+                };
+            }
+        }
+
+        // 1. Fetch all holders (full analysis)
         const allHolders = await fetchTokenHolders(mint);
         if (allHolders.length === 0) {
             return { score: 0, analyzed: 0, realHoldersCount: 0, totalHolders: 0 };
@@ -325,16 +572,28 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9) {
         let reducers = 0;
         let extractors = 0;
         let analyzed = 0;
+        const snapshotData = []; // For saving to DB
 
         for (const holder of top20) {
             try {
-                const retention = await getHolderRetention(holder.address, mint);
-                const classification = classifyRetention(retention);
+                const retentionData = await getHolderRetention(holder.address, mint);
+                const classification = classifyRetention(retentionData);
 
                 if (classification === 'accumulator') accumulators++;
                 else if (classification === 'holder') holders++;
                 else if (classification === 'reducer') reducers++;
                 else if (classification === 'extractor') extractors++;
+
+                // Collect data for snapshot
+                snapshotData.push({
+                    address: holder.address,
+                    balance: holder.balance,
+                    buyCount: retentionData.buyCount,
+                    sellCount: retentionData.sellCount,
+                    netFlow: retentionData.netFlow,
+                    lastSignature: retentionData.lastSignature,
+                    convictionClass: classification
+                });
 
                 analyzed++;
                 await sleep(100); // Rate limit
@@ -345,6 +604,12 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9) {
 
         if (analyzed === 0) {
             return { score: 0, analyzed: 0, realHoldersCount, totalHolders: allHolders.length };
+        }
+
+        // 5. Save snapshots for future delta analysis
+        if (db && snapshotData.length > 0) {
+            await saveHolderSnapshots(db, mint, snapshotData);
+            logger.info(`[Snapshot] ${mint.slice(0,8)}: Saved ${snapshotData.length} holder snapshots`);
         }
 
         const score = Math.round(((accumulators + holders) / analyzed) * 100);
@@ -1031,7 +1296,7 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         // ============================================
 
         if (!skipConviction && HELIUS_API_KEY) {
-            convictionData = await calculateConvictionAndHolders(mint, priceUsd, decimals);
+            convictionData = await calculateConvictionAndHolders(mint, priceUsd, decimals, db);
 
             // For top10 calculation
             burnData = await calculateBurn(mint, convictionData.allHolders || []);
