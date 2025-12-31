@@ -13,6 +13,7 @@ const { startSnapshotter } = require('./indexer/tasks/snapshotter');
 // REMOVED: const { startNewTokenListener } = require('./services/new_token_listener'); 
 const { initSocket } = require('./services/socket'); 
 const tokensRoutes = require('./routes/tokens');
+const webhooksRoutes = require('./routes/webhooks');
 const fs = require('fs');
 const path = require('path');
 
@@ -185,6 +186,7 @@ async function startServer() {
         
         // Initialize Routes
         app.use('/api', tokensRoutes.init({ db: getDB() }));
+        app.use('/webhook', webhooksRoutes.init({ db: getDB() }));
 
         app.use((err, req, res, next) => {
             logger.error(`🔥 Unhandled Server Error: ${err.message}`);

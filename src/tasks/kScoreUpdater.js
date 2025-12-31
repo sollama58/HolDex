@@ -518,6 +518,10 @@ function classifyRetention(retentionData) {
 /**
  * Calculate conviction score AND real holders count
  *
+ * DUAL MODE:
+ * - WEBHOOK MODE: If USE_WEBHOOKS=true and fresh snapshots exist, use cached data (0 API calls)
+ * - POLLING MODE: Traditional API-based analysis (100+ API calls per token)
+ *
  * @param {string} mint - Token mint address
  * @param {number} priceUsd - Current token price in USD
  * @param {number} decimals - Token decimals (default 9 for SPL)
@@ -530,6 +534,77 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
     const MIN_USD_VALUE = 1; // $1 minimum to count as "real holder"
 
     try {
+        // ============================================
+        // WEBHOOK MODE: Use cached snapshots (0 API calls)
+        // ============================================
+        // When webhooks are active, holder_snapshots is constantly updated
+        // by POST /webhook/transfers, so we just read from cache
+
+        if (config.USE_WEBHOOKS && db) {
+            const snapshots = await db.all(
+                'SELECT * FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 20',
+                [mint]
+            );
+
+            // If we have cached data, use it (webhook mode)
+            if (snapshots && snapshots.length > 0) {
+                // Check freshness (snapshots should be updated by webhook in real-time)
+                const newestSnapshot = Math.max(...snapshots.map(s => s.updated_at || 0));
+                const ageMinutes = (Date.now() - newestSnapshot) / 60000;
+
+                // If snapshots are reasonably fresh (< 30 min), use them
+                if (ageMinutes < 30) {
+                    let accumulators = 0, holders = 0, reducers = 0, extractors = 0;
+
+                    for (const snap of snapshots) {
+                        switch (snap.conviction_class) {
+                            case 'accumulator': accumulators++; break;
+                            case 'holder': holders++; break;
+                            case 'reducer': reducers++; break;
+                            case 'extractor': extractors++; break;
+                        }
+                    }
+
+                    const analyzed = snapshots.length;
+                    const score = analyzed > 0 ? Math.round(((accumulators + holders) / analyzed) * 100) : 0;
+
+                    logger.info(`[Webhook Mode] ${mint.slice(0,8)}: ${score}% conviction from cache (${analyzed} holders, ${ageMinutes.toFixed(0)}m old)`);
+
+                    // Still need total holder count - this is a lightweight call
+                    const allHolders = await fetchTokenHolders(mint);
+                    let realHoldersCount = 0;
+                    if (priceUsd > 0) {
+                        const divisor = Math.pow(10, decimals);
+                        for (const h of allHolders) {
+                            const usdValue = (h.balance / divisor) * priceUsd;
+                            if (usdValue >= MIN_USD_VALUE) realHoldersCount++;
+                        }
+                    } else {
+                        realHoldersCount = allHolders.length;
+                    }
+
+                    return {
+                        score,
+                        analyzed,
+                        accumulators,
+                        holders,
+                        reducers,
+                        extractors,
+                        realHoldersCount,
+                        totalHolders: allHolders.length,
+                        allHolders,
+                        isWebhookMode: true
+                    };
+                }
+
+                logger.info(`[Webhook Mode] ${mint.slice(0,8)}: Snapshots stale (${ageMinutes.toFixed(0)}m), falling back to polling`);
+            }
+        }
+
+        // ============================================
+        // POLLING MODE: Traditional API-based analysis
+        // ============================================
+
         // 0. Try delta analysis first (if snapshots exist and are fresh)
         if (db) {
             const deltaResult = await deltaConvictionAnalysis(db, mint);

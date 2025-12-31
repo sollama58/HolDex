@@ -64,5 +64,13 @@ module.exports = {
     FEE_TOKEN_MINT: process.env.FEE_TOKEN_MINT || '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump',
     
     // --- MEMORY PROTECTION ---
-    ENABLE_RPC_HOLDER_CHECK: process.env.ENABLE_RPC_HOLDER_CHECK !== 'false'
+    ENABLE_RPC_HOLDER_CHECK: process.env.ENABLE_RPC_HOLDER_CHECK !== 'false',
+
+    // --- WEBHOOK CONFIGURATION ---
+    // API_URL: Public URL for webhook callbacks (e.g., https://holdex.io)
+    API_URL: process.env.API_URL || null,
+    // WEBHOOK_URL: Full webhook callback URL (auto-detected from API_URL if not set)
+    WEBHOOK_URL: process.env.WEBHOOK_URL || null,
+    // USE_WEBHOOKS: Enable webhook mode (auto-detected if WEBHOOK_URL or API_URL is set)
+    USE_WEBHOOKS: !!(process.env.WEBHOOK_URL || process.env.API_URL)
 };

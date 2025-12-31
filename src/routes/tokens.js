@@ -28,6 +28,7 @@ const logger = require('../services/logger');
 const cacheControl = require('../middleware/httpCache');
 const apiKeyAuth = require('../middleware/apiKeyAuth');
 const { indexTokenOnChain } = require('../services/indexer');
+const { addTokenToMasterWebhook } = require('../services/heliusWebhook');
 
 const router = express.Router();
 const solanaConnection = getSolanaConnection();
@@ -345,11 +346,22 @@ function init(deps) {
             currentMeta.community = { ...(currentMeta.community || {}), ...newCommunity }; 
             const jsonStr = JSON.stringify(currentMeta); 
             
-            await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE, updated_at = CURRENT_TIMESTAMP WHERE mint = $2`, [jsonStr, request.mint]); 
-            await db.run(`UPDATE token_updates SET status = 'approved' WHERE id = $1`, [id]); 
-            await updateSingleToken({ db }, request.mint); 
-            res.json({ success: true }); 
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+            await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE, updated_at = CURRENT_TIMESTAMP WHERE mint = $2`, [jsonStr, request.mint]);
+            await db.run(`UPDATE token_updates SET status = 'approved' WHERE id = $1`, [id]);
+
+            // Add token to Helius webhook for real-time holder tracking (if enabled)
+            if (config.USE_WEBHOOKS) {
+                try {
+                    await addTokenToMasterWebhook(db, request.mint);
+                    logger.info(`[Webhook] Added ${request.mint.slice(0,8)} to master webhook`);
+                } catch (webhookErr) {
+                    logger.warn(`[Webhook] Failed to add ${request.mint.slice(0,8)}: ${webhookErr.message}`);
+                }
+            }
+
+            await updateSingleToken({ db }, request.mint);
+            res.json({ success: true });
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.post('/admin/reject-update', requireAdmin, async (req, res) => { const { id } = req.body; try { await db.run(`UPDATE token_updates SET status = 'rejected' WHERE id = $1`, [id]); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });

@@ -123,6 +123,14 @@ async function initDB() {
                     updated_at BIGINT DEFAULT 0,
                     PRIMARY KEY (mint, holder)
                 );
+
+                CREATE TABLE IF NOT EXISTS webhooks (
+                    id TEXT PRIMARY KEY,
+                    mint TEXT NOT NULL,
+                    webhook_id TEXT NOT NULL,
+                    created_at BIGINT DEFAULT 0,
+                    UNIQUE(mint)
+                );
             `);
 
             dbWrapper = {
