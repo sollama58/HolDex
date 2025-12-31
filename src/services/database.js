@@ -221,11 +221,17 @@ async function aggregateAndSaveToken(db, mint) {
         const lastCheck = parseInt(tokenRow?.last_holder_check || 0);
         
         let holderCount = null;
-        // Check holders every 30 minutes
+        // Check holders every 30 minutes (with 30s timeout to not block)
         if (now - lastCheck > 1800000) {
             try {
-                // Fetch from RPC
-                const count = await getHolderCountFromRPC(mint);
+                // Fetch from RPC with timeout
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('Holder count timeout')), 30000)
+                );
+                const count = await Promise.race([
+                    getHolderCountFromRPC(mint),
+                    timeoutPromise
+                ]);
                 if (typeof count === 'number' && count > 0) {
                     holderCount = count;
                     // Save history (Snapshot normalized to start of day)

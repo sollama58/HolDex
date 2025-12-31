@@ -256,7 +256,11 @@ async function processPoolBatch(db, connection, pools, redis) {
     await Promise.allSettled([...updates, ...trackerUpdates]);
 
     if (affectedMints.size > 0) {
-        for (const mint of affectedMints) await aggregateAndSaveToken(db, mint);
+        // Run aggregation in background (don't block snapshotter)
+        // Holder counts are updated separately, no need to await here
+        Promise.allSettled(
+            [...affectedMints].map(mint => aggregateAndSaveToken(db, mint))
+        ).catch(e => logger.warn(`Aggregation batch error: ${e.message}`));
     }
     
     // Clean up sets/maps
