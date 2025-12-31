@@ -118,135 +118,42 @@ async function getHolderCountFromRPC(mintAddress) {
     return count;
 }
 
-/**
- * Analyze top 20 holders (excluding pools) for conviction and hold time
- *
- * Conviction analysis:
- * - For each holder, look at their recent transactions for THIS token
- * - Count buys vs sells to classify as accumulator/holder/reducer/extractor
- * - Conviction score = % of accumulators + holders
- *
- * @param {string} mintAddress - Token mint
- * @param {string[]} excludeAddresses - Pool addresses to exclude
- * @returns {Object} { avgHoldHours, conviction: { score, accumulators, holders, reducers, extractors, analyzed } }
- */
 async function analyzeTokenHolders(mintAddress, excludeAddresses = []) {
     const conn = getSolanaConnection();
-    const TOP_HOLDERS = 20;
-
     try {
         const mint = new PublicKey(mintAddress);
         const largest = await retryRPC(() => conn.getTokenLargestAccounts(mint), 2, 2000);
-        if (!largest || !largest.value || largest.value.length === 0) {
-            return { avgHoldHours: 0, conviction: { score: 0, analyzed: 0 } };
-        }
+        if (!largest || !largest.value || largest.value.length === 0) return { avgHoldHours: 0 };
 
         const topAccounts = largest.value;
         const nowSec = Math.floor(Date.now() / 1000);
-        const excludeSet = new Set(excludeAddresses.map(a => a ? a.toString() : ''));
-
-        // Filter out pools and get top 20 real holders
-        const realHolders = topAccounts
-            .filter(acc => !excludeSet.has(acc.address.toString()))
-            .slice(0, TOP_HOLDERS);
-
         let totalDuration = 0;
         let validSamples = 0;
-        let accumulators = 0;
-        let holders = 0;
-        let reducers = 0;
-        let extractors = 0;
+        const excludeSet = new Set(excludeAddresses.map(a => a ? a.toString() : ''));
 
-        for (const acc of realHolders) {
+        for (const acc of topAccounts) {
+            if (validSamples >= 15) break; 
+            if (excludeSet.has(acc.address.toString())) continue;
+
             try {
                 const pubkey = new PublicKey(acc.address);
-                const signatures = await retryRPC(() => conn.getSignaturesForAddress(pubkey, { limit: 30 }), 2, 1000);
-
+                const signatures = await retryRPC(() => conn.getSignaturesForAddress(pubkey, { limit: 50 }), 2, 1000);
+                
                 if (signatures.length > 0) {
-                    // Hold time: oldest transaction
                     const oldestTx = signatures[signatures.length - 1];
                     const txTime = oldestTx.blockTime || nowSec;
                     totalDuration += (nowSec - txTime);
-
-                    // Conviction: analyze buy/sell pattern for this token
-                    // Count transactions involving this token
-                    let buyCount = 0;
-                    let sellCount = 0;
-
-                    // Get parsed transactions to analyze token transfers
-                    for (const sig of signatures.slice(0, 10)) {  // Last 10 transactions
-                        try {
-                            const tx = await retryRPC(() => conn.getParsedTransaction(sig.signature, {
-                                maxSupportedTransactionVersion: 0
-                            }), 1, 500);
-
-                            if (!tx || !tx.meta) continue;
-
-                            // Check pre/post token balances for this mint
-                            const preBalances = tx.meta.preTokenBalances || [];
-                            const postBalances = tx.meta.postTokenBalances || [];
-
-                            const preBal = preBalances.find(b => b.mint === mintAddress && b.owner === acc.address.toString());
-                            const postBal = postBalances.find(b => b.mint === mintAddress && b.owner === acc.address.toString());
-
-                            const preAmount = preBal ? parseFloat(preBal.uiTokenAmount?.uiAmount || 0) : 0;
-                            const postAmount = postBal ? parseFloat(postBal.uiTokenAmount?.uiAmount || 0) : 0;
-
-                            if (postAmount > preAmount) buyCount++;
-                            else if (preAmount > postAmount) sellCount++;
-                        } catch (txErr) {
-                            // Skip failed transaction fetches
-                        }
-                    }
-
-                    // Classify holder based on buy/sell ratio
-                    const total = buyCount + sellCount;
-                    if (total === 0) {
-                        holders++;  // No activity = diamond hands
-                    } else {
-                        const buyRatio = buyCount / total;
-                        if (buyRatio >= 0.7) accumulators++;      // 70%+ buys
-                        else if (buyRatio >= 0.4) holders++;       // 40-70% buys
-                        else if (buyRatio >= 0.2) reducers++;      // 20-40% buys
-                        else extractors++;                         // <20% buys
-                    }
-
                     validSamples++;
                 } else {
-                    // No transactions = probably diamond hands
                     totalDuration += (24 * 3600);
-                    holders++;
                     validSamples++;
                 }
-            } catch (err) {
-                // Skip failed holders
-            }
-
-            // Small delay to avoid rate limits
-            await new Promise(r => setTimeout(r, 100));
+            } catch (err) {}
         }
-
-        if (validSamples === 0) {
-            return { avgHoldHours: 0, conviction: { score: 0, analyzed: 0 } };
-        }
-
-        // Conviction score = % of accumulators + holders (diamond hands)
-        const convictionScore = Math.round(((accumulators + holders) / validSamples) * 100);
-
-        return {
-            avgHoldHours: (totalDuration / validSamples) / 3600,
-            conviction: {
-                score: convictionScore,
-                accumulators,
-                holders,
-                reducers,
-                extractors,
-                analyzed: validSamples
-            }
-        };
+        if (validSamples === 0) return { avgHoldHours: 0 };
+        return { avgHoldHours: (totalDuration / validSamples) / 3600 };
     } catch (e) {
-        logger.error(`[analyzeTokenHolders] ${mintAddress}: ${e.message}`);
-        return { avgHoldHours: 0, conviction: { score: 0, analyzed: 0 } };
+        return { avgHoldHours: 0 };
     }
 }
 
