@@ -109,7 +109,7 @@ async function initDB() {
 
                 CREATE TABLE IF NOT EXISTS active_trackers ( pool_address TEXT PRIMARY KEY, priority INTEGER DEFAULT 1, last_check BIGINT DEFAULT 0 );
                 CREATE TABLE IF NOT EXISTS token_updates ( id SERIAL PRIMARY KEY, mint TEXT, twitter TEXT, website TEXT, telegram TEXT, banner TEXT, description TEXT, submittedAt BIGINT, status TEXT DEFAULT 'pending', signature TEXT, payer TEXT );
-                CREATE TABLE IF NOT EXISTS api_keys ( key TEXT PRIMARY KEY, owner TEXT, tier TEXT DEFAULT 'free', requests_limit INTEGER DEFAULT 1000, requests_today INTEGER DEFAULT 0, last_reset BIGINT DEFAULT 0, is_active BOOLEAN DEFAULT TRUE, created_at BIGINT );
+                CREATE TABLE IF NOT EXISTS api_keys ( key_hash TEXT PRIMARY KEY, key_prefix TEXT, owner TEXT, tier TEXT DEFAULT 'free', requests_limit INTEGER DEFAULT 1000, requests_today INTEGER DEFAULT 0, last_reset BIGINT DEFAULT 0, is_active BOOLEAN DEFAULT TRUE, created_at BIGINT );
             `);
 
             dbWrapper = {

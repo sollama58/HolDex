@@ -1,6 +1,7 @@
 const { getClient } = require('../services/redis');
 const { getDB } = require('../services/database');
 const logger = require('../services/logger');
+const { hashApiKey } = require('../utils/apiKeyHash');
 
 // Cache key details in memory for 60 seconds to avoid hitting Postgres on every request
 const KEY_CACHE = new Map();
@@ -12,37 +13,39 @@ const rateLimiter = async (req, res, next) => {
 
     try {
         const redis = getClient();
-        
+        const keyHash = hashApiKey(apiKey);
+
         // 2. Validate Key (Memory Cache -> DB Fallback)
-        let keyData = KEY_CACHE.get(apiKey);
+        let keyData = KEY_CACHE.get(keyHash);
         const now = Date.now();
 
         // If not in cache or expired, fetch from DB
         if (!keyData || now > keyData.expiry) {
             const db = getDB();
-            // We select plain text key as requested
-            const record = await db.get('SELECT * FROM api_keys WHERE key = $1', [apiKey]);
+            // Compare by hash
+            const record = await db.get('SELECT * FROM api_keys WHERE key_hash = $1', [keyHash]);
 
             if (!record) return res.status(403).json({ success: false, error: 'Invalid API Key' });
             if (!record.is_active) return res.status(403).json({ success: false, error: 'API Key Revoked' });
 
-            keyData = { 
-                ...record, 
+            keyData = {
+                ...record,
+                keyHash,
                 // Cache for 60 seconds
-                expiry: now + 60000 
+                expiry: now + 60000
             };
-            KEY_CACHE.set(apiKey, keyData);
+            KEY_CACHE.set(keyHash, keyData);
         }
 
         // 3. Rate Limit Logic (Redis Window)
         if (redis) {
-            // Key format: rate_limit:<api_key>:<YYYY-MM-DD>
+            // Key format: rate_limit:<key_hash>:<YYYY-MM-DD>
             const dateStr = new Date().toISOString().split('T')[0];
-            const windowKey = `rate_limit:${apiKey}:${dateStr}`;
+            const windowKey = `rate_limit:${keyHash}:${dateStr}`;
 
             // Atomic Increment
             const currentUsage = await redis.incr(windowKey);
-            
+
             // Set expiry for 24 hours if this is the first request of the day
             if (currentUsage === 1) await redis.expire(windowKey, 86400);
 
@@ -52,8 +55,8 @@ const rateLimiter = async (req, res, next) => {
             if (currentUsage % 10 === 0) {
                 const db = getDB();
                 // Fire and forget - don't await this
-                db.run('UPDATE api_keys SET requests_today = $1, last_reset = $2 WHERE key = $3', 
-                    [currentUsage, now, apiKey])
+                db.run('UPDATE api_keys SET requests_today = $1, last_reset = $2 WHERE key_hash = $3',
+                    [currentUsage, now, keyHash])
                     .catch(err => logger.error(`DB Sync Error: ${err.message}`));
             }
 

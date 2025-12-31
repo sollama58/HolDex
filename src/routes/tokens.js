@@ -4,6 +4,7 @@ const { PublicKey } = require('@solana/web3.js');
 const nacl = require('tweetnacl'); 
 const bs58 = require('bs58');      
 const { isValidPubkey } = require('../utils/solana');
+const { hashApiKey, maskApiKey } = require('../utils/apiKeyHash');
 const { smartCache, enableIndexing, aggregateAndSaveToken } = require('../services/database'); 
 const { findPoolsOnChain } = require('../services/pool_finder');
 const { getSolanaConnection } = require('../services/solana'); 
@@ -245,17 +246,19 @@ function init(deps) {
             }
             
             const key = 'hx_' + require('crypto').randomBytes(16).toString('hex');
+            const keyHash = hashApiKey(key);
+            const keyPrefix = key.substring(0, 7); // Store prefix for identification
             const defaultLimit = 1000;
             const defaultTier = 'free';
-            
-            await db.run(`INSERT INTO api_keys (key, owner, tier, requests_limit, created_at) VALUES ($1, $2, $3, $4, $5)`, [key, wallet, defaultTier, defaultLimit, Date.now()]);
-            
-            res.json({ 
-                success: true, 
-                key, 
+
+            await db.run(`INSERT INTO api_keys (key_hash, key_prefix, owner, tier, requests_limit, created_at) VALUES ($1, $2, $3, $4, $5, $6)`, [keyHash, keyPrefix, wallet, defaultTier, defaultLimit, Date.now()]);
+
+            res.json({
+                success: true,
+                key, // Only time user sees the full key!
                 tier: defaultTier,
                 requests_limit: defaultLimit,
-                message: "New API Key Generated" 
+                message: "Save this key! It won't be shown again."
             });
         } catch (e) { console.error(e); res.status(500).json({ success: false, error: "Server Error" }); }
     });
@@ -272,9 +275,20 @@ function init(deps) {
             
             if (!verified) return res.status(403).json({ success: false, error: "Invalid Signature" });
 
-            const keys = await db.all('SELECT key, tier, requests_limit, requests_today, is_active, created_at FROM api_keys WHERE owner = $1 ORDER BY created_at DESC', [wallet]);
-            
-            res.json({ success: true, keys: keys || [] });
+            const keys = await db.all('SELECT key_hash, key_prefix, tier, requests_limit, requests_today, is_active, created_at FROM api_keys WHERE owner = $1 ORDER BY created_at DESC', [wallet]);
+
+            // Return masked keys (user can't see full key after creation)
+            const maskedKeys = (keys || []).map(k => ({
+                key_id: k.key_hash.substring(0, 8), // Short ID for reference
+                key_preview: k.key_prefix + '...****',
+                tier: k.tier,
+                requests_limit: k.requests_limit,
+                requests_today: k.requests_today,
+                is_active: k.is_active,
+                created_at: k.created_at
+            }));
+
+            res.json({ success: true, keys: maskedKeys });
         } catch (e) { console.error(e); res.status(500).json({ success: false, error: "Server Error" }); }
     });
 
@@ -382,32 +396,61 @@ function init(deps) {
     router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => { const { mint } = req.body; try { const newScore = await updateSingleToken({ db }, mint); res.json({ success: true, message: `K-Score Updated: ${newScore}` }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
 
     // --- API KEY ADMIN ---
-    router.get('/admin/keys', requireAdmin, async (req, res) => { try { const keys = await db.all('SELECT * FROM api_keys ORDER BY created_at DESC'); res.json({ success: true, keys }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.post('/admin/generate-key', requireAdmin, async (req, res) => { const { owner, tier } = req.body; if (!owner) return res.status(400).json({ success: false, error: "Owner name required" }); try { const key = 'hx_' + require('crypto').randomBytes(16).toString('hex'); const limit = tier === 'pro' ? 100000 : (tier === 'enterprise' ? 1000000 : 1000); await db.run(`INSERT INTO api_keys (key, owner, tier, requests_limit, created_at) VALUES ($1, $2, $3, $4, $5)`, [key, owner, tier || 'free', limit, Date.now()]); res.json({ success: true, key, message: "Key Generated" }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    
-    router.post('/admin/update-key', requireAdmin, async (req, res) => { 
-        const { key, tier, limit } = req.body; 
-        try { 
-            if (!key) return res.status(400).json({ success: false, error: "Key required" }); 
-            await db.run(`UPDATE api_keys SET tier = $1, requests_limit = $2 WHERE key = $3`, [tier, parseInt(limit), key]); 
-            res.json({ success: true, message: "Key Updated Successfully" }); 
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+    router.get('/admin/keys', requireAdmin, async (req, res) => {
+        try {
+            const keys = await db.all('SELECT key_hash, key_prefix, owner, tier, requests_limit, requests_today, is_active, created_at FROM api_keys ORDER BY created_at DESC');
+            // Admin sees key_hash (first 8 chars) + prefix, not full keys
+            const maskedKeys = keys.map(k => ({
+                key_id: k.key_hash.substring(0, 8),
+                key_preview: k.key_prefix + '...****',
+                owner: k.owner,
+                tier: k.tier,
+                requests_limit: k.requests_limit,
+                requests_today: k.requests_today,
+                is_active: k.is_active,
+                created_at: k.created_at
+            }));
+            res.json({ success: true, keys: maskedKeys });
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
-    router.post('/admin/revoke-key', requireAdmin, async (req, res) => { 
-        const { key } = req.body; 
-        try { 
-            await db.run('UPDATE api_keys SET is_active = FALSE WHERE key = $1', [key]); 
-            res.json({ success: true, message: "Key Revoked" }); 
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+    router.post('/admin/generate-key', requireAdmin, async (req, res) => {
+        const { owner, tier } = req.body;
+        if (!owner) return res.status(400).json({ success: false, error: "Owner name required" });
+        try {
+            const key = 'hx_' + require('crypto').randomBytes(16).toString('hex');
+            const keyHash = hashApiKey(key);
+            const keyPrefix = key.substring(0, 7);
+            const limit = tier === 'pro' ? 100000 : (tier === 'enterprise' ? 1000000 : 1000);
+            await db.run(`INSERT INTO api_keys (key_hash, key_prefix, owner, tier, requests_limit, created_at) VALUES ($1, $2, $3, $4, $5, $6)`, [keyHash, keyPrefix, owner, tier || 'free', limit, Date.now()]);
+            res.json({ success: true, key, message: "Save this key! It won't be shown again." });
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
-    router.post('/admin/delete-key', requireAdmin, async (req, res) => { 
-        const { key } = req.body; 
-        try { 
-            await db.run('DELETE FROM api_keys WHERE key = $1', [key]); 
-            res.json({ success: true, message: "Key Deleted" }); 
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+    router.post('/admin/update-key', requireAdmin, async (req, res) => {
+        const { key_id, tier, limit } = req.body;
+        try {
+            if (!key_id) return res.status(400).json({ success: false, error: "key_id required" });
+            // Find by key_hash prefix
+            await db.run(`UPDATE api_keys SET tier = $1, requests_limit = $2 WHERE key_hash LIKE $3`, [tier, parseInt(limit), key_id + '%']);
+            res.json({ success: true, message: "Key Updated Successfully" });
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+    });
+
+    router.post('/admin/revoke-key', requireAdmin, async (req, res) => {
+        const { key_id } = req.body;
+        try {
+            await db.run('UPDATE api_keys SET is_active = FALSE WHERE key_hash LIKE $1', [key_id + '%']);
+            res.json({ success: true, message: "Key Revoked" });
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+    });
+
+    router.post('/admin/delete-key', requireAdmin, async (req, res) => {
+        const { key_id } = req.body;
+        try {
+            await db.run('DELETE FROM api_keys WHERE key_hash LIKE $1', [key_id + '%']);
+            res.json({ success: true, message: "Key Deleted" });
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
     router.get('/admin/backup/updates', requireAdmin, async (req, res) => { try { const updates = await db.all('SELECT * FROM token_updates ORDER BY submittedAt DESC'); const keys = await db.all('SELECT * FROM api_keys'); res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Disposition', `attachment; filename=holdex_full_backup_${Date.now()}.json`); res.json({ success: true, timestamp: Date.now(), updates: updates, api_keys: keys }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
