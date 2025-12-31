@@ -105,11 +105,70 @@ async function fetchAccountsForProgram(conn, programId, mintAddress) {
     }
 }
 
+/**
+ * Get holder count using Helius API (paginated, works for any token size)
+ * Falls back to standard RPC if Helius unavailable
+ */
 async function getHolderCountFromRPC(mintAddress) {
     if (!mintAddress) return 0;
     const cleanMint = mintAddress.trim();
+
+    // Try Helius API first (paginated, works for millions of holders)
+    if (config.HELIUS_API_KEY) {
+        try {
+            let count = 0;
+            let cursor = null;
+            const HELIUS_RPC = `https://mainnet.helius-rpc.com/?api-key=${config.HELIUS_API_KEY}`;
+            const headers = { 'Content-Type': 'application/json' };
+
+            // Paginate through holders (max 100 pages = 100k holders)
+            // For tokens with millions of holders, this gives a representative count
+            const MAX_PAGES = 100;
+            let page = 0;
+
+            while (page < MAX_PAGES) {
+                const params = { mint: cleanMint, limit: 1000 };
+                if (cursor) params.cursor = cursor;
+
+                const response = await fetch(HELIUS_RPC, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: Date.now(),
+                        method: 'getTokenAccounts',
+                        params
+                    })
+                });
+
+                const data = await response.json();
+                if (data.error || !data.result?.token_accounts) break;
+
+                // Count accounts with balance > 0
+                for (const acc of data.result.token_accounts) {
+                    if (acc.amount > 0) count++;
+                }
+
+                cursor = data.result.cursor;
+                page++;
+                if (!cursor) break;
+            }
+
+            // If we hit the limit, log it
+            if (page >= MAX_PAGES && cursor) {
+                logger.info(`[Holders] ${cleanMint.slice(0,8)}: ${count}+ holders (limit reached)`);
+            }
+
+            if (count > 0) {
+                return count;
+            }
+        } catch (e) {
+            logger.warn(`[Holders] Helius API failed for ${cleanMint.slice(0,8)}: ${e.message}`);
+        }
+    }
+
+    // Fallback to standard RPC (may fail for large tokens)
     const conn = getSolanaConnection();
-    
     let count = await fetchAccountsForProgram(conn, TOKEN_PROGRAM_ID, cleanMint);
     if (count === 0) {
         const count2022 = await fetchAccountsForProgram(conn, TOKEN_2022_PROGRAM_ID, cleanMint);
