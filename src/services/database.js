@@ -150,6 +150,16 @@ async function initDB() {
                     real_holders INTEGER,
                     PRIMARY KEY (mint, date)
                 );
+
+                -- Supply history for Mayhem Mode (mutable supply) tracking
+                CREATE TABLE IF NOT EXISTS supply_history (
+                    mint TEXT NOT NULL,
+                    supply TEXT NOT NULL,
+                    timestamp BIGINT NOT NULL,
+                    source TEXT DEFAULT 'kscore',
+                    change_percent DOUBLE PRECISION DEFAULT 0,
+                    PRIMARY KEY (mint, timestamp)
+                );
             `);
 
             // Add new columns if they don't exist (migration-safe)
@@ -165,6 +175,12 @@ async function initDB() {
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_reducers INTEGER DEFAULT 0`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_extractors INTEGER DEFAULT 0`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_analyzed INTEGER DEFAULT 0`,
+                // Mayhem Mode (mutable supply) support
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS supply_last_check BIGINT DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS supply_change_24h DOUBLE PRECISION DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS is_mutable_supply BOOLEAN DEFAULT FALSE`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS mint_authority_revoked BOOLEAN DEFAULT FALSE`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS freeze_authority_revoked BOOLEAN DEFAULT FALSE`,
             ];
 
             for (const sql of migrations) {

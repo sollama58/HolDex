@@ -925,6 +925,169 @@ async function calculateBurn(mint, allHolders = null) {
 }
 
 // ============================================
+// MAYHEM MODE - SUPPLY TRACKING
+// ============================================
+
+/**
+ * Refresh and track supply changes for Mayhem Mode tokens
+ *
+ * Detects:
+ * - Supply inflation (minting)
+ * - Supply deflation (burning)
+ * - Supply volatility over 24h
+ *
+ * @param {Object} db - Database connection
+ * @param {string} mint - Token mint address
+ * @param {number} decimals - Token decimals
+ * @returns {Object} { currentSupply, previousSupply, changePercent, isMutable, supplyData }
+ */
+async function refreshSupply(db, mint, decimals = 9) {
+    const result = {
+        currentSupply: 0,
+        previousSupply: 0,
+        changePercent: 0,
+        change24h: 0,
+        isMutable: false,
+        source: 'helius'
+    };
+
+    try {
+        // 1. Fetch current supply from chain
+        const supplyInfo = await heliusRpc('getTokenSupply', [mint]);
+        if (!supplyInfo?.value?.amount) {
+            return result;
+        }
+
+        const currentRaw = Number(supplyInfo.value.amount);
+        const divisor = Math.pow(10, decimals);
+        result.currentSupply = currentRaw / divisor;
+
+        // 2. Get stored supply from DB
+        const token = await db.get('SELECT supply, supply_last_check FROM tokens WHERE mint = $1', [mint]);
+        const storedSupply = parseFloat(token?.supply || 0) / divisor;
+        result.previousSupply = storedSupply;
+
+        // 3. Calculate change percentage
+        if (storedSupply > 0) {
+            result.changePercent = ((result.currentSupply - storedSupply) / storedSupply) * 100;
+        }
+
+        // 4. Detect if supply is mutable (>0.1% change since last check)
+        const MUTABLE_THRESHOLD = 0.1; // 0.1% change = mutable
+        if (Math.abs(result.changePercent) > MUTABLE_THRESHOLD) {
+            result.isMutable = true;
+            logger.info(`[Supply] ${mint.slice(0,8)}: ${result.changePercent > 0 ? '📈' : '📉'} ${result.changePercent.toFixed(2)}% change (${storedSupply.toLocaleString()} → ${result.currentSupply.toLocaleString()})`);
+        }
+
+        // 5. Calculate 24h change from supply_history
+        const history24h = await db.get(`
+            SELECT supply FROM supply_history
+            WHERE mint = $1 AND timestamp <= $2
+            ORDER BY timestamp DESC LIMIT 1
+        `, [mint, Date.now() - 86400000]);
+
+        if (history24h?.supply) {
+            const supply24hAgo = parseFloat(history24h.supply) / divisor;
+            if (supply24hAgo > 0) {
+                result.change24h = ((result.currentSupply - supply24hAgo) / supply24hAgo) * 100;
+            }
+        }
+
+        // 6. Update tokens table with fresh supply
+        if (Math.abs(result.changePercent) > 0.01 || !token?.supply_last_check) {
+            await db.run(`
+                UPDATE tokens
+                SET supply = $1,
+                    supply_last_check = $2,
+                    supply_change_24h = $3,
+                    is_mutable_supply = $4
+                WHERE mint = $5
+            `, [
+                currentRaw.toString(),
+                Date.now(),
+                result.change24h,
+                result.isMutable || Math.abs(result.change24h) > MUTABLE_THRESHOLD,
+                mint
+            ]);
+        }
+
+        // 7. Save to supply_history (max 1 entry per hour to avoid spam)
+        const lastHistory = await db.get(`
+            SELECT timestamp FROM supply_history
+            WHERE mint = $1
+            ORDER BY timestamp DESC LIMIT 1
+        `, [mint]);
+
+        const hourAgo = Date.now() - 3600000;
+        if (!lastHistory || lastHistory.timestamp < hourAgo) {
+            await db.run(`
+                INSERT INTO supply_history (mint, supply, timestamp, source, change_percent)
+                VALUES ($1, $2, $3, $4, $5)
+            `, [mint, currentRaw.toString(), Date.now(), 'kscore', result.changePercent]);
+        }
+
+        return result;
+
+    } catch (e) {
+        logger.warn(`[Supply] ${mint.slice(0,8)}: Refresh failed - ${e.message}`);
+        return result;
+    }
+}
+
+/**
+ * Get supply volatility score for K-Score penalty
+ * High volatility = less trustworthy = lower score
+ *
+ * @param {Object} db - Database connection
+ * @param {string} mint - Token mint address
+ * @returns {Object} { volatility, penalty, dataPoints }
+ */
+async function getSupplyVolatility(db, mint) {
+    try {
+        // Get supply history for last 7 days
+        const history = await db.all(`
+            SELECT supply, change_percent, timestamp
+            FROM supply_history
+            WHERE mint = $1 AND timestamp >= $2
+            ORDER BY timestamp ASC
+        `, [mint, Date.now() - 7 * 86400000]);
+
+        if (!history || history.length < 2) {
+            return { volatility: 0, penalty: 0, dataPoints: 0 };
+        }
+
+        // Calculate standard deviation of changes
+        const changes = history.map(h => Math.abs(h.change_percent || 0));
+        const avgChange = changes.reduce((a, b) => a + b, 0) / changes.length;
+        const variance = changes.reduce((sum, c) => sum + Math.pow(c - avgChange, 2), 0) / changes.length;
+        const stdDev = Math.sqrt(variance);
+
+        // Volatility score (0-100)
+        // 0% stdDev = 0 volatility, 10% stdDev = 100 volatility
+        const volatility = Math.min(100, stdDev * 10);
+
+        // K-Score penalty based on volatility
+        // 0-10 volatility: no penalty
+        // 10-50 volatility: -5 to -15 points
+        // 50-100 volatility: -15 to -30 points
+        let penalty = 0;
+        if (volatility > 10) {
+            penalty = Math.min(30, Math.round((volatility - 10) * 0.33));
+        }
+
+        return {
+            volatility: Math.round(volatility * 10) / 10,
+            penalty,
+            dataPoints: history.length,
+            avgChange: Math.round(avgChange * 100) / 100
+        };
+
+    } catch (e) {
+        return { volatility: 0, penalty: 0, dataPoints: 0 };
+    }
+}
+
+// ============================================
 // LP BURN/LOCK CHECK (on-chain)
 // ============================================
 
@@ -1441,6 +1604,18 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         }
 
         // ============================================
+        // MAYHEM MODE: REFRESH SUPPLY
+        // ============================================
+
+        let supplyData = null;
+        let volatilityData = null;
+
+        if (db && HELIUS_API_KEY) {
+            supplyData = await refreshSupply(db, mint, decimals);
+            volatilityData = await getSupplyVolatility(db, mint);
+        }
+
+        // ============================================
         // SECURITY CHECK (ELIMINATORY)
         // ============================================
 
@@ -1586,8 +1761,17 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         // 2. LP cap modifier (0 or negative)
         const lpModifier = lpData?.maxScoreModifier || 0;
 
-        // Final cap = authority cap + LP modifier (can go down)
-        const finalCap = Math.max(0, authorityCap + lpModifier);
+        // 3. Supply volatility penalty (Mayhem Mode)
+        const volatilityPenalty = volatilityData?.penalty || 0;
+
+        // Final cap = authority cap + LP modifier - volatility penalty
+        let finalCap = Math.max(0, authorityCap + lpModifier);
+
+        // Apply volatility penalty (subtracts from score, not cap)
+        if (volatilityPenalty > 0) {
+            score = Math.max(0, score - volatilityPenalty);
+            logger.info(`[Mayhem] ${mint.slice(0,8)}: -${volatilityPenalty} pts (volatility: ${volatilityData.volatility}%)`);
+        }
 
         if (score > finalCap) {
             score = finalCap;
@@ -1606,6 +1790,9 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         if (lpData) {
             logger.info(`  LP: ${lpData.lpStatus} (${lpData.lpBurnPct.toFixed(0)}% burn)`);
         }
+        if (supplyData?.isMutable) {
+            logger.info(`  Supply: MUTABLE (${supplyData.changePercent.toFixed(2)}% change)`);
+        }
 
         return {
             score: Math.min(100, Math.max(0, score)),
@@ -1615,6 +1802,8 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
             burn: burnData,
             security: securityData,
             lp: lpData,
+            supply: supplyData,
+            volatility: volatilityData,
             raw,
             normalized,
             pillars
@@ -1676,6 +1865,8 @@ async function updateSingleToken(deps, mint) {
         const result = await computeScoreInternal(mint, token, false, db);
         const conviction = result.conviction || {};
         const burn = result.burn || {};
+        const security = result.security || {};
+        const supply = result.supply || {};
 
         // Apply EMA smoothing to prevent wild swings
         const previousScore = token.k_score || 0;
@@ -1705,8 +1896,11 @@ async function updateSingleToken(deps, mint) {
                 burned_percent = $12,
                 initial_supply = $13,
                 is_pump_fun = $14,
-                bonding_curve_complete = $15
-            WHERE mint = $16
+                bonding_curve_complete = $15,
+                mint_authority_revoked = $16,
+                freeze_authority_revoked = $17,
+                is_mutable_supply = $18
+            WHERE mint = $19
         `, [
             smoothedScore,
             Date.now().toString(),
@@ -1723,6 +1917,9 @@ async function updateSingleToken(deps, mint) {
             initialSupply > 0 ? initialSupply.toString() : null,
             category.isPumpFun,
             category.bondingCurveComplete,
+            security.mintAuthorityRevoked || false,
+            security.freezeAuthorityRevoked || false,
+            supply.isMutable || false,
             mint
         ]);
 
@@ -1781,6 +1978,8 @@ async function updateKScores(deps) {
                 const result = await computeScoreInternal(t.mint, t, false, db);
                 const conviction = result.conviction || {};
                 const burn = result.burn || {};
+                const security = result.security || {};
+                const supply = result.supply || {};
 
                 // Apply EMA smoothing to prevent wild swings
                 const previousScore = t.k_score || 0;
@@ -1810,8 +2009,11 @@ async function updateKScores(deps) {
                         burned_percent = $12,
                         initial_supply = $13,
                         is_pump_fun = $14,
-                        bonding_curve_complete = $15
-                    WHERE mint = $16
+                        bonding_curve_complete = $15,
+                        mint_authority_revoked = $16,
+                        freeze_authority_revoked = $17,
+                        is_mutable_supply = $18
+                    WHERE mint = $19
                 `, [
                     smoothedScore,
                     Date.now().toString(),
@@ -1828,6 +2030,9 @@ async function updateKScores(deps) {
                     initialSupply > 0 ? initialSupply.toString() : null,
                     category.isPumpFun,
                     category.bondingCurveComplete,
+                    security.mintAuthorityRevoked || false,
+                    security.freezeAuthorityRevoked || false,
+                    supply.isMutable || false,
                     t.mint
                 ]);
 

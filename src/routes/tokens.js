@@ -761,6 +761,17 @@ function init(deps) {
                     analyzed: token.conviction_analyzed || 0
                 };
 
+                // Mayhem Mode (mutable supply) fields
+                tokenData.security = {
+                    mintAuthorityRevoked: token.mint_authority_revoked || false,
+                    freezeAuthorityRevoked: token.freeze_authority_revoked || false,
+                    isMutableSupply: token.is_mutable_supply || false
+                };
+
+                // Supply change tracking
+                tokenData.supplyChange24h = token.supply_change_24h || 0;
+                tokenData.supplyLastCheck = token.supply_last_check || 0;
+
                 // --- NORMALIZE UPDATED STATUS ---
                 // Force boolean conversion for frontend consistency
                 const rawStatus = token.hasCommunityUpdate || token.hascommunityupdate;
@@ -914,7 +925,10 @@ function init(deps) {
                     // GASdf fields (lightweight version for list)
                     burnedPercent: r.burned_percent || 0,
                     isPumpFun: r.is_pump_fun || false,
-                    convictionScore: r.conviction_score || 0
+                    convictionScore: r.conviction_score || 0,
+                    // Mayhem Mode indicator
+                    isMutableSupply: r.is_mutable_supply || false,
+                    supplyChange24h: r.supply_change_24h || 0
                 }))
             };
 
