@@ -953,11 +953,20 @@ function isBurnAddress(address) {
  * 1. SPL Token `burn` instruction - removes tokens from supply
  * 2. Send to burn address - tokens still in supply but inaccessible
  *
- * For pump.fun tokens: initial supply is always 1 billion
- * Burn % = (initial - current + tokens_in_burn_addresses) / initial * 100
+ * Initial supply sources (priority order):
+ * 1. Pump.fun tokens: always 1 billion (detected by mint suffix OR is_pump_fun flag)
+ * 2. Stored initial_supply from DB (first indexing)
+ * 3. First entry in supply_history (for Mayhem Mode)
+ * 4. Fallback: current supply + burn addresses (no instruction burns detected)
+ *
+ * @param {string} mint - Token mint address
+ * @param {Array} allHolders - Optional holders array
+ * @param {Object} options - Optional: { storedInitialSupply, isPumpFunFlag, db }
  */
-async function calculateBurn(mint, allHolders = null) {
+async function calculateBurn(mint, allHolders = null, options = {}) {
     try {
+        const { storedInitialSupply, isPumpFunFlag, db } = options;
+
         // Get current supply from chain
         const supply = await heliusRpc('getTokenSupply', [mint]);
         if (!supply) return { burnPct: 0, burned: 0, totalSupply: 0, initialSupply: 0 };
@@ -977,17 +986,40 @@ async function calculateBurn(mint, allHolders = null) {
             }
         }
 
-        // Determine initial supply
+        // Determine initial supply (priority order)
         let initialSupply;
-        const isPumpFun = mint.endsWith('pump');
+        let supplySource = 'unknown';
+        // Pump.fun detection: mint ends with 'pump' OR is_pump_fun flag from DB
+        const isPumpFun = mint.endsWith('pump') || isPumpFunFlag === true;
 
         if (isPumpFun) {
-            // Pump.fun tokens always start with 1 billion
+            // 1. Pump.fun tokens always start with 1 billion
             initialSupply = PUMP_INITIAL_SUPPLY;
-        } else {
-            // For non-pump.fun, we can't know initial supply
-            // Just report tokens in burn addresses relative to current supply
+            supplySource = 'pump.fun';
+        } else if (storedInitialSupply && storedInitialSupply > 0) {
+            // 2. Use stored initial_supply from DB (converted to raw amount)
+            initialSupply = BigInt(Math.floor(storedInitialSupply * divisor));
+            supplySource = 'db';
+        } else if (db) {
+            // 3. Try to get first supply_history entry (for Mayhem Mode tokens)
+            try {
+                const firstHistory = await db.get(
+                    'SELECT supply FROM supply_history WHERE mint = $1 ORDER BY timestamp ASC LIMIT 1',
+                    [mint]
+                );
+                if (firstHistory?.supply) {
+                    initialSupply = BigInt(firstHistory.supply);
+                    supplySource = 'history';
+                }
+            } catch (e) {
+                // Ignore, fall through to default
+            }
+        }
+
+        // 4. Fallback: can only detect burn addresses, not instruction burns
+        if (!initialSupply) {
             initialSupply = currentSupply + burnedInAddresses;
+            supplySource = 'fallback';
         }
 
         // Calculate total burned
@@ -1000,7 +1032,10 @@ async function calculateBurn(mint, allHolders = null) {
             ? (Number(totalBurned) / Number(initialSupply)) * 100
             : 0;
 
-        logger.info(`[Burn] ${mint.slice(0,8)}: ${burnPct.toFixed(2)}% burned${isPumpFun ? ' (pump.fun)' : ''}`);
+        const sourceLabel = supplySource === 'pump.fun' ? ' (pump.fun)' :
+                           supplySource === 'db' ? ' (stored)' :
+                           supplySource === 'history' ? ' (history)' : '';
+        logger.info(`[Burn] ${mint.slice(0,8)}: ${burnPct.toFixed(2)}% burned${sourceLabel}`);
 
         return {
             burnPct,
@@ -1010,7 +1045,8 @@ async function calculateBurn(mint, allHolders = null) {
             totalSupply: Number(currentSupply) / divisor,
             initialSupply: Number(initialSupply) / divisor,
             decimals,
-            isPumpFun
+            isPumpFun,
+            supplySource
         };
     } catch (e) {
         logger.error(`[Burn] Error for ${mint}: ${e.message}`);
@@ -1731,8 +1767,13 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         if (!skipConviction && HELIUS_API_KEY) {
             convictionData = await calculateConvictionAndHolders(mint, priceUsd, decimals, db);
 
-            // For top10 calculation
-            burnData = await calculateBurn(mint, convictionData.allHolders || []);
+            // For top10 calculation + burn detection
+            // Pass stored initial_supply and is_pump_fun flag for proper detection
+            burnData = await calculateBurn(mint, convictionData.allHolders || [], {
+                storedInitialSupply: dbData?.initial_supply,
+                isPumpFunFlag: dbData?.is_pump_fun,
+                db
+            });
         }
 
         // Get age from token timestamp (DexScreener creation date)
