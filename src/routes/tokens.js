@@ -1,10 +1,21 @@
 const express = require('express');
 const axios = require('axios');
+const rateLimit = require('express-rate-limit');
 const { PublicKey } = require('@solana/web3.js');
-const nacl = require('tweetnacl'); 
-const bs58 = require('bs58');      
+const nacl = require('tweetnacl');
+const bs58 = require('bs58');
 const { isValidPubkey } = require('../utils/solana');
 const { hashApiKey, maskApiKey } = require('../utils/apiKeyHash');
+
+// Strict rate limit for API key generation (5 per hour per IP)
+const apiKeyRateLimit = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 5,
+    message: { success: false, error: 'Too many key requests. Try again in 1 hour.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip
+});
 const { smartCache, enableIndexing, aggregateAndSaveToken } = require('../services/database'); 
 const { findPoolsOnChain } = require('../services/pool_finder');
 const { getSolanaConnection } = require('../services/solana'); 
@@ -227,7 +238,7 @@ function init(deps) {
     });
 
     // --- API KEY GENERATION ---
-    router.post('/request-api-key', async (req, res) => {
+    router.post('/request-api-key', apiKeyRateLimit, async (req, res) => {
         const { wallet, signature } = req.body;
         try {
             if (!wallet || !signature) return res.status(400).json({ success: false, error: "Wallet and Signature required" });
