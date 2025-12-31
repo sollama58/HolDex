@@ -33,12 +33,46 @@ const HELIUS_HEADERS = HELIUS_API_KEY
     ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${HELIUS_API_KEY}` }
     : { 'Content-Type': 'application/json' };
 
-// Rate limiting
-const RATE_LIMIT = 50;
-const REQUEST_INTERVAL = 1000 / RATE_LIMIT;
+// Rate limiting with adaptive throttling
+const BASE_RATE_LIMIT = 50; // requests per second
+let currentRateLimit = BASE_RATE_LIMIT;
+let requestInterval = 1000 / currentRateLimit;
 let lastRequestTime = 0;
+let rateLimitRemaining = BASE_RATE_LIMIT;
+let rateLimitResetTime = 0;
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Parse rate limit headers from Helius response
+ * Headers: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset
+ */
+function parseRateLimitHeaders(response) {
+    try {
+        const remaining = parseInt(response.headers.get('X-RateLimit-Remaining') || response.headers.get('x-ratelimit-remaining'));
+        const resetTime = parseInt(response.headers.get('X-RateLimit-Reset') || response.headers.get('x-ratelimit-reset'));
+        const limit = parseInt(response.headers.get('X-RateLimit-Limit') || response.headers.get('x-ratelimit-limit'));
+
+        if (!isNaN(remaining)) rateLimitRemaining = remaining;
+        if (!isNaN(resetTime)) rateLimitResetTime = resetTime * 1000; // Convert to ms
+        if (!isNaN(limit) && limit > 0) {
+            currentRateLimit = limit;
+            requestInterval = 1000 / currentRateLimit;
+        }
+
+        // Adaptive throttling: slow down when approaching limit
+        if (rateLimitRemaining < 10) {
+            requestInterval = 200; // 5 req/s when almost exhausted
+            logger.warn(`[RateLimit] Low credits: ${rateLimitRemaining} remaining, throttling to 5 req/s`);
+        } else if (rateLimitRemaining < 25) {
+            requestInterval = 100; // 10 req/s when getting low
+        } else {
+            requestInterval = 1000 / currentRateLimit; // Normal rate
+        }
+    } catch (e) {
+        // Ignore parsing errors, use defaults
+    }
+}
 
 /**
  * Save holder history snapshot (one entry per day per token)
@@ -337,12 +371,27 @@ const POOL_CACHE_TTL = 3600000; // 1 hour
 
 async function rateLimitedFetch(url, options) {
     const now = Date.now();
+
+    // Wait for rate limit reset if exhausted
+    if (rateLimitRemaining <= 0 && rateLimitResetTime > now) {
+        const waitTime = rateLimitResetTime - now + 100; // +100ms buffer
+        logger.warn(`[RateLimit] Exhausted, waiting ${Math.round(waitTime / 1000)}s until reset`);
+        await sleep(waitTime);
+    }
+
+    // Respect request interval
     const timeSince = now - lastRequestTime;
-    if (timeSince < REQUEST_INTERVAL) {
-        await sleep(REQUEST_INTERVAL - timeSince);
+    if (timeSince < requestInterval) {
+        await sleep(requestInterval - timeSince);
     }
     lastRequestTime = Date.now();
-    return fetch(url, options);
+
+    const response = await fetch(url, options);
+
+    // Parse rate limit headers for adaptive throttling
+    parseRateLimitHeaders(response);
+
+    return response;
 }
 
 async function heliusRpc(method, params) {

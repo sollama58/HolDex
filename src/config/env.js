@@ -72,5 +72,8 @@ module.exports = {
     // WEBHOOK_URL: Full webhook callback URL (auto-detected from API_URL if not set)
     WEBHOOK_URL: process.env.WEBHOOK_URL || null,
     // USE_WEBHOOKS: Enable webhook mode (auto-detected if WEBHOOK_URL or API_URL is set)
-    USE_WEBHOOKS: !!(process.env.WEBHOOK_URL || process.env.API_URL)
+    USE_WEBHOOKS: !!(process.env.WEBHOOK_URL || process.env.API_URL),
+    // WEBHOOK_SECRET: Secret for verifying Helius webhook signatures (HMAC-SHA256)
+    // CRITICAL: Set this in production to prevent webhook spoofing
+    WEBHOOK_SECRET: process.env.WEBHOOK_SECRET || null
 };

@@ -1,30 +1,53 @@
 /**
  * Helius Webhook Service
  * Manages webhook creation/deletion for real-time token transfer monitoring
+ *
+ * SECURITY NOTE: Helius Webhooks API requires API key in query string (not headers)
+ * This is by design from Helius. RPC endpoints can use headers, but webhooks cannot.
  */
+const crypto = require('crypto');
 const config = require('../config/env');
 const logger = require('./logger');
 
 const HELIUS_API_URL = 'https://api.helius.xyz/v0';
 
-/**
- * Create a webhook for monitoring token transfers
- * @param {string} mint - Token mint address
- * @param {string} callbackUrl - URL to receive webhook events
- * @returns {Promise<{webhookID: string}>}
- */
-async function createTokenWebhook(mint, callbackUrl) {
+// Mask API key for logging (show first 4 chars only)
+function maskApiKey(key) {
+    if (!key || key.length < 8) return '****';
+    return key.slice(0, 4) + '...' + key.slice(-4);
+}
+
+// Build webhook URL with API key (required by Helius Webhooks API)
+function getWebhookApiUrl(path = '') {
     if (!config.HELIUS_API_KEY) {
         throw new Error('HELIUS_API_KEY not configured');
     }
+    return `${HELIUS_API_URL}/webhooks${path}?api-key=${config.HELIUS_API_KEY}`;
+}
 
-    const response = await fetch(`${HELIUS_API_URL}/webhooks?api-key=${config.HELIUS_API_KEY}`, {
+/**
+ * Create a webhook for monitoring token transfers
+ * @param {string[]} mints - Array of token mint addresses (atomic creation)
+ * @param {string} callbackUrl - URL to receive webhook events
+ * @returns {Promise<{webhookID: string}>}
+ */
+async function createTokenWebhook(mints, callbackUrl) {
+    // Ensure mints is always an array
+    const mintArray = Array.isArray(mints) ? mints : [mints];
+
+    if (mintArray.length === 0) {
+        throw new Error('At least one mint address required');
+    }
+
+    logger.info(`[Webhook] Creating webhook for ${mintArray.length} tokens (key: ${maskApiKey(config.HELIUS_API_KEY)})`);
+
+    const response = await fetch(getWebhookApiUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             webhookURL: callbackUrl,
             transactionTypes: ['TRANSFER'],
-            accountAddresses: [mint],
+            accountAddresses: mintArray,  // All mints at once (atomic)
             webhookType: 'enhanced',
             encoding: 'jsonParsed'
         })
@@ -32,11 +55,12 @@ async function createTokenWebhook(mint, callbackUrl) {
 
     if (!response.ok) {
         const error = await response.text();
+        logger.error(`[Webhook] Creation failed: ${error}`);
         throw new Error(`Helius webhook creation failed: ${error}`);
     }
 
     const data = await response.json();
-    logger.info(`✅ Webhook created for ${mint}: ${data.webhookID}`);
+    logger.info(`[Webhook] Created: ${data.webhookID} with ${mintArray.length} tokens`);
     return data;
 }
 
@@ -46,20 +70,21 @@ async function createTokenWebhook(mint, callbackUrl) {
  * @param {string[]} mints - Array of mint addresses to add
  */
 async function addToWebhook(webhookId, mints) {
-    if (!config.HELIUS_API_KEY) {
-        throw new Error('HELIUS_API_KEY not configured');
-    }
+    const mintArray = Array.isArray(mints) ? mints : [mints];
 
-    const response = await fetch(`${HELIUS_API_URL}/webhooks/${webhookId}?api-key=${config.HELIUS_API_KEY}`, {
+    logger.info(`[Webhook] Updating ${webhookId} with ${mintArray.length} addresses`);
+
+    const response = await fetch(getWebhookApiUrl(`/${webhookId}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            accountAddresses: mints
+            accountAddresses: mintArray
         })
     });
 
     if (!response.ok) {
         const error = await response.text();
+        logger.error(`[Webhook] Update failed: ${error}`);
         throw new Error(`Helius webhook update failed: ${error}`);
     }
 
@@ -71,20 +96,19 @@ async function addToWebhook(webhookId, mints) {
  * @param {string} webhookId - Webhook ID to delete
  */
 async function deleteWebhook(webhookId) {
-    if (!config.HELIUS_API_KEY) {
-        throw new Error('HELIUS_API_KEY not configured');
-    }
+    logger.info(`[Webhook] Deleting: ${webhookId}`);
 
-    const response = await fetch(`${HELIUS_API_URL}/webhooks/${webhookId}?api-key=${config.HELIUS_API_KEY}`, {
+    const response = await fetch(getWebhookApiUrl(`/${webhookId}`), {
         method: 'DELETE'
     });
 
     if (!response.ok) {
         const error = await response.text();
+        logger.error(`[Webhook] Deletion failed: ${error}`);
         throw new Error(`Helius webhook deletion failed: ${error}`);
     }
 
-    logger.info(`🗑️ Webhook deleted: ${webhookId}`);
+    logger.info(`[Webhook] Deleted: ${webhookId}`);
     return true;
 }
 
@@ -93,11 +117,7 @@ async function deleteWebhook(webhookId) {
  * @returns {Promise<Array>}
  */
 async function listWebhooks() {
-    if (!config.HELIUS_API_KEY) {
-        throw new Error('HELIUS_API_KEY not configured');
-    }
-
-    const response = await fetch(`${HELIUS_API_URL}/webhooks?api-key=${config.HELIUS_API_KEY}`);
+    const response = await fetch(getWebhookApiUrl());
 
     if (!response.ok) {
         const error = await response.text();
@@ -108,8 +128,43 @@ async function listWebhooks() {
 }
 
 /**
+ * Verify webhook signature (CRITICAL for security)
+ * Helius signs webhook payloads with HMAC-SHA256
+ *
+ * @param {string} payload - Raw request body (string)
+ * @param {string} signature - X-Helius-Signature header
+ * @param {string} secret - Webhook secret (from webhook creation)
+ * @returns {boolean}
+ */
+function verifyWebhookSignature(payload, signature, secret) {
+    if (!signature || !secret) {
+        logger.warn('[Webhook] Missing signature or secret for verification');
+        return false;
+    }
+
+    try {
+        const expectedSig = crypto
+            .createHmac('sha256', secret)
+            .update(payload, 'utf8')
+            .digest('hex');
+
+        // Constant-time comparison to prevent timing attacks
+        return crypto.timingSafeEqual(
+            Buffer.from(signature, 'hex'),
+            Buffer.from(expectedSig, 'hex')
+        );
+    } catch (e) {
+        logger.error(`[Webhook] Signature verification error: ${e.message}`);
+        return false;
+    }
+}
+
+/**
  * Get or create a master webhook for all tracked tokens
  * This is more efficient than creating one webhook per token
+ *
+ * FIXED: Now creates webhook with ALL mints atomically (no race condition)
+ *
  * @param {object} db - Database connection
  * @param {string} callbackUrl - Callback URL
  * @returns {Promise<string>} - Webhook ID
@@ -127,17 +182,12 @@ async function getOrCreateMasterWebhook(db, callbackUrl) {
     const mints = tokens.map(t => t.mint);
 
     if (mints.length === 0) {
-        logger.warn('⚠️ No verified tokens to create webhook for');
+        logger.warn('[Webhook] No verified tokens to create webhook for');
         return null;
     }
 
-    // Create new master webhook
-    const webhook = await createTokenWebhook(mints[0], callbackUrl);
-
-    // Add remaining mints if any
-    if (mints.length > 1) {
-        await addToWebhook(webhook.webhookID, mints);
-    }
+    // Create new master webhook with ALL mints atomically (no race condition)
+    const webhook = await createTokenWebhook(mints, callbackUrl);
 
     // Save master webhook reference
     await db.run(
@@ -145,7 +195,7 @@ async function getOrCreateMasterWebhook(db, callbackUrl) {
         ['_master', '_master', webhook.webhookID, Date.now()]
     );
 
-    logger.info(`✅ Master webhook created with ${mints.length} tokens`);
+    logger.info(`[Webhook] Master webhook created with ${mints.length} tokens`);
     return webhook.webhookID;
 }
 
@@ -158,7 +208,7 @@ async function addTokenToMasterWebhook(db, mint) {
     const master = await db.get('SELECT webhook_id FROM webhooks WHERE mint = $1', ['_master']);
 
     if (!master) {
-        logger.warn('⚠️ No master webhook exists, creating one...');
+        logger.warn('[Webhook] No master webhook exists, creating one...');
         const callbackUrl = config.WEBHOOK_URL || `${config.API_URL}/webhook/transfers`;
         await getOrCreateMasterWebhook(db, callbackUrl);
         return;
@@ -166,11 +216,11 @@ async function addTokenToMasterWebhook(db, mint) {
 
     // Get all current tracked tokens + new one
     const tokens = await db.all('SELECT mint FROM tokens WHERE hasCommunityUpdate = TRUE');
-    const mints = [...tokens.map(t => t.mint), mint];
+    const mints = [...new Set([...tokens.map(t => t.mint), mint])]; // Dedupe
 
     // Update webhook with new token list
     await addToWebhook(master.webhook_id, mints);
-    logger.info(`✅ Added ${mint} to master webhook`);
+    logger.info(`[Webhook] Added ${mint.slice(0, 8)}... to master webhook (total: ${mints.length})`);
 }
 
 module.exports = {
@@ -179,5 +229,6 @@ module.exports = {
     deleteWebhook,
     listWebhooks,
     getOrCreateMasterWebhook,
-    addTokenToMasterWebhook
+    addTokenToMasterWebhook,
+    verifyWebhookSignature  // Export for route handler
 };

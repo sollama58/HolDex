@@ -1,10 +1,15 @@
 /**
  * Helius Webhook Receiver
  * Receives real-time token transfer events and updates holder_snapshots
+ *
+ * SECURITY: Webhooks are verified using HMAC-SHA256 signatures
+ * from Helius (X-Helius-Signature header)
  */
 const express = require('express');
 const router = express.Router();
 const logger = require('../services/logger');
+const config = require('../config/env');
+const { verifyWebhookSignature } = require('../services/heliusWebhook');
 
 // Known DEX/AMM pool programs to exclude from holder tracking
 const POOL_PROGRAMS = new Set([
@@ -50,6 +55,9 @@ function init(deps) {
      * POST /webhook/transfers
      * Receives transfer events from Helius webhook
      *
+     * SECURITY: Signature verification is REQUIRED in production
+     * Set WEBHOOK_SECRET env var to enable verification
+     *
      * Event structure (Enhanced):
      * [{
      *   type: 'TRANSFER',
@@ -65,6 +73,21 @@ function init(deps) {
      */
     router.post('/transfers', async (req, res) => {
         try {
+            // SECURITY: Verify Helius signature if WEBHOOK_SECRET is configured
+            // Note: req.rawBody must be set by middleware (see index.js)
+            if (config.WEBHOOK_SECRET) {
+                const signature = req.headers['x-helius-signature'];
+                const rawBody = req.rawBody || JSON.stringify(req.body);
+
+                if (!verifyWebhookSignature(rawBody, signature, config.WEBHOOK_SECRET)) {
+                    logger.warn('⚠️  Webhook signature verification FAILED');
+                    return res.status(401).json({ error: 'Invalid signature' });
+                }
+            } else if (process.env.NODE_ENV === 'production') {
+                // Warn in production if no secret configured
+                logger.warn('⚠️  WEBHOOK_SECRET not set - signature verification disabled');
+            }
+
             const events = Array.isArray(req.body) ? req.body : [req.body];
             let processed = 0;
 
