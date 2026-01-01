@@ -45,22 +45,35 @@ try {
 // CORS CONFIGURATION
 const allowedOrigins = config.CORS_ORIGINS;
 
+// SECURITY: Strict domain validation patterns (prevents subdomain spoofing)
+// Pattern explanation:
+// - ^https?:// = must start with http:// or https://
+// - (www\.)? = optional www prefix
+// - domain\.tld$ = exact domain match at end
+const ALLOWED_DOMAIN_PATTERNS = [
+    /^https?:\/\/(www\.)?alonisthe\.dev$/,           // alonisthe.dev (exact)
+    /^https?:\/\/[a-z0-9-]+\.alonisthe\.dev$/,       // *.alonisthe.dev subdomains
+    /^https?:\/\/localhost(:\d+)?$/,                  // localhost with optional port
+    /^https?:\/\/127\.0\.0\.1(:\d+)?$/,              // 127.0.0.1 with optional port
+    /^https?:\/\/[a-z0-9-]+\.squarespace\.com$/,     // *.squarespace.com
+    /^https?:\/\/[a-z0-9-]+\.github\.dev$/,          // GitHub Codespaces
+    /^https?:\/\/[a-z0-9-]+\.app\.github\.dev$/,     // GitHub Codespaces (port forwarding)
+];
+
+function isOriginAllowed(origin) {
+    if (!origin) return true; // Allow requests with no origin (server-to-server)
+
+    // Check explicit config first
+    if (allowedOrigins === '*') return true;
+    if (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin)) return true;
+
+    // Check against strict patterns
+    return ALLOWED_DOMAIN_PATTERNS.some(pattern => pattern.test(origin));
+}
+
 const corsOptions = {
     origin: function (origin, callback) {
-        if (!origin) return callback(null, true);
-        
-        // Check Config
-        const isConfigAllowed = allowedOrigins === '*' || (Array.isArray(allowedOrigins) && allowedOrigins.includes(origin));
-        
-        // Check Domain Whitelist
-        const isDomainAllowed = 
-            origin.includes('alonisthe.dev') || 
-            origin.includes('localhost') || 
-            origin.includes('127.0.0.1') ||
-            origin.includes('.squarespace.com') ||
-            origin.includes('squarespace.com');
-
-        if (isConfigAllowed || isDomainAllowed) {
+        if (isOriginAllowed(origin)) {
             return callback(null, true);
         } else {
             logger.warn(`⚠️ CORS Blocked Origin: ${origin}`);

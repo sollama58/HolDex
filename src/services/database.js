@@ -183,6 +183,26 @@ async function initDB() {
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS freeze_authority_revoked BOOLEAN DEFAULT FALSE`,
             ];
 
+            // PERFORMANCE: Add indexes for frequently queried columns
+            const indexMigrations = [
+                // Index for verified tokens filter (hasCommunityUpdate = TRUE)
+                `CREATE INDEX IF NOT EXISTS idx_tokens_community_update ON tokens (hasCommunityUpdate) WHERE hasCommunityUpdate = TRUE`,
+                // Index for K-Score sorting (most common sort)
+                `CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens (k_score DESC NULLS LAST)`,
+                // Index for timestamp/age sorting
+                `CREATE INDEX IF NOT EXISTS idx_tokens_timestamp ON tokens (timestamp DESC NULLS LAST)`,
+                // Index for market cap sorting
+                `CREATE INDEX IF NOT EXISTS idx_tokens_marketcap ON tokens (marketCap DESC NULLS LAST)`,
+                // Composite index for verified + k_score (most common query pattern)
+                `CREATE INDEX IF NOT EXISTS idx_tokens_verified_kscore ON tokens (hasCommunityUpdate, k_score DESC NULLS LAST) WHERE hasCommunityUpdate = TRUE`,
+                // Index for pools by mint (frequent JOIN)
+                `CREATE INDEX IF NOT EXISTS idx_pools_mint ON pools (mint)`,
+                // Index for holder_snapshots queries
+                `CREATE INDEX IF NOT EXISTS idx_holder_snapshots_mint_balance ON holder_snapshots (mint, balance DESC)`,
+                // Index for k_score_history date range queries
+                `CREATE INDEX IF NOT EXISTS idx_kscore_history_mint_date ON k_score_history (mint, date DESC)`,
+            ];
+
             for (const sql of migrations) {
                 try {
                     await primaryPool.query(sql);
@@ -190,6 +210,17 @@ async function initDB() {
                     // Column might already exist, ignore
                 }
             }
+
+            // Apply index migrations
+            for (const sql of indexMigrations) {
+                try {
+                    await primaryPool.query(sql);
+                } catch (e) {
+                    // Index might already exist or column missing, ignore
+                    logger.debug(`Index migration skipped: ${e.message?.slice(0, 50)}`);
+                }
+            }
+            logger.info('💾 Database: Indexes verified');
 
             dbWrapper = {
                 query: (text, params) => (text.trim().toUpperCase().startsWith('SELECT') ? readPool : primaryPool).query(text, params),

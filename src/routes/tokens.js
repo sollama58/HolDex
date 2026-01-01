@@ -20,7 +20,7 @@ const { smartCache, enableIndexing, aggregateAndSaveToken } = require('../servic
 const { findPoolsOnChain } = require('../services/pool_finder');
 const { getSolanaConnection } = require('../services/solana'); 
 const config = require('../config/env');
-const { updateSingleToken } = require('../tasks/kScoreUpdater'); 
+const { updateSingleToken, getHealthStatus } = require('../tasks/kScoreUpdater'); 
 const { getClient } = require('../services/redis'); 
 const { enqueueTokenUpdate } = require('../services/queue'); 
 const { snapshotPools } = require('../indexer/tasks/snapshotter'); 
@@ -186,12 +186,67 @@ function init(deps) {
 
     router.post('/proxy/send-tx', async (req, res) => {
         try {
-            const { signedTx } = req.body; 
+            const { signedTx } = req.body;
             if (!signedTx) return res.status(400).json({ success: false, error: "No transaction data" });
             const txBuffer = Buffer.from(signedTx, 'base64');
             const signature = await solanaConnection.sendRawTransaction(txBuffer, { skipPreflight: false, preflightCommitment: 'confirmed' });
             res.json({ success: true, signature });
         } catch (e) { res.status(500).json({ success: false, error: "Transaction Failed at RPC" }); }
+    });
+
+    // --- HEALTH CHECK ---
+    // Returns system health including Helius API status, circuit breaker, and rate limits
+    router.get('/health', async (req, res) => {
+        try {
+            const redis = getClient();
+            const heliusHealth = getHealthStatus();
+
+            // Check DB connectivity
+            let dbStatus = 'ok';
+            try {
+                await db.get('SELECT 1');
+            } catch (e) {
+                dbStatus = 'error';
+            }
+
+            // Check Redis connectivity
+            let redisStatus = 'disconnected';
+            if (redis) {
+                try {
+                    await redis.ping();
+                    redisStatus = 'ok';
+                } catch (e) {
+                    redisStatus = 'error';
+                }
+            }
+
+            const health = {
+                status: heliusHealth.helius.circuitBreaker.state === 'open' ? 'degraded' : 'ok',
+                timestamp: new Date().toISOString(),
+                uptime: process.uptime(),
+                memory: {
+                    heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+                    heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+                    rss: Math.round(process.memoryUsage().rss / 1024 / 1024)
+                },
+                services: {
+                    database: dbStatus,
+                    redis: redisStatus,
+                    ...heliusHealth
+                }
+            };
+
+            // Return 503 if circuit breaker is open (degraded service)
+            const statusCode = health.status === 'degraded' ? 503 : 200;
+            res.status(statusCode).json(health);
+
+        } catch (e) {
+            res.status(500).json({
+                status: 'error',
+                error: e.message,
+                timestamp: new Date().toISOString()
+            });
+        }
     });
 
     // PUBLIC: Candle Chart

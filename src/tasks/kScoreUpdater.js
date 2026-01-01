@@ -2323,6 +2323,39 @@ function start(deps) {
     setTimeout(() => updateKScores(deps), 30000);
 }
 
+/**
+ * Get Helius API health status for monitoring
+ * Exposes circuit breaker state and rate limit info
+ */
+function getHealthStatus() {
+    return {
+        helius: {
+            configured: !!HELIUS_API_KEY,
+            circuitBreaker: {
+                state: circuitBreaker.state,
+                failures: circuitBreaker.failures,
+                threshold: circuitBreaker.threshold,
+                lastFailure: circuitBreaker.lastFailure > 0
+                    ? new Date(circuitBreaker.lastFailure).toISOString()
+                    : null,
+                cooldownMs: circuitBreaker.cooldown
+            },
+            rateLimit: {
+                remaining: rateLimitRemaining,
+                limit: currentRateLimit,
+                resetTime: rateLimitResetTime > 0
+                    ? new Date(rateLimitResetTime).toISOString()
+                    : null,
+                requestIntervalMs: Math.round(requestInterval)
+            }
+        },
+        caches: {
+            poolCacheSize: poolCache.size,
+            poolCacheTTLMs: POOL_CACHE_TTL
+        }
+    };
+}
+
 module.exports = {
     start,
     updateSingleToken,
@@ -2331,4 +2364,6 @@ module.exports = {
         return result.score;
     },
     calculateConviction, // Exposed for testing
+    getHealthStatus,     // For /health endpoint
+    checkTokenSecurity,  // Exposed for direct security checks
 };
