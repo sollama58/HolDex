@@ -1,5 +1,6 @@
 const express = require('express');
 const axios = require('axios');
+const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const { PublicKey } = require('@solana/web3.js');
 const nacl = require('tweetnacl');
@@ -128,7 +129,20 @@ const requireAdmin = (req, res, next) => {
         return res.status(503).json({ success: false, error: 'Admin not configured' });
     }
     const authHeader = req.headers['x-admin-auth'];
-    if (!authHeader || authHeader !== config.ADMIN_PASSWORD) {
+    if (!authHeader) {
+        return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+
+    // SECURITY: Use timing-safe comparison to prevent timing attacks
+    const headerBuffer = Buffer.from(String(authHeader));
+    const passwordBuffer = Buffer.from(config.ADMIN_PASSWORD);
+
+    // Ensure same length for timing-safe comparison
+    if (headerBuffer.length !== passwordBuffer.length) {
+        return res.status(403).json({ success: false, error: 'Unauthorized' });
+    }
+
+    if (!crypto.timingSafeEqual(headerBuffer, passwordBuffer)) {
         return res.status(403).json({ success: false, error: 'Unauthorized' });
     }
     next();

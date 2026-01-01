@@ -19,6 +19,17 @@ const fs = require('fs');
 const path = require('path');
 
 const app = express();
+
+// SECURITY: HTML escape function to prevent XSS in dynamic meta tags
+function escapeHtml(str) {
+    if (!str || typeof str !== 'string') return '';
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 const server = http.createServer(app); 
 
 // SECURITY HEADERS
@@ -87,6 +98,17 @@ const corsOptions = {
 
 app.options('*', cors(corsOptions));
 app.use(cors(corsOptions));
+
+// SECURITY: Capture raw body for webhook signature verification
+// Must be placed BEFORE express.json() to access the original request body
+app.use('/webhook', express.json({
+    limit: '100kb',
+    verify: (req, _res, buf) => {
+        req.rawBody = buf.toString('utf8');
+    }
+}));
+
+// Standard JSON parsing for all other routes
 app.use(express.json({ limit: '100kb' }));
 
 // RATE LIMITING
@@ -131,28 +153,34 @@ app.get('/token/:mint', async (req, res, next) => {
         // Use In-Memory Template
         let html = HOMEPAGE_TEMPLATE;
 
-        // Prepare Meta Tags
+        // SECURITY: Escape all user-controlled values to prevent XSS
+        const safeTitle = escapeHtml(title);
+        const safeDesc = escapeHtml(desc);
+        const safeImage = escapeHtml(image);
+        const safeMint = escapeHtml(mint);
+
+        // Prepare Meta Tags (with escaped values)
         const metaTags = `
-            <meta property="og:title" content="${title}" />
-            <meta property="og:description" content="${desc}" />
-            <meta property="og:image" content="${image}" />
-            <meta property="og:url" content="https://holdex.io/token/${mint}" />
+            <meta property="og:title" content="${safeTitle}" />
+            <meta property="og:description" content="${safeDesc}" />
+            <meta property="og:image" content="${safeImage}" />
+            <meta property="og:url" content="https://holdex.io/token/${safeMint}" />
             <meta property="og:type" content="website" />
             <meta name="twitter:card" content="summary_large_image" />
-            <meta name="twitter:title" content="${title}" />
-            <meta name="twitter:description" content="${desc}" />
-            <meta name="twitter:image" content="${image}" />
+            <meta name="twitter:title" content="${safeTitle}" />
+            <meta name="twitter:description" content="${safeDesc}" />
+            <meta name="twitter:image" content="${safeImage}" />
         `;
 
         // Inject into <head>
         html = html.replace('<head>', `<head>${metaTags}`);
-        
+
         // Inject Client-Side Redirect Script (To enable SPA hash routing)
         // This converts /token/:mint -> /#token/:mint so the JS app loads the view
         const redirectScript = `
             <script>
                 if (!window.location.hash) {
-                    history.replaceState(null, null, '/#token/${mint}');
+                    history.replaceState(null, null, '/#token/${safeMint}');
                 }
             </script>
         `;
