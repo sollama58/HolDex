@@ -247,13 +247,26 @@ async function loadHolderSnapshots(db, mint) {
 
 /**
  * Get NEW transactions for a holder since last snapshot
+ * Optimized with Helius time-based filtering when available
+ *
+ * @param {string} wallet - Wallet address
+ * @param {string} lastSignature - Last analyzed signature (fallback stop condition)
+ * @param {string} mint - Token mint to filter for
+ * @param {number} sinceTimestamp - Optional: Unix timestamp (ms) to filter from
  */
-async function getNewTransactions(wallet, lastSignature, mint) {
+async function getNewTransactions(wallet, lastSignature, mint, sinceTimestamp = null) {
     const newTxs = [];
     let before = null;
 
+    // Build query options with time filter optimization
+    const baseOptions = {
+        limit: 50,
+        // Use time filter if we have a snapshot timestamp (reduces API calls)
+        ...(sinceTimestamp && { gtTime: Math.floor(sinceTimestamp / 1000) })
+    };
+
     for (let page = 0; page < 3; page++) { // Max 3 pages of new txs
-        const txs = await getEnhancedTransactions(wallet, { limit: 50, before });
+        const txs = await getEnhancedTransactions(wallet, { ...baseOptions, before });
         if (!txs || txs.length === 0) break;
 
         let foundLast = false;
@@ -331,7 +344,8 @@ async function deltaConvictionAnalysis(db, mint) {
     for (const snap of snapshots) {
         try {
             // Get only NEW transactions since last check
-            const newTxs = await getNewTransactions(snap.holder, snap.last_signature, mint);
+            // Use time filter optimization when snapshot has timestamp
+            const newTxs = await getNewTransactions(snap.holder, snap.last_signature, mint, snap.updated_at);
 
             if (newTxs.length > 0) {
                 // Update counts incrementally
@@ -505,14 +519,45 @@ async function heliusRpc(method, params) {
     }
 }
 
+/**
+ * Enhanced Transaction History API with new Helius features
+ *
+ * @param {string} address - Wallet address to query
+ * @param {Object} options - Query options
+ * @param {number} options.limit - Results per page (1-100, default: 10)
+ * @param {string} options.before - Pagination: fetch before this signature (use with desc)
+ * @param {string} options.after - Pagination: fetch after this signature (use with asc)
+ * @param {string} options.sortOrder - 'asc' (oldest first) or 'desc' (newest first, default)
+ * @param {number} options.gtTime - Filter: transactions after this unix timestamp
+ * @param {number} options.gteTime - Filter: transactions at or after this unix timestamp
+ * @param {number} options.ltTime - Filter: transactions before this unix timestamp
+ * @param {number} options.lteTime - Filter: transactions at or before this unix timestamp
+ * @param {string} options.type - Filter by tx type: SWAP, TRANSFER, etc.
+ * @returns {Array} Enhanced transaction objects
+ */
 async function getEnhancedTransactions(address, options = {}) {
     if (!HELIUS_API_KEY) return [];
 
     // Note: Enhanced Transactions API (v0) requires API key in query string
     // Header auth returns 401 - this is a Helius API limitation
     const params = new URLSearchParams({ 'api-key': HELIUS_API_KEY });
+
+    // Pagination
     if (options.limit) params.append('limit', options.limit.toString());
-    if (options.before) params.append('before', options.before);
+    if (options.before) params.append('before-signature', options.before);
+    if (options.after) params.append('after-signature', options.after);
+
+    // Sort order (new feature: oldest first)
+    if (options.sortOrder) params.append('sort-order', options.sortOrder);
+
+    // Time-based filtering (unix timestamps in seconds)
+    if (options.gtTime) params.append('gt-time', options.gtTime.toString());
+    if (options.gteTime) params.append('gte-time', options.gteTime.toString());
+    if (options.ltTime) params.append('lt-time', options.ltTime.toString());
+    if (options.lteTime) params.append('lte-time', options.lteTime.toString());
+
+    // Transaction type filter
+    if (options.type) params.append('type', options.type);
 
     const url = `https://api-mainnet.helius-rpc.com/v0/addresses/${address}/transactions?${params}`;
 
@@ -609,6 +654,10 @@ async function fetchTokenHolders(mint) {
     return holders;
 }
 
+/**
+ * Analyze holder's retention and trading behavior
+ * Optimized with Helius sort-order for efficient first transaction lookup
+ */
 async function getHolderRetention(wallet, mint) {
     let firstBuyAmount = 0;
     let currentBalance = 0;
@@ -618,6 +667,28 @@ async function getHolderRetention(wallet, mint) {
     let netFlow = 0;
     let lastSignature = null;
 
+    // OPTIMIZATION: Get first transaction efficiently using sort-order=asc
+    // This finds the holder's earliest activity in one call instead of paginating backwards
+    const oldestTxs = await getEnhancedTransactions(wallet, {
+        limit: 10,
+        sortOrder: 'asc'  // Oldest first
+    });
+
+    if (oldestTxs && oldestTxs.length > 0) {
+        // Find first buy for this mint
+        for (const tx of oldestTxs) {
+            if (!tx.tokenTransfers) continue;
+            for (const transfer of tx.tokenTransfers) {
+                if (transfer.mint === mint && transfer.toUserAccount === wallet) {
+                    firstBuyAmount = transfer.tokenAmount || 0;
+                    break;
+                }
+            }
+            if (firstBuyAmount > 0) break;
+        }
+    }
+
+    // Get recent transactions (newest first) for current state and signature
     for (let page = 0; page < 5; page++) {
         const txs = await getEnhancedTransactions(wallet, { limit: 100, before });
         if (!txs || txs.length === 0) break;
@@ -635,7 +706,8 @@ async function getHolderRetention(wallet, mint) {
                 const amount = transfer.tokenAmount || 0;
                 if (transfer.toUserAccount === wallet) {
                     currentBalance += amount;
-                    firstBuyAmount = amount; // Going backwards, last seen = first buy
+                    // Fallback: if asc query didn't find first buy, use last seen from desc
+                    if (firstBuyAmount === 0) firstBuyAmount = amount;
                     buyCount++;
                     netFlow += amount;
                 }
