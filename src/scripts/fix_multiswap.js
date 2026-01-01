@@ -17,7 +17,7 @@ async function fixSchema() {
         try {
             await pool.query(`ALTER TABLE pools DROP CONSTRAINT IF EXISTS pools_mint_dex_key;`);
             console.log("✅ Removed single-pool constraint.");
-        } catch (e) {
+        } catch (_e) {
             console.log("⚠️  Constraint might not exist, skipping.");
         }
 

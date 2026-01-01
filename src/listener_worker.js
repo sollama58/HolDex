@@ -16,7 +16,7 @@ process.on('uncaughtException', (err) => {
     // Keep running to avoid downtime, but log loudly
 });
 
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason, _promise) => {
     console.error('❌ UNHANDLED REJECTION:', reason);
 });
 
@@ -24,7 +24,7 @@ process.on('unhandledRejection', (reason, promise) => {
 let indexerService = null;
 try {
     indexerService = require('./indexer');
-} catch (e) {
+} catch (_e) {
     logger.warn("ℹ️ Listener Worker: Could not load './indexer' module. Skipping indexer start.");
 }
 

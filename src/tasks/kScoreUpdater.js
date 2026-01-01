@@ -133,7 +133,7 @@ function parseRateLimitHeaders(response) {
         } else {
             requestInterval = 1000 / currentRateLimit; // Normal rate
         }
-    } catch (e) {
+    } catch (_e) {
         // Ignore parsing errors, use defaults
     }
 }
@@ -150,7 +150,7 @@ async function saveHolderHistory(db, mint, totalHolders, realHolders) {
                 holders = EXCLUDED.holders,
                 real_holders = EXCLUDED.real_holders
         `, [mint, totalHolders, realHolders]);
-    } catch (e) {
+    } catch (_e) {
         // Ignore errors (table might not exist on first run)
     }
 }
@@ -169,7 +169,7 @@ async function saveKScoreHistory(db, mint, kScore, convictionScore, holders) {
                 conviction_score = EXCLUDED.conviction_score,
                 holders = EXCLUDED.holders
         `, [mint, kScore, convictionScore, holders]);
-    } catch (e) {
+    } catch (_e) {
         // Ignore errors (table might not exist on first run)
     }
 }
@@ -240,7 +240,7 @@ async function loadHolderSnapshots(db, mint) {
             [mint]
         );
         return snapshots || [];
-    } catch (e) {
+    } catch (_e) {
         return [];
     }
 }
@@ -290,7 +290,7 @@ async function getNewTransactions(wallet, lastSignature, mint) {
 /**
  * Classify holder from buy/sell counts
  */
-function classifyFromCounts(buyCount, sellCount, netFlow) {
+function classifyFromCounts(buyCount, sellCount, _netFlow) {
     if (buyCount === 0 && sellCount === 0) return 'holder';
 
     const ratio = sellCount > 0 ? buyCount / sellCount : buyCount > 0 ? 10 : 1;
@@ -377,7 +377,7 @@ async function deltaConvictionAnalysis(db, mint) {
             }
 
             await sleep(50); // Light rate limiting
-        } catch (e) {
+        } catch (_e) {
             // Skip failed holders
         }
     }
@@ -520,7 +520,7 @@ async function getEnhancedTransactions(address, options = {}) {
         const response = await rateLimitedFetch(url, { method: 'GET' });
         if (!response.ok) return [];
         return await response.json();
-    } catch (error) {
+    } catch (_error) {
         return [];
     }
 }
@@ -556,7 +556,7 @@ async function batchCheckPools(addresses) {
                 results.set(addr, isPool);
                 poolCache.set(addr, { isPool, ts: Date.now() });
             }
-        } catch (error) {
+        } catch (_error) {
             for (const addr of uncached) {
                 results.set(addr, false);
             }
@@ -854,7 +854,7 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
 
                 analyzed++;
                 await sleep(100); // Rate limit
-            } catch (e) {
+            } catch (_e) {
                 // Skip failed holders
             }
         }
@@ -1118,7 +1118,7 @@ async function calculateBurn(mint, allHolders = null, options = {}) {
                     initialSupply = BigInt(firstHistory.supply);
                     supplySource = 'history';
                 }
-            } catch (e) {
+            } catch (_e) {
                 // Ignore, fall through to default
             }
         }
@@ -1319,7 +1319,7 @@ async function getSupplyVolatility(db, mint) {
             avgChange: Math.round(avgChange * 100) / 100
         };
 
-    } catch (e) {
+    } catch (_e) {
         return { volatility: 0, penalty: 0, dataPoints: 0 };
     }
 }
@@ -1347,7 +1347,7 @@ const LP_LOCKER_PROGRAMS = new Set([
 ]);
 
 // Known launchpads with auto LP burn on graduation
-const LAUNCHPAD_DEXES = new Set([
+const _LAUNCHPAD_DEXES = new Set([
     'pumpswap',
     'pump-fun',
     'moonshot',   // Moonshot also burns LP
@@ -1535,7 +1535,7 @@ async function checkLPHolders(lpMint) {
 
         return { burnPct, lockedPct, status };
 
-    } catch (e) {
+    } catch (_e) {
         return { burnPct: 0, lockedPct: 0, status: 'error' };
     }
 }
@@ -1551,7 +1551,7 @@ const USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
 /**
  * Get token account balance from RPC
  */
-async function getTokenAccountBalance(vaultAddress) {
+async function _getTokenAccountBalance(vaultAddress) {
     try {
         const result = await heliusRpc('getAccountInfo', [vaultAddress, { encoding: 'base64' }]);
         if (!result || !result.value || !result.value.data) return null;
@@ -1562,7 +1562,7 @@ async function getTokenAccountBalance(vaultAddress) {
 
         const amount = data.readBigUInt64LE(64);
         return Number(amount);
-    } catch (e) {
+    } catch (_e) {
         return null;
     }
 }
@@ -1572,7 +1572,7 @@ async function getTokenAccountBalance(vaultAddress) {
  * Uses vault reserves from pools (reserve_a, reserve_b)
  * Falls back to cached liquidity_usd if reserves unavailable
  */
-async function calculateOnChainLiquidity(db, mint, solPrice) {
+async function _calculateOnChainLiquidity(db, mint, solPrice) {
     try {
         // Get pools for this token paired with SOL/USDC/USDT (with reserves)
         const pools = await db.all(`
@@ -2087,7 +2087,7 @@ async function detectTokenCategory(db, mint) {
             category.isPumpFun = true;
             category.bondingCurveComplete = true;
         }
-    } catch (e) {
+    } catch (_e) {
         // Ignore errors
     }
 

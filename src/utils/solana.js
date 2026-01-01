@@ -5,7 +5,7 @@ function isValidPubkey(str) {
     try {
         new PublicKey(str);
         return true;
-    } catch (e) {
+    } catch (_e) {
         return false;
     }
 }

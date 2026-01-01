@@ -27,7 +27,7 @@ async function processToken(mint) {
             const supplyInfo = await connection.getTokenSupply(new PublicKey(mint));
             supply = supplyInfo.value.amount;
             decimals = supplyInfo.value.decimals;
-        } catch (e) {}
+        } catch (_e) { /* ignore */ }
 
         const baseData = {
             name: meta?.name || 'Unknown',
@@ -127,7 +127,7 @@ async function startWorker() {
                     
                     // Small delay to allow GC to run if needed
                     if (global.gc) {
-                        try { global.gc(); } catch (e) {}
+                        try { global.gc(); } catch (_e) { /* ignore */ }
                     }
                     setTimeout(runLoop, 50); 
                 } else {

@@ -100,18 +100,18 @@ async function enrichPoolsWithReserves(pools) {
                         const reserveB = new PublicKey(acc.data.subarray(layout.offB, layout.offB + 32));
                         pool.reserve_a = reserveA.toBase58();
                         pool.reserve_b = reserveB.toBase58();
-                    } catch (parseErr) {}
+                    } catch (_parseErr) { /* ignore */ }
                 } else if (pool.dexId === 'whirlpool' || owner === 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc') {
                     try {
                         const reserveA = new PublicKey(acc.data.subarray(101, 133));
                         const reserveB = new PublicKey(acc.data.subarray(133, 165));
                         pool.reserve_a = reserveA.toBase58();
                         pool.reserve_b = reserveB.toBase58();
-                    } catch(e) {}
+                    } catch(_e) { /* ignore */ }
                 }
             });
-        } catch (err) {
-            logger.warn(`Enrichment Error: ${err.message}`);
+        } catch (_err) {
+            // logger.warn(`Enrichment Error: ${_err.message}`);
         }
     }
 }
@@ -141,7 +141,7 @@ async function findPumpFunCurve(mintAddress, results) {
                 priceUsd: 0
             });
         }
-    } catch (e) {}
+    } catch (_e) { /* ignore */ }
 }
 
 async function findPoolsOnChain(mintAddress) {

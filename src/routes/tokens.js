@@ -3,9 +3,9 @@ const axios = require('axios');
 const rateLimit = require('express-rate-limit');
 const { PublicKey } = require('@solana/web3.js');
 const nacl = require('tweetnacl');
-const bs58 = require('bs58');
+const _bs58 = require('bs58');
 const { isValidPubkey } = require('../utils/solana');
-const { hashApiKey, maskApiKey } = require('../utils/apiKeyHash');
+const { hashApiKey } = require('../utils/apiKeyHash');
 
 // Strict rate limit for API key generation (5 per hour per IP)
 const apiKeyRateLimit = rateLimit({
@@ -16,13 +16,11 @@ const apiKeyRateLimit = rateLimit({
     legacyHeaders: false,
     keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip
 });
-const { smartCache, enableIndexing, aggregateAndSaveToken } = require('../services/database'); 
-const { findPoolsOnChain } = require('../services/pool_finder');
+const { smartCache, aggregateAndSaveToken } = require('../services/database');
 const { getSolanaConnection } = require('../services/solana'); 
 const config = require('../config/env');
 const { updateSingleToken, getHealthStatus } = require('../tasks/kScoreUpdater'); 
 const { getClient } = require('../services/redis'); 
-const { enqueueTokenUpdate } = require('../services/queue'); 
 const { snapshotPools } = require('../indexer/tasks/snapshotter'); 
 const logger = require('../services/logger');
 const cacheControl = require('../middleware/httpCache');
@@ -103,7 +101,7 @@ async function calculateTrajectory(db, mint, currentScore) {
             delta30d: Math.round(delta * 10) / 10,
             dataPoints: history.length
         };
-    } catch (e) {
+    } catch (_e) {
         return { trajectory: 'stable', delta30d: 0, dataPoints: 0 };
     }
 }
@@ -166,10 +164,10 @@ function init(deps) {
             const response = await axios.get(url, { timeout: 5000 });
             const data = response.data.data.attributes.ohlcv_list;
             return data.map(c => ({ time: c[0], open: c[1], high: c[2], low: c[3], close: c[4], volume: c[5] })).reverse();
-        } catch (e) { return []; }
+        } catch (_e) { return []; }
     }
 
-    async function verifyPayment(signature, payerPubkey) {
+    async function verifyPayment(signature, _payerPubkey) {
         if (!signature) throw new Error("Payment signature required");
         const existing = await db.get('SELECT id FROM token_updates WHERE signature = $1', [signature]);
         if (existing) throw new Error("Transaction signature already used");
@@ -181,7 +179,7 @@ function init(deps) {
         try {
             const { blockhash, lastValidBlockHeight } = await solanaConnection.getLatestBlockhash('confirmed');
             res.json({ success: true, blockhash, lastValidBlockHeight });
-        } catch (e) { res.status(500).json({ success: false, error: "Network Busy" }); }
+        } catch (_e) { res.status(500).json({ success: false, error: "Network Busy" }); }
     });
 
     router.post('/proxy/send-tx', async (req, res) => {
@@ -191,7 +189,7 @@ function init(deps) {
             const txBuffer = Buffer.from(signedTx, 'base64');
             const signature = await solanaConnection.sendRawTransaction(txBuffer, { skipPreflight: false, preflightCommitment: 'confirmed' });
             res.json({ success: true, signature });
-        } catch (e) { res.status(500).json({ success: false, error: "Transaction Failed at RPC" }); }
+        } catch (_e) { res.status(500).json({ success: false, error: "Transaction Failed at RPC" }); }
     });
 
     // --- HEALTH CHECK ---
@@ -205,7 +203,7 @@ function init(deps) {
             let dbStatus = 'ok';
             try {
                 await db.get('SELECT 1');
-            } catch (e) {
+            } catch (_e) {
                 dbStatus = 'error';
             }
 
@@ -215,7 +213,7 @@ function init(deps) {
                 try {
                     await redis.ping();
                     redisStatus = 'ok';
-                } catch (e) {
+                } catch (_e) {
                     redisStatus = 'error';
                 }
             }
@@ -333,7 +331,7 @@ function init(deps) {
                 solanaConnection.getParsedTokenAccountsByOwner(pubKey, { mint: new PublicKey(tokenMint) })
             ]);
             res.json({ success: true, sol: solBalance / 1e9, tokens: tokenAccounts.value.length > 0 ? tokenAccounts.value[0].account.data.parsed.info.tokenAmount.uiAmount : 0 });
-        } catch (e) { res.status(500).json({ success: false, error: "Failed to fetch balance" }); }
+        } catch (_e) { res.status(500).json({ success: false, error: "Failed to fetch balance" }); }
     });
 
     router.post('/request-update', async (req, res) => {
@@ -357,9 +355,9 @@ function init(deps) {
                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
             `, [mint, twitter, website, telegram, banner, finalDescription, Date.now(), signature, userPublicKey]);
             
-            try { await indexTokenOnChain(mint); } catch (err) {}
+            try { await indexTokenOnChain(mint); } catch (_err) { /* ignore */ }
             res.json({ success: true, message: "Update queued." });
-        } catch (e) { res.status(500).json({ success: false, error: "Submission failed" }); }
+        } catch (_e) { res.status(500).json({ success: false, error: "Submission failed" }); }
     });
 
     // --- API KEY GENERATION ---
@@ -456,7 +454,7 @@ function init(deps) {
             const token = await db.get(`SELECT metadata FROM tokens WHERE mint = $1`, [request.mint]); 
             let currentMeta = {}; 
             if (token && token.metadata) { 
-                try { currentMeta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata; } catch (e) {} 
+                try { currentMeta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata; } catch (_e) { /* ignore */ } 
             } 
             
             const newCommunity = { 
@@ -489,7 +487,7 @@ function init(deps) {
     });
 
     router.post('/admin/reject-update', requireAdmin, async (req, res) => { const { id } = req.body; try { await db.run(`UPDATE token_updates SET status = 'rejected' WHERE id = $1`, [id]); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.get('/admin/token/:mint', requireAdmin, async (req, res) => { const { mint } = req.params; if (!isValidPubkey(mint)) return res.status(400).json({ success: false, error: "Invalid mint" }); try { const token = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]); if (!token) return res.status(404).json({ success: false, error: "Token not found" }); let meta = {}; try { if (typeof token.metadata === 'string') meta = JSON.parse(token.metadata); else meta = token.metadata || {}; } catch(e) {} const community = meta.community || {}; res.json({ success: true, token: { ...token, ticker: token.symbol, twitter: community.twitter || meta.twitter, website: community.website || meta.website, telegram: community.telegram || meta.telegram, banner: community.banner || meta.banner, description: community.description || meta.description } }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    router.get('/admin/token/:mint', requireAdmin, async (req, res) => { const { mint } = req.params; if (!isValidPubkey(mint)) return res.status(400).json({ success: false, error: "Invalid mint" }); try { const token = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]); if (!token) return res.status(404).json({ success: false, error: "Token not found" }); let meta = {}; try { if (typeof token.metadata === 'string') meta = JSON.parse(token.metadata); else meta = token.metadata || {}; } catch(_e) { /* ignore */ } const community = meta.community || {}; res.json({ success: true, token: { ...token, ticker: token.symbol, twitter: community.twitter || meta.twitter, website: community.website || meta.website, telegram: community.telegram || meta.telegram, banner: community.banner || meta.banner, description: community.description || meta.description } }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
     
     router.post('/admin/update-token', requireAdmin, async (req, res) => {
         const { mint, twitter, website, telegram, banner, description } = req.body;
@@ -498,7 +496,7 @@ function init(deps) {
             const token = await db.get(`SELECT metadata FROM tokens WHERE mint = $1`, [mint]); 
             let currentMeta = {}; 
             if (token && token.metadata) { 
-                try { currentMeta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata; } catch (e) {} 
+                try { currentMeta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata; } catch (_e) { /* ignore */ } 
             } 
             
             const newCommunity = { 
@@ -674,7 +672,7 @@ function init(deps) {
                             const token = await db.get('SELECT metadata, hasCommunityUpdate FROM tokens WHERE mint = $1', [u.mint]);
                             if (token) {
                                 let meta = {};
-                                try { meta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata || {}; } catch(e){}
+                                try { meta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata || {}; } catch(_e) { /* ignore */ }
                                 
                                 meta.community = meta.community || {};
                                 let changed = false;
@@ -779,7 +777,7 @@ function init(deps) {
                         const indexed = await indexTokenOnChain(mint);
                         token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]); 
                         pairs = indexed.pairs || [];
-                    } catch (e) {}
+                    } catch (_e) { /* ignore */ }
                 }
                 
                 if (!token) return { success: false, error: "Token not found" };
@@ -858,7 +856,7 @@ function init(deps) {
                 }));
 
                 if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
-                if (tokenData.metadata) { try { const meta = typeof tokenData.metadata === 'string' ? JSON.parse(tokenData.metadata) : tokenData.metadata; const comm = meta.community || {}; tokenData.banner = comm.banner || meta.banner; tokenData.description = comm.description || meta.description; tokenData.twitter = comm.twitter || meta.twitter; tokenData.telegram = comm.telegram || meta.telegram; tokenData.website = comm.website || meta.website; } catch (e) {} }
+                if (tokenData.metadata) { try { const meta = typeof tokenData.metadata === 'string' ? JSON.parse(tokenData.metadata) : tokenData.metadata; const comm = meta.community || {}; tokenData.banner = comm.banner || meta.banner; tokenData.description = comm.description || meta.description; tokenData.twitter = comm.twitter || meta.twitter; tokenData.telegram = comm.telegram || meta.telegram; tokenData.website = comm.website || meta.website; } catch (_e) { /* ignore */ } }
                 if (pairs.length > 0) { const mainPool = pairs[0]; if (mainPool.price_usd > 0) tokenData.priceUsd = mainPool.price_usd; }
                 const holderHistory = await db.all(`SELECT count, timestamp FROM holders_history WHERE mint = $1 ORDER BY timestamp ASC LIMIT 100`, [mint]);
                 return { success: true, token: { ...tokenData, pairs: formattedPairs, holderHistory } };
@@ -930,7 +928,7 @@ function init(deps) {
             const isGenericView = !search && !filter && direction === 'desc' && limit === 20 && page === 1; 
             const cacheKey = `api:tokens:list:${sort}:${page}:${search}:${filter}:${direction}:${limit}`;
             const redis = getClient(); 
-            if (isGenericView && redis) { try { const cached = await redis.get(cacheKey); if (cached) { res.setHeader('X-Cache', 'HIT'); return res.json(JSON.parse(cached)); } } catch(e) {} }
+            if (isGenericView && redis) { try { const cached = await redis.get(cacheKey); if (cached) { res.setHeader('X-Cache', 'HIT'); return res.json(JSON.parse(cached)); } } catch(_e) { /* ignore */ } }
 
             const isAddressSearch = isValidPubkey(search);
             let rows = [];
@@ -1010,7 +1008,7 @@ function init(deps) {
                 }))
             };
 
-            if (isGenericView && redis) { try { await redis.set(cacheKey, JSON.stringify(responsePayload), 'EX', 3); } catch(e){} }
+            if (isGenericView && redis) { try { await redis.set(cacheKey, JSON.stringify(responsePayload), 'EX', 3); } catch(_e) { /* ignore */ } }
             res.setHeader('X-Cache', 'MISS');
             return res.json(responsePayload);
 

@@ -32,7 +32,7 @@ async function fetchTokenDetails(mintAddress) {
         const response = await axios.get(url, { timeout: 5000 });
         if (!response.data || !response.data.data) return null;
         return response.data.data;
-    } catch (e) { return null; }
+    } catch (_e) { return null; }
 }
 
 async function processSingleToken(db, t, now) {
@@ -71,7 +71,7 @@ async function processSingleToken(db, t, now) {
                     holderCount = rpcHolders;
                 }
                 didCheckRpc = true; // Mark as checked so we update timestamp
-            } catch (e) {
+            } catch (_e) {
                 // Ignore RPC errors, try again next cycle or wait
             }
         }
@@ -273,11 +273,11 @@ async function updateMetadata(deps) {
 
         // OOM FIX: Manual GC Trigger (if available)
         if (global.gc) {
-            try { global.gc(); } catch (e) {}
+            try { global.gc(); } catch (_e) { /* ignore */ }
         }
 
-    } catch (e) {
-        logger.error(`Metadata Cycle Error: ${e.message}`);
+    } catch (_e) {
+        logger.error(`Metadata Cycle Error: ${_e.message}`);
     } finally {
         isRunning = false;
     }

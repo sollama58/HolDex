@@ -26,7 +26,7 @@ function isValidSolanaAddress(address) {
         // Attempt to decode - must be exactly 32 bytes
         const decoded = bs58.decode(address);
         return decoded.length === 32;
-    } catch (e) {
+    } catch (_e) {
         return false;
     }
 }

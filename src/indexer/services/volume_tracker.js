@@ -1,6 +1,6 @@
 const { PublicKey } = require('@solana/web3.js');
 const { getSolanaConnection, retryRPC } = require('../../services/solana');
-const logger = require('../../services/logger');
+const _logger = require('../../services/logger');
 
 /**
  * Calculates trading volume by counting recent transactions.
@@ -8,7 +8,7 @@ const logger = require('../../services/logger');
  * or parses SOL transfers if possible.
  */
 async function getRealVolume(poolAddress, lastSignature, solPrice) {
-    const connection = getSolanaConnection();
+    const _connection = getSolanaConnection();
     let volumeUsd = 0;
     let newLatestSignature = lastSignature;
     let txCount = 0;
@@ -49,8 +49,8 @@ async function getRealVolume(poolAddress, lastSignature, solPrice) {
             txCount 
         };
 
-    } catch (e) {
-        // logger.warn(`Volume Track Error: ${e.message}`);
+    } catch (_e) {
+        // logger.warn(`Volume Track Error: ${_e.message}`);
         return { volumeUsd: 0, latestSignature: lastSignature, txCount: 0 };
     }
 }

@@ -42,7 +42,7 @@ async function fetchTokenMetadata(mintAddress) {
                     try {
                         const jsonRes = await axios.get(c.json_uri, { timeout: 2000 });
                         image = jsonRes.data.image;
-                    } catch (e) { /* ignore */ }
+                    } catch (_e) { /* ignore */ }
                 }
 
                 return {
@@ -52,8 +52,8 @@ async function fetchTokenMetadata(mintAddress) {
                     description: m?.description || c.json_uri?.description || ''
                 };
             }
-        } catch (e) {
-            // console.warn(`Helius DAS failed, falling back to on-chain: ${e.message}`);
+        } catch (_e) {
+            // console.warn(`Helius DAS failed, falling back to on-chain: ${_e.message}`);
         }
     }
 
@@ -100,14 +100,14 @@ async function fetchTokenMetadata(mintAddress) {
                     const jsonRes = await axios.get(cleanUri, { timeout: 3000 });
                     metadata.image = jsonRes.data.image;
                     metadata.description = jsonRes.data.description;
-                } catch (e) { 
-                    // console.warn('Failed to fetch JSON URI'); 
+                } catch (_e) {
+                    // console.warn('Failed to fetch JSON URI');
                 }
             }
             return metadata;
         }
-    } catch (e) {
-        // console.warn(`All metadata fetches failed for ${mintAddress}: ${e.message}`);
+    } catch (_e) {
+        // console.warn(`All metadata fetches failed for ${mintAddress}: ${_e.message}`);
     }
 
     return null; // Truly failed

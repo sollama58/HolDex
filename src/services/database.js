@@ -206,7 +206,7 @@ async function initDB() {
             for (const sql of migrations) {
                 try {
                     await primaryPool.query(sql);
-                } catch (e) {
+                } catch (_e) {
                     // Column might already exist, ignore
                 }
             }
@@ -245,7 +245,7 @@ function getDB() { if (!dbWrapper) throw new Error("Database not initialized.");
 
 async function smartCache(key, ttlSeconds, fetchFn) {
     const redis = getClient();
-    if (redis) { try { const cached = await redis.get(key); if (cached) return JSON.parse(cached); } catch (e) {} }
+    if (redis) { try { const cached = await redis.get(key); if (cached) return JSON.parse(cached); } catch (_e) { /* ignore */ } }
     if (pendingRequests.has(key)) return pendingRequests.get(key);
     const fetchPromise = (async () => {
         try { const data = await fetchFn(); if (redis && data) redis.set(key, JSON.stringify(data), 'EX', ttlSeconds).catch(() => {}); return data; } finally { pendingRequests.delete(key); }
@@ -273,7 +273,7 @@ async function enableIndexing(db, mint, poolData) {
             poolData.reserve_a || null, poolData.reserve_b || null
         ]);
         await db.run(`INSERT INTO active_trackers (pool_address, priority, last_check) VALUES ($1, 10, 0) ON CONFLICT(pool_address) DO NOTHING`, [poolData.pairAddress]);
-    } catch (err) {}
+    } catch (_err) { /* ignore */ }
 }
 
 async function aggregateAndSaveToken(db, mint) {

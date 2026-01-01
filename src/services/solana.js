@@ -122,7 +122,7 @@ async function fetchAccountsForProgram(conn, programId, mintAddress) {
             }
         }
         return activeHolders;
-    } catch (e) {
+    } catch (_e) {
         return 0;
     }
 }
@@ -228,11 +228,11 @@ async function analyzeTokenHolders(mintAddress, excludeAddresses = []) {
                     totalDuration += (24 * 3600);
                     validSamples++;
                 }
-            } catch (err) {}
+            } catch (_err) { /* ignore */ }
         }
         if (validSamples === 0) return { avgHoldHours: 0 };
         return { avgHoldHours: (totalDuration / validSamples) / 3600 };
-    } catch (e) {
+    } catch (_e) {
         return { avgHoldHours: 0 };
     }
 }

@@ -5,7 +5,7 @@ const { fetchTokenMetadata } = require('../utils/metaplex');
 const { getSolanaConnection } = require('./solana');
 const { enqueueTokenUpdate } = require('./queue');
 const { snapshotPools } = require('../indexer/tasks/snapshotter');
-const logger = require('./logger');
+const _logger = require('./logger');
 const axios = require('axios');
 
 const solanaConnection = getSolanaConnection();
@@ -23,7 +23,7 @@ async function fetchInitialMarketData(mint) {
             change5m: parseFloat(attrs.price_change_percentage?.m5 || 0),
             marketCap: parseFloat(attrs.fdv_usd || attrs.market_cap_usd || 0)
         };
-    } catch (e) { return null; }
+    } catch (_e) { return null; }
 }
 
 async function indexTokenOnChain(mint) {
@@ -35,7 +35,7 @@ async function indexTokenOnChain(mint) {
         const supplyInfo = await solanaConnection.getTokenSupply(new PublicKey(mint));
         supply = supplyInfo.value.amount;
         decimals = supplyInfo.value.decimals;
-    } catch (e) {}
+    } catch (_e) { /* ignore */ }
 
     const marketData = await fetchInitialMarketData(mint);
     const baseData = { name: meta?.name || 'Unknown', ticker: meta?.symbol || 'UNKNOWN', image: meta?.image || null };

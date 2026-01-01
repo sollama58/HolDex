@@ -1,4 +1,4 @@
-const { getSolanaConnection, retryRPC } = require('../services/solana');
+const { getSolanaConnection } = require('../services/solana');
 const { getDB } = require('../services/database');
 const { indexTokenOnChain } = require('../services/indexer');
 const logger = require('../services/logger');
@@ -139,7 +139,7 @@ async function startNewTokenListener() {
     try {
         connection.onLogs(
             RAYDIUM_PROGRAM_ID,
-            async (logs, ctx) => {
+            async (logs, _ctx) => {
                 if (logs.err) return;
                 const isInit = logs.logs.some(l => l.includes('InitializeInstruction2') || l.includes('initialize2'));
                 if (isInit) {
@@ -157,7 +157,7 @@ async function startNewTokenListener() {
     try {
         connection.onLogs(
             PUMP_PROGRAM_ID,
-            async (logs, ctx) => {
+            async (logs, _ctx) => {
                 if (logs.err) return;
                 const isCreate = logs.logs.some(l => l.includes('Instruction: Create') || l.includes('Program log: Instruction: Create'));
                 if (isCreate) {

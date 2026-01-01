@@ -67,7 +67,7 @@ async function getTokenAccountBalance(vaultAddress) {
         // SPL Token account layout: amount at offset 64 (8 bytes)
         const amount = info.data.readBigUInt64LE(64);
         return Number(amount);
-    } catch (e) {
+    } catch (_e) {
         return null;
     }
 }
@@ -147,7 +147,7 @@ async function getOnChainPrice(db, mint, decimals = 9) {
                 solPrice
             };
 
-        } catch (e) {
+        } catch (_e) {
             continue; // Try next pool
         }
     }
@@ -171,7 +171,7 @@ async function getOnChainPrice(db, mint, decimals = 9) {
  * Get vault addresses for a pool (DEX-specific)
  * For now, we use Helius getAsset API to discover vault accounts
  */
-async function getPoolVaults(poolAddress, dex) {
+async function getPoolVaults(poolAddress, _dex) {
     try {
         // Use Helius DAS API to get pool info
         // Security: API key in header, not URL
@@ -201,7 +201,7 @@ async function getPoolVaults(poolAddress, dex) {
         }
 
         return null;
-    } catch (e) {
+    } catch (_e) {
         return null;
     }
 }

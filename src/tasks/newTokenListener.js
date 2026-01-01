@@ -1,4 +1,4 @@
-const { getSolanaConnection, retryRPC } = require('../services/solana');
+const { getSolanaConnection } = require('../services/solana');
 const { getDB } = require('../services/database');
 const { getClient } = require('../services/redis'); 
 const logger = require('../services/logger');
@@ -56,7 +56,7 @@ async function processNewPoolTx(signature, connection, db, source) {
                     maxSupportedTransactionVersion: 0,
                     commitment: 'confirmed' 
                 });
-            } catch (err) {}
+            } catch (_err) { /* ignore */ }
             if (tx && tx.meta && !tx.meta.err) break;
         }
 
@@ -165,7 +165,7 @@ async function setupSubscriptions(connection, db) {
     try {
         const id1 = connection.onLogs(
             RAYDIUM_PROGRAM_ID,
-            async (logs, ctx) => {
+            async (logs, _ctx) => {
                 logCounter++; 
                 lastLogTime = Date.now();
                 const safeLogs = logs.logs || (logs.value && logs.value.logs) || [];
@@ -185,7 +185,7 @@ async function setupSubscriptions(connection, db) {
     try {
         const id2 = connection.onLogs(
             PUMP_PROGRAM_ID,
-            async (logs, ctx) => {
+            async (logs, _ctx) => {
                 logCounter++;
                 lastLogTime = Date.now();
                 const safeLogs = logs.logs || (logs.value && logs.value.logs) || [];
@@ -221,7 +221,7 @@ async function startNewTokenListener() {
     
     // FORCE NEW CONNECTION
     if (currentConnection) {
-        try { subscriptionIds.forEach(id => currentConnection.removeOnLogsListener(id)); } catch(e) {}
+        try { subscriptionIds.forEach(id => currentConnection.removeOnLogsListener(id)); } catch(_e) { /* ignore */ }
         subscriptionIds = [];
     }
 

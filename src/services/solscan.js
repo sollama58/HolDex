@@ -5,9 +5,9 @@
  * to avoid 403 Forbidden / Rate Limit issues.
  */
 
-const logger = require('./logger');
+const _logger = require('./logger');
 
-async function fetchSolscanData(mint) {
+async function fetchSolscanData(_mint) {
     // Return null immediately to bypass Solscan completely
     return null;
 }

@@ -96,7 +96,7 @@ const limiter = rateLimit({
     max: 500, 
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req, res) => req.headers['x-forwarded-for'] || req.ip
+    keyGenerator: (req, _res) => req.headers['x-forwarded-for'] || req.ip
 });
 app.use(limiter);
 
@@ -180,7 +180,7 @@ app.get(['/about', '/update'], (req, res) => {
         const redirectScript = `<script>if(!window.location.hash) history.replaceState(null, null, '/#${pathName}');</script>`;
         html = html.replace('</body>', `${redirectScript}</body>`);
         res.send(html);
-    } catch (e) {
+    } catch (_e) {
         res.send(HOMEPAGE_TEMPLATE);
     }
 });
@@ -203,7 +203,7 @@ async function startServer() {
         app.use('/api', tokensRoutes.init({ db: getDB() }));
         app.use('/webhook', webhooksRoutes.init({ db: getDB() }));
 
-        app.use((err, req, res, next) => {
+        app.use((err, req, res, _next) => {
             logger.error(`🔥 Unhandled Server Error: ${err.message}`);
             logger.error(err.stack);
             if (!res.headersSent) {
