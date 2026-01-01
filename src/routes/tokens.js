@@ -1014,7 +1014,75 @@ function init(deps) {
 
         } catch (e) { res.status(500).json({ success: false, tokens: [], error: e.message }); }
     });
-    
+
+    // ==================================
+    // WALLET PNL ENDPOINTS
+    // ==================================
+
+    const { calculateWalletPnL, getTokenPnL } = require('../services/pnlService');
+
+    /**
+     * GET /wallet/:address/pnl
+     * Calculate on-chain PnL for a wallet
+     *
+     * Query params:
+     *   - maxPages: Max pages of transactions to fetch (default 10, max 50)
+     *   - since: Unix timestamp to filter transactions after
+     */
+    router.get('/wallet/:address/pnl', cacheControl(60, 120), apiKeyAuth(false), async (req, res) => {
+        const { address } = req.params;
+
+        if (!isValidPubkey(address)) {
+            return res.status(400).json({ success: false, error: 'Invalid wallet address' });
+        }
+
+        try {
+            const options = {
+                maxPages: Math.min(parseInt(req.query.maxPages) || 10, 50),
+                ...(req.query.since && { gtTime: parseInt(req.query.since) })
+            };
+
+            const pnl = await calculateWalletPnL(address, options);
+
+            res.json({
+                success: true,
+                ...pnl
+            });
+        } catch (e) {
+            logger.error(`[PnL] Wallet error: ${e.message}`);
+            res.status(500).json({ success: false, error: e.message });
+        }
+    });
+
+    /**
+     * GET /wallet/:address/token/:mint/pnl
+     * Calculate PnL for a specific token in a wallet
+     */
+    router.get('/wallet/:address/token/:mint/pnl', cacheControl(60, 120), apiKeyAuth(false), async (req, res) => {
+        const { address, mint } = req.params;
+
+        if (!isValidPubkey(address)) {
+            return res.status(400).json({ success: false, error: 'Invalid wallet address' });
+        }
+        if (!isValidPubkey(mint)) {
+            return res.status(400).json({ success: false, error: 'Invalid token mint' });
+        }
+
+        try {
+            const pnl = await getTokenPnL(address, mint, {
+                maxPages: 20 // More pages for specific token lookup
+            });
+
+            res.json({
+                success: true,
+                ...pnl
+            });
+        } catch (e) {
+            logger.error(`[PnL] Token error: ${e.message}`);
+            res.status(500).json({ success: false, error: e.message });
+        }
+    });
+
     return router;
 }
 
