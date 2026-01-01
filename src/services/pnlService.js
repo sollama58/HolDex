@@ -19,6 +19,127 @@ const { getSolPrice } = require('./priceService');
 const logger = require('./logger');
 
 const HELIUS_API_KEY = config.HELIUS_API_KEY;
+
+/**
+ * Fetch actual on-chain token balances for a wallet using Helius DAS API
+ * "On-chain is truth" - real balances, not calculated from swap history
+ */
+async function fetchOnChainBalances(wallet) {
+    if (!HELIUS_API_KEY) return new Map();
+
+    try {
+        const url = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: 'holdings',
+                method: 'getAssetsByOwner',
+                params: {
+                    ownerAddress: wallet,
+                    page: 1,
+                    limit: 1000,
+                    displayOptions: { showFungible: true }
+                }
+            }),
+            signal: AbortSignal.timeout(15000)
+        });
+
+        if (!response.ok) {
+            logger.warn(`[PnL] Helius DAS API error: ${response.status}`);
+            return new Map();
+        }
+
+        const data = await response.json();
+        const balanceMap = new Map();
+
+        if (data.result?.items) {
+            for (const item of data.result.items) {
+                // Only fungible tokens
+                if (item.interface === 'FungibleToken' || item.interface === 'FungibleAsset') {
+                    const mint = item.id;
+                    const balance = item.token_info?.balance || 0;
+                    const decimals = item.token_info?.decimals || 0;
+                    const actualBalance = balance / Math.pow(10, decimals);
+
+                    if (actualBalance > 0) {
+                        balanceMap.set(mint, actualBalance);
+                    }
+                }
+            }
+        }
+
+        return balanceMap;
+    } catch (error) {
+        logger.error(`[PnL] Balance fetch error: ${error.message}`);
+        return new Map();
+    }
+}
+
+/**
+ * Fetch current prices for multiple tokens from DexScreener API
+ * Returns prices in SOL (priceNative)
+ * DexScreener has better coverage for pump.fun tokens than Jupiter
+ */
+async function fetchTokenPrices(mints) {
+    if (!mints || mints.length === 0) return new Map();
+
+    const priceMap = new Map();
+
+    try {
+        // DexScreener allows fetching multiple tokens (up to 30 per request)
+        const chunks = [];
+        for (let i = 0; i < mints.length; i += 30) {
+            chunks.push(mints.slice(i, i + 30));
+        }
+
+        for (const chunk of chunks) {
+            const ids = chunk.join(',');
+            const url = `https://api.dexscreener.com/latest/dex/tokens/${ids}`;
+
+            const response = await fetch(url, {
+                method: 'GET',
+                signal: AbortSignal.timeout(15000)
+            });
+
+            if (!response.ok) {
+                logger.warn(`[PnL] DexScreener API error: ${response.status}`);
+                continue;
+            }
+
+            const data = await response.json();
+            if (data.pairs && Array.isArray(data.pairs)) {
+                // Group pairs by base token and get best price (highest liquidity)
+                const tokenPairs = new Map();
+                for (const pair of data.pairs) {
+                    if (!pair.baseToken || !pair.priceNative) continue;
+                    const mint = pair.baseToken.address;
+                    const priceNative = parseFloat(pair.priceNative);
+                    const liquidity = pair.liquidity?.usd || 0;
+
+                    if (!tokenPairs.has(mint) || liquidity > tokenPairs.get(mint).liquidity) {
+                        tokenPairs.set(mint, { price: priceNative, liquidity });
+                    }
+                }
+
+                for (const [mint, data] of tokenPairs) {
+                    priceMap.set(mint, data.price);
+                }
+            }
+
+            // Rate limiting between chunks
+            if (chunks.length > 1) {
+                await new Promise(r => setTimeout(r, 300));
+            }
+        }
+
+        return priceMap;
+    } catch (error) {
+        logger.error(`[PnL] Price fetch error: ${error.message}`);
+        return priceMap;
+    }
+}
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const WSOL_MINT = 'So11111111111111111111111111111111111111112';
 
@@ -312,15 +433,108 @@ async function calculateWalletPnL(wallet, options = {}) {
     // Get current SOL price for USD conversion
     const solPrice = await getSolPrice();
 
+    // Fetch ACTUAL on-chain balances (on-chain is truth)
+    const onChainBalances = await fetchOnChainBalances(wallet);
+
+    // Update tokens with real on-chain balances
+    for (const token of tokenPnLs) {
+        const actualBalance = onChainBalances.get(token.mint);
+        if (actualBalance !== undefined) {
+            token.onChainBalance = actualBalance;
+            // Flag if there's a discrepancy
+            if (Math.abs(actualBalance - token.remainingTokens) > 0.01) {
+                token.balanceDiscrepancy = actualBalance - token.remainingTokens;
+            }
+        }
+    }
+
+    // Add tokens that are on-chain but not in swap history (airdrops, transfers)
+    for (const [mint, balance] of onChainBalances) {
+        if (!tokenPnLs.find(t => t.mint === mint) && balance > 0.000001) {
+            tokenPnLs.push({
+                mint,
+                totalBought: 0,
+                totalSold: 0,
+                totalCostSol: 0,
+                totalProceedsSol: 0,
+                realizedPnlSol: 0,
+                remainingTokens: 0,
+                remainingCostBasisSol: 0,
+                onChainBalance: balance,
+                buyCount: 0,
+                sellCount: 0,
+                source: 'airdrop/transfer' // Not from swaps
+            });
+        }
+    }
+
+    // Fetch current prices for all tokens with on-chain holdings
+    const mintsWithHoldings = tokenPnLs
+        .filter(t => (t.onChainBalance || t.remainingTokens) > 0.000001)
+        .map(t => t.mint);
+
+    let totalUnrealizedPnlSol = 0;
+    let totalCurrentValueSol = 0;
+
+    if (mintsWithHoldings.length > 0) {
+        const priceMap = await fetchTokenPrices(mintsWithHoldings);
+
+        for (const token of tokenPnLs) {
+            // Use on-chain balance (truth) or fall back to calculated
+            const actualHolding = token.onChainBalance ?? token.remainingTokens;
+
+            if (actualHolding > 0.000001) {
+                const priceInSol = priceMap.get(token.mint);
+                if (priceInSol) {
+                    const currentValueSol = actualHolding * priceInSol;
+                    // Cost basis: use calculated if we have swap history, else 0 (airdrop)
+                    const costBasis = token.remainingCostBasisSol || 0;
+                    const unrealizedPnlSol = currentValueSol - costBasis;
+
+                    token.currentPriceSol = priceInSol;
+                    token.currentValueSol = currentValueSol;
+                    token.actualHolding = actualHolding;
+                    token.unrealizedPnlSol = unrealizedPnlSol;
+                    token.unrealizedPnlUsd = unrealizedPnlSol * solPrice;
+                    token.unrealizedPnlPercent = costBasis > 0
+                        ? ((currentValueSol / costBasis) - 1) * 100
+                        : (currentValueSol > 0 ? 100 : 0); // Airdrop = 100% gain
+
+                    totalUnrealizedPnlSol += unrealizedPnlSol;
+                    totalCurrentValueSol += currentValueSol;
+                } else {
+                    token.currentPriceSol = null;
+                    token.currentValueSol = null;
+                    token.actualHolding = actualHolding;
+                    token.unrealizedPnlSol = null;
+                }
+            }
+        }
+    }
+
+    // Re-sort by total PnL (realized + unrealized)
+    tokenPnLs.sort((a, b) => {
+        const aTotalPnl = a.realizedPnlSol + (a.unrealizedPnlSol || 0);
+        const bTotalPnl = b.realizedPnlSol + (b.unrealizedPnlSol || 0);
+        return bTotalPnl - aTotalPnl;
+    });
+
     return {
         wallet,
         totalRealizedPnlSol,
         totalRealizedPnlUsd: totalRealizedPnlSol * solPrice,
+        totalUnrealizedPnlSol,
+        totalUnrealizedPnlUsd: totalUnrealizedPnlSol * solPrice,
+        totalPnlSol: totalRealizedPnlSol + totalUnrealizedPnlSol,
+        totalPnlUsd: (totalRealizedPnlSol + totalUnrealizedPnlSol) * solPrice,
         totalCostBasisSol,
         totalCostBasisUsd: totalCostBasisSol * solPrice,
+        totalCurrentValueSol,
+        totalCurrentValueUsd: totalCurrentValueSol * solPrice,
         solPrice,
         tokens: tokenPnLs.slice(0, 50), // Top 50 tokens
         tokenCount: tokenPnLs.length,
+        holdingsCount: mintsWithHoldings.length,
         txCount: txs.length,
         swapCount: allSwaps.length,
         computeTimeMs: Date.now() - startTime
