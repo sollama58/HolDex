@@ -448,6 +448,111 @@
         </div>
     </div>
 
+    <!-- WALLET PNL VIEW -->
+    <div id="view-wallet" class="view-section px-4 md:px-0 hidden">
+        <div class="bg-[#2a1005] border-2 border-[#7c2d12] rounded-2xl p-6 md:p-8 shadow-2xl max-w-4xl mx-auto">
+            <div class="flex items-center gap-4 border-b-2 border-[#7c2d12] pb-6 mb-6">
+                <div class="w-14 h-14 rounded-xl flex items-center justify-center bg-[#451a03] text-orange-500 border-2 border-[#7c2d12]">
+                    <i data-lucide="trending-up" width="28"></i>
+                </div>
+                <div>
+                    <h2 class="text-2xl md:text-3xl font-bold text-white">Wallet PnL</h2>
+                    <p class="text-[#9a3412] text-sm">On-chain profit/loss analysis via Helius</p>
+                </div>
+            </div>
+
+            <!-- Wallet Input -->
+            <div class="mb-6">
+                <label class="form-label">Wallet Address</label>
+                <div class="flex gap-2">
+                    <input type="text" id="pnl-wallet-input" class="form-input mb-0 flex-1" placeholder="Enter Solana wallet address...">
+                    <button onclick="fetchWalletPnL()" id="pnl-fetch-btn" class="action-btn flex items-center gap-2 whitespace-nowrap">
+                        <i data-lucide="search" width="16"></i> Analyze
+                    </button>
+                </div>
+                <div class="flex gap-2 mt-2">
+                    <button onclick="useConnectedWallet()" class="text-xs text-[#9a3412] hover:text-[#ea580c] border border-[#7c2d12] px-3 py-1 rounded bg-[#451a03]">
+                        <i data-lucide="wallet" width="12" class="inline mr-1"></i> Use Connected
+                    </button>
+                    <select id="pnl-depth" class="limit-select text-xs">
+                        <option value="5">Quick (5 pages)</option>
+                        <option value="10" selected>Normal (10 pages)</option>
+                        <option value="25">Deep (25 pages)</option>
+                        <option value="50">Full (50 pages)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Loading State -->
+            <div id="pnl-loading" class="hidden text-center py-12">
+                <div class="inline-block animate-spin text-[#ea580c] mb-4"><i data-lucide="loader-2" width="40"></i></div>
+                <p class="text-[#9a3412] font-mono text-sm">Analyzing swap transactions...</p>
+            </div>
+
+            <!-- Results -->
+            <div id="pnl-results" class="hidden space-y-6">
+                <!-- Summary Cards -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div class="stat-card">
+                        <span class="text-[#9a3412] text-xs uppercase font-bold">Realized PnL</span>
+                        <span id="pnl-realized-sol" class="stat-value text-lg"></span>
+                        <span id="pnl-realized-usd" class="text-[#9a3412] text-xs font-mono"></span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="text-[#9a3412] text-xs uppercase font-bold">Cost Basis</span>
+                        <span id="pnl-cost-sol" class="stat-value text-lg"></span>
+                        <span id="pnl-cost-usd" class="text-[#9a3412] text-xs font-mono"></span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="text-[#9a3412] text-xs uppercase font-bold">Tokens Traded</span>
+                        <span id="pnl-token-count" class="stat-value text-lg"></span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="text-[#9a3412] text-xs uppercase font-bold">Swaps Analyzed</span>
+                        <span id="pnl-swap-count" class="stat-value text-lg"></span>
+                    </div>
+                </div>
+
+                <!-- Token Breakdown -->
+                <div class="bg-[#451a03] border border-[#7c2d12] rounded-xl overflow-hidden">
+                    <div class="px-4 py-3 border-b border-[#7c2d12] flex justify-between items-center">
+                        <h3 class="font-bold text-white text-sm">Token Breakdown</h3>
+                        <span id="pnl-compute-time" class="text-[#9a3412] text-xs font-mono"></span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead>
+                                <tr class="text-[#9a3412] text-xs uppercase border-b border-[#7c2d12]">
+                                    <th class="px-4 py-3">Token</th>
+                                    <th class="px-4 py-3 text-right">Buys</th>
+                                    <th class="px-4 py-3 text-right">Sells</th>
+                                    <th class="px-4 py-3 text-right">Cost (SOL)</th>
+                                    <th class="px-4 py-3 text-right">Proceeds (SOL)</th>
+                                    <th class="px-4 py-3 text-right">PnL (SOL)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pnl-table-body" class="font-mono text-sm">
+                                <!-- Populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Disclaimer -->
+                <div class="text-center text-[#9a3412] text-xs">
+                    <p>PnL calculated using FIFO cost basis in SOL. USD values use current SOL price.</p>
+                    <p class="mt-1">Data from Helius Enhanced Transactions API. Not financial advice.</p>
+                </div>
+            </div>
+
+            <!-- Empty State -->
+            <div id="pnl-empty" class="text-center py-12 text-[#9a3412]">
+                <i data-lucide="bar-chart-2" width="48" class="mx-auto mb-4 opacity-50"></i>
+                <p class="font-mono text-sm">Enter a wallet address to analyze trading PnL</p>
+            </div>
+        </div>
+    </div>
+
     <!-- DETAIL VIEW -->
     <div id="view-detail" class="view-section px-2 md:px-0 hidden">
         <div id="detail-loading" class="text-center py-20 text-[#ea580c] font-mono animate-pulse hidden">Fetching Chain Data...</div>
@@ -556,6 +661,10 @@
     <button class="bottom-nav-item" onclick="toggleAppsModal()" id="nav-apps">
         <i data-lucide="grid" width="20"></i>
         <span>Apps</span>
+    </button>
+    <button class="bottom-nav-item" onclick="navigateTo('wallet')" id="nav-wallet">
+        <i data-lucide="wallet" width="20"></i>
+        <span>PnL</span>
     </button>
     <button class="bottom-nav-item" onclick="navigateTo('about')" id="nav-about">
         <i data-lucide="info" width="20"></i>
@@ -982,10 +1091,14 @@
         } else if (hash === '#about') { 
             document.getElementById('view-about').classList.remove('hidden');
             document.getElementById('nav-about').classList.add('active');
-        } else if (hash === '#update') { 
+        } else if (hash === '#update') {
             document.getElementById('view-update').classList.remove('hidden');
             document.getElementById('nav-update').classList.add('active');
-            updateWalletUI(walletAddress !== null); 
+            updateWalletUI(walletAddress !== null);
+        } else if (hash === '#wallet') {
+            document.getElementById('view-wallet').classList.remove('hidden');
+            document.getElementById('nav-wallet').classList.add('active');
+            lucide.createIcons();
         } else if (hash.startsWith('#token/')) { 
             showDetailView(hash.split('/')[1]); 
         } 
@@ -1805,14 +1918,120 @@
     function cleanupChart() { if (chartInstance) { chartInstance.remove(); chartInstance = null; candleSeries = null; } document.getElementById('tv-chart').innerHTML = ''; }
     
     // Updated cleanup function
-    function cleanupHolderChart() { 
-        if (holderChart) { 
-            holderChart.remove(); 
-            holderChart = null; 
-            holderAreaSeries = null; 
-        } 
+    function cleanupHolderChart() {
+        if (holderChart) {
+            holderChart.remove();
+            holderChart = null;
+            holderAreaSeries = null;
+        }
         const container = document.getElementById('holder-chart-container');
-        if (container) container.innerHTML = ''; 
+        if (container) container.innerHTML = '';
+    }
+
+    // =====================================
+    // WALLET PNL FUNCTIONS
+    // =====================================
+
+    function useConnectedWallet() {
+        if (!walletAddress) {
+            openWalletModal();
+            return;
+        }
+        document.getElementById('pnl-wallet-input').value = walletAddress;
+    }
+
+    async function fetchWalletPnL() {
+        const input = document.getElementById('pnl-wallet-input');
+        const wallet = input.value.trim();
+
+        if (!wallet || wallet.length < 32 || wallet.length > 44) {
+            alert('Please enter a valid Solana wallet address');
+            return;
+        }
+
+        const depth = document.getElementById('pnl-depth').value;
+        const btn = document.getElementById('pnl-fetch-btn');
+        const loading = document.getElementById('pnl-loading');
+        const results = document.getElementById('pnl-results');
+        const empty = document.getElementById('pnl-empty');
+
+        // Show loading
+        btn.disabled = true;
+        loading.classList.remove('hidden');
+        results.classList.add('hidden');
+        empty.classList.add('hidden');
+
+        try {
+            const res = await fetch(`${API_URL}/api/wallet/${wallet}/pnl?maxPages=${depth}`);
+            const data = await res.json();
+
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to fetch PnL');
+            }
+
+            renderPnLResults(data);
+            results.classList.remove('hidden');
+
+        } catch (e) {
+            console.error('PnL Error:', e);
+            alert('Error fetching PnL: ' + e.message);
+            empty.classList.remove('hidden');
+        } finally {
+            btn.disabled = false;
+            loading.classList.add('hidden');
+        }
+    }
+
+    function renderPnLResults(data) {
+        // Summary cards
+        const pnlSol = data.totalRealizedPnlSol || 0;
+        const pnlUsd = data.totalRealizedPnlUsd || 0;
+        const costSol = data.totalCostBasisSol || 0;
+        const costUsd = data.totalCostBasisUsd || 0;
+
+        const pnlColor = pnlSol >= 0 ? '#4ade80' : '#fca5a5';
+        document.getElementById('pnl-realized-sol').innerHTML = `<span style="color:${pnlColor}">${pnlSol >= 0 ? '+' : ''}${pnlSol.toFixed(4)} SOL</span>`;
+        document.getElementById('pnl-realized-usd').textContent = `${pnlUsd >= 0 ? '+' : ''}$${Math.abs(pnlUsd).toFixed(2)}`;
+
+        document.getElementById('pnl-cost-sol').textContent = `${costSol.toFixed(4)} SOL`;
+        document.getElementById('pnl-cost-usd').textContent = `$${costUsd.toFixed(2)}`;
+
+        document.getElementById('pnl-token-count').textContent = data.tokenCount || 0;
+        document.getElementById('pnl-swap-count').textContent = data.swapCount || 0;
+        document.getElementById('pnl-compute-time').textContent = `${data.computeTimeMs || 0}ms`;
+
+        // Token table
+        const tbody = document.getElementById('pnl-table-body');
+        tbody.innerHTML = '';
+
+        const tokens = data.tokens || [];
+        if (tokens.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-[#9a3412]">No swap data found</td></tr>';
+            return;
+        }
+
+        for (const t of tokens) {
+            const pnlVal = t.realizedPnlSol || 0;
+            const pnlCls = pnlVal >= 0 ? 'text-green-400' : 'text-red-400';
+            const pnlSign = pnlVal >= 0 ? '+' : '';
+
+            tbody.innerHTML += `
+                <tr class="border-b border-[#7c2d12]/30 hover:bg-[#351408] cursor-pointer" onclick="navigateTo('token/${t.mint}')">
+                    <td class="px-4 py-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-[#fb923c]">${t.mint.slice(0,4)}...${t.mint.slice(-4)}</span>
+                        </div>
+                    </td>
+                    <td class="px-4 py-3 text-right text-[#ffedd5]">${t.buyCount || 0}</td>
+                    <td class="px-4 py-3 text-right text-[#ffedd5]">${t.sellCount || 0}</td>
+                    <td class="px-4 py-3 text-right text-[#ffedd5]">${(t.totalCostSol || 0).toFixed(4)}</td>
+                    <td class="px-4 py-3 text-right text-[#ffedd5]">${(t.totalProceedsSol || 0).toFixed(4)}</td>
+                    <td class="px-4 py-3 text-right ${pnlCls}">${pnlSign}${pnlVal.toFixed(4)}</td>
+                </tr>
+            `;
+        }
+
+        lucide.createIcons();
     }
 
 </script>
