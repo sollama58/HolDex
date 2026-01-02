@@ -6,6 +6,10 @@
 require('dotenv').config();
 console.log('[ADDED] dotenv loaded');
 
+const config = require('./config/env');
+console.log('[ADDED] config/env loaded');
+console.log('  DATABASE_URL:', config.DATABASE_URL ? 'SET' : 'MISSING');
+
 console.log('=== CALCULATOR STARTING ===');
 console.log('Node version:', process.version);
 console.log('Platform:', process.platform);
