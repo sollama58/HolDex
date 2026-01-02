@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 /**
- * HolDex Calculator - Copy of the WORKING minimal version
+ * HolDex Calculator - Testing: add dotenv
  */
+
+require('dotenv').config();
+console.log('[ADDED] dotenv loaded');
 
 console.log('=== CALCULATOR STARTING ===');
 console.log('Node version:', process.version);
