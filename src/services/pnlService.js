@@ -21,11 +21,12 @@ const logger = require('./logger');
 const HELIUS_API_KEY = config.HELIUS_API_KEY;
 
 /**
- * Fetch actual on-chain token balances for a wallet using Helius DAS API
- * "On-chain is truth" - real balances, not calculated from swap history
+ * Fetch actual on-chain token balances AND prices for a wallet using Helius DAS API
+ * "On-chain is truth" - real balances + Helius price_info for top 10k tokens
+ * Returns: { balances: Map<mint, balance>, prices: Map<mint, priceInSol> }
  */
-async function fetchOnChainBalances(wallet) {
-    if (!HELIUS_API_KEY) return new Map();
+async function fetchOnChainHoldings(wallet, solPrice) {
+    if (!HELIUS_API_KEY) return { balances: new Map(), prices: new Map() };
 
     try {
         const url = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
@@ -48,11 +49,12 @@ async function fetchOnChainBalances(wallet) {
 
         if (!response.ok) {
             logger.warn(`[PnL] Helius DAS API error: ${response.status}`);
-            return new Map();
+            return { balances: new Map(), prices: new Map() };
         }
 
         const data = await response.json();
         const balanceMap = new Map();
+        const priceMap = new Map();
 
         if (data.result?.items) {
             for (const item of data.result.items) {
@@ -65,22 +67,39 @@ async function fetchOnChainBalances(wallet) {
 
                     if (actualBalance > 0) {
                         balanceMap.set(mint, actualBalance);
+
+                        // Extract price_info if available (Helius provides for top 10k tokens)
+                        const priceInfo = item.token_info?.price_info;
+                        if (priceInfo?.price_per_token) {
+                            // price_per_token is in USD, convert to SOL
+                            const priceUsd = priceInfo.price_per_token;
+                            const priceInSol = solPrice > 0 ? priceUsd / solPrice : 0;
+                            priceMap.set(mint, priceInSol);
+                        }
                     }
                 }
             }
         }
 
-        return balanceMap;
+        return { balances: balanceMap, prices: priceMap };
     } catch (error) {
-        logger.error(`[PnL] Balance fetch error: ${error.message}`);
-        return new Map();
+        logger.error(`[PnL] Holdings fetch error: ${error.message}`);
+        return { balances: new Map(), prices: new Map() };
     }
 }
 
+// Legacy function for compatibility
+async function fetchOnChainBalances(wallet) {
+    const { balances } = await fetchOnChainHoldings(wallet, 0);
+    return balances;
+}
+
 /**
- * Fetch current prices for multiple tokens from DexScreener API
- * Returns prices in SOL (priceNative)
- * DexScreener has better coverage for pump.fun tokens than Jupiter
+ * Fetch on-chain prices for multiple tokens using Jupiter Aggregator
+ * Jupiter pulls prices directly from on-chain DEX pools (Raydium, Orca, PumpSwap, etc.)
+ * Returns prices in SOL (using vsToken=SOL)
+ *
+ * Note: Jupiter is on-chain truth - it aggregates real pool reserves, not off-chain data
  */
 async function fetchTokenPrices(mints) {
     if (!mints || mints.length === 0) return new Map();
@@ -88,49 +107,39 @@ async function fetchTokenPrices(mints) {
     const priceMap = new Map();
 
     try {
-        // DexScreener allows fetching multiple tokens (up to 30 per request)
+        // Jupiter API accepts up to 100 tokens per request
         const chunks = [];
-        for (let i = 0; i < mints.length; i += 30) {
-            chunks.push(mints.slice(i, i + 30));
+        for (let i = 0; i < mints.length; i += 100) {
+            chunks.push(mints.slice(i, i + 100));
         }
 
         for (const chunk of chunks) {
             const ids = chunk.join(',');
-            const url = `https://api.dexscreener.com/latest/dex/tokens/${ids}`;
+            // Get prices in SOL terms (on-chain pool prices)
+            const url = `https://api.jup.ag/price/v2?ids=${ids}&vsToken=So11111111111111111111111111111111111111112`;
 
             const response = await fetch(url, {
                 method: 'GET',
-                signal: AbortSignal.timeout(15000)
+                signal: AbortSignal.timeout(10000)
             });
 
             if (!response.ok) {
-                logger.warn(`[PnL] DexScreener API error: ${response.status}`);
+                logger.warn(`[PnL] Jupiter API error: ${response.status}`);
                 continue;
             }
 
             const data = await response.json();
-            if (data.pairs && Array.isArray(data.pairs)) {
-                // Group pairs by base token and get best price (highest liquidity)
-                const tokenPairs = new Map();
-                for (const pair of data.pairs) {
-                    if (!pair.baseToken || !pair.priceNative) continue;
-                    const mint = pair.baseToken.address;
-                    const priceNative = parseFloat(pair.priceNative);
-                    const liquidity = pair.liquidity?.usd || 0;
-
-                    if (!tokenPairs.has(mint) || liquidity > tokenPairs.get(mint).liquidity) {
-                        tokenPairs.set(mint, { price: priceNative, liquidity });
+            if (data.data) {
+                for (const [mint, priceData] of Object.entries(data.data)) {
+                    if (priceData && priceData.price) {
+                        priceMap.set(mint, parseFloat(priceData.price));
                     }
-                }
-
-                for (const [mint, data] of tokenPairs) {
-                    priceMap.set(mint, data.price);
                 }
             }
 
             // Rate limiting between chunks
             if (chunks.length > 1) {
-                await new Promise(r => setTimeout(r, 300));
+                await new Promise(r => setTimeout(r, 200));
             }
         }
 
@@ -140,6 +149,170 @@ async function fetchTokenPrices(mints) {
         return priceMap;
     }
 }
+
+/**
+ * Fetch prices from DB pools table (fastest fallback)
+ * Uses pre-indexed pool prices from the snapshotter
+ * Returns prices in SOL (converted from USD using solPrice)
+ */
+async function fetchPoolDbPrices(db, mints, solPrice) {
+    const priceMap = new Map();
+    if (!db || mints.length === 0 || solPrice <= 0) return priceMap;
+
+    try {
+        // Query pools with best liquidity for each mint
+        const placeholders = mints.map((_, i) => `$${i + 1}`).join(',');
+        const rows = await db.all(`
+            SELECT DISTINCT ON (mint) mint, price_usd, dex, liquidity_usd
+            FROM pools
+            WHERE mint IN (${placeholders}) AND price_usd > 0
+            ORDER BY mint, liquidity_usd DESC NULLS LAST
+        `, mints);
+
+        for (const row of rows) {
+            // Convert USD price to SOL
+            const priceInSol = row.price_usd / solPrice;
+            priceMap.set(row.mint, priceInSol);
+        }
+
+        logger.debug(`[PnL] DB pools: found ${priceMap.size}/${mints.length} prices`);
+    } catch (error) {
+        logger.debug(`[PnL] DB pool query error: ${error.message}`);
+    }
+
+    return priceMap;
+}
+
+/**
+ * Fetch prices from on-chain pool reserves (batched for speed)
+ * For pump.fun tokens not covered by Helius/Jupiter
+ * Uses batch RPC calls: 3 calls total instead of N*3
+ */
+async function fetchPoolReservePrices(mints) {
+    const priceMap = new Map();
+    if (!HELIUS_API_KEY || mints.length === 0) return priceMap;
+
+    const url = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
+
+    try {
+        // Step 1: Batch getTokenLargestAccounts for all mints
+        const largestAccountsReqs = mints.map((mint, i) => ({
+            jsonrpc: '2.0',
+            id: `la-${i}`,
+            method: 'getTokenLargestAccounts',
+            params: [mint]
+        }));
+
+        const laResp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(largestAccountsReqs),
+            signal: AbortSignal.timeout(15000)
+        });
+
+        if (!laResp.ok) return priceMap;
+        const laResults = await laResp.json();
+
+        // Collect token accounts to query (top holder = likely pool)
+        const accountsToQuery = [];
+        const mintAccountMap = new Map(); // address -> { mint, tokenAmount }
+
+        for (let i = 0; i < mints.length; i++) {
+            const accounts = laResults[i]?.result?.value || [];
+            const mint = mints[i];
+
+            // Get top 2 holders (pools are usually largest)
+            for (const acc of accounts.slice(0, 2)) {
+                const tokenAmount = parseFloat(acc.uiAmountString || '0');
+                if (tokenAmount > 0) {
+                    accountsToQuery.push(acc.address);
+                    mintAccountMap.set(acc.address, { mint, tokenAmount });
+                }
+            }
+        }
+
+        if (accountsToQuery.length === 0) return priceMap;
+
+        // Step 2: Batch getAccountInfo for all token accounts
+        const infoReqs = accountsToQuery.map((addr, i) => ({
+            jsonrpc: '2.0',
+            id: `info-${i}`,
+            method: 'getAccountInfo',
+            params: [addr, { encoding: 'jsonParsed' }]
+        }));
+
+        const infoResp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(infoReqs),
+            signal: AbortSignal.timeout(15000)
+        });
+
+        if (!infoResp.ok) return priceMap;
+        const infoResults = await infoResp.json();
+
+        // Collect unique owners (pool addresses)
+        const owners = new Set();
+        const ownerTokenMap = new Map(); // owner -> [{ mint, tokenAmount }]
+
+        for (let i = 0; i < accountsToQuery.length; i++) {
+            const owner = infoResults[i]?.result?.value?.data?.parsed?.info?.owner;
+            if (owner) {
+                const data = mintAccountMap.get(accountsToQuery[i]);
+                owners.add(owner);
+                if (!ownerTokenMap.has(owner)) ownerTokenMap.set(owner, []);
+                ownerTokenMap.get(owner).push(data);
+            }
+        }
+
+        if (owners.size === 0) return priceMap;
+
+        // Step 3: Batch getBalance for all pool owners
+        const ownerList = Array.from(owners);
+        const balReqs = ownerList.map((owner, i) => ({
+            jsonrpc: '2.0',
+            id: `bal-${i}`,
+            method: 'getBalance',
+            params: [owner]
+        }));
+
+        const balResp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(balReqs),
+            signal: AbortSignal.timeout(15000)
+        });
+
+        if (!balResp.ok) return priceMap;
+        const balResults = await balResp.json();
+
+        // Step 4: Calculate price = SOL / tokens
+        for (let i = 0; i < ownerList.length; i++) {
+            const solLamports = balResults[i]?.result?.value || 0;
+            const solAmount = solLamports / 1e9;
+
+            // Need some SOL to be a real pool (0.1 SOL minimum)
+            if (solAmount < 0.1) continue;
+
+            const owner = ownerList[i];
+            const tokenDatas = ownerTokenMap.get(owner) || [];
+
+            for (const { mint, tokenAmount } of tokenDatas) {
+                if (!priceMap.has(mint) && tokenAmount > 0) {
+                    const priceInSol = solAmount / tokenAmount;
+                    priceMap.set(mint, priceInSol);
+                }
+            }
+        }
+
+        logger.debug(`[PnL] Pool reserves: found ${priceMap.size}/${mints.length} prices`);
+    } catch (error) {
+        logger.debug(`[PnL] Pool reserve error: ${error.message}`);
+    }
+
+    return priceMap;
+}
+
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const WSOL_MINT = 'So11111111111111111111111111111111111111112';
 
@@ -309,8 +482,11 @@ function parseSwapTransaction(tx, wallet) {
 /**
  * Calculate PnL for a wallet
  * Returns per-token breakdown + summary
+ * @param {string} wallet - Wallet address
+ * @param {Object} options - { db, maxPages, limit }
  */
 async function calculateWalletPnL(wallet, options = {}) {
+    const { db } = options; // Optional DB connection for pool price fallback
     const startTime = Date.now();
 
     // Fetch swap transactions
@@ -433,8 +609,9 @@ async function calculateWalletPnL(wallet, options = {}) {
     // Get current SOL price for USD conversion
     const solPrice = await getSolPrice();
 
-    // Fetch ACTUAL on-chain balances (on-chain is truth)
-    const onChainBalances = await fetchOnChainBalances(wallet);
+    // Fetch ACTUAL on-chain balances AND prices (on-chain is truth)
+    // Helius DAS returns price_info for top 10k tokens
+    const { balances: onChainBalances, prices: heliusPrices } = await fetchOnChainHoldings(wallet, solPrice);
 
     // Update tokens with real on-chain balances
     for (const token of tokenPnLs) {
@@ -468,7 +645,7 @@ async function calculateWalletPnL(wallet, options = {}) {
         }
     }
 
-    // Fetch current prices for all tokens with on-chain holdings
+    // Get prices: use Helius prices first, then Jupiter fallback
     const mintsWithHoldings = tokenPnLs
         .filter(t => (t.onChainBalance || t.remainingTokens) > 0.000001)
         .map(t => t.mint);
@@ -477,7 +654,35 @@ async function calculateWalletPnL(wallet, options = {}) {
     let totalCurrentValueSol = 0;
 
     if (mintsWithHoldings.length > 0) {
-        const priceMap = await fetchTokenPrices(mintsWithHoldings);
+        // Start with Helius prices (already fetched with balances)
+        const priceMap = new Map(heliusPrices);
+
+        // Fallback 1: Jupiter for tokens not covered by Helius
+        let mintsNeedingPrices = mintsWithHoldings.filter(m => !priceMap.has(m));
+        if (mintsNeedingPrices.length > 0) {
+            const jupiterPrices = await fetchTokenPrices(mintsNeedingPrices);
+            for (const [mint, price] of jupiterPrices) {
+                priceMap.set(mint, price);
+            }
+        }
+
+        // Fallback 2: DB pools table (pre-indexed prices from snapshotter)
+        mintsNeedingPrices = mintsWithHoldings.filter(m => !priceMap.has(m));
+        if (mintsNeedingPrices.length > 0 && db) {
+            const dbPoolPrices = await fetchPoolDbPrices(db, mintsNeedingPrices, solPrice);
+            for (const [mint, price] of dbPoolPrices) {
+                priceMap.set(mint, price);
+            }
+        }
+
+        // Fallback 3: On-chain pool reserves (for tokens not in DB yet)
+        mintsNeedingPrices = mintsWithHoldings.filter(m => !priceMap.has(m));
+        if (mintsNeedingPrices.length > 0) {
+            const poolPrices = await fetchPoolReservePrices(mintsNeedingPrices);
+            for (const [mint, price] of poolPrices) {
+                priceMap.set(mint, price);
+            }
+        }
 
         for (const token of tokenPnLs) {
             // Use on-chain balance (truth) or fall back to calculated
@@ -532,7 +737,8 @@ async function calculateWalletPnL(wallet, options = {}) {
         totalCurrentValueSol,
         totalCurrentValueUsd: totalCurrentValueSol * solPrice,
         solPrice,
-        tokens: tokenPnLs.slice(0, 50), // Top 50 tokens
+        tokens: tokenPnLs.slice(0, 50), // Top 50 tokens for API response
+        _allTokens: tokenPnLs, // Full list for internal use (getTokenPnL)
         tokenCount: tokenPnLs.length,
         holdingsCount: mintsWithHoldings.length,
         txCount: txs.length,
@@ -546,7 +752,8 @@ async function calculateWalletPnL(wallet, options = {}) {
  */
 async function getTokenPnL(wallet, mint, options = {}) {
     const fullPnL = await calculateWalletPnL(wallet, options);
-    const tokenData = fullPnL.tokens.find(t => t.mint === mint);
+    // Search in full list, not just top 50
+    const tokenData = (fullPnL._allTokens || fullPnL.tokens).find(t => t.mint === mint);
 
     if (!tokenData) {
         return {

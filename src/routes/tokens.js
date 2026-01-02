@@ -1052,15 +1052,18 @@ function init(deps) {
 
         try {
             const options = {
+                db, // Pass DB for pool price fallback
                 maxPages: Math.min(parseInt(req.query.maxPages) || 10, 50),
                 ...(req.query.since && { gtTime: parseInt(req.query.since) })
             };
 
             const pnl = await calculateWalletPnL(address, options);
 
+            // Exclude _allTokens from API response (internal use only)
+            const { _allTokens, ...publicPnl } = pnl;
             res.json({
                 success: true,
-                ...pnl
+                ...publicPnl
             });
         } catch (e) {
             logger.error(`[PnL] Wallet error: ${e.message}`);
@@ -1084,6 +1087,7 @@ function init(deps) {
 
         try {
             const pnl = await getTokenPnL(address, mint, {
+                db, // Pass DB for pool price fallback
                 maxPages: 20 // More pages for specific token lookup
             });
 
