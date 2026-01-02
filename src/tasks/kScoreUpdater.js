@@ -1854,20 +1854,26 @@ const EMA_ALPHA = 0.3;
  * @returns {number} Smoothed score
  */
 function applyEMA(calculated, previous, alpha = EMA_ALPHA) {
+    // DATA VALIDATION: Ensure input is valid
+    const safeCalculated = Math.max(0, Math.min(100, Math.round(calculated || 0)));
+
     // First calculation or no previous score
     if (!previous || previous <= 0) {
-        return calculated;
+        return safeCalculated;
     }
 
-    const smoothed = Math.round(alpha * calculated + (1 - alpha) * previous);
+    const smoothed = Math.round(alpha * safeCalculated + (1 - alpha) * previous);
+
+    // DATA VALIDATION: Ensure output is always 0-100
+    const validScore = Math.max(0, Math.min(100, smoothed));
 
     // Log significant smoothing adjustments
-    const diff = Math.abs(calculated - previous);
+    const diff = Math.abs(safeCalculated - previous);
     if (diff >= 5) {
-        logger.info(`[EMA] Smoothed ${calculated} → ${smoothed} (prev: ${previous}, Δ${diff})`);
+        logger.info(`[EMA] Smoothed ${safeCalculated} → ${validScore} (prev: ${previous}, Δ${diff})`);
     }
 
-    return smoothed;
+    return validScore;
 }
 
 async function computeScoreInternal(mint, dbData = null, skipConviction = false, db = null) {
@@ -2304,19 +2310,32 @@ async function updateKScores(deps) {
     logger.info(`[K-Score v5] Starting cycle... Mode: ${modeLabel}`);
 
     try {
-        // Only calculate K-Score for verified tokens (saves Helius API credits)
+        // Smart token selection for 100% coverage without compromising quality
+        // Priority: 1) Never scored, 2) Stale (>24h), 3) High value tokens
+        // Filter: Only tokens with some activity (liquidity > $100 or holders > 5)
+        const BATCH_LIMIT = 50; // Limit per cycle to respect API limits
+        const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
+        const staleThreshold = Date.now() - STALE_THRESHOLD_MS;
+
         const tokens = await db.all(`
             SELECT * FROM tokens
-            WHERE hascommunityupdate = TRUE
-            ORDER BY volume24h DESC NULLS LAST
-        `);
+            WHERE (liquidity > 100 OR holders > 5 OR marketcap > 1000)
+            ORDER BY
+                CASE WHEN k_score IS NULL THEN 0 ELSE 1 END,  -- Never scored first
+                CASE WHEN last_k_score_update IS NULL OR last_k_score_update < $1 THEN 0 ELSE 1 END,  -- Stale second
+                COALESCE(marketcap, 0) DESC,  -- High value third
+                COALESCE(liquidity, 0) DESC
+            LIMIT $2
+        `, [staleThreshold, BATCH_LIMIT]);
 
         if (!tokens || tokens.length === 0) {
             logger.info("[K-Score] No eligible tokens.");
             return;
         }
 
-        logger.info(`[K-Score] Updating ${tokens.length} tokens...`);
+        const neverScored = tokens.filter(t => t.k_score === null).length;
+        const stale = tokens.filter(t => t.k_score !== null && (!t.last_k_score_update || t.last_k_score_update < staleThreshold)).length;
+        logger.info(`[K-Score] Updating ${tokens.length} tokens (${neverScored} never scored, ${stale} stale)...`);
 
         for (const t of tokens) {
             try {
@@ -2337,6 +2356,23 @@ async function updateKScores(deps) {
                 const currentSupply = burn.totalSupply || 0;
                 const burnedAmount = burn.burned || 0;
                 const initialSupply = currentSupply + burnedAmount;
+
+                // DATA VALIDATION: Ensure all values are safe before DB write
+                const safeInt = (v, max = 1000000) => Math.max(0, Math.min(max, Math.round(v || 0)));
+                const safeFloat = (v, max = 1e15) => Math.max(0, Math.min(max, v || 0));
+                const safeBool = (v) => v === true;
+
+                // Validate conviction counts don't exceed analyzed count
+                const analyzedCount = safeInt(conviction.analyzed, 100);
+                const validatedConviction = {
+                    score: safeInt(conviction.score, 100),
+                    accumulators: safeInt(conviction.accumulators, analyzedCount),
+                    holders: safeInt(conviction.holders, analyzedCount),
+                    reducers: safeInt(conviction.reducers, analyzedCount),
+                    extractors: safeInt(conviction.extractors, analyzedCount),
+                    analyzed: analyzedCount,
+                    realHoldersCount: safeInt(conviction.realHoldersCount, 10000000)
+                };
 
                 await db.run(`
                     UPDATE tokens
@@ -2362,22 +2398,22 @@ async function updateKScores(deps) {
                 `, [
                     smoothedScore,
                     Date.now().toString(),
-                    conviction.score || 0,
-                    conviction.accumulators || 0,
-                    conviction.holders || 0,
-                    conviction.reducers || 0,
-                    conviction.extractors || 0,
-                    conviction.analyzed || 0,
-                    conviction.realHoldersCount || 0,
+                    validatedConviction.score,
+                    validatedConviction.accumulators,
+                    validatedConviction.holders,
+                    validatedConviction.reducers,
+                    validatedConviction.extractors,
+                    validatedConviction.analyzed,
+                    validatedConviction.realHoldersCount,
                     Date.now().toString(),
-                    burnedAmount,
-                    burn.burnPct || 0,
+                    safeFloat(burnedAmount),
+                    safeFloat(burn.burnPct, 100),
                     initialSupply > 0 ? initialSupply.toString() : null,
-                    category.isPumpFun,
-                    category.bondingCurveComplete,
-                    security.mintAuthorityRevoked || false,
-                    security.freezeAuthorityRevoked || false,
-                    supply.isMutable || false,
+                    safeBool(category.isPumpFun),
+                    safeBool(category.bondingCurveComplete),
+                    safeBool(security.mintAuthorityRevoked),
+                    safeBool(security.freezeAuthorityRevoked),
+                    safeBool(supply.isMutable),
                     t.mint
                 ]);
 
