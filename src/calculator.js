@@ -418,33 +418,46 @@ async function main() {
     process.on('SIGTERM', shutdown);
     process.on('SIGINT', shutdown);
 
+    // Wrap async tasks to prevent unhandled rejections
+    const safeRun = (fn, name) => async () => {
+        if (!isRunning) return;
+        try {
+            await fn();
+        } catch (err) {
+            logger.error(`[${name}] Unhandled error:`, err.message);
+            stats.errors++;
+        }
+    };
+
     // Initial run after 10s
-    setTimeout(() => runFullCycle(), 10000);
+    setTimeout(() => safeRun(runFullCycle, 'FullCycle')(), 10000);
 
     // Schedule regular cycles
-    setInterval(() => {
-        if (isRunning) runFullCycle();
-    }, CYCLE_INTERVAL);
+    setInterval(() => safeRun(runFullCycle, 'FullCycle')(), CYCLE_INTERVAL);
 
     // More frequent metadata updates
-    setInterval(() => {
-        if (isRunning) runMetadataTask();
-    }, METADATA_INTERVAL);
+    setInterval(() => safeRun(runMetadataTask, 'Metadata')(), METADATA_INTERVAL);
 
     // Grower checks
-    setInterval(() => {
-        if (isRunning) runGrowerTask();
-    }, GROWER_INTERVAL);
+    setInterval(() => safeRun(runGrowerTask, 'Growers')(), GROWER_INTERVAL);
 
     // Daily deep refresh (offset 6h)
     setTimeout(() => {
-        setInterval(() => {
-            if (isRunning) runDeepRefresh();
-        }, 24 * 60 * 60 * 1000);
+        setInterval(() => safeRun(runDeepRefresh, 'DeepRefresh')(), 24 * 60 * 60 * 1000);
     }, 6 * 60 * 60 * 1000);
 
     logger.info('🧠 [Brain] Calculator started. First cycle in 10 seconds...');
 }
+
+// Global error handlers to prevent crashes
+process.on('unhandledRejection', (reason, promise) => {
+    logger.error('Unhandled Rejection:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+    logger.error('Uncaught Exception:', err.message);
+    // Don't exit - keep running
+});
 
 main().catch(err => {
     logger.error('Fatal error:', err);
