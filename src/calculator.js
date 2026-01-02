@@ -1,64 +1,94 @@
 #!/usr/bin/env node
 /**
- * HolDex Calculator - Minimal Diagnostic Version
- * Just to test if basic Node.js works on Render
+ * HolDex Calculator - Module Isolation Test
+ * Testing which module causes the crash
  */
 
 console.log('=== CALCULATOR STARTING ===');
 console.log('Node version:', process.version);
-console.log('Platform:', process.platform);
-console.log('Memory:', JSON.stringify(process.memoryUsage()));
 
-// Check env vars
-console.log('DATABASE_URL:', process.env.DATABASE_URL ? 'SET' : 'MISSING');
-console.log('HELIUS_API_KEY:', process.env.HELIUS_API_KEY ? 'SET' : 'MISSING');
+// Test 1: Basic modules (these should be safe)
+console.log('\n[TEST 1] Loading basic modules...');
+try {
+    require('dotenv').config();
+    console.log('  ✓ dotenv OK');
+} catch (e) {
+    console.log('  ✗ dotenv FAILED:', e.message);
+}
+
+try {
+    const { Pool } = require('pg');
+    console.log('  ✓ pg OK');
+} catch (e) {
+    console.log('  ✗ pg FAILED:', e.message);
+}
+
+try {
+    const axios = require('axios');
+    console.log('  ✓ axios OK');
+} catch (e) {
+    console.log('  ✗ axios FAILED:', e.message);
+}
+
+// Test 2: App config
+console.log('\n[TEST 2] Loading config...');
+try {
+    const config = require('./config/env');
+    console.log('  ✓ config/env OK');
+    console.log('    DATABASE_URL:', config.DATABASE_URL ? 'SET' : 'MISSING');
+    console.log('    HELIUS_API_KEY:', config.HELIUS_API_KEY ? 'SET' : 'MISSING');
+} catch (e) {
+    console.log('  ✗ config/env FAILED:', e.message);
+}
+
+// Test 3: Logger
+console.log('\n[TEST 3] Loading logger...');
+try {
+    const logger = require('./services/logger');
+    console.log('  ✓ services/logger OK');
+} catch (e) {
+    console.log('  ✗ services/logger FAILED:', e.message);
+}
+
+// Test 4: Services index (this loads redis + database)
+console.log('\n[TEST 4] Loading services/index...');
+try {
+    const services = require('./services');
+    console.log('  ✓ services/index OK');
+} catch (e) {
+    console.log('  ✗ services/index FAILED:', e.message);
+}
+
+// Test 5: priceService (creates Solana Connection)
+console.log('\n[TEST 5] Loading priceService...');
+try {
+    const priceService = require('./services/priceService');
+    console.log('  ✓ services/priceService OK');
+} catch (e) {
+    console.log('  ✗ services/priceService FAILED:', e.message);
+}
+
+// Test 6: kScoreUpdater (the main suspect)
+console.log('\n[TEST 6] Loading kScoreUpdater...');
+try {
+    const kScoreUpdater = require('./tasks/kScoreUpdater');
+    console.log('  ✓ tasks/kScoreUpdater OK');
+} catch (e) {
+    console.log('  ✗ tasks/kScoreUpdater FAILED:', e.message);
+}
+
+console.log('\n=== ALL MODULES LOADED ===');
+console.log('If you see this, all require() calls succeeded.\n');
 
 // Simple keep-alive loop
 let counter = 0;
-
 function heartbeat() {
     counter++;
     const mem = process.memoryUsage();
     console.log(`[${new Date().toISOString()}] Heartbeat #${counter} | RSS: ${Math.round(mem.rss / 1024 / 1024)}MB | Heap: ${Math.round(mem.heapUsed / 1024 / 1024)}MB`);
 }
 
-// Heartbeat every 10 seconds
-setInterval(heartbeat, 10000);
-
-// Test DB connection after 5 seconds
-setTimeout(async () => {
-    console.log('=== TESTING DB CONNECTION ===');
-    try {
-        const { Pool } = require('pg');
-        const pool = new Pool({
-            connectionString: process.env.DATABASE_URL,
-            ssl: { rejectUnauthorized: false },
-            max: 3
-        });
-
-        const result = await pool.query('SELECT COUNT(*) as count FROM tokens');
-        console.log('DB OK - Token count:', result.rows[0].count);
-        await pool.end();
-    } catch (err) {
-        console.error('DB ERROR:', err.message);
-    }
-}, 5000);
-
-// Test GeckoTerminal after 15 seconds
-setTimeout(async () => {
-    console.log('=== TESTING GECKO API ===');
-    try {
-        const axios = require('axios');
-        const res = await axios.get('https://api.geckoterminal.com/api/v2/networks/solana/tokens/So11111111111111111111111111111111111111112', { timeout: 5000 });
-        console.log('Gecko OK - SOL price:', res.data?.data?.attributes?.price_usd);
-    } catch (err) {
-        console.error('Gecko ERROR:', err.message);
-    }
-}, 15000);
-
-// Log that we're running
-console.log('=== ENTERING MAIN LOOP ===');
-console.log('Will heartbeat every 10 seconds...');
+setInterval(heartbeat, 15000);
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
@@ -66,10 +96,14 @@ process.on('SIGTERM', () => {
     process.exit(0);
 });
 
-process.on('SIGINT', () => {
-    console.log('Received SIGINT, exiting...');
-    process.exit(0);
+process.on('uncaughtException', (err) => {
+    console.error('UNCAUGHT EXCEPTION:', err.message);
+    console.error(err.stack);
 });
 
-// Keep process alive
+process.on('unhandledRejection', (reason) => {
+    console.error('UNHANDLED REJECTION:', reason);
+});
+
+console.log('Entering keep-alive loop...');
 process.stdin.resume();
