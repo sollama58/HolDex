@@ -380,12 +380,19 @@ async function runFullCycle() {
     logger.info(`🧠 [BRAIN] Starting cycle #${stats.cycles}`);
     logger.info(`${'='.repeat(60)}\n`);
 
-    await runKScoreTask();
-    await sleep(5000);
+    // K-Score is memory-intensive, skip first few cycles to test stability
+    if (stats.cycles >= 3 && stats.cycles % 4 === 0) {
+        await runKScoreTask();
+        await sleep(5000);
+    } else {
+        logger.info('🧮 [K-Score] Skipped this cycle');
+    }
+
     await runMetadataTask();
     await sleep(5000);
     await runGrowerTask();
 
+    logMemory();
     logger.info(`\n📈 Cycle #${stats.cycles} complete | K:${stats.kscoreUpdates} M:${stats.metadataUpdates} G:${stats.growersPromoted} E:${stats.errors}\n`);
 }
 
