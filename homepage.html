@@ -492,24 +492,43 @@
             <!-- Results -->
             <div id="pnl-results" class="hidden space-y-6">
                 <!-- Summary Cards -->
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+                    <div class="stat-card col-span-2 md:col-span-1 bg-gradient-to-br from-[#451a03] to-[#351408]">
+                        <span class="text-[#9a3412] text-xs uppercase font-bold">Total PnL</span>
+                        <span id="pnl-total-sol" class="stat-value text-xl"></span>
+                        <span id="pnl-total-usd" class="text-[#9a3412] text-xs font-mono"></span>
+                    </div>
                     <div class="stat-card">
-                        <span class="text-[#9a3412] text-xs uppercase font-bold">Realized PnL</span>
+                        <span class="text-[#9a3412] text-xs uppercase font-bold">Realized</span>
                         <span id="pnl-realized-sol" class="stat-value text-lg"></span>
                         <span id="pnl-realized-usd" class="text-[#9a3412] text-xs font-mono"></span>
                     </div>
+                    <div class="stat-card">
+                        <span class="text-[#9a3412] text-xs uppercase font-bold">Unrealized</span>
+                        <span id="pnl-unrealized-sol" class="stat-value text-lg"></span>
+                        <span id="pnl-unrealized-usd" class="text-[#9a3412] text-xs font-mono"></span>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div class="stat-card">
                         <span class="text-[#9a3412] text-xs uppercase font-bold">Cost Basis</span>
                         <span id="pnl-cost-sol" class="stat-value text-lg"></span>
                         <span id="pnl-cost-usd" class="text-[#9a3412] text-xs font-mono"></span>
                     </div>
                     <div class="stat-card">
-                        <span class="text-[#9a3412] text-xs uppercase font-bold">Tokens Traded</span>
-                        <span id="pnl-token-count" class="stat-value text-lg"></span>
+                        <span class="text-[#9a3412] text-xs uppercase font-bold">Holdings Value</span>
+                        <span id="pnl-holdings-sol" class="stat-value text-lg"></span>
+                        <span id="pnl-holdings-usd" class="text-[#9a3412] text-xs font-mono"></span>
                     </div>
                     <div class="stat-card">
-                        <span class="text-[#9a3412] text-xs uppercase font-bold">Swaps Analyzed</span>
+                        <span class="text-[#9a3412] text-xs uppercase font-bold">Tokens</span>
+                        <span id="pnl-token-count" class="stat-value text-lg"></span>
+                        <span id="pnl-holdings-count" class="text-[#9a3412] text-xs font-mono"></span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="text-[#9a3412] text-xs uppercase font-bold">Swaps</span>
                         <span id="pnl-swap-count" class="stat-value text-lg"></span>
+                        <span id="pnl-compute-time" class="text-[#9a3412] text-xs font-mono"></span>
                     </div>
                 </div>
 
@@ -517,18 +536,21 @@
                 <div class="bg-[#451a03] border border-[#7c2d12] rounded-xl overflow-hidden">
                     <div class="px-4 py-3 border-b border-[#7c2d12] flex justify-between items-center">
                         <h3 class="font-bold text-white text-sm">Token Breakdown</h3>
-                        <span id="pnl-compute-time" class="text-[#9a3412] text-xs font-mono"></span>
+                        <div class="flex gap-2">
+                            <button id="pnl-tab-holdings" onclick="switchPnlTab('holdings')" class="text-xs px-2 py-1 rounded bg-[#7c2d12] text-[#fb923c]">Holdings</button>
+                            <button id="pnl-tab-history" onclick="switchPnlTab('history')" class="text-xs px-2 py-1 rounded text-[#9a3412] hover:text-[#fb923c]">History</button>
+                        </div>
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left">
                             <thead>
                                 <tr class="text-[#9a3412] text-xs uppercase border-b border-[#7c2d12]">
                                     <th class="px-4 py-3">Token</th>
-                                    <th class="px-4 py-3 text-right">Buys</th>
-                                    <th class="px-4 py-3 text-right">Sells</th>
+                                    <th class="px-4 py-3 text-right">Balance</th>
+                                    <th class="px-4 py-3 text-right">Value (SOL)</th>
                                     <th class="px-4 py-3 text-right">Cost (SOL)</th>
-                                    <th class="px-4 py-3 text-right">Proceeds (SOL)</th>
-                                    <th class="px-4 py-3 text-right">PnL (SOL)</th>
+                                    <th class="px-4 py-3 text-right">Unrealized</th>
+                                    <th class="px-4 py-3 text-right">Total PnL</th>
                                 </tr>
                             </thead>
                             <tbody id="pnl-table-body" class="font-mono text-sm">
@@ -1982,56 +2004,141 @@
         }
     }
 
+    let currentPnlData = null;
+    let currentPnlTab = 'holdings';
+
     function renderPnLResults(data) {
-        // Summary cards
-        const pnlSol = data.totalRealizedPnlSol || 0;
-        const pnlUsd = data.totalRealizedPnlUsd || 0;
+        currentPnlData = data;
+
+        // Total PnL (realized + unrealized)
+        const totalSol = data.totalPnlSol || 0;
+        const totalUsd = data.totalPnlUsd || 0;
+        const totalColor = totalSol >= 0 ? '#4ade80' : '#fca5a5';
+        document.getElementById('pnl-total-sol').innerHTML = `<span style="color:${totalColor}">${totalSol >= 0 ? '+' : ''}${totalSol.toFixed(4)} SOL</span>`;
+        document.getElementById('pnl-total-usd').textContent = `${totalUsd >= 0 ? '+' : ''}$${Math.abs(totalUsd).toFixed(2)}`;
+
+        // Realized PnL
+        const realizedSol = data.totalRealizedPnlSol || 0;
+        const realizedUsd = data.totalRealizedPnlUsd || 0;
+        const realizedColor = realizedSol >= 0 ? '#4ade80' : '#fca5a5';
+        document.getElementById('pnl-realized-sol').innerHTML = `<span style="color:${realizedColor}">${realizedSol >= 0 ? '+' : ''}${realizedSol.toFixed(4)} SOL</span>`;
+        document.getElementById('pnl-realized-usd').textContent = `${realizedUsd >= 0 ? '+' : ''}$${Math.abs(realizedUsd).toFixed(2)}`;
+
+        // Unrealized PnL
+        const unrealizedSol = data.totalUnrealizedPnlSol || 0;
+        const unrealizedUsd = data.totalUnrealizedPnlUsd || 0;
+        const unrealizedColor = unrealizedSol >= 0 ? '#4ade80' : '#fca5a5';
+        document.getElementById('pnl-unrealized-sol').innerHTML = `<span style="color:${unrealizedColor}">${unrealizedSol >= 0 ? '+' : ''}${unrealizedSol.toFixed(4)} SOL</span>`;
+        document.getElementById('pnl-unrealized-usd').textContent = `${unrealizedUsd >= 0 ? '+' : ''}$${Math.abs(unrealizedUsd).toFixed(2)}`;
+
+        // Cost Basis
         const costSol = data.totalCostBasisSol || 0;
         const costUsd = data.totalCostBasisUsd || 0;
-
-        const pnlColor = pnlSol >= 0 ? '#4ade80' : '#fca5a5';
-        document.getElementById('pnl-realized-sol').innerHTML = `<span style="color:${pnlColor}">${pnlSol >= 0 ? '+' : ''}${pnlSol.toFixed(4)} SOL</span>`;
-        document.getElementById('pnl-realized-usd').textContent = `${pnlUsd >= 0 ? '+' : ''}$${Math.abs(pnlUsd).toFixed(2)}`;
-
         document.getElementById('pnl-cost-sol').textContent = `${costSol.toFixed(4)} SOL`;
         document.getElementById('pnl-cost-usd').textContent = `$${costUsd.toFixed(2)}`;
 
+        // Holdings Value
+        const holdingsSol = data.totalCurrentValueSol || 0;
+        const holdingsUsd = data.totalCurrentValueUsd || 0;
+        document.getElementById('pnl-holdings-sol').textContent = `${holdingsSol.toFixed(4)} SOL`;
+        document.getElementById('pnl-holdings-usd').textContent = `$${holdingsUsd.toFixed(2)}`;
+
+        // Counts
         document.getElementById('pnl-token-count').textContent = data.tokenCount || 0;
+        document.getElementById('pnl-holdings-count').textContent = `${data.holdingsCount || 0} with value`;
         document.getElementById('pnl-swap-count').textContent = data.swapCount || 0;
         document.getElementById('pnl-compute-time').textContent = `${data.computeTimeMs || 0}ms`;
 
-        // Token table
+        // Render table based on current tab
+        renderPnlTable();
+        lucide.createIcons();
+    }
+
+    function switchPnlTab(tab) {
+        currentPnlTab = tab;
+        document.getElementById('pnl-tab-holdings').className = tab === 'holdings'
+            ? 'text-xs px-2 py-1 rounded bg-[#7c2d12] text-[#fb923c]'
+            : 'text-xs px-2 py-1 rounded text-[#9a3412] hover:text-[#fb923c]';
+        document.getElementById('pnl-tab-history').className = tab === 'history'
+            ? 'text-xs px-2 py-1 rounded bg-[#7c2d12] text-[#fb923c]'
+            : 'text-xs px-2 py-1 rounded text-[#9a3412] hover:text-[#fb923c]';
+        renderPnlTable();
+    }
+
+    function renderPnlTable() {
+        if (!currentPnlData) return;
         const tbody = document.getElementById('pnl-table-body');
         tbody.innerHTML = '';
 
-        const tokens = data.tokens || [];
+        const tokens = currentPnlData.tokens || [];
         if (tokens.length === 0) {
             tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-[#9a3412]">No swap data found</td></tr>';
             return;
         }
 
-        for (const t of tokens) {
-            const pnlVal = t.realizedPnlSol || 0;
-            const pnlCls = pnlVal >= 0 ? 'text-green-400' : 'text-red-400';
-            const pnlSign = pnlVal >= 0 ? '+' : '';
+        if (currentPnlTab === 'holdings') {
+            // Filter tokens with holdings
+            const holdings = tokens.filter(t => (t.actualHolding || t.onChainBalance || 0) > 0.000001);
+            if (holdings.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-[#9a3412]">No current holdings</td></tr>';
+                return;
+            }
 
-            tbody.innerHTML += `
-                <tr class="border-b border-[#7c2d12]/30 hover:bg-[#351408] cursor-pointer" onclick="navigateTo('token/${t.mint}')">
-                    <td class="px-4 py-3">
-                        <div class="flex items-center gap-2">
+            for (const t of holdings) {
+                const balance = t.actualHolding || t.onChainBalance || 0;
+                const value = t.currentValueSol || 0;
+                const cost = t.remainingCostBasisSol || 0;
+                const unrealized = t.unrealizedPnlSol;
+                const totalPnl = (t.realizedPnlSol || 0) + (unrealized || 0);
+
+                const unrealizedCls = unrealized >= 0 ? 'text-green-400' : 'text-red-400';
+                const totalCls = totalPnl >= 0 ? 'text-green-400' : 'text-red-400';
+                const unrealizedStr = unrealized !== null ? `${unrealized >= 0 ? '+' : ''}${unrealized.toFixed(4)}` : '-';
+                const unrealizedPct = t.unrealizedPnlPercent !== undefined ? ` (${t.unrealizedPnlPercent >= 0 ? '+' : ''}${t.unrealizedPnlPercent.toFixed(0)}%)` : '';
+
+                tbody.innerHTML += `
+                    <tr class="border-b border-[#7c2d12]/30 hover:bg-[#351408] cursor-pointer" onclick="navigateTo('token/${t.mint}')">
+                        <td class="px-4 py-3">
+                            <div class="flex items-center gap-2">
+                                <span class="text-[#fb923c]">${t.mint.slice(0,4)}...${t.mint.slice(-4)}</span>
+                                ${t.source === 'airdrop/transfer' ? '<span class="text-[9px] text-[#9a3412] bg-[#351408] px-1 rounded">AIRDROP</span>' : ''}
+                            </div>
+                        </td>
+                        <td class="px-4 py-3 text-right text-[#ffedd5]">${formatNumber(balance)}</td>
+                        <td class="px-4 py-3 text-right text-[#ffedd5]">${value > 0 ? value.toFixed(4) : '-'}</td>
+                        <td class="px-4 py-3 text-right text-[#ffedd5]">${cost > 0 ? cost.toFixed(4) : '-'}</td>
+                        <td class="px-4 py-3 text-right ${unrealizedCls}">${unrealizedStr}${unrealizedPct}</td>
+                        <td class="px-4 py-3 text-right ${totalCls}">${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(4)}</td>
+                    </tr>
+                `;
+            }
+        } else {
+            // History view - show all trades
+            for (const t of tokens) {
+                const pnlVal = t.realizedPnlSol || 0;
+                const pnlCls = pnlVal >= 0 ? 'text-green-400' : 'text-red-400';
+
+                tbody.innerHTML += `
+                    <tr class="border-b border-[#7c2d12]/30 hover:bg-[#351408] cursor-pointer" onclick="navigateTo('token/${t.mint}')">
+                        <td class="px-4 py-3">
                             <span class="text-[#fb923c]">${t.mint.slice(0,4)}...${t.mint.slice(-4)}</span>
-                        </div>
-                    </td>
-                    <td class="px-4 py-3 text-right text-[#ffedd5]">${t.buyCount || 0}</td>
-                    <td class="px-4 py-3 text-right text-[#ffedd5]">${t.sellCount || 0}</td>
-                    <td class="px-4 py-3 text-right text-[#ffedd5]">${(t.totalCostSol || 0).toFixed(4)}</td>
-                    <td class="px-4 py-3 text-right text-[#ffedd5]">${(t.totalProceedsSol || 0).toFixed(4)}</td>
-                    <td class="px-4 py-3 text-right ${pnlCls}">${pnlSign}${pnlVal.toFixed(4)}</td>
-                </tr>
-            `;
+                        </td>
+                        <td class="px-4 py-3 text-right text-[#ffedd5]">${t.buyCount || 0} / ${t.sellCount || 0}</td>
+                        <td class="px-4 py-3 text-right text-[#ffedd5]">${(t.totalBought || 0).toFixed(2)}</td>
+                        <td class="px-4 py-3 text-right text-[#ffedd5]">${(t.totalCostSol || 0).toFixed(4)}</td>
+                        <td class="px-4 py-3 text-right text-[#ffedd5]">${(t.totalProceedsSol || 0).toFixed(4)}</td>
+                        <td class="px-4 py-3 text-right ${pnlCls}">${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(4)}</td>
+                    </tr>
+                `;
+            }
         }
+    }
 
-        lucide.createIcons();
+    function formatNumber(n) {
+        if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+        if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(2) + 'K';
+        return n.toFixed(2);
     }
 
 </script>
