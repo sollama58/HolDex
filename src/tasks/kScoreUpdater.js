@@ -2310,32 +2310,20 @@ async function updateKScores(deps) {
     logger.info(`[K-Score v5] Starting cycle... Mode: ${modeLabel}`);
 
     try {
-        // Smart token selection for 100% coverage without compromising quality
-        // Priority: 1) Never scored, 2) Stale (>24h), 3) High value tokens
-        // Filter: Only tokens with some activity (liquidity > $100 or holders > 5)
-        const BATCH_LIMIT = 50; // Limit per cycle to respect API limits
-        const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
-        const staleThreshold = Date.now() - STALE_THRESHOLD_MS;
-
+        // Only calculate K-Score for verified tokens (saves Helius API credits)
+        // Tokens get verified via community submission or admin approval
         const tokens = await db.all(`
             SELECT * FROM tokens
-            WHERE (liquidity > 100 OR holders > 5 OR marketcap > 1000)
-            ORDER BY
-                CASE WHEN k_score IS NULL THEN 0 ELSE 1 END,  -- Never scored first
-                CASE WHEN last_k_score_update IS NULL OR last_k_score_update < $1 THEN 0 ELSE 1 END,  -- Stale second
-                COALESCE(marketcap, 0) DESC,  -- High value third
-                COALESCE(liquidity, 0) DESC
-            LIMIT $2
-        `, [staleThreshold, BATCH_LIMIT]);
+            WHERE hascommunityupdate = TRUE
+            ORDER BY volume24h DESC NULLS LAST
+        `);
 
         if (!tokens || tokens.length === 0) {
-            logger.info("[K-Score] No eligible tokens.");
+            logger.info("[K-Score] No eligible tokens (none verified).");
             return;
         }
 
-        const neverScored = tokens.filter(t => t.k_score === null).length;
-        const stale = tokens.filter(t => t.k_score !== null && (!t.last_k_score_update || t.last_k_score_update < staleThreshold)).length;
-        logger.info(`[K-Score] Updating ${tokens.length} tokens (${neverScored} never scored, ${stale} stale)...`);
+        logger.info(`[K-Score] Updating ${tokens.length} verified tokens...`);
 
         for (const t of tokens) {
             try {
