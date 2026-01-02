@@ -1083,6 +1083,11 @@ function init(deps) {
                     burnedPercent: r.burned_percent || 0,
                     isPumpFun: r.is_pump_fun || false,
                     convictionScore: r.conviction_score || 0,
+                    // Conviction breakdown
+                    conviction_accumulators: r.conviction_accumulators || 0,
+                    conviction_holders: r.conviction_holders || 0,
+                    conviction_reducers: r.conviction_reducers || 0,
+                    conviction_extractors: r.conviction_extractors || 0,
                     // Mayhem Mode indicator
                     isMutableSupply: r.is_mutable_supply || false,
                     supplyChange24h: r.supply_change_24h || 0

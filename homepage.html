@@ -611,6 +611,32 @@
                          <div class="text-[10px] text-[#9a3412] uppercase font-bold flex justify-end items-center gap-1">Credit <i data-lucide="help-circle" width="10"></i></div>
                     </div>
                 </div>
+
+                <!-- Conviction Breakdown -->
+                <div id="conviction-breakdown" class="hidden mt-2 p-2 bg-[#1a0a02] rounded-lg border border-[#7c2d12]">
+                    <div class="text-[10px] text-[#9a3412] uppercase font-bold mb-2">Top 20 Holders Conviction</div>
+                    <div class="grid grid-cols-4 gap-1 text-center">
+                        <div class="flex flex-col items-center">
+                            <span class="conviction-pill conviction-accumulator" id="conv-acc">0</span>
+                            <span class="text-[8px] text-[#9a3412] mt-1">💎 Acc</span>
+                        </div>
+                        <div class="flex flex-col items-center">
+                            <span class="conviction-pill conviction-holder" id="conv-hold">0</span>
+                            <span class="text-[8px] text-[#9a3412] mt-1">🪙 Hold</span>
+                        </div>
+                        <div class="flex flex-col items-center">
+                            <span class="conviction-pill conviction-reducer" id="conv-red">0</span>
+                            <span class="text-[8px] text-[#9a3412] mt-1">📉 Red</span>
+                        </div>
+                        <div class="flex flex-col items-center">
+                            <span class="conviction-pill conviction-extractor" id="conv-ext">0</span>
+                            <span class="text-[8px] text-[#9a3412] mt-1">🔻 Ext</span>
+                        </div>
+                    </div>
+                    <div class="mt-2 h-2 bg-[#2a1005] rounded-full overflow-hidden flex" id="conviction-bar">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
                 
                 <div id="detail-desc" class="mt-3 text-sm text-[#ffedd5] leading-relaxed border-t border-[#7c2d12] pt-3 hidden whitespace-pre-wrap"></div>
                 
@@ -1263,7 +1289,40 @@
                         kScoreValEl.innerHTML = renderKScore(score, isVerified);
                     }
                 }
-                
+
+                // CONVICTION BREAKDOWN DISPLAY
+                const convBreakdown = document.getElementById('conviction-breakdown');
+                const acc = t.conviction_accumulators || 0;
+                const hold = t.conviction_holders || 0;
+                const red = t.conviction_reducers || 0;
+                const ext = t.conviction_extractors || 0;
+                const total = acc + hold + red + ext;
+
+                if (convBreakdown && total > 0) {
+                    convBreakdown.classList.remove('hidden');
+                    document.getElementById('conv-acc').innerText = acc;
+                    document.getElementById('conv-hold').innerText = hold;
+                    document.getElementById('conv-red').innerText = red;
+                    document.getElementById('conv-ext').innerText = ext;
+
+                    // Visual bar
+                    const bar = document.getElementById('conviction-bar');
+                    if (bar) {
+                        const pAcc = (acc / total * 100).toFixed(1);
+                        const pHold = (hold / total * 100).toFixed(1);
+                        const pRed = (red / total * 100).toFixed(1);
+                        const pExt = (ext / total * 100).toFixed(1);
+                        bar.innerHTML = `
+                            <div style="width:${pAcc}%; background:#b9f2ff;" title="Accumulators ${pAcc}%"></div>
+                            <div style="width:${pHold}%; background:#c0c0c0;" title="Holders ${pHold}%"></div>
+                            <div style="width:${pRed}%; background:#b87333;" title="Reducers ${pRed}%"></div>
+                            <div style="width:${pExt}%; background:#cd853f;" title="Extractors ${pExt}%"></div>
+                        `;
+                    }
+                } else if (convBreakdown) {
+                    convBreakdown.classList.add('hidden');
+                }
+
                 const c5m = t.change5m || 0;
                 const c5mEl = document.getElementById('stat-chg5m');
                 if (c5mEl) {
