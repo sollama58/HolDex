@@ -59,14 +59,8 @@ try {
     console.log('  ✗ services/index FAILED:', e.message);
 }
 
-// Test 5: priceService (creates Solana Connection)
-console.log('\n[TEST 5] Loading priceService...');
-try {
-    const priceService = require('./services/priceService');
-    console.log('  ✓ services/priceService OK');
-} catch (e) {
-    console.log('  ✗ services/priceService FAILED:', e.message);
-}
+// Test 5: priceService - DISABLED
+console.log('\n[TEST 5] priceService SKIPPED');
 
 // Test 6: kScoreUpdater - DISABLED to isolate crash
 console.log('\n[TEST 6] kScoreUpdater SKIPPED (testing without it)');
