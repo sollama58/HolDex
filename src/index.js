@@ -15,6 +15,7 @@ const kScoreUpdater = require('./tasks/kScoreUpdater');
 const { initSocket } = require('./services/socket'); 
 const tokensRoutes = require('./routes/tokens');
 const webhooksRoutes = require('./routes/webhooks');
+const { getOrCreateMasterWebhook } = require('./services/heliusWebhook');
 const fs = require('fs');
 const path = require('path');
 
@@ -222,6 +223,23 @@ async function startServer() {
 
         // Start WebSocket Server
         initSocket(server, allowedOrigins);
+
+        // Initialize Helius Webhooks (if configured)
+        if (config.USE_WEBHOOKS) {
+            const webhookUrl = config.WEBHOOK_URL || `${config.API_URL}/webhook/transfers`;
+            logger.info(`[Webhook] Initializing master webhook → ${webhookUrl}`);
+            try {
+                const webhookId = await getOrCreateMasterWebhook(getDB(), webhookUrl);
+                if (webhookId) {
+                    logger.info(`[Webhook] Master webhook active: ${webhookId}`);
+                }
+            } catch (err) {
+                logger.error(`[Webhook] Failed to initialize: ${err.message}`);
+                // Don't crash - webhooks are optional, fall back to polling
+            }
+        } else {
+            logger.warn('[Webhook] Webhooks disabled (set API_URL or WEBHOOK_URL to enable)');
+        }
 
         // Start Background Tasks
         startSnapshotter();

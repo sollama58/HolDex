@@ -28,6 +28,7 @@ const cacheControl = require('../middleware/httpCache');
 const apiKeyAuth = require('../middleware/apiKeyAuth');
 const { indexTokenOnChain } = require('../services/indexer');
 const { addTokenToMasterWebhook } = require('../services/heliusWebhook');
+const { generateKScoreCard } = require('../services/cardGenerator');
 
 const router = express.Router();
 const solanaConnection = getSolanaConnection();
@@ -877,6 +878,59 @@ function init(deps) {
             });
             res.json(result);
         } catch(e) { res.status(500).json({ success: false, error: e.message }); }
+    });
+
+    // --- K-SCORE CARD IMAGE (for Twitter/social sharing) ---
+    router.get('/token/:mint/card.png', async (req, res) => {
+        const { mint } = req.params;
+
+        // Validate mint address
+        if (!isValidPubkey(mint)) {
+            return res.status(400).json({ success: false, error: 'Invalid mint address' });
+        }
+
+        try {
+            // Get token data
+            const token = await db.get(`
+                SELECT
+                    mint, name, symbol, image,
+                    k_score, holders, marketcap,
+                    conviction_accumulators, conviction_holders,
+                    conviction_reducers, conviction_extractors
+                FROM tokens
+                WHERE mint = $1
+            `, [mint]);
+
+            if (!token) {
+                return res.status(404).json({ success: false, error: 'Token not found' });
+            }
+
+            // Generate the card image
+            const imageBuffer = await generateKScoreCard({
+                name: token.name,
+                symbol: token.symbol,
+                image: token.image,
+                k_score: token.k_score || 0,
+                holders: token.holders || 0,
+                marketCap: token.marketcap || 0,
+                conviction_accumulators: token.conviction_accumulators || 0,
+                conviction_holders: token.conviction_holders || 0,
+                conviction_reducers: token.conviction_reducers || 0,
+                conviction_extractors: token.conviction_extractors || 0
+            });
+
+            // Set caching headers (cache for 5 minutes)
+            res.set({
+                'Content-Type': 'image/png',
+                'Cache-Control': 'public, max-age=300',
+                'Content-Length': imageBuffer.length
+            });
+
+            res.send(imageBuffer);
+        } catch (e) {
+            logger.error(`Card generation failed for ${mint}: ${e.message}`);
+            res.status(500).json({ success: false, error: 'Failed to generate card' });
+        }
     });
 
     // --- TOP HOLDERS (for Orb AI integration) ---

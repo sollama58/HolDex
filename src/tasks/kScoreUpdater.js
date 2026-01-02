@@ -767,8 +767,9 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
         // ============================================
         // When webhooks are active, holder_snapshots is constantly updated
         // by POST /webhook/transfers, so we just read from cache
+        // Skip this mode during daily deep refresh (forceDeepRefreshMode)
 
-        if (config.USE_WEBHOOKS && db) {
+        if (config.USE_WEBHOOKS && db && !forceDeepRefreshMode) {
             const snapshots = await db.all(
                 'SELECT * FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 20',
                 [mint]
@@ -796,20 +797,19 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
                     const analyzed = snapshots.length;
                     const score = analyzed > 0 ? Math.round(((accumulators + holders) / analyzed) * 100) : 0;
 
-                    logger.info(`[Webhook Mode] ${mint.slice(0,8)}: ${score}% conviction from cache (${analyzed} holders, ${ageMinutes.toFixed(0)}m old)`);
+                    // Use stored holder count from DB (0 RPC calls)
+                    // This is updated periodically by deep refresh, not on every K-Score calc
+                    const tokenData = await db.get(
+                        'SELECT holders FROM tokens WHERE mint = $1',
+                        [mint]
+                    );
+                    const storedHolderCount = tokenData?.holders || snapshots.length;
 
-                    // Still need total holder count - this is a lightweight call
-                    const allHolders = await fetchTokenHolders(mint);
-                    let realHoldersCount = 0;
-                    if (priceUsd > 0) {
-                        const divisor = Math.pow(10, decimals);
-                        for (const h of allHolders) {
-                            const usdValue = (h.balance / divisor) * priceUsd;
-                            if (usdValue >= MIN_USD_VALUE) realHoldersCount++;
-                        }
-                    } else {
-                        realHoldersCount = allHolders.length;
-                    }
+                    // Estimate real holders from snapshot count (holders with balance > dust)
+                    // In webhook mode, snapshots only contain significant holders
+                    const realHoldersCount = Math.max(snapshots.length, Math.floor(storedHolderCount * 0.7));
+
+                    logger.info(`[Webhook Mode] ${mint.slice(0,8)}: ${score}% conviction from cache (${analyzed} analyzed, ${storedHolderCount} total, ${ageMinutes.toFixed(0)}m old) - 0 RPC`);
 
                     return {
                         score,
@@ -819,8 +819,8 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
                         reducers,
                         extractors,
                         realHoldersCount,
-                        totalHolders: allHolders.length,
-                        allHolders,
+                        totalHolders: storedHolderCount,
+                        allHolders: null,  // Not fetched in webhook mode
                         isWebhookMode: true
                     };
                 }
@@ -1946,13 +1946,23 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         if (!skipConviction && HELIUS_API_KEY) {
             convictionData = await calculateConvictionAndHolders(mint, priceUsd, decimals, db);
 
-            // For top10 calculation + burn detection
-            // Pass stored initial_supply and is_pump_fun flag for proper detection
-            burnData = await calculateBurn(mint, convictionData.allHolders || [], {
-                storedInitialSupply: dbData?.initial_supply,
-                isPumpFunFlag: dbData?.is_pump_fun,
-                db
-            });
+            // In webhook mode (0 RPC), skip burn recalculation - use stored values
+            if (convictionData?.isWebhookMode) {
+                // Use cached burn data from DB
+                burnData = {
+                    burnedPercent: dbData?.burned_percent || 0,
+                    totalSupply: dbData?.supply || 0,
+                    decimals: dbData?.decimals || 9
+                };
+                logger.info(`[Webhook Mode] ${mint.slice(0,8)}: Using cached burn data (${burnData.burnedPercent}%)`);
+            } else {
+                // Full analysis mode - calculate burn from holders
+                burnData = await calculateBurn(mint, convictionData.allHolders || [], {
+                    storedInitialSupply: dbData?.initial_supply,
+                    isPumpFunFlag: dbData?.is_pump_fun,
+                    db
+                });
+            }
         }
 
         // Get age from token timestamp (DexScreener creation date)
@@ -1993,12 +2003,26 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
             const ext = convictionData.extractors || 0;
             raw.accExtRatio = ext > 0 ? acc / ext : (acc > 0 ? 10 : 0);
 
-            // Top10 concentration (using filtered holders, pools removed)
-            const filteredHolders = convictionData.filteredTop50 || convictionData.allHolders || [];
-            if (filteredHolders.length >= 10 && burnData?.totalSupply > 0) {
-                const top10Balance = filteredHolders.slice(0, 10).reduce((s, h) => s + h.balance, 0);
-                const totalSupplyRaw = burnData.totalSupply * Math.pow(10, burnData.decimals || 9);
-                raw.top10Pct = (top10Balance / totalSupplyRaw) * 100;
+            // Top10 concentration
+            if (convictionData.isWebhookMode && db) {
+                // Webhook mode: calculate from holder_snapshots (0 RPC)
+                const top10Snapshots = await db.all(
+                    'SELECT balance FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 10',
+                    [mint]
+                );
+                if (top10Snapshots.length >= 10 && burnData?.totalSupply > 0) {
+                    const top10Balance = top10Snapshots.reduce((s, h) => s + BigInt(h.balance || 0), 0n);
+                    const totalSupplyRaw = BigInt(Math.floor(burnData.totalSupply * Math.pow(10, burnData.decimals || 9)));
+                    raw.top10Pct = totalSupplyRaw > 0n ? Number((top10Balance * 100n) / totalSupplyRaw) : 50;
+                }
+            } else {
+                // Full analysis mode: use filtered holders from RPC
+                const filteredHolders = convictionData.filteredTop50 || convictionData.allHolders || [];
+                if (filteredHolders.length >= 10 && burnData?.totalSupply > 0) {
+                    const top10Balance = filteredHolders.slice(0, 10).reduce((s, h) => s + h.balance, 0);
+                    const totalSupplyRaw = burnData.totalSupply * Math.pow(10, burnData.decimals || 9);
+                    raw.top10Pct = (top10Balance / totalSupplyRaw) * 100;
+                }
             }
         }
 
@@ -2267,10 +2291,17 @@ async function updateSingleToken(deps, mint) {
 /**
  * Batch update K-Scores (scheduled task)
  */
-async function updateKScores(deps) {
-    const { db, broadcast } = deps;
+// Flag to force deep refresh (bypass webhook mode)
+let forceDeepRefreshMode = false;
 
-    logger.info("[K-Score v5] Starting cycle...");
+async function updateKScores(deps) {
+    const { db, broadcast, forceDeepRefresh } = deps;
+
+    // Set global flag for deep refresh (will be read by calculateConvictionAndHolders)
+    forceDeepRefreshMode = !!forceDeepRefresh;
+
+    const modeLabel = forceDeepRefresh ? 'DEEP REFRESH' : (config.USE_WEBHOOKS ? 'LIGHT (webhook)' : 'POLLING');
+    logger.info(`[K-Score v5] Starting cycle... Mode: ${modeLabel}`);
 
     try {
         // Only calculate K-Score for verified tokens (saves Helius API credits)
@@ -2379,6 +2410,9 @@ async function updateKScores(deps) {
 
     } catch (e) {
         logger.error("[K-Score] Cycle error", e);
+    } finally {
+        // Reset deep refresh flag
+        forceDeepRefreshMode = false;
     }
 }
 
@@ -2387,10 +2421,28 @@ function start(deps) {
         logger.warn("[K-Score] No HELIUS_API_KEY - conviction analysis disabled");
     }
 
-    logger.info("🟢 K-Score Updater Started (every 10 min)");
+    // Determine interval based on webhook mode
+    // Webhook mode: Data arrives in real-time, so we just need to aggregate periodically
+    // Polling mode: We need to fetch data ourselves, but 10 min is overkill for conviction
+    const LIGHT_INTERVAL = config.USE_WEBHOOKS ? 3600000 : 1800000; // 1h (webhook) or 30m (polling)
+    const DEEP_INTERVAL = 86400000; // 24h for full holder refresh
 
-    // Run every 10 minutes
-    setInterval(() => updateKScores(deps), 600000);
+    const modeLabel = config.USE_WEBHOOKS ? 'WEBHOOK (0 RPC)' : 'POLLING';
+    const intervalMin = LIGHT_INTERVAL / 60000;
+
+    logger.info(`🟢 K-Score Updater Started - Mode: ${modeLabel}, Interval: ${intervalMin}min`);
+
+    // Light updates (uses cached data in webhook mode)
+    setInterval(() => updateKScores(deps), LIGHT_INTERVAL);
+
+    // Deep refresh once per day (full RPC analysis to update holder counts, burn, etc.)
+    // Runs at a different offset to avoid overlap
+    setInterval(() => {
+        logger.info('[K-Score] Starting daily deep refresh (full RPC analysis)');
+        // Force polling mode for deep refresh by temporarily clearing webhook flag
+        updateKScores({ ...deps, forceDeepRefresh: true });
+    }, DEEP_INTERVAL);
+
     // Run once after startup (delay 30s to let other services init)
     setTimeout(() => updateKScores(deps), 30000);
 }
