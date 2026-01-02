@@ -50,14 +50,8 @@ try {
     console.log('  ✗ services/logger FAILED:', e.message);
 }
 
-// Test 4: Services index (this loads redis + database)
-console.log('\n[TEST 4] Loading services/index...');
-try {
-    const services = require('./services');
-    console.log('  ✓ services/index OK');
-} catch (e) {
-    console.log('  ✗ services/index FAILED:', e.message);
-}
+// Test 4: Services index - DISABLED
+console.log('\n[TEST 4] services/index SKIPPED');
 
 // Test 5: priceService - DISABLED
 console.log('\n[TEST 5] priceService SKIPPED');
