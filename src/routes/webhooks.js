@@ -83,14 +83,19 @@ function init(deps) {
     router.post('/transfers', async (req, res) => {
         try {
             // ============================================
-            // SECURITY: Signature Verification (REQUIRED in production)
+            // SECURITY: Auth Header Verification (REQUIRED in production)
+            // Helius sends the authHeader in the Authorization header
             // ============================================
             if (config.WEBHOOK_SECRET) {
-                const signature = req.headers['x-helius-signature'];
-                const rawBody = req.rawBody || JSON.stringify(req.body);
+                const authHeader = req.headers['authorization'];
 
-                if (!verifyWebhookSignature(rawBody, signature, config.WEBHOOK_SECRET)) {
-                    logger.warn('⚠️  Webhook signature verification FAILED');
+                // Constant-time comparison to prevent timing attacks
+                const expected = Buffer.from(config.WEBHOOK_SECRET);
+                const received = Buffer.from(authHeader || '');
+
+                if (expected.length !== received.length ||
+                    !require('crypto').timingSafeEqual(expected, received)) {
+                    logger.warn('⚠️  Webhook auth verification FAILED');
                     return res.status(401).json({ error: 'Unauthorized' });
                 }
             } else if (process.env.NODE_ENV === 'production') {
