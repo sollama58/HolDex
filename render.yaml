@@ -7,15 +7,7 @@ services:
     region: oregon
     repo: https://github.com/zeyxx/HolDex
     branch: kscore-v8-rebased
-    buildCommand: |
-      apt-get update && apt-get install -y \
-        build-essential \
-        libcairo2-dev \
-        libpango1.0-dev \
-        libjpeg-dev \
-        libgif-dev \
-        librsvg2-dev && \
-      npm install
+    buildCommand: npm install --ignore-optional
     startCommand: npm run calculator
     envVars:
       - key: DATABASE_URL
