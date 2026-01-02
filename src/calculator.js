@@ -68,14 +68,8 @@ try {
     console.log('  ✗ services/priceService FAILED:', e.message);
 }
 
-// Test 6: kScoreUpdater (the main suspect)
-console.log('\n[TEST 6] Loading kScoreUpdater...');
-try {
-    const kScoreUpdater = require('./tasks/kScoreUpdater');
-    console.log('  ✓ tasks/kScoreUpdater OK');
-} catch (e) {
-    console.log('  ✗ tasks/kScoreUpdater FAILED:', e.message);
-}
+// Test 6: kScoreUpdater - DISABLED to isolate crash
+console.log('\n[TEST 6] kScoreUpdater SKIPPED (testing without it)');
 
 console.log('\n=== ALL MODULES LOADED ===');
 console.log('If you see this, all require() calls succeeded.\n');
