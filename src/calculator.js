@@ -1,85 +1,54 @@
 #!/usr/bin/env node
 /**
- * HolDex Calculator - Module Isolation Test
- * Testing which module causes the crash
+ * HolDex Calculator - Copy of the WORKING minimal version
  */
 
 console.log('=== CALCULATOR STARTING ===');
 console.log('Node version:', process.version);
+console.log('Platform:', process.platform);
+console.log('Memory:', JSON.stringify(process.memoryUsage()));
 
-// Test 1: Basic modules (these should be safe)
-console.log('\n[TEST 1] Loading basic modules...');
-try {
-    require('dotenv').config();
-    console.log('  ✓ dotenv OK');
-} catch (e) {
-    console.log('  ✗ dotenv FAILED:', e.message);
-}
+console.log('DATABASE_URL:', process.env.DATABASE_URL ? 'SET' : 'MISSING');
+console.log('HELIUS_API_KEY:', process.env.HELIUS_API_KEY ? 'SET' : 'MISSING');
 
-try {
-    const { Pool } = require('pg');
-    console.log('  ✓ pg OK');
-} catch (e) {
-    console.log('  ✗ pg FAILED:', e.message);
-}
-
-try {
-    const axios = require('axios');
-    console.log('  ✓ axios OK');
-} catch (e) {
-    console.log('  ✗ axios FAILED:', e.message);
-}
-
-// Test 2: App config
-console.log('\n[TEST 2] Loading config...');
-try {
-    const config = require('./config/env');
-    console.log('  ✓ config/env OK');
-    console.log('    DATABASE_URL:', config.DATABASE_URL ? 'SET' : 'MISSING');
-    console.log('    HELIUS_API_KEY:', config.HELIUS_API_KEY ? 'SET' : 'MISSING');
-} catch (e) {
-    console.log('  ✗ config/env FAILED:', e.message);
-}
-
-// Test 3: Logger - DISABLED
-console.log('\n[TEST 3] services/logger SKIPPED');
-
-// Test 4: Services index - DISABLED
-console.log('\n[TEST 4] services/index SKIPPED');
-
-// Test 5: priceService - DISABLED
-console.log('\n[TEST 5] priceService SKIPPED');
-
-// Test 6: kScoreUpdater - DISABLED to isolate crash
-console.log('\n[TEST 6] kScoreUpdater SKIPPED (testing without it)');
-
-console.log('\n=== ALL MODULES LOADED ===');
-console.log('If you see this, all require() calls succeeded.\n');
-
-// Simple keep-alive loop
 let counter = 0;
+
 function heartbeat() {
     counter++;
     const mem = process.memoryUsage();
     console.log(`[${new Date().toISOString()}] Heartbeat #${counter} | RSS: ${Math.round(mem.rss / 1024 / 1024)}MB | Heap: ${Math.round(mem.heapUsed / 1024 / 1024)}MB`);
 }
 
-setInterval(heartbeat, 15000);
+setInterval(heartbeat, 10000);
 
-// Graceful shutdown
+setTimeout(async () => {
+    console.log('=== TESTING DB CONNECTION ===');
+    try {
+        const { Pool } = require('pg');
+        const pool = new Pool({
+            connectionString: process.env.DATABASE_URL,
+            ssl: { rejectUnauthorized: false },
+            max: 3
+        });
+
+        const result = await pool.query('SELECT COUNT(*) as count FROM tokens');
+        console.log('DB OK - Token count:', result.rows[0].count);
+        await pool.end();
+    } catch (err) {
+        console.error('DB ERROR:', err.message);
+    }
+}, 5000);
+
+console.log('=== ENTERING MAIN LOOP ===');
+
 process.on('SIGTERM', () => {
     console.log('Received SIGTERM, exiting...');
     process.exit(0);
 });
 
-process.on('uncaughtException', (err) => {
-    console.error('UNCAUGHT EXCEPTION:', err.message);
-    console.error(err.stack);
+process.on('SIGINT', () => {
+    console.log('Received SIGINT, exiting...');
+    process.exit(0);
 });
 
-process.on('unhandledRejection', (reason) => {
-    console.error('UNHANDLED REJECTION:', reason);
-});
-
-console.log('Entering keep-alive loop...');
 process.stdin.resume();
