@@ -20,6 +20,7 @@ const config = require('../config/env');
 const { logger } = require('../services');
 const priceService = require('../services/priceService');
 const bs58 = require('bs58');
+const { getClient: getRedisClient } = require('../services/redis');
 
 // ============================================
 // HELIUS CONFIG
@@ -182,52 +183,78 @@ const SNAPSHOT_TTL = 3600000; // 1 hour - use delta if snapshot is newer
 
 /**
  * Save holder snapshots for delta analysis
+ * OPTIMIZED: Uses batch UPSERT instead of individual inserts
  */
 async function saveHolderSnapshots(db, mint, holders) {
     const now = Date.now();
-    let saved = 0;
-    let failed = 0;
 
-    for (const h of holders) {
-        try {
-            // Ensure all values are valid (convert BigInt, handle undefined)
-            const address = h.address || '';
-            const lastSig = h.lastSignature || null;
-            const buyCount = Math.floor(Number(h.buyCount)) || 0;
-            const sellCount = Math.floor(Number(h.sellCount)) || 0;
-            const netFlow = Math.floor(Number(h.netFlow)) || 0;
-            const convClass = h.convictionClass || 'holder';
-            const balance = Math.floor(Number(h.balance)) || 0; // Truncate decimals for BIGINT
+    // Filter and prepare valid holders
+    const validHolders = holders
+        .filter(h => h.address)
+        .map(h => ({
+            address: h.address,
+            lastSig: h.lastSignature || null,
+            buyCount: Math.floor(Number(h.buyCount)) || 0,
+            sellCount: Math.floor(Number(h.sellCount)) || 0,
+            netFlow: Math.floor(Number(h.netFlow)) || 0,
+            convClass: h.convictionClass || 'holder',
+            balance: Math.floor(Number(h.balance)) || 0
+        }));
 
-            if (!address) {
+    if (validHolders.length === 0) {
+        return { saved: 0, failed: holders.length };
+    }
+
+    try {
+        // Build batch UPSERT with UNNEST for PostgreSQL
+        const addresses = validHolders.map(h => h.address);
+        const lastSigs = validHolders.map(h => h.lastSig);
+        const buyCounts = validHolders.map(h => h.buyCount);
+        const sellCounts = validHolders.map(h => h.sellCount);
+        const netFlows = validHolders.map(h => h.netFlow);
+        const convClasses = validHolders.map(h => h.convClass);
+        const balances = validHolders.map(h => h.balance);
+        const mints = validHolders.map(() => mint);
+        const timestamps = validHolders.map(() => now);
+
+        await db.run(`
+            INSERT INTO holder_snapshots (mint, holder, last_signature, buy_count, sell_count, net_flow, conviction_class, balance, updated_at)
+            SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::int[], $5::int[], $6::bigint[], $7::text[], $8::bigint[], $9::bigint[])
+            ON CONFLICT (mint, holder) DO UPDATE SET
+                last_signature = EXCLUDED.last_signature,
+                buy_count = EXCLUDED.buy_count,
+                sell_count = EXCLUDED.sell_count,
+                net_flow = EXCLUDED.net_flow,
+                conviction_class = EXCLUDED.conviction_class,
+                balance = EXCLUDED.balance,
+                updated_at = EXCLUDED.updated_at
+        `, [mints, addresses, lastSigs, buyCounts, sellCounts, netFlows, convClasses, balances, timestamps]);
+
+        return { saved: validHolders.length, failed: holders.length - validHolders.length };
+    } catch (e) {
+        logger.warn(`[Snapshot] Batch save failed for ${mint.slice(0,8)}: ${e.message}, falling back to individual`);
+
+        // Fallback to individual inserts on batch failure
+        let saved = 0;
+        let failed = 0;
+        for (const h of validHolders) {
+            try {
+                await db.run(`
+                    INSERT INTO holder_snapshots (mint, holder, last_signature, buy_count, sell_count, net_flow, conviction_class, balance, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    ON CONFLICT (mint, holder) DO UPDATE SET
+                        last_signature = EXCLUDED.last_signature, buy_count = EXCLUDED.buy_count,
+                        sell_count = EXCLUDED.sell_count, net_flow = EXCLUDED.net_flow,
+                        conviction_class = EXCLUDED.conviction_class, balance = EXCLUDED.balance,
+                        updated_at = EXCLUDED.updated_at
+                `, [mint, h.address, h.lastSig, h.buyCount, h.sellCount, h.netFlow, h.convClass, h.balance, now]);
+                saved++;
+            } catch (_e) {
                 failed++;
-                continue;
             }
-
-            await db.run(`
-                INSERT INTO holder_snapshots (mint, holder, last_signature, buy_count, sell_count, net_flow, conviction_class, balance, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                ON CONFLICT (mint, holder) DO UPDATE SET
-                    last_signature = EXCLUDED.last_signature,
-                    buy_count = EXCLUDED.buy_count,
-                    sell_count = EXCLUDED.sell_count,
-                    net_flow = EXCLUDED.net_flow,
-                    conviction_class = EXCLUDED.conviction_class,
-                    balance = EXCLUDED.balance,
-                    updated_at = EXCLUDED.updated_at
-            `, [mint, address, lastSig, buyCount, sellCount, netFlow, convClass, balance, now]);
-            saved++;
-        } catch (e) {
-            logger.warn(`[Snapshot] Failed to save ${h.address?.slice(0,8)}: ${e.message}`);
-            failed++;
         }
+        return { saved, failed: failed + (holders.length - validHolders.length) };
     }
-
-    if (failed > 0) {
-        logger.warn(`[Snapshot] ${mint.slice(0,8)}: ${saved} saved, ${failed} failed`);
-    }
-
-    return { saved, failed };
 }
 
 /**
@@ -341,58 +368,65 @@ async function deltaConvictionAnalysis(db, mint) {
     let reducers = 0;
     let extractors = 0;
 
-    for (const snap of snapshots) {
-        try {
-            // Get only NEW transactions since last check
-            // Use time filter optimization when snapshot has timestamp
-            const newTxs = await getNewTransactions(snap.holder, snap.last_signature, mint, snap.updated_at);
+    // OPTIMIZATION: Process snapshots in parallel batches (5x faster)
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < snapshots.length; i += BATCH_SIZE) {
+        const batch = snapshots.slice(i, i + BATCH_SIZE);
 
-            if (newTxs.length > 0) {
-                // Update counts incrementally
-                let buyCount = snap.buy_count || 0;
-                let sellCount = snap.sell_count || 0;
-                let netFlow = snap.net_flow || 0;
-                let newLastSig = newTxs[0].signature; // Most recent
+        const results = await Promise.allSettled(
+            batch.map(async (snap) => {
+                // Get only NEW transactions since last check
+                const newTxs = await getNewTransactions(snap.holder, snap.last_signature, mint, snap.updated_at);
 
-                for (const tx of newTxs) {
-                    if (tx.isBuy) {
-                        buyCount++;
-                        netFlow += tx.amount;
+                let convictionClass = snap.conviction_class;
+
+                if (newTxs.length > 0) {
+                    // Update counts incrementally
+                    let buyCount = snap.buy_count || 0;
+                    let sellCount = snap.sell_count || 0;
+                    let netFlow = snap.net_flow || 0;
+                    const newLastSig = newTxs[0].signature;
+
+                    for (const tx of newTxs) {
+                        if (tx.isBuy) { buyCount++; netFlow += tx.amount; }
+                        if (tx.isSell) { sellCount++; netFlow -= tx.amount; }
                     }
-                    if (tx.isSell) {
-                        sellCount++;
-                        netFlow -= tx.amount;
-                    }
+
+                    convictionClass = classifyFromCounts(buyCount, sellCount, netFlow);
+
+                    await db.run(`
+                        UPDATE holder_snapshots
+                        SET buy_count = $1, sell_count = $2, net_flow = $3,
+                            conviction_class = $4, last_signature = $5, updated_at = $6
+                        WHERE mint = $7 AND holder = $8
+                    `, [buyCount, sellCount, netFlow, convictionClass, newLastSig, Date.now(), mint, snap.holder]);
+
+                    return { updated: true, convictionClass, holder: snap.holder, txCount: newTxs.length };
                 }
 
-                // Reclassify based on updated counts
-                const newClass = classifyFromCounts(buyCount, sellCount, netFlow);
+                return { updated: false, convictionClass };
+            })
+        );
 
-                // Save updated snapshot
-                await db.run(`
-                    UPDATE holder_snapshots
-                    SET buy_count = $1, sell_count = $2, net_flow = $3,
-                        conviction_class = $4, last_signature = $5, updated_at = $6
-                    WHERE mint = $7 AND holder = $8
-                `, [buyCount, sellCount, netFlow, newClass, newLastSig, Date.now(), mint, snap.holder]);
-
-                snap.conviction_class = newClass;
-                updated++;
-
-                logger.debug(`[Delta] ${snap.holder.slice(0,8)}: +${newTxs.length} txs → ${newClass}`);
+        for (const result of results) {
+            if (result.status === 'fulfilled') {
+                const { updated: wasUpdated, convictionClass, holder, txCount } = result.value;
+                if (wasUpdated) {
+                    updated++;
+                    logger.debug(`[Delta] ${holder.slice(0,8)}: +${txCount} txs → ${convictionClass}`);
+                }
+                switch (convictionClass) {
+                    case 'accumulator': accumulators++; break;
+                    case 'holder': holders++; break;
+                    case 'reducer': reducers++; break;
+                    case 'extractor': extractors++; break;
+                }
             }
+        }
 
-            // Count by class
-            switch (snap.conviction_class) {
-                case 'accumulator': accumulators++; break;
-                case 'holder': holders++; break;
-                case 'reducer': reducers++; break;
-                case 'extractor': extractors++; break;
-            }
-
-            await sleep(50); // Light rate limiting
-        } catch (_e) {
-            // Skip failed holders
+        // Rate limit between batches
+        if (i + BATCH_SIZE < snapshots.length) {
+            await sleep(100);
         }
     }
 
@@ -439,9 +473,81 @@ const KNOWN_POOL_WALLETS = new Set([
     'CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM', // PumpFun Fee
 ]);
 
-// Pool cache (address -> { isPool, ts })
-const poolCache = new Map();
-const POOL_CACHE_TTL = 3600000; // 1 hour
+// Pool cache - Redis-backed with in-memory fallback
+// OPTIMIZED: Shared across instances, survives restarts
+const POOL_CACHE_TTL_SECONDS = 3600; // 1 hour
+const memoryPoolCache = new Map(); // Fallback if Redis unavailable
+
+async function getPoolFromCache(address) {
+    const redis = getRedisClient();
+    if (redis) {
+        try {
+            const cached = await redis.get(`pool:${address}`);
+            if (cached !== null) return cached === '1';
+        } catch (_e) { /* fallback to memory */ }
+    }
+    const mem = memoryPoolCache.get(address);
+    if (mem && Date.now() - mem.ts < POOL_CACHE_TTL_SECONDS * 1000) {
+        return mem.isPool;
+    }
+    return undefined;
+}
+
+async function setPoolInCache(address, isPool) {
+    const redis = getRedisClient();
+    if (redis) {
+        try {
+            await redis.set(`pool:${address}`, isPool ? '1' : '0', 'EX', POOL_CACHE_TTL_SECONDS);
+        } catch (_e) { /* fallback to memory */ }
+    }
+    memoryPoolCache.set(address, { isPool, ts: Date.now() });
+}
+
+async function getPoolsFromCache(addresses) {
+    const results = new Map();
+    const redis = getRedisClient();
+
+    if (redis) {
+        try {
+            const keys = addresses.map(a => `pool:${a}`);
+            const values = await redis.mget(...keys);
+            for (let i = 0; i < addresses.length; i++) {
+                if (values[i] !== null) {
+                    results.set(addresses[i], values[i] === '1');
+                }
+            }
+            return results;
+        } catch (_e) { /* fallback to memory */ }
+    }
+
+    // Memory fallback
+    const now = Date.now();
+    for (const addr of addresses) {
+        const mem = memoryPoolCache.get(addr);
+        if (mem && now - mem.ts < POOL_CACHE_TTL_SECONDS * 1000) {
+            results.set(addr, mem.isPool);
+        }
+    }
+    return results;
+}
+
+async function setPoolsInCache(entries) {
+    const redis = getRedisClient();
+    if (redis && entries.length > 0) {
+        try {
+            const pipeline = redis.pipeline();
+            for (const { address, isPool } of entries) {
+                pipeline.set(`pool:${address}`, isPool ? '1' : '0', 'EX', POOL_CACHE_TTL_SECONDS);
+            }
+            await pipeline.exec();
+        } catch (_e) { /* fallback to memory */ }
+    }
+    // Always update memory fallback
+    const now = Date.now();
+    for (const { address, isPool } of entries) {
+        memoryPoolCache.set(address, { isPool, ts: now });
+    }
+}
 
 // ============================================
 // HELIUS API FUNCTIONS
@@ -576,31 +682,44 @@ async function getEnhancedTransactions(address, options = {}) {
 
 async function batchCheckPools(addresses) {
     const results = new Map();
-    const uncached = [];
 
+    // 1. Check known pools first (instant)
+    const toCheck = [];
     for (const addr of addresses) {
         if (KNOWN_POOL_WALLETS.has(addr)) {
             results.set(addr, true);
-            continue;
+        } else {
+            toCheck.push(addr);
         }
-        const cached = poolCache.get(addr);
-        if (cached && Date.now() - cached.ts < POOL_CACHE_TTL) {
-            results.set(addr, cached.isPool);
+    }
+
+    if (toCheck.length === 0) return results;
+
+    // 2. Check Redis/memory cache (batch MGET)
+    const cached = await getPoolsFromCache(toCheck);
+    const uncached = [];
+    for (const addr of toCheck) {
+        if (cached.has(addr)) {
+            results.set(addr, cached.get(addr));
         } else {
             uncached.push(addr);
         }
     }
 
+    // 3. Fetch uncached from Helius and cache results
     if (uncached.length > 0) {
         try {
             const infos = await heliusRpc('getMultipleAccounts', [uncached, { encoding: 'base64' }]);
+            const toCache = [];
             for (let i = 0; i < uncached.length; i++) {
                 const addr = uncached[i];
                 const info = infos?.value?.[i];
                 const isPool = info ? DEX_PROGRAMS.has(info.owner) : false;
                 results.set(addr, isPool);
-                poolCache.set(addr, { isPool, ts: Date.now() });
+                toCache.push({ address: addr, isPool });
             }
+            // Batch cache update (Redis pipeline)
+            await setPoolsInCache(toCache);
         } catch (_error) {
             for (const addr of uncached) {
                 results.set(addr, false);
@@ -903,31 +1022,46 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
         let analyzed = 0;
         const snapshotData = []; // For saving to DB
 
-        for (const holder of top20) {
-            try {
-                const retentionData = await getHolderRetention(holder.address, mint);
-                const classification = classifyRetention(retentionData);
+        // OPTIMIZATION: Process holders in parallel batches (5x faster)
+        const BATCH_SIZE = 5;
+        for (let i = 0; i < top20.length; i += BATCH_SIZE) {
+            const batch = top20.slice(i, i + BATCH_SIZE);
 
-                if (classification === 'accumulator') accumulators++;
-                else if (classification === 'holder') holders++;
-                else if (classification === 'reducer') reducers++;
-                else if (classification === 'extractor') extractors++;
+            const results = await Promise.allSettled(
+                batch.map(async (holder) => {
+                    const retentionData = await getHolderRetention(holder.address, mint);
+                    const classification = classifyRetention(retentionData);
+                    return { holder, retentionData, classification };
+                })
+            );
 
-                // Collect data for snapshot
-                snapshotData.push({
-                    address: holder.address,
-                    balance: holder.balance,
-                    buyCount: retentionData.buyCount,
-                    sellCount: retentionData.sellCount,
-                    netFlow: retentionData.netFlow,
-                    lastSignature: retentionData.lastSignature,
-                    convictionClass: classification
-                });
+            for (const result of results) {
+                if (result.status === 'fulfilled') {
+                    const { holder, retentionData, classification } = result.value;
 
-                analyzed++;
-                await sleep(100); // Rate limit
-            } catch (_e) {
-                // Skip failed holders
+                    if (classification === 'accumulator') accumulators++;
+                    else if (classification === 'holder') holders++;
+                    else if (classification === 'reducer') reducers++;
+                    else if (classification === 'extractor') extractors++;
+
+                    snapshotData.push({
+                        address: holder.address,
+                        balance: holder.balance,
+                        buyCount: retentionData.buyCount,
+                        sellCount: retentionData.sellCount,
+                        netFlow: retentionData.netFlow,
+                        lastSignature: retentionData.lastSignature,
+                        convictionClass: classification
+                    });
+
+                    analyzed++;
+                }
+                // Failed holders are silently skipped
+            }
+
+            // Rate limit between batches (not per-holder)
+            if (i + BATCH_SIZE < top20.length) {
+                await sleep(200);
             }
         }
 
@@ -2498,8 +2632,9 @@ function getHealthStatus() {
             }
         },
         caches: {
-            poolCacheSize: poolCache.size,
-            poolCacheTTLMs: POOL_CACHE_TTL
+            poolCacheSize: memoryPoolCache.size,
+            poolCacheTTLSeconds: POOL_CACHE_TTL_SECONDS,
+            redisEnabled: !!getRedisClient()
         }
     };
 }

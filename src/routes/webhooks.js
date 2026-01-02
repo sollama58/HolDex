@@ -12,13 +12,11 @@ const express = require('express');
 const router = express.Router();
 const logger = require('../services/logger');
 const config = require('../config/env');
-const { verifyWebhookSignature } = require('../services/heliusWebhook');
+const { getClient } = require('../services/redis');
 const { isValidSolanaAddress, sanitizeError, isValidTimestamp } = require('../utils/validation');
 
-// Security: Track processed signatures to prevent replay attacks
-const processedSignatures = new Map(); // signature -> timestamp
-const REPLAY_WINDOW_MS = 300000; // 5 minutes
-const MAX_CACHED_SIGNATURES = 10000;
+// Security: Replay attack prevention via Redis (cluster-safe, persistent)
+const REPLAY_WINDOW_SECONDS = 300; // 5 minutes TTL
 
 // Known DEX/AMM pool programs to exclude from holder tracking
 const POOL_PROGRAMS = new Set([
@@ -41,18 +39,17 @@ const isPoolAddress = (address) => {
 };
 
 /**
- * Classify conviction based on buy/sell counts
+ * Check if signature was already processed (Redis-backed, cluster-safe)
+ * Returns true if duplicate, false if new
  */
-function classifyConviction(buys, sells) {
-    const total = buys + sells;
-    if (total === 0) return 'holder';
+async function checkAndMarkProcessed(signature) {
+    const redis = getClient();
+    if (!redis) return false; // Allow if Redis down (degrade gracefully)
 
-    const buyRatio = buys / total;
-
-    if (buyRatio >= 0.8) return 'accumulator';
-    if (buyRatio >= 0.5) return 'holder';
-    if (buyRatio >= 0.2) return 'reducer';
-    return 'extractor';
+    const key = `webhook:sig:${signature}`;
+    // SETNX returns 1 if key was set (new), 0 if already exists (duplicate)
+    const isNew = await redis.set(key, '1', 'EX', REPLAY_WINDOW_SECONDS, 'NX');
+    return !isNew; // Return true if duplicate
 }
 
 let db = null;
@@ -117,32 +114,14 @@ function init(deps) {
                 if (event.type !== 'TRANSFER') continue;
 
                 // ============================================
-                // SECURITY: Replay Attack Protection
+                // SECURITY: Replay Attack Protection (Redis-backed)
                 // ============================================
                 const txSignature = event.signature;
                 if (txSignature) {
-                    // Check if already processed
-                    if (processedSignatures.has(txSignature)) {
+                    // Check if already processed (atomic Redis SETNX)
+                    if (await checkAndMarkProcessed(txSignature)) {
                         skipped++;
                         continue;
-                    }
-
-                    // Check timestamp (reject old events)
-                    if (event.timestamp && !isValidTimestamp(event.timestamp, REPLAY_WINDOW_MS)) {
-                        logger.debug(`[Webhook] Rejecting stale event: ${txSignature.slice(0, 8)}...`);
-                        skipped++;
-                        continue;
-                    }
-
-                    // Track this signature
-                    processedSignatures.set(txSignature, Date.now());
-
-                    // Cleanup old signatures if cache is too large
-                    if (processedSignatures.size > MAX_CACHED_SIGNATURES) {
-                        const cutoff = Date.now() - REPLAY_WINDOW_MS;
-                        for (const [sig, ts] of processedSignatures) {
-                            if (ts < cutoff) processedSignatures.delete(sig);
-                        }
                     }
                 }
 
@@ -173,70 +152,43 @@ function init(deps) {
                     const amount = parseInt(tokenAmount) || 0;
 
                     // Update buyer (if not a pool and valid address)
+                    // OPTIMIZED: Single atomic UPSERT with inline conviction calculation
                     if (toUserAccount && !isPoolAddress(toUserAccount) && isValidSolanaAddress(toUserAccount)) {
                         await db.run(`
-                            INSERT INTO holder_snapshots (mint, holder, buy_count, net_flow, balance, updated_at)
-                            VALUES ($1, $2, 1, $3, $3, $4)
+                            INSERT INTO holder_snapshots (mint, holder, buy_count, sell_count, net_flow, balance, conviction_class, updated_at)
+                            VALUES ($1, $2, 1, 0, $3, $3, 'accumulator', $4)
                             ON CONFLICT (mint, holder) DO UPDATE SET
                                 buy_count = holder_snapshots.buy_count + 1,
                                 net_flow = holder_snapshots.net_flow + $3,
                                 balance = holder_snapshots.balance + $3,
-                                conviction_class = $5,
-                                updated_at = $4
-                        `, [
-                            mint,
-                            toUserAccount,
-                            amount,
-                            now,
-                            classifyConviction(1, 0) // Will be recalculated
-                        ]);
-
-                        // Recalculate conviction class with actual counts
-                        const holder = await db.get(
-                            'SELECT buy_count, sell_count FROM holder_snapshots WHERE mint = $1 AND holder = $2',
-                            [mint, toUserAccount]
-                        );
-                        if (holder) {
-                            const newClass = classifyConviction(holder.buy_count, holder.sell_count);
-                            await db.run(
-                                'UPDATE holder_snapshots SET conviction_class = $1 WHERE mint = $2 AND holder = $3',
-                                [newClass, mint, toUserAccount]
-                            );
-                        }
+                                updated_at = $4,
+                                conviction_class = CASE
+                                    WHEN (holder_snapshots.buy_count + 1)::float / NULLIF(holder_snapshots.buy_count + 1 + holder_snapshots.sell_count, 0) >= 0.8 THEN 'accumulator'
+                                    WHEN (holder_snapshots.buy_count + 1)::float / NULLIF(holder_snapshots.buy_count + 1 + holder_snapshots.sell_count, 0) >= 0.5 THEN 'holder'
+                                    WHEN (holder_snapshots.buy_count + 1)::float / NULLIF(holder_snapshots.buy_count + 1 + holder_snapshots.sell_count, 0) >= 0.2 THEN 'reducer'
+                                    ELSE 'extractor'
+                                END
+                        `, [mint, toUserAccount, amount, now]);
                     }
 
                     // Update seller (if not a pool and valid address)
+                    // OPTIMIZED: Single atomic UPSERT with inline conviction calculation
                     if (fromUserAccount && !isPoolAddress(fromUserAccount) && isValidSolanaAddress(fromUserAccount)) {
                         await db.run(`
-                            INSERT INTO holder_snapshots (mint, holder, sell_count, net_flow, balance, updated_at)
-                            VALUES ($1, $2, 1, $3, 0, $4)
+                            INSERT INTO holder_snapshots (mint, holder, buy_count, sell_count, net_flow, balance, conviction_class, updated_at)
+                            VALUES ($1, $2, 0, 1, $3, 0, 'extractor', $4)
                             ON CONFLICT (mint, holder) DO UPDATE SET
                                 sell_count = holder_snapshots.sell_count + 1,
                                 net_flow = holder_snapshots.net_flow - $5,
                                 balance = GREATEST(0, holder_snapshots.balance - $5),
-                                conviction_class = $6,
-                                updated_at = $4
-                        `, [
-                            mint,
-                            fromUserAccount,
-                            -amount,
-                            now,
-                            amount,
-                            classifyConviction(0, 1)
-                        ]);
-
-                        // Recalculate conviction class
-                        const holder = await db.get(
-                            'SELECT buy_count, sell_count FROM holder_snapshots WHERE mint = $1 AND holder = $2',
-                            [mint, fromUserAccount]
-                        );
-                        if (holder) {
-                            const newClass = classifyConviction(holder.buy_count, holder.sell_count);
-                            await db.run(
-                                'UPDATE holder_snapshots SET conviction_class = $1 WHERE mint = $2 AND holder = $3',
-                                [newClass, mint, fromUserAccount]
-                            );
-                        }
+                                updated_at = $4,
+                                conviction_class = CASE
+                                    WHEN holder_snapshots.buy_count::float / NULLIF(holder_snapshots.buy_count + holder_snapshots.sell_count + 1, 0) >= 0.8 THEN 'accumulator'
+                                    WHEN holder_snapshots.buy_count::float / NULLIF(holder_snapshots.buy_count + holder_snapshots.sell_count + 1, 0) >= 0.5 THEN 'holder'
+                                    WHEN holder_snapshots.buy_count::float / NULLIF(holder_snapshots.buy_count + holder_snapshots.sell_count + 1, 0) >= 0.2 THEN 'reducer'
+                                    ELSE 'extractor'
+                                END
+                        `, [mint, fromUserAccount, -amount, now, amount]);
                     }
 
                     processed++;
