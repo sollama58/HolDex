@@ -28,7 +28,20 @@ const cacheControl = require('../middleware/httpCache');
 const apiKeyAuth = require('../middleware/apiKeyAuth');
 const { indexTokenOnChain } = require('../services/indexer');
 const { addTokenToMasterWebhook } = require('../services/heliusWebhook');
-const { generateKScoreCard } = require('../services/cardGenerator');
+
+// Lazy load canvas-based card generator (avoid build failures on workers without native deps)
+let generateKScoreCard = null;
+function getCardGenerator() {
+    if (!generateKScoreCard) {
+        try {
+            generateKScoreCard = require('../services/cardGenerator').generateKScoreCard;
+        } catch (err) {
+            console.warn('[CardGenerator] Canvas not available:', err.message);
+            generateKScoreCard = () => { throw new Error('Card generator not available'); };
+        }
+    }
+    return generateKScoreCard;
+}
 
 const router = express.Router();
 const solanaConnection = getSolanaConnection();
@@ -905,8 +918,8 @@ function init(deps) {
                 return res.status(404).json({ success: false, error: 'Token not found' });
             }
 
-            // Generate the card image
-            const imageBuffer = await generateKScoreCard({
+            // Generate the card image (lazy load canvas)
+            const imageBuffer = await getCardGenerator()({
                 name: token.name,
                 symbol: token.symbol,
                 image: token.image,

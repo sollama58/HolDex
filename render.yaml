@@ -1,0 +1,24 @@
+services:
+  # Background Worker for K-Score calculations
+  - type: worker
+    name: holdex-calculator
+    runtime: node
+    plan: starter
+    region: oregon
+    repo: https://github.com/zeyxx/HolDex
+    branch: kscore-v8-rebased
+    buildCommand: |
+      apt-get update && apt-get install -y \
+        build-essential \
+        libcairo2-dev \
+        libpango1.0-dev \
+        libjpeg-dev \
+        libgif-dev \
+        librsvg2-dev && \
+      npm install
+    startCommand: npm run calculator
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: HELIUS_API_KEY
+        sync: false
