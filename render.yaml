@@ -1,4 +1,26 @@
 services:
+  # Web Service - API + Frontend
+  - type: web
+    name: holdex-api
+    runtime: node
+    plan: starter
+    region: oregon
+    repo: https://github.com/zeyxx/HolDex
+    branch: kscore-v8-rebased
+    buildCommand: npm install --ignore-optional
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: HELIUS_API_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: NODE_ENV
+        value: production
+
   # Background Worker for K-Score calculations
   - type: worker
     name: holdex-calculator
