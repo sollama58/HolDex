@@ -3,13 +3,17 @@
  * HolDex Calculator - Testing: add dotenv
  */
 
+// IMPORTANT: Set NODE_ENV to development to avoid production validation
+process.env.NODE_ENV = 'development';
+
 require('dotenv').config();
 console.log('[ADDED] dotenv loaded');
+console.log('[DEBUG] NODE_ENV =', process.env.NODE_ENV);
 
-console.log('[BEFORE] Loading logger...');
-const logger = require('./services/logger');
-console.log('[AFTER] logger loaded successfully');
-logger.info('Logger test message');
+console.log('[BEFORE] Loading config/env...');
+const config = require('./config/env');
+console.log('[AFTER] config/env loaded successfully');
+console.log('  DATABASE_URL:', config.DATABASE_URL ? 'SET' : 'MISSING');
 
 console.log('=== CALCULATOR STARTING ===');
 console.log('Node version:', process.version);
