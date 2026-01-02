@@ -60,16 +60,24 @@ let stats = {
 // TASK 1: K-SCORE UPDATER
 // ============================================
 
+function logMemory() {
+    const used = process.memoryUsage();
+    const mb = (bytes) => (bytes / 1024 / 1024).toFixed(1);
+    logger.info(`[Memory] RSS: ${mb(used.rss)}MB | Heap: ${mb(used.heapUsed)}/${mb(used.heapTotal)}MB`);
+}
+
 async function runKScoreTask() {
     logger.info('🧮 [K-Score] Starting calculation cycle...');
+    logMemory();
 
     try {
+        // Reduced batch size for memory efficiency
         const tokens = await db.all(`
             SELECT mint, symbol, k_score, holders
             FROM tokens
             WHERE hascommunityupdate = true
             ORDER BY volume24h DESC NULLS LAST
-            LIMIT 100
+            LIMIT 20
         `);
 
         logger.info(`[K-Score] Processing ${tokens.length} verified tokens...`);
@@ -88,8 +96,13 @@ async function runKScoreTask() {
                 logger.warn(`  ✗ K-Score ${token.symbol}: ${err.message}`);
             }
 
-            await sleep(1500);
+            await sleep(2000);
+
+            // Help GC between tokens
+            if (global.gc) try { global.gc(); } catch (_) {}
         }
+
+        logMemory();
     } catch (err) {
         logger.error('[K-Score] Task error:', err.message);
     }
@@ -224,11 +237,12 @@ async function runMetadataTask() {
     logger.info('📊 [Metadata] Starting update cycle...');
 
     try {
+        // Reduced batch for memory
         const tokens = await db.all(`
             SELECT mint, supply, decimals, holders, timestamp
             FROM tokens
             ORDER BY liquidity DESC NULLS LAST, updated_at ASC
-            LIMIT 50
+            LIMIT 25
         `);
 
         logger.info(`[Metadata] Processing ${tokens.length} tokens...`);

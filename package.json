@@ -17,8 +17,8 @@
     "optimize:db": "node src/scripts/optimize_db.js",
     "prune:data": "node src/scripts/prune_data.js",
     "seed": "node src/scripts/seed_data.js",
-    "calculator": "node src/calculator.js",
-    "start:calculator": "node src/calculator.js"
+    "calculator": "node --max-old-space-size=400 --expose-gc src/calculator.js",
+    "start:calculator": "node --max-old-space-size=400 --expose-gc src/calculator.js"
   },
   "dependencies": {
     "@socket.io/redis-adapter": "^8.2.1",
