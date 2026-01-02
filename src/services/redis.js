@@ -14,8 +14,10 @@ async function connectRedis() {
         try {
             // Initialize Redis Client
             // Force lazyConnect to ensure we catch connection errors in the Promise
+            // keyPrefix isolates HolDex keys from other apps sharing the same Redis
             const tempClient = new Redis(config.REDIS_URL, {
                 lazyConnect: true,
+                keyPrefix: 'holdex:',
                 maxRetriesPerRequest: null,
                 retryStrategy: (times) => Math.min(times * 50, 2000),
                 reconnectOnError: (err) => {
