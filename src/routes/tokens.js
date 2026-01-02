@@ -1176,6 +1176,170 @@ function init(deps) {
         }
     });
 
+    // ==================================
+    // TRACK RECORD - K-Score Predictions
+    // ==================================
+
+    /**
+     * GET /api/track-record
+     * Public track record of K-Score predictions vs reality
+     * No API key required - this is proof of concept for organic growth
+     */
+    router.get('/track-record', cacheControl(300, 600), async (req, res) => {
+        try {
+            const result = await smartCache('track-record', 300, async () => {
+                // 1. K-Score vs Security correlation
+                const securityCorr = await db.all(`
+                    SELECT
+                        CASE
+                            WHEN k_score >= 70 THEN 'HIGH'
+                            WHEN k_score >= 50 THEN 'MID'
+                            ELSE 'LOW'
+                        END as tier,
+                        COUNT(*) as total,
+                        SUM(CASE WHEN mint_authority_revoked = true AND freeze_authority_revoked = true THEN 1 ELSE 0 END) as secure,
+                        SUM(CASE WHEN mint_authority_revoked = false OR freeze_authority_revoked = false THEN 1 ELSE 0 END) as unsafe
+                    FROM tokens
+                    WHERE k_score IS NOT NULL
+                    GROUP BY tier
+                    ORDER BY tier DESC
+                `);
+
+                // 2. Tier distribution with details
+                const tierDetails = await db.all(`
+                    SELECT
+                        symbol,
+                        name,
+                        k_score,
+                        conviction_score,
+                        conviction_accumulators,
+                        conviction_holders,
+                        conviction_reducers,
+                        conviction_extractors,
+                        marketcap,
+                        mint_authority_revoked,
+                        freeze_authority_revoked,
+                        hasCommunityUpdate as verified
+                    FROM tokens
+                    WHERE k_score IS NOT NULL
+                    ORDER BY k_score DESC
+                `);
+
+                // 3. K-Score evolution (tokens with history)
+                const evolution = await db.all(`
+                    SELECT
+                        h.mint,
+                        t.symbol,
+                        t.k_score as current,
+                        MIN(h.k_score) as min_score,
+                        MAX(h.k_score) as max_score,
+                        (SELECT h2.k_score FROM k_score_history h2 WHERE h2.mint = h.mint ORDER BY h2.date ASC LIMIT 1) as first_score,
+                        COUNT(*) as data_points
+                    FROM k_score_history h
+                    JOIN tokens t ON t.mint = h.mint
+                    GROUP BY h.mint, t.symbol, t.k_score
+                    HAVING COUNT(*) >= 2
+                    ORDER BY t.k_score DESC
+                `);
+
+                // 4. Extractor analysis (sell pressure indicator)
+                const extractorAnalysis = await db.all(`
+                    SELECT
+                        symbol,
+                        k_score,
+                        conviction_extractors as extractors,
+                        conviction_accumulators + conviction_holders as diamond_holders,
+                        CASE
+                            WHEN conviction_accumulators + conviction_holders + conviction_reducers + conviction_extractors > 0
+                            THEN ROUND(conviction_extractors::numeric / (conviction_accumulators + conviction_holders + conviction_reducers + conviction_extractors) * 100, 1)
+                            ELSE 0
+                        END as extractor_pct
+                    FROM tokens
+                    WHERE k_score IS NOT NULL AND conviction_extractors IS NOT NULL
+                    ORDER BY extractor_pct DESC
+                `);
+
+                // 5. Calculate summary stats
+                const rustTokens = tierDetails.filter(t => t.k_score < 20);
+                const platinumTokens = tierDetails.filter(t => t.k_score >= 80);
+                const highExtractorTokens = extractorAnalysis.filter(t => t.extractor_pct > 40);
+
+                return {
+                    generated: new Date().toISOString(),
+                    summary: {
+                        totalTracked: tierDetails.length,
+                        rustTier: {
+                            count: rustTokens.length,
+                            allUnsafe: rustTokens.every(t => !t.mint_authority_revoked || !t.freeze_authority_revoked),
+                            tokens: rustTokens.map(t => t.symbol)
+                        },
+                        platinumPlus: {
+                            count: platinumTokens.length,
+                            allSecure: platinumTokens.every(t => t.mint_authority_revoked && t.freeze_authority_revoked),
+                            tokens: platinumTokens.map(t => ({ symbol: t.symbol, kScore: t.k_score }))
+                        },
+                        highSellPressure: {
+                            count: highExtractorTokens.length,
+                            avgKScore: highExtractorTokens.length > 0
+                                ? Math.round(highExtractorTokens.reduce((a, t) => a + t.k_score, 0) / highExtractorTokens.length)
+                                : 0,
+                            tokens: highExtractorTokens.map(t => ({ symbol: t.symbol, extractorPct: t.extractor_pct }))
+                        }
+                    },
+                    correlations: {
+                        kScoreVsSecurity: securityCorr.map(row => ({
+                            tier: row.tier,
+                            total: parseInt(row.total),
+                            secure: parseInt(row.secure),
+                            unsafe: parseInt(row.unsafe),
+                            securePercent: Math.round((row.secure / row.total) * 100)
+                        }))
+                    },
+                    evolution: evolution.map(e => ({
+                        symbol: e.symbol,
+                        current: e.current,
+                        first: e.first_score,
+                        change: e.current - e.first_score,
+                        dataPoints: parseInt(e.data_points)
+                    })),
+                    tokens: tierDetails.map(t => {
+                        const totalAnalyzed = (t.conviction_accumulators || 0) + (t.conviction_holders || 0) +
+                                             (t.conviction_reducers || 0) + (t.conviction_extractors || 0);
+                        const extPct = totalAnalyzed > 0
+                            ? Math.round((t.conviction_extractors / totalAnalyzed) * 100)
+                            : 0;
+
+                        return {
+                            symbol: t.symbol,
+                            name: t.name,
+                            kScore: t.k_score,
+                            tier: t.k_score >= 90 ? 'Diamond' : t.k_score >= 80 ? 'Platinum' :
+                                  t.k_score >= 70 ? 'Gold' : t.k_score >= 60 ? 'Silver' :
+                                  t.k_score >= 50 ? 'Bronze' : t.k_score >= 40 ? 'Copper' :
+                                  t.k_score >= 20 ? 'Iron' : 'Rust',
+                            conviction: t.conviction_score,
+                            breakdown: {
+                                accumulators: t.conviction_accumulators || 0,
+                                holders: t.conviction_holders || 0,
+                                reducers: t.conviction_reducers || 0,
+                                extractors: t.conviction_extractors || 0
+                            },
+                            extractorPct: extPct,
+                            secure: t.mint_authority_revoked && t.freeze_authority_revoked,
+                            verified: t.verified || false,
+                            marketCap: t.marketcap || 0
+                        };
+                    })
+                };
+            });
+
+            res.json({ success: true, ...result });
+        } catch (e) {
+            logger.error(`[TrackRecord] Error: ${e.message}`);
+            res.status(500).json({ success: false, error: e.message });
+        }
+    });
+
     return router;
 }
 
