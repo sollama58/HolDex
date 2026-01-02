@@ -380,20 +380,19 @@ async function runFullCycle() {
     logger.info(`🧠 [BRAIN] Starting cycle #${stats.cycles}`);
     logger.info(`${'='.repeat(60)}\n`);
 
-    // K-Score is memory-intensive, skip first few cycles to test stability
-    if (stats.cycles >= 3 && stats.cycles % 4 === 0) {
-        await runKScoreTask();
-        await sleep(5000);
-    } else {
-        logger.info('🧮 [K-Score] Skipped this cycle');
+    // DIAGNOSTIC: Just test basic tasks first
+    try {
+        const count = await db.get('SELECT COUNT(*) as c FROM tokens');
+        logger.info(`[DB Test] Token count: ${count.c}`);
+    } catch (err) {
+        logger.error('[DB Test] Failed:', err.message);
     }
 
+    // Only run lightweight metadata for now
     await runMetadataTask();
-    await sleep(5000);
-    await runGrowerTask();
 
     logMemory();
-    logger.info(`\n📈 Cycle #${stats.cycles} complete | K:${stats.kscoreUpdates} M:${stats.metadataUpdates} G:${stats.growersPromoted} E:${stats.errors}\n`);
+    logger.info(`\n📈 Cycle #${stats.cycles} complete | M:${stats.metadataUpdates} E:${stats.errors}\n`);
 }
 
 // ============================================
@@ -453,19 +452,15 @@ async function main() {
     // Initial run after 10s
     setTimeout(() => safeRun(runFullCycle, 'FullCycle')(), 10000);
 
-    // Schedule regular cycles
+    // DIAGNOSTIC: Only run the full cycle, no parallel tasks
     setInterval(() => safeRun(runFullCycle, 'FullCycle')(), CYCLE_INTERVAL);
 
-    // More frequent metadata updates
-    setInterval(() => safeRun(runMetadataTask, 'Metadata')(), METADATA_INTERVAL);
-
-    // Grower checks
-    setInterval(() => safeRun(runGrowerTask, 'Growers')(), GROWER_INTERVAL);
-
-    // Daily deep refresh (offset 6h)
-    setTimeout(() => {
-        setInterval(() => safeRun(runDeepRefresh, 'DeepRefresh')(), 24 * 60 * 60 * 1000);
-    }, 6 * 60 * 60 * 1000);
+    // Disabled for diagnostics
+    // setInterval(() => safeRun(runMetadataTask, 'Metadata')(), METADATA_INTERVAL);
+    // setInterval(() => safeRun(runGrowerTask, 'Growers')(), GROWER_INTERVAL);
+    // setTimeout(() => {
+    //     setInterval(() => safeRun(runDeepRefresh, 'DeepRefresh')(), 24 * 60 * 60 * 1000);
+    // }, 6 * 60 * 60 * 1000);
 
     logger.info('🧠 [Brain] Calculator started. First cycle in 10 seconds...');
 }
