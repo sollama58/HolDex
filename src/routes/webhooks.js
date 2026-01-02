@@ -89,15 +89,22 @@ function init(deps) {
             if (config.WEBHOOK_SECRET) {
                 const authHeader = req.headers['authorization'];
 
+                if (!authHeader) {
+                    logger.warn('⚠️  Webhook missing Authorization header');
+                    return res.status(401).json({ error: 'Unauthorized' });
+                }
+
                 // Constant-time comparison to prevent timing attacks
                 const expected = Buffer.from(config.WEBHOOK_SECRET);
-                const received = Buffer.from(authHeader || '');
+                const received = Buffer.from(authHeader);
 
                 if (expected.length !== received.length ||
                     !require('crypto').timingSafeEqual(expected, received)) {
-                    logger.warn('⚠️  Webhook auth verification FAILED');
+                    logger.warn(`⚠️  Webhook auth mismatch (got ${authHeader.slice(0,8)}...)`);
                     return res.status(401).json({ error: 'Unauthorized' });
                 }
+
+                logger.debug('✅ Webhook auth verified');
             } else if (process.env.NODE_ENV === 'production') {
                 // CRITICAL: Block requests in production without secret
                 logger.error('❌ WEBHOOK_SECRET not configured - rejecting webhook');
