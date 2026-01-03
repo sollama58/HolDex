@@ -408,7 +408,8 @@ async function deltaConvictionAnalysis(db, mint) {
                     return { updated: true, convictionClass, holder: snap.holder, txCount: newTxs.length };
                 }
 
-                return { updated: false, convictionClass };
+                // Always include holder for top20 breakdown counting
+                return { updated: false, convictionClass, holder: snap.holder };
             })
         );
 
