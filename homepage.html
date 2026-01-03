@@ -25,8 +25,9 @@
             theme: {
                 extend: {
                     colors: {
-                        fire: { bg: '#0c0c0c', panel: '#161616', border: '#2a2a2a', accent: '#ea580c', text: '#f0f0f0', highlight: '#fb923c' },
-                        void: '#000000'
+                        fire: { bg: '#0a0e12', panel: '#111820', border: '#1e2a36', accent: '#00d4aa', text: '#e8ecf0', highlight: '#00ffcc', muted: '#5a6a7a' },
+                        void: '#050709',
+                        cyber: { green: '#00ffaa', blue: '#00d4ff', gold: '#ffd700', red: '#ff4757' }
                     },
                     fontFamily: { mono: ['JetBrains Mono', 'monospace'], sans: ['Comic Neue', 'cursive'] },
                     screens: {
@@ -37,51 +38,51 @@
         }
     </script>
     <style>
-        body { background-color: #0c0c0c; color: #f0f0f0; font-family: 'Comic Neue', cursive; min-height: 100vh; font-size: 14px; overflow-x: hidden; padding-bottom: 90px; /* Space for bottom nav */ }
+        body { background-color: #0a0e12; color: #e8ecf0; font-family: 'Comic Neue', cursive; min-height: 100vh; font-size: 14px; overflow-x: hidden; padding-bottom: 90px; }
         ::-webkit-scrollbar { width: 4px; height: 4px; }
-        ::-webkit-scrollbar-track { background: #0c0c0c; }
-        ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #ea580c; }
-        
-        nav { background: rgba(12, 12, 12, 0.95); backdrop-filter: blur(12px); border-bottom: 1px solid #2a2a2a; }
-        .brand-text { color: #ea580c; text-shadow: 2px 2px 0px #000; font-weight: 800; letter-spacing: 1px; }
+        ::-webkit-scrollbar-track { background: #0a0e12; }
+        ::-webkit-scrollbar-thumb { background: #1e2a36; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #00d4aa; }
+
+        nav { background: rgba(10, 14, 18, 0.95); backdrop-filter: blur(12px); border-bottom: 1px solid #1e2a36; }
+        .brand-text { color: #00ffcc; text-shadow: 0 0 20px rgba(0,212,170,0.5); font-weight: 800; letter-spacing: 1px; }
         
         /* Table Styles with Sticky Columns for Mobile */
         .holdex-table { width: 100%; border-collapse: separate; border-spacing: 0; }
-        .holdex-table th { background: #161616; position: sticky; top: 0; z-index: 20; padding: 10px 8px; text-align: right; font-size: 11px; font-weight: 700; color: #fb923c; border-bottom: 1px solid #333; cursor: pointer; white-space: nowrap; text-transform: uppercase; transition: color 0.2s, background 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
-        .holdex-table th:first-child { text-align: left; padding-left: 12px; position: sticky; left: 0; z-index: 30; background: #161616; border-right: 1px solid #2a2a2a; }
-        .holdex-table td { padding: 8px 8px; border-bottom: 1px solid #1a1a1a; vertical-align: middle; font-family: 'JetBrains Mono', monospace; white-space: nowrap; font-size: 12px; }
-        .holdex-table td:first-child { padding-left: 12px; position: sticky; left: 0; z-index: 10; background: #0c0c0c; border-right: 1px solid #2a2a2a; }
-        .holdex-table tr:hover td { background: rgba(234, 88, 12, 0.08); }
-        .holdex-table tr:hover td:first-child { background: #141414; } 
+        .holdex-table th { background: #111820; position: sticky; top: 0; z-index: 20; padding: 10px 8px; text-align: right; font-size: 11px; font-weight: 700; color: #00d4aa; border-bottom: 1px solid #1e2a36; cursor: pointer; white-space: nowrap; text-transform: uppercase; transition: color 0.2s, background 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+        .holdex-table th:first-child { text-align: left; padding-left: 12px; position: sticky; left: 0; z-index: 30; background: #111820; border-right: 1px solid #1e2a36; }
+        .holdex-table td { padding: 8px 8px; border-bottom: 1px solid #111820; vertical-align: middle; font-family: 'JetBrains Mono', monospace; white-space: nowrap; font-size: 12px; }
+        .holdex-table td:first-child { padding-left: 12px; position: sticky; left: 0; z-index: 10; background: #0a0e12; border-right: 1px solid #1e2a36; }
+        .holdex-table tr:hover td { background: rgba(0, 212, 170, 0.05); }
+        .holdex-table tr:hover td:first-child { background: #0f1419; } 
 
-        .img-token { width: 32px; height: 32px; border-radius: 6px; border: 2px solid #333; object-fit: cover; flex-shrink: 0; background: #000; }
+        .img-token { width: 32px; height: 32px; border-radius: 6px; border: 2px solid #1e2a36; object-fit: cover; flex-shrink: 0; background: #050709; }
         .pill { padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; font-family: 'JetBrains Mono'; }
         .pill-green { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4); }
         .pill-red { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
         
         /* IMPROVED RESPONSIVE SEARCH CONTAINER */
         .search-container { position: relative; width: 100%; display: flex; align-items: center; gap: 8px; flex-shrink: 1; min-width: 0; }
-        .search-box { background: #161616; border: 1px solid #333; color: #f0f0f0; padding: 10px 36px 10px 16px; border-radius: 8px; outline: none; width: 100%; font-family: 'JetBrains Mono'; transition: border-color 0.2s; font-size: 16px; /* Prevents iOS zoom */ }
-        .search-box:focus { border-color: #ea580c; }
-        .search-box::placeholder { color: #666; }
-        .clear-search { position: absolute; right: 46px; top: 50%; transform: translateY(-50%); color: #666; cursor: pointer; display: none; }
+        .search-box { background: #111820; border: 1px solid #1e2a36; color: #e8ecf0; padding: 10px 36px 10px 16px; border-radius: 8px; outline: none; width: 100%; font-family: 'JetBrains Mono'; transition: border-color 0.2s, box-shadow 0.2s; font-size: 16px; }
+        .search-box:focus { border-color: #00d4aa; box-shadow: 0 0 10px rgba(0,212,170,0.2); }
+        .search-box::placeholder { color: #5a6a7a; }
+        .clear-search { position: absolute; right: 46px; top: 50%; transform: translateY(-50%); color: #5a6a7a; cursor: pointer; display: none; }
         
-        .nav-btn { background: transparent; color: #666; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 800; transition: all 0.2s; border: 2px solid transparent; }
-        .nav-btn:hover { color: #fb923c; }
-        .nav-btn.active { background: #161616; color: #ea580c; border-color: #333; box-shadow: 0 4px 0 #000; }
+        .nav-btn { background: transparent; color: #5a6a7a; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 800; transition: all 0.2s; border: 2px solid transparent; }
+        .nav-btn:hover { color: #00ffcc; }
+        .nav-btn.active { background: #111820; color: #00d4aa; border-color: #1e2a36; box-shadow: 0 4px 0 #050709; }
 
-        .filter-toggle { background: #161616; border: 1px solid #333; color: #888; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 11px; font-weight: 700; transition: all 0.2s; display: flex; align-items: center; gap: 6px; white-space: nowrap; flex-shrink: 0; }
-        .filter-toggle.active { border-color: #22c55e; color: #4ade80; background: rgba(34, 197, 94, 0.1); }
+        .filter-toggle { background: #111820; border: 1px solid #1e2a36; color: #5a6a7a; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 11px; font-weight: 700; transition: all 0.2s; display: flex; align-items: center; gap: 6px; white-space: nowrap; flex-shrink: 0; }
+        .filter-toggle.active { border-color: #00ffaa; color: #00ffaa; background: rgba(0, 255, 170, 0.1); }
 
-        .refresh-btn { background: #161616; border: 1px solid #333; color: #fb923c; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; transition: all 0.2s; flex-shrink: 0; }
+        .refresh-btn { background: #111820; border: 1px solid #1e2a36; color: #00d4aa; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; transition: all 0.2s; flex-shrink: 0; }
         .refresh-btn:disabled i { animation: spin 1s linear infinite; }
         
         /* Select Dropdown Style */
         .limit-select {
-            background: #161616;
-            border: 1px solid #333;
-            color: #888;
+            background: #111820;
+            border: 1px solid #1e2a36;
+            color: #5a6a7a;
             padding: 8px 8px;
             border-radius: 8px;
             cursor: pointer;
@@ -89,39 +90,39 @@
             font-weight: 700;
             outline: none;
             transition: all 0.2s;
-            appearance: none; /* Remove default arrow */
+            appearance: none;
             -webkit-appearance: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235a6a7a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
             background-repeat: no-repeat;
             background-position: right 8px center;
             padding-right: 24px;
         }
-        .limit-select:focus { border-color: #ea580c; color: #fb923c; }
+        .limit-select:focus { border-color: #00d4aa; color: #00ffcc; }
 
         /* Chart Styles */
-        .chart-wrapper { width: 100%; height: 400px; background: #0a0a0a; border-radius: 16px; overflow: hidden; border: 1px solid #2a2a2a; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
+        .chart-wrapper { width: 100%; height: 400px; background: #050709; border-radius: 16px; overflow: hidden; border: 1px solid #1e2a36; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
         @media (min-width: 768px) { .chart-wrapper { height: 600px; } }
-        
-        .res-btn { background: transparent; border: 1px solid transparent; color: #666; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; cursor: pointer; transition: all 0.2s; }
-        .res-btn:hover { color: #fb923c; }
-        .res-btn.active { background: #1a1a1a; border-color: #333; color: #ea580c; }
 
-        .stat-card { background: #161616; border: 1px solid #2a2a2a; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 4px; box-shadow: 4px 4px 0 rgba(0,0,0,0.3); }
+        .res-btn { background: transparent; border: 1px solid transparent; color: #5a6a7a; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; cursor: pointer; transition: all 0.2s; }
+        .res-btn:hover { color: #00ffcc; }
+        .res-btn.active { background: #111820; border-color: #1e2a36; color: #00d4aa; }
+
+        .stat-card { background: #111820; border: 1px solid #1e2a36; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 4px; box-shadow: 4px 4px 0 rgba(0,0,0,0.3); }
         .stat-value { font-size: 16px; font-weight: 700; color: #fff; font-family: 'JetBrains Mono'; text-shadow: 0 2px 4px rgba(0,0,0,0.5); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        
+
         /* Bottom Navigation */
-        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: #0c0c0c; border-top: 1px solid #2a2a2a; display: flex; justify-content: space-around; padding: 8px 0; z-index: 50; padding-bottom: env(safe-area-inset-bottom); }
-        .bottom-nav-item { display: flex; flex-direction: column; align-items: center; gap: 4px; color: #666; font-size: 10px; font-weight: bold; width: 100%; background: none; border: none; }
-        .bottom-nav-item.active { color: #ea580c; }
+        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: #0a0e12; border-top: 1px solid #1e2a36; display: flex; justify-content: space-around; padding: 8px 0; z-index: 50; padding-bottom: env(safe-area-inset-bottom); }
+        .bottom-nav-item { display: flex; flex-direction: column; align-items: center; gap: 4px; color: #5a6a7a; font-size: 10px; font-weight: bold; width: 100%; background: none; border: none; }
+        .bottom-nav-item.active { color: #00d4aa; }
         .bottom-nav-item i { transition: transform 0.2s; }
         .bottom-nav-item.active i { transform: translateY(-2px); }
 
         /* Modal fixes for mobile */
-        .modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.9); backdrop-filter: blur(5px); z-index: 100; display: flex; align-items: flex-end; padding: 16px; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+        .modal-overlay { position: fixed; inset: 0; background: rgba(5, 7, 9, 0.95); backdrop-filter: blur(8px); z-index: 100; display: flex; align-items: flex-end; padding: 16px; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
         .modal-overlay.open { opacity: 1; pointer-events: auto; }
         @media (min-width: 768px) { .modal-overlay { align-items: center; justify-content: center; } }
 
-        .modal-content { max-height: 85vh; overflow-y: auto; width: 100%; border-radius: 16px 16px 0 0; background: #0c0c0c; border: 1px solid #2a2a2a; box-shadow: 0 -10px 40px rgba(0,0,0,0.5); }
+        .modal-content { max-height: 85vh; overflow-y: auto; width: 100%; border-radius: 16px 16px 0 0; background: #0a0e12; border: 1px solid #1e2a36; box-shadow: 0 -10px 40px rgba(0,212,170,0.1); }
         @media (min-width: 768px) { .modal-content { border-radius: 16px; width: auto; min-width: 400px; max-width: 800px; } }
 
         /* Animation */
@@ -134,22 +135,22 @@
         .hidden-scrollbar::-webkit-scrollbar { display: none; }
         .hidden-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         
-        .social-btn { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 10px; border: 1px solid #333; background: #161616; color: #ea580c; transition: all 0.2s; }
-        .social-btn:hover { border-color: #ea580c; color: #fff; background: #1a1a1a; transform: translateY(-2px); }
+        .social-btn { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 10px; border: 1px solid #1e2a36; background: #111820; color: #00d4aa; transition: all 0.2s; }
+        .social-btn:hover { border-color: #00d4aa; color: #fff; background: #0f1419; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,212,170,0.2); }
 
-        .feature-box { background: #161616; border: 1px solid #2a2a2a; border-radius: 16px; padding: 24px; transition: transform 0.2s; display: flex; flex-direction: column; gap: 8px; }
-        .feature-box:hover { border-color: #ea580c; transform: translateY(-4px); }
+        .feature-box { background: #111820; border: 1px solid #1e2a36; border-radius: 16px; padding: 24px; transition: all 0.2s; display: flex; flex-direction: column; gap: 8px; }
+        .feature-box:hover { border-color: #00d4aa; transform: translateY(-4px); box-shadow: 0 8px 24px rgba(0,212,170,0.1); }
 
-        .action-btn { background: #161616; border: 2px solid #ea580c; color: #fb923c; padding: 12px 20px; border-radius: 12px; font-weight: 700; text-transform: uppercase; font-size: 13px; transition: all 0.2s; box-shadow: 4px 4px 0 #000; }
-        .action-btn:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 #000; background: #1a1a1a; color: #fff; }
+        .action-btn { background: #111820; border: 2px solid #00d4aa; color: #00ffcc; padding: 12px 20px; border-radius: 12px; font-weight: 700; text-transform: uppercase; font-size: 13px; transition: all 0.2s; box-shadow: 4px 4px 0 #050709; }
+        .action-btn:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 #050709; background: #0f1419; color: #fff; }
         .action-btn:active { transform: translate(2px, 2px); box-shadow: 0 0 0; }
         .action-btn:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(1); transform: none; box-shadow: none; }
         
-        .form-input { background: #161616; border: 1px solid #333; color: #f0f0f0; padding: 12px; border-radius: 8px; width: 100%; font-family: 'JetBrains Mono'; margin-bottom: 16px; outline: none; transition: border-color 0.2s; font-size: 14px; }
-        .form-input:focus { border-color: #ea580c; }
-        .form-label { display: block; color: #888; font-size: 12px; font-weight: bold; margin-bottom: 6px; text-transform: uppercase; }
+        .form-input { background: #111820; border: 1px solid #1e2a36; color: #e8ecf0; padding: 12px; border-radius: 8px; width: 100%; font-family: 'JetBrains Mono'; margin-bottom: 16px; outline: none; transition: border-color 0.2s, box-shadow 0.2s; font-size: 14px; }
+        .form-input:focus { border-color: #00d4aa; box-shadow: 0 0 10px rgba(0,212,170,0.2); }
+        .form-label { display: block; color: #5a6a7a; font-size: 12px; font-weight: bold; margin-bottom: 6px; text-transform: uppercase; }
 
-        .code-block { background: #0a0a0a; border: 1px solid #2a2a2a; padding: 16px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #fb923c; overflow-x: auto; position: relative; }
+        .code-block { background: #050709; border: 1px solid #1e2a36; padding: 16px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #00ffcc; overflow-x: auto; position: relative; }
         
         #detail-banner-container { width: 100%; overflow: hidden; position: relative; background: #000; border-radius: 12px; margin-bottom: 16px; }
         #detail-banner-img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; }
@@ -201,14 +202,14 @@
         <!-- Header Row: Logo -->
         <div class="flex justify-between items-center">
             <div class="flex items-center gap-3 cursor-pointer group" onclick="navigateTo('')">
-                <div class="w-10 h-10 md:w-12 md:h-12 rounded-xl flex items-center justify-center bg-[#161616] text-orange-500 border-2 border-[#2a2a2a] shadow-lg group-hover:border-orange-500 transition relative">
+                <div class="w-10 h-10 md:w-12 md:h-12 rounded-xl flex items-center justify-center bg-[#111820] text-[#00d4aa] border-2 border-[#1e2a36] shadow-lg group-hover:border-[#00d4aa] transition relative">
                     <i data-lucide="flame" width="20" class="md:w-6 md:h-6"></i>
                     <!-- Status Dot Overlay -->
                     <div id="status-dot-nav" class="absolute -top-1 -right-1 status-dot offline border border-[#0c0c0c]"></div>
                 </div>
                 <div>
                     <h1 class="text-2xl md:text-3xl brand-text tracking-tight font-sans">HolDex</h1>
-                    <p class="text-[10px] md:text-xs text-[#888] font-mono hidden md:block">Holdex it. Wallets don't lie.</p>
+                    <p class="text-[10px] md:text-xs text-[#5a6a7a] font-mono hidden md:block">Holdex it. Wallets don't lie.</p>
                 </div>
             </div>
         </div>
@@ -220,7 +221,7 @@
                 <div class="relative flex-grow search-container">
                     <input type="text" id="search" placeholder="Holdex it... paste CA or ticker" class="search-box">
                     <i id="clear-search-btn" data-lucide="x" width="16" class="clear-search" onclick="clearSearch()"></i>
-                    <i id="help-btn" data-lucide="help-circle" width="18" class="absolute right-3 top-1/2 -translate-y-1/2 text-[#888]" onclick="toggleHowItWorksModal()"></i>
+                    <i id="help-btn" data-lucide="help-circle" width="18" class="absolute right-3 top-1/2 -translate-y-1/2 text-[#5a6a7a]" onclick="toggleHowItWorksModal()"></i>
                 </div>
                 <button id="manual-refresh" onclick="handleManualRefresh()" class="refresh-btn" title="Refresh Data">
                     <i data-lucide="refresh-cw" width="18"></i>
@@ -248,7 +249,7 @@
         </div>
 
         <div id="detail-controls" class="hidden w-full md:w-auto md:ml-auto">
-            <button onclick="navigateTo('')" class="bg-[#0c0c0c] border-2 border-[#2a2a2a] text-[#888] hover:text-[#ea580c] hover:border-[#ea580c] py-2 px-4 rounded-lg font-bold flex items-center justify-center gap-2 w-full md:w-auto transition"><i data-lucide="arrow-left" width="16"></i> Back to List</button>
+            <button onclick="navigateTo('')" class="bg-[#0a0e12] border-2 border-[#1e2a36] text-[#5a6a7a] hover:text-[#00d4aa] hover:border-[#00d4aa] py-2 px-4 rounded-lg font-bold flex items-center justify-center gap-2 w-full md:w-auto transition"><i data-lucide="arrow-left" width="16"></i> Back to List</button>
         </div>
         
     </div>
@@ -258,16 +259,16 @@
     
     <!-- DASHBOARD VIEW -->
     <div id="view-dashboard" class="view-section active">
-        <div class="bg-[#0c0c0c] md:border-2 border-[#2a2a2a] md:rounded-2xl shadow-2xl flex flex-col min-h-[60vh]">
+        <div class="bg-[#0a0e12] md:border-2 border-[#1e2a36] md:rounded-2xl shadow-2xl flex flex-col min-h-[60vh]">
             <div class="overflow-x-auto">
                 <table class="holdex-table">
                     <thead>
                         <tr>
                             <th class="sort-header w-auto md:w-[30%]" data-sort="newest" onclick="setSort('newest')">Asset <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
                             <!-- K-SCORE HEADER: Updated to be sortable but keep help icon -->
-                            <th class="sort-header text-[#ea580c] border-b-[#ea580c] border-b-2 hidden md:table-cell cursor-pointer" data-sort="kscore" onclick="setSort('kscore')">
+                            <th class="sort-header text-[#00d4aa] border-b-[#ea580c] border-b-2 hidden md:table-cell cursor-pointer" data-sort="kscore" onclick="setSort('kscore')">
                                 Score <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i>
-                                <i data-lucide="help-circle" width="12" class="inline ml-1 text-[#888] hover:text-white" onclick="event.stopPropagation(); toggleKScoreModal()"></i>
+                                <i data-lucide="help-circle" width="12" class="inline ml-1 text-[#5a6a7a] hover:text-white" onclick="event.stopPropagation(); toggleKScoreModal()"></i>
                             </th>
                             <!-- PRICE COLUMN REMOVED -->
                             <th class="sort-header hidden md:table-cell" data-sort="1h" onclick="setSort('1h')">1h% <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
@@ -279,17 +280,17 @@
                         </tr>
                     </thead>
                     <tbody id="table-body">
-                        <tr><td colspan="8" class="text-center py-20 text-orange-700 font-mono animate-pulse">Scanning Solana Mempool...</td></tr>
+                        <tr><td colspan="8" class="text-center py-20 text-[#00d4aa] font-mono animate-pulse">Scanning Solana Mempool...</td></tr>
                     </tbody>
                 </table>
             </div>
             
             <!-- Pagination -->
-            <div class="bg-[#161616] p-4 border-t-2 border-[#2a2a2a] flex justify-between items-center mt-auto">
+            <div class="bg-[#111820] p-4 border-t-2 border-[#1e2a36] flex justify-between items-center mt-auto">
                 <button id="btn-prev" onclick="changePage(-1)" class="nav-btn flex items-center gap-2 disabled:opacity-50" disabled>
                     <i data-lucide="chevron-left" width="16"></i>
                 </button>
-                <span id="page-display" class="text-[#fb923c] font-mono font-bold text-sm">Page 1</span>
+                <span id="page-display" class="text-[#00ffcc] font-mono font-bold text-sm">Page 1</span>
                 <button id="btn-next" onclick="changePage(1)" class="nav-btn flex items-center gap-2">
                     <i data-lucide="chevron-right" width="16"></i>
                 </button>
@@ -299,20 +300,20 @@
 
     <!-- ABOUT VIEW -->
     <div id="view-about" class="view-section px-4 md:px-0 hidden">
-        <div class="bg-[#0c0c0c] border-2 border-[#2a2a2a] rounded-2xl p-8 md:p-12 shadow-2xl max-w-5xl mx-auto space-y-12">
-            <div class="flex items-center gap-6 border-b-2 border-[#2a2a2a] pb-8">
-                <div class="w-20 h-20 rounded-2xl flex items-center justify-center bg-[#161616] text-orange-500 border-2 border-[#2a2a2a] shadow-lg flex-shrink-0">
+        <div class="bg-[#0a0e12] border-2 border-[#1e2a36] rounded-2xl p-8 md:p-12 shadow-2xl max-w-5xl mx-auto space-y-12">
+            <div class="flex items-center gap-6 border-b-2 border-[#1e2a36] pb-8">
+                <div class="w-20 h-20 rounded-2xl flex items-center justify-center bg-[#111820] text-[#00d4aa] border-2 border-[#1e2a36] shadow-lg flex-shrink-0">
                     <i data-lucide="flame" width="40"></i>
                 </div>
                 <div>
                     <h2 class="text-3xl md:text-5xl font-bold text-white tracking-tight font-sans">About HolDex</h2>
-                    <p class="text-[#ea580c] font-mono text-sm md:text-lg mt-1">Holdex it. K encrypts the money.</p>
+                    <p class="text-[#00d4aa] font-mono text-sm md:text-lg mt-1">Holdex it. K encrypts the money.</p>
                 </div>
             </div>
 
             <!-- Holdex It Banner -->
-            <div class="bg-gradient-to-r from-[#1a1a1a] to-[#0c0c0c] p-6 rounded-xl border-2 border-[#ea580c] text-center">
-                <p class="text-2xl md:text-3xl font-bold text-white mb-2">"Before you ape, <span class="text-[#ea580c]">Holdex it.</span>"</p>
+            <div class="bg-gradient-to-r from-[#111820] to-[#0a0e12] p-6 rounded-xl border-2 border-[#00d4aa] text-center">
+                <p class="text-2xl md:text-3xl font-bold text-white mb-2">"Before you ape, <span class="text-[#00d4aa]">Holdex it.</span>"</p>
                 <p class="text-[#e0e0e0] text-sm md:text-base">Wallets don't lie. Charts can be painted. TG can be botted. But on-chain behavior is permanent.</p>
             </div>
 
@@ -329,58 +330,58 @@
                         K-Score doesn't pick winners. <strong>It filters losers.</strong> In a game where 90% rug, not losing is the edge.
                     </p>
                 </div>
-                <div class="bg-[#161616] p-6 rounded-xl border border-[#2a2a2a] flex flex-col justify-center shadow-inner">
+                <div class="bg-[#111820] p-6 rounded-xl border border-[#1e2a36] flex flex-col justify-center shadow-inner">
                     <div class="flex items-center gap-3 mb-2"><i data-lucide="server" width="20" class="text-[#22c55e]"></i><span class="font-bold text-white">Direct RPC Sync</span></div>
-                    <p class="text-sm text-[#888] mb-4">No third-party delays. We index Raydium and Pump.fun directly.</p>
+                    <p class="text-sm text-[#5a6a7a] mb-4">No third-party delays. We index Raydium and Pump.fun directly.</p>
                     <div class="flex items-center gap-3 mb-2"><i data-lucide="bar-chart" width="20" class="text-[#3b82f6]"></i><span class="font-bold text-white">Holder Analytics</span></div>
-                    <p class="text-sm text-[#888]">Track wallet growth over time with our daily snapshot engine.</p>
+                    <p class="text-sm text-[#5a6a7a]">Track wallet growth over time with our daily snapshot engine.</p>
                 </div>
             </div>
             <div class="grid md:grid-cols-3 gap-6">
-                <div class="feature-box"><div class="text-[#fb923c] mb-2"><i data-lucide="shield-check" width="24"></i></div><h4 class="font-bold text-white text-lg">K-Score Protocol</h4><p class="text-sm text-[#888]">Credit rating for tokens. 3 pillars: Diamond Hands (50%), Organic Growth (35%), Longevity (15%). Weighted geometric mean.</p></div>
-                <div class="feature-box"><div class="text-[#22c55e] mb-2"><i data-lucide="filter" width="24"></i></div><h4 class="font-bold text-white text-lg">Anti-Sybil: $1 Min</h4><p class="text-sm text-[#888]">Only wallets holding $1+ count as real holders. Dust wallets don't count. Bots don't count. Real conviction only.</p></div>
-                <div class="feature-box"><div class="text-[#a855f7] mb-2"><i data-lucide="badge-check" width="24"></i></div><h4 class="font-bold text-white text-lg">Verified = Unlocked</h4><p class="text-sm text-[#888]">K-Score, Credit Rating, Top 20 Breakdown only visible for verified tokens. Data is power. Earn it.</p></div>
+                <div class="feature-box"><div class="text-[#00ffcc] mb-2"><i data-lucide="shield-check" width="24"></i></div><h4 class="font-bold text-white text-lg">K-Score Protocol</h4><p class="text-sm text-[#5a6a7a]">Credit rating for tokens. 3 pillars: Diamond Hands (50%), Organic Growth (35%), Longevity (15%). Weighted geometric mean.</p></div>
+                <div class="feature-box"><div class="text-[#22c55e] mb-2"><i data-lucide="filter" width="24"></i></div><h4 class="font-bold text-white text-lg">Anti-Sybil: $1 Min</h4><p class="text-sm text-[#5a6a7a]">Only wallets holding $1+ count as real holders. Dust wallets don't count. Bots don't count. Real conviction only.</p></div>
+                <div class="feature-box"><div class="text-[#a855f7] mb-2"><i data-lucide="badge-check" width="24"></i></div><h4 class="font-bold text-white text-lg">Verified = Unlocked</h4><p class="text-sm text-[#5a6a7a]">K-Score, Credit Rating, Top 20 Breakdown only visible for verified tokens. Data is power. Earn it.</p></div>
             </div>
-            <div class="bg-[#0a0a0a] border border-[#2a2a2a] rounded-xl p-8 relative overflow-hidden group hover:border-[#ea580c] transition-colors">
-                <div class="absolute top-4 right-4 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><i data-lucide="code" width="100" class="text-[#ea580c]"></i></div>
+            <div class="bg-[#050709] border border-[#1e2a36] rounded-xl p-8 relative overflow-hidden group hover:border-[#00d4aa] transition-colors">
+                <div class="absolute top-4 right-4 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><i data-lucide="code" width="100" class="text-[#00d4aa]"></i></div>
                 <h3 class="text-2xl font-bold text-white mb-2">Developers & API</h3>
-                <p class="text-[#888] mb-6 max-w-2xl text-sm">HolDex exposes a robust public API. Build trading bots, analytics platforms, or integrate real-time data into your dApp. API Keys are rate-limited to ensure fair usage.</p>
+                <p class="text-[#5a6a7a] mb-6 max-w-2xl text-sm">HolDex exposes a robust public API. Build trading bots, analytics platforms, or integrate real-time data into your dApp. API Keys are rate-limited to ensure fair usage.</p>
                 
                 <div id="api-section-unconnected">
                     <div class="flex flex-col md:flex-row gap-4">
                         <button onclick="toggleApiModal()" class="action-btn flex items-center justify-center gap-2"><i data-lucide="file-text" width="16"></i> Documentation</button>
-                        <button onclick="openWalletModal()" class="action-btn flex items-center justify-center gap-2 bg-[#0c0c0c] border-[#22c55e] text-[#22c55e] hover:bg-green-900/20"><i data-lucide="wallet" width="16"></i> Connect to Manage Keys</button>
+                        <button onclick="openWalletModal()" class="action-btn flex items-center justify-center gap-2 bg-[#0a0e12] border-[#22c55e] text-[#22c55e] hover:bg-green-900/20"><i data-lucide="wallet" width="16"></i> Connect to Manage Keys</button>
                     </div>
                 </div>
 
                 <div id="api-section-connected" class="hidden space-y-4">
                     <div class="flex justify-between items-center mb-4">
-                        <h4 class="text-[#fb923c] font-bold text-sm uppercase">Your API Keys</h4>
+                        <h4 class="text-[#00ffcc] font-bold text-sm uppercase">Your API Keys</h4>
                         <div class="flex gap-2">
-                            <button onclick="toggleApiModal()" class="text-xs text-[#888] hover:text-[#fb923c] flex items-center gap-1 border border-[#2a2a2a] px-2 py-1 rounded bg-[#0c0c0c]"><i data-lucide="file-text" width="12"></i> Docs</button>
-                            <button onclick="requestApiKey()" class="text-xs text-[#22c55e] border border-[#22c55e] px-2 py-1 rounded bg-[#0c0c0c] hover:bg-green-900/20 flex items-center gap-1"><i data-lucide="plus" width="12"></i> New Key</button>
+                            <button onclick="toggleApiModal()" class="text-xs text-[#5a6a7a] hover:text-[#00ffcc] flex items-center gap-1 border border-[#1e2a36] px-2 py-1 rounded bg-[#0a0e12]"><i data-lucide="file-text" width="12"></i> Docs</button>
+                            <button onclick="requestApiKey()" class="text-xs text-[#22c55e] border border-[#22c55e] px-2 py-1 rounded bg-[#0a0e12] hover:bg-green-900/20 flex items-center gap-1"><i data-lucide="plus" width="12"></i> New Key</button>
                         </div>
                     </div>
 
                     <!-- Burn Credits Banner -->
-                    <div class="bg-gradient-to-r from-[#1a1a1a] to-[#0c0c0c] border border-[#2a2a2a] rounded-lg p-3">
+                    <div class="bg-gradient-to-r from-[#111820] to-[#0a0e12] border border-[#1e2a36] rounded-lg p-3">
                         <div class="flex items-center gap-2 mb-2">
-                            <span class="text-[#fb923c] font-bold text-xs uppercase">Burn = API Calls</span>
-                            <span class="text-[#888] text-xs">Hold to enter. Burn to use.</span>
+                            <span class="text-[#00ffcc] font-bold text-xs uppercase">Burn = API Calls</span>
+                            <span class="text-[#5a6a7a] text-xs">Hold to enter. Burn to use.</span>
                         </div>
                         <div class="grid grid-cols-2 gap-2 text-center text-xs">
                             <div class="bg-black/50 rounded p-2 border border-[#fb923c]/30">
-                                <div class="text-[#888]">Eligibility</div>
-                                <div class="text-[#fb923c] font-bold">Hold 10K+</div>
+                                <div class="text-[#5a6a7a]">Eligibility</div>
+                                <div class="text-[#00ffcc] font-bold">Hold 10K+</div>
                                 <div class="text-[#666]">$ASDFASDFA</div>
                             </div>
                             <div class="bg-black/50 rounded p-2 border border-[#22c55e]/30">
-                                <div class="text-[#888]">Pricing</div>
+                                <div class="text-[#5a6a7a]">Pricing</div>
                                 <div class="text-[#22c55e] font-bold">1:1</div>
                                 <div class="text-[#22c55e]">1 burn = 1 call</div>
                             </div>
                         </div>
-                        <div class="text-center text-[10px] text-[#888] mt-2 italic">
+                        <div class="text-center text-[10px] text-[#5a6a7a] mt-2 italic">
                             Burn $ASDFASDFA → Earn API calls forever. Power users rewarded.
                         </div>
                     </div>
@@ -389,65 +390,65 @@
                     <div id="my-credits" class="hidden bg-black/50 rounded-lg p-3 border border-[#22c55e]/30">
                         <div class="flex justify-between items-center mb-2">
                             <span class="text-[#22c55e] font-bold text-xs uppercase">Your Credits</span>
-                            <button onclick="refreshCredits()" class="text-[10px] text-[#888] hover:text-[#fb923c]"><i data-lucide="refresh-cw" width="10"></i></button>
+                            <button onclick="refreshCredits()" class="text-[10px] text-[#5a6a7a] hover:text-[#00ffcc]"><i data-lucide="refresh-cw" width="10"></i></button>
                         </div>
                         <div class="grid grid-cols-3 gap-2 text-center text-xs">
                             <div>
-                                <div class="text-[#888]">Holdings</div>
-                                <div id="credits-holdings" class="text-[#fb923c] font-bold">-</div>
+                                <div class="text-[#5a6a7a]">Holdings</div>
+                                <div id="credits-holdings" class="text-[#00ffcc] font-bold">-</div>
                             </div>
                             <div>
-                                <div class="text-[#888]">Burned</div>
+                                <div class="text-[#5a6a7a]">Burned</div>
                                 <div id="credits-burned" class="text-[#22c55e] font-bold">-</div>
                             </div>
                             <div>
-                                <div class="text-[#888]">Remaining</div>
+                                <div class="text-[#5a6a7a]">Remaining</div>
                                 <div id="credits-remaining" class="text-[#22c55e] font-bold">-</div>
                             </div>
                         </div>
                     </div>
 
                     <div id="my-keys-list" class="space-y-2">
-                        <div class="text-center py-4 text-[#888] text-xs font-mono">
-                            <button onclick="fetchMyKeys()" class="text-[#ea580c] underline hover:text-[#fb923c] font-bold">Sign to Reveal My Keys</button>
+                        <div class="text-center py-4 text-[#5a6a7a] text-xs font-mono">
+                            <button onclick="fetchMyKeys()" class="text-[#00d4aa] underline hover:text-[#00ffcc] font-bold">Sign to Reveal My Keys</button>
                         </div>
                     </div>
                 </div>
             </div>
-             <div class="border-t border-[#2a2a2a] pt-8 flex justify-between items-center text-xs text-[#888]"><div>&copy; 2025 HolDex Protocol. All rights reserved.</div><div class="font-mono">v2.5.0 (Stable)</div></div>
+             <div class="border-t border-[#1e2a36] pt-8 flex justify-between items-center text-xs text-[#5a6a7a]"><div>&copy; 2025 HolDex Protocol. All rights reserved.</div><div class="font-mono">v2.5.0 (Stable)</div></div>
         </div>
     </div>
 
     <!-- UPDATE VIEW -->
     <div id="view-update" class="view-section px-4 md:px-0 hidden">
-        <div class="bg-[#0c0c0c] border-2 border-[#2a2a2a] rounded-2xl p-8 shadow-2xl max-w-2xl mx-auto">
-            <h2 class="text-2xl font-bold text-white mb-4 font-sans border-b border-[#2a2a2a] pb-4">Update Token</h2>
+        <div class="bg-[#0a0e12] border-2 border-[#1e2a36] rounded-2xl p-8 shadow-2xl max-w-2xl mx-auto">
+            <h2 class="text-2xl font-bold text-white mb-4 font-sans border-b border-[#1e2a36] pb-4">Update Token</h2>
             
-            <div id="wallet-disconnected-msg" class="bg-[#161616] p-4 rounded-xl border-l-4 border-[#ea580c] mb-6">
+            <div id="wallet-disconnected-msg" class="bg-[#111820] p-4 rounded-xl border-l-4 border-[#00d4aa] mb-6">
                 <p class="text-[#e0e0e0] text-sm">Connect your wallet to pay fees and submit updates.</p>
                 <button onclick="openWalletModal()" class="mt-3 text-xs bg-[#ea580c] text-white px-3 py-2 rounded font-bold">Connect Now</button>
             </div>
             
-            <div id="fee-panel" class="hidden mb-6 p-4 border border-[#2a2a2a] rounded bg-[#0a0a0a]">
-                 <div class="text-[#888] text-xs uppercase font-bold mb-3 border-b border-[#2a2a2a] pb-2 flex justify-between">
+            <div id="fee-panel" class="hidden mb-6 p-4 border border-[#1e2a36] rounded bg-[#050709]">
+                 <div class="text-[#5a6a7a] text-xs uppercase font-bold mb-3 border-b border-[#1e2a36] pb-2 flex justify-between">
                      <span>Protocol Fees</span>
-                     <span id="balance-check-status" class="text-[#ea580c] animate-pulse">Checking Balance...</span>
+                     <span id="balance-check-status" class="text-[#00d4aa] animate-pulse">Checking Balance...</span>
                  </div>
                  
                  <!-- Fee Row: SOL -->
-                 <div class="flex justify-between items-center text-sm font-mono text-[#fb923c] mb-2">
+                 <div class="flex justify-between items-center text-sm font-mono text-[#00ffcc] mb-2">
                      <div class="flex flex-col">
                          <span>SOL Fee</span>
-                         <span class="text-[10px] text-[#888]" id="user-sol-balance">Bal: --</span>
+                         <span class="text-[10px] text-[#5a6a7a]" id="user-sol-balance">Bal: --</span>
                      </div>
                      <span id="fee-sol">-- SOL</span>
                  </div>
                  
                  <!-- Fee Row: Token -->
-                 <div class="flex justify-between items-center text-sm font-mono text-[#fb923c]">
+                 <div class="flex justify-between items-center text-sm font-mono text-[#00ffcc]">
                      <div class="flex flex-col">
                          <span id="fee-token-name">Token Fee</span>
-                         <span class="text-[10px] text-[#888]" id="user-token-balance">Bal: --</span>
+                         <span class="text-[10px] text-[#5a6a7a]" id="user-token-balance">Bal: --</span>
                      </div>
                      <span id="fee-token">--</span>
                  </div>
@@ -458,22 +459,22 @@
                     <label class="form-label">Mint Address</label>
                     <div class="relative">
                         <input type="text" id="update-mint" class="form-input" placeholder="Enter Mint Address..." required onblur="fetchTokenForUpdate(this.value)">
-                        <div id="mint-check-spinner" class="absolute right-3 top-3 hidden"><i data-lucide="loader-2" class="animate-spin text-[#ea580c]" width="18"></i></div>
+                        <div id="mint-check-spinner" class="absolute right-3 top-3 hidden"><i data-lucide="loader-2" class="animate-spin text-[#00d4aa]" width="18"></i></div>
                     </div>
                 </div>
                 
-                <div id="token-preview-info" class="p-4 bg-[#161616] border border-[#2a2a2a] rounded-lg hidden flex items-center gap-4 mb-4">
+                <div id="token-preview-info" class="p-4 bg-[#111820] border border-[#1e2a36] rounded-lg hidden flex items-center gap-4 mb-4">
                     <img id="update-token-img" src="" class="w-12 h-12 rounded-md bg-black object-cover">
                     <div>
                         <div class="font-bold text-white text-sm" id="update-token-name">Token</div>
-                        <div class="text-xs text-[#888] font-mono" id="update-token-ticker">TICKER</div>
+                        <div class="text-xs text-[#5a6a7a] font-mono" id="update-token-ticker">TICKER</div>
                     </div>
                 </div>
 
                 <div id="update-cto-warning" class="hidden p-3 border border-red-900 bg-red-900/10 rounded-lg mb-4">
                     <div class="text-red-400 text-xs font-bold mb-2">⚠️ Existing Data Found</div>
                     <label class="form-label text-[10px] mb-1">CTO Username (Required)</label>
-                    <input type="text" id="update-cto-user" class="w-full bg-[#0c0c0c] border border-red-900 text-[#e0e0e0] p-2 rounded text-xs" placeholder="@username">
+                    <input type="text" id="update-cto-user" class="w-full bg-[#0a0e12] border border-red-900 text-[#e0e0e0] p-2 rounded text-xs" placeholder="@username">
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
@@ -486,7 +487,7 @@
                 <div>
                     <div class="flex justify-between items-center mb-1">
                         <label class="form-label mb-0">Banner URL</label>
-                        <button type="button" class="text-[#888] hover:text-[#fb923c] text-xs flex items-center gap-1" onclick="toggleInfoModal()"><i data-lucide="help-circle" width="12"></i> Help</button>
+                        <button type="button" class="text-[#5a6a7a] hover:text-[#00ffcc] text-xs flex items-center gap-1" onclick="toggleInfoModal()"><i data-lucide="help-circle" width="12"></i> Help</button>
                     </div>
                     <input type="url" id="update-banner" class="form-input" placeholder="https://...">
                 </div>
@@ -494,12 +495,12 @@
                 <div>
                     <label class="form-label">Description</label>
                     <textarea id="update-description" class="form-input h-24 resize-none" maxlength="250"></textarea>
-                    <div class="text-right text-[10px] text-[#888]"><span id="char-count">0</span>/250</div>
+                    <div class="text-right text-[10px] text-[#5a6a7a]"><span id="char-count">0</span>/250</div>
                 </div>
 
                 <div class="flex gap-4 pt-4">
-                    <button type="button" onclick="openPreview()" class="flex-1 bg-[#161616] border border-[#ea580c] text-[#fb923c] py-3 rounded-xl font-bold text-sm hover:bg-[#1a1a1a] transition">Preview</button>
-                    <button type="submit" id="submit-btn" class="flex-1 bg-[#0c0c0c] border border-[#22c55e] text-[#22c55e] py-3 rounded-xl font-bold text-sm disabled:opacity-50 disabled:grayscale hover:bg-green-900/20 transition" disabled>Pay & Submit</button>
+                    <button type="button" onclick="openPreview()" class="flex-1 bg-[#111820] border border-[#00d4aa] text-[#00ffcc] py-3 rounded-xl font-bold text-sm hover:bg-[#111820] transition">Preview</button>
+                    <button type="submit" id="submit-btn" class="flex-1 bg-[#0a0e12] border border-[#22c55e] text-[#22c55e] py-3 rounded-xl font-bold text-sm disabled:opacity-50 disabled:grayscale hover:bg-green-900/20 transition" disabled>Pay & Submit</button>
                 </div>
             </form>
             <div id="update-status" class="mt-4 text-center text-sm font-mono hidden"></div>
@@ -508,14 +509,14 @@
 
     <!-- WALLET PNL VIEW -->
     <div id="view-wallet" class="view-section px-4 md:px-0 hidden">
-        <div class="bg-[#0c0c0c] border-2 border-[#2a2a2a] rounded-2xl p-6 md:p-8 shadow-2xl max-w-4xl mx-auto">
-            <div class="flex items-center gap-4 border-b-2 border-[#2a2a2a] pb-6 mb-6">
-                <div class="w-14 h-14 rounded-xl flex items-center justify-center bg-[#161616] text-orange-500 border-2 border-[#2a2a2a]">
+        <div class="bg-[#0a0e12] border-2 border-[#1e2a36] rounded-2xl p-6 md:p-8 shadow-2xl max-w-4xl mx-auto">
+            <div class="flex items-center gap-4 border-b-2 border-[#1e2a36] pb-6 mb-6">
+                <div class="w-14 h-14 rounded-xl flex items-center justify-center bg-[#111820] text-[#00d4aa] border-2 border-[#1e2a36]">
                     <i data-lucide="trending-up" width="28"></i>
                 </div>
                 <div>
                     <h2 class="text-2xl md:text-3xl font-bold text-white">Wallet PnL</h2>
-                    <p class="text-[#888] text-sm">On-chain profit/loss analysis via Helius</p>
+                    <p class="text-[#5a6a7a] text-sm">On-chain profit/loss analysis via Helius</p>
                 </div>
             </div>
 
@@ -529,7 +530,7 @@
                     </button>
                 </div>
                 <div class="flex gap-2 mt-2">
-                    <button onclick="useConnectedWallet()" class="text-xs text-[#888] hover:text-[#ea580c] border border-[#2a2a2a] px-3 py-1 rounded bg-[#161616]">
+                    <button onclick="useConnectedWallet()" class="text-xs text-[#5a6a7a] hover:text-[#00d4aa] border border-[#1e2a36] px-3 py-1 rounded bg-[#111820]">
                         <i data-lucide="wallet" width="12" class="inline mr-1"></i> Use Connected
                     </button>
                     <select id="pnl-depth" class="limit-select text-xs">
@@ -543,66 +544,66 @@
 
             <!-- Loading State -->
             <div id="pnl-loading" class="hidden text-center py-12">
-                <div class="inline-block animate-spin text-[#ea580c] mb-4"><i data-lucide="loader-2" width="40"></i></div>
-                <p class="text-[#888] font-mono text-sm">Analyzing swap transactions...</p>
+                <div class="inline-block animate-spin text-[#00d4aa] mb-4"><i data-lucide="loader-2" width="40"></i></div>
+                <p class="text-[#5a6a7a] font-mono text-sm">Analyzing swap transactions...</p>
             </div>
 
             <!-- Results -->
             <div id="pnl-results" class="hidden space-y-6">
                 <!-- Summary Cards -->
                 <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-                    <div class="stat-card col-span-2 md:col-span-1 bg-gradient-to-br from-[#1a1a1a] to-[#0c0c0c]">
-                        <span class="text-[#888] text-xs uppercase font-bold">Total PnL</span>
+                    <div class="stat-card col-span-2 md:col-span-1 bg-gradient-to-br from-[#111820] to-[#0a0e12]">
+                        <span class="text-[#5a6a7a] text-xs uppercase font-bold">Total PnL</span>
                         <span id="pnl-total-sol" class="stat-value text-xl"></span>
-                        <span id="pnl-total-usd" class="text-[#888] text-xs font-mono"></span>
+                        <span id="pnl-total-usd" class="text-[#5a6a7a] text-xs font-mono"></span>
                     </div>
                     <div class="stat-card">
-                        <span class="text-[#888] text-xs uppercase font-bold">Realized</span>
+                        <span class="text-[#5a6a7a] text-xs uppercase font-bold">Realized</span>
                         <span id="pnl-realized-sol" class="stat-value text-lg"></span>
-                        <span id="pnl-realized-usd" class="text-[#888] text-xs font-mono"></span>
+                        <span id="pnl-realized-usd" class="text-[#5a6a7a] text-xs font-mono"></span>
                     </div>
                     <div class="stat-card">
-                        <span class="text-[#888] text-xs uppercase font-bold">Unrealized</span>
+                        <span class="text-[#5a6a7a] text-xs uppercase font-bold">Unrealized</span>
                         <span id="pnl-unrealized-sol" class="stat-value text-lg"></span>
-                        <span id="pnl-unrealized-usd" class="text-[#888] text-xs font-mono"></span>
+                        <span id="pnl-unrealized-usd" class="text-[#5a6a7a] text-xs font-mono"></span>
                     </div>
                 </div>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div class="stat-card">
-                        <span class="text-[#888] text-xs uppercase font-bold">Cost Basis</span>
+                        <span class="text-[#5a6a7a] text-xs uppercase font-bold">Cost Basis</span>
                         <span id="pnl-cost-sol" class="stat-value text-lg"></span>
-                        <span id="pnl-cost-usd" class="text-[#888] text-xs font-mono"></span>
+                        <span id="pnl-cost-usd" class="text-[#5a6a7a] text-xs font-mono"></span>
                     </div>
                     <div class="stat-card">
-                        <span class="text-[#888] text-xs uppercase font-bold">Holdings Value</span>
+                        <span class="text-[#5a6a7a] text-xs uppercase font-bold">Holdings Value</span>
                         <span id="pnl-holdings-sol" class="stat-value text-lg"></span>
-                        <span id="pnl-holdings-usd" class="text-[#888] text-xs font-mono"></span>
+                        <span id="pnl-holdings-usd" class="text-[#5a6a7a] text-xs font-mono"></span>
                     </div>
                     <div class="stat-card">
-                        <span class="text-[#888] text-xs uppercase font-bold">Tokens</span>
+                        <span class="text-[#5a6a7a] text-xs uppercase font-bold">Tokens</span>
                         <span id="pnl-token-count" class="stat-value text-lg"></span>
-                        <span id="pnl-holdings-count" class="text-[#888] text-xs font-mono"></span>
+                        <span id="pnl-holdings-count" class="text-[#5a6a7a] text-xs font-mono"></span>
                     </div>
                     <div class="stat-card">
-                        <span class="text-[#888] text-xs uppercase font-bold">Swaps</span>
+                        <span class="text-[#5a6a7a] text-xs uppercase font-bold">Swaps</span>
                         <span id="pnl-swap-count" class="stat-value text-lg"></span>
-                        <span id="pnl-compute-time" class="text-[#888] text-xs font-mono"></span>
+                        <span id="pnl-compute-time" class="text-[#5a6a7a] text-xs font-mono"></span>
                     </div>
                 </div>
 
                 <!-- Token Breakdown -->
-                <div class="bg-[#161616] border border-[#2a2a2a] rounded-xl overflow-hidden">
-                    <div class="px-4 py-3 border-b border-[#2a2a2a] flex justify-between items-center">
+                <div class="bg-[#111820] border border-[#1e2a36] rounded-xl overflow-hidden">
+                    <div class="px-4 py-3 border-b border-[#1e2a36] flex justify-between items-center">
                         <h3 class="font-bold text-white text-sm">Token Breakdown</h3>
                         <div class="flex gap-2">
-                            <button id="pnl-tab-holdings" onclick="switchPnlTab('holdings')" class="text-xs px-2 py-1 rounded bg-[#ea580c] text-[#fb923c]">Holdings</button>
-                            <button id="pnl-tab-history" onclick="switchPnlTab('history')" class="text-xs px-2 py-1 rounded text-[#888] hover:text-[#fb923c]">History</button>
+                            <button id="pnl-tab-holdings" onclick="switchPnlTab('holdings')" class="text-xs px-2 py-1 rounded bg-[#ea580c] text-[#00ffcc]">Holdings</button>
+                            <button id="pnl-tab-history" onclick="switchPnlTab('history')" class="text-xs px-2 py-1 rounded text-[#5a6a7a] hover:text-[#00ffcc]">History</button>
                         </div>
                     </div>
                     <div class="overflow-x-auto">
                         <table class="w-full text-left">
                             <thead>
-                                <tr class="text-[#888] text-xs uppercase border-b border-[#2a2a2a]">
+                                <tr class="text-[#5a6a7a] text-xs uppercase border-b border-[#1e2a36]">
                                     <th class="px-4 py-3">Token</th>
                                     <th class="px-4 py-3 text-right">Balance</th>
                                     <th class="px-4 py-3 text-right">Value (SOL)</th>
@@ -619,14 +620,14 @@
                 </div>
 
                 <!-- Disclaimer -->
-                <div class="text-center text-[#888] text-xs">
+                <div class="text-center text-[#5a6a7a] text-xs">
                     <p>PnL calculated using FIFO cost basis in SOL. USD values use current SOL price.</p>
                     <p class="mt-1">Data from Helius Enhanced Transactions API. Not financial advice.</p>
                 </div>
             </div>
 
             <!-- Empty State -->
-            <div id="pnl-empty" class="text-center py-12 text-[#888]">
+            <div id="pnl-empty" class="text-center py-12 text-[#5a6a7a]">
                 <i data-lucide="bar-chart-2" width="48" class="mx-auto mb-4 opacity-50"></i>
                 <p class="font-mono text-sm">Enter a wallet address to analyze trading PnL</p>
             </div>
@@ -635,15 +636,15 @@
 
     <!-- DETAIL VIEW -->
     <div id="view-detail" class="view-section px-2 md:px-0 hidden">
-        <div id="detail-loading" class="text-center py-20 text-[#ea580c] font-mono animate-pulse hidden">Fetching Chain Data...</div>
+        <div id="detail-loading" class="text-center py-20 text-[#00d4aa] font-mono animate-pulse hidden">Fetching Chain Data...</div>
         <div id="detail-content" style="display: none;">
             
-            <div id="detail-banner-container" class="hidden h-32 md:h-48 rounded-xl border border-[#2a2a2a] mb-4 shadow-lg">
+            <div id="detail-banner-container" class="hidden h-32 md:h-48 rounded-xl border border-[#1e2a36] mb-4 shadow-lg">
                 <img id="detail-banner-img" src="" alt="Token Banner">
             </div>
 
             <!-- Mobile Header Stack -->
-            <div class="bg-[#161616] rounded-xl border border-[#2a2a2a] p-4 mb-4 shadow-lg relative z-10">
+            <div class="bg-[#111820] rounded-xl border border-[#1e2a36] p-4 mb-4 shadow-lg relative z-10">
                 <div class="flex items-start gap-4">
                     <div id="detail-media-container" class="flex-shrink-0">
                         <!-- Image populated by JS -->
@@ -652,9 +653,9 @@
                         <div class="flex flex-col">
                             <h2 id="detail-ticker" class="text-2xl font-bold text-white tracking-tight truncate font-mono">TICKER</h2>
                             <div class="flex items-center gap-2 mt-1 flex-wrap">
-                                <span id="detail-name" class="text-[#fb923c] text-xs px-2 py-0.5 rounded border border-[#2a2a2a] truncate max-w-[120px]">Name</span>
+                                <span id="detail-name" class="text-[#00ffcc] text-xs px-2 py-0.5 rounded border border-[#1e2a36] truncate max-w-[120px]">Name</span>
                                 <span id="detail-mint" class="hidden"></span>
-                                <i data-lucide="copy" width="12" class="text-[#888] cursor-pointer" onclick="copyMint()"></i>
+                                <i data-lucide="copy" width="12" class="text-[#5a6a7a] cursor-pointer" onclick="copyMint()"></i>
                             </div>
                             
                             <!-- New Badge Section -->
@@ -665,14 +666,14 @@
                     </div>
                     
                     <div class="text-right cursor-pointer" onclick="toggleKScoreModal()" id="kscore-container">
-                         <div id="stat-kscore" class="text-2xl font-bold text-[#fb923c] font-mono">--</div>
-                         <div class="text-[10px] text-[#888] uppercase font-bold flex justify-end items-center gap-1">Credit <i data-lucide="help-circle" width="10"></i></div>
+                         <div id="stat-kscore" class="text-2xl font-bold text-[#00ffcc] font-mono">--</div>
+                         <div class="text-[10px] text-[#5a6a7a] uppercase font-bold flex justify-end items-center gap-1">Credit <i data-lucide="help-circle" width="10"></i></div>
                     </div>
                 </div>
 
                 <!-- Conviction Breakdown -->
-                <div id="conviction-breakdown" class="hidden mt-3 p-4 bg-[#1a0a02] rounded-lg border border-[#2a2a2a]">
-                    <div class="text-xs text-[#fb923c] uppercase font-bold mb-3 flex items-center justify-between">
+                <div id="conviction-breakdown" class="hidden mt-3 p-4 bg-[#1a0a02] rounded-lg border border-[#1e2a36]">
+                    <div class="text-xs text-[#00ffcc] uppercase font-bold mb-3 flex items-center justify-between">
                         <span>Top 20 Holders Conviction</span>
                         <a href="/track-record.html" class="text-[10px] text-[#22c55e] hover:text-[#4ade80] flex items-center gap-1 font-normal normal-case">
                             <i data-lucide="bar-chart-2" width="12"></i> Track Record
@@ -696,51 +697,51 @@
                             <span class="text-[11px] text-[#cd853f] font-medium">🔻 Ext</span>
                         </div>
                     </div>
-                    <div class="mt-3 h-3 bg-[#0c0c0c] rounded-full overflow-hidden flex" id="conviction-bar">
+                    <div class="mt-3 h-3 bg-[#0a0e12] rounded-full overflow-hidden flex" id="conviction-bar">
                         <!-- Populated dynamically -->
                     </div>
                 </div>
                 
-                <div id="detail-desc" class="mt-3 text-sm text-[#e0e0e0] leading-relaxed border-t border-[#2a2a2a] pt-3 hidden whitespace-pre-wrap"></div>
+                <div id="detail-desc" class="mt-3 text-sm text-[#e0e0e0] leading-relaxed border-t border-[#1e2a36] pt-3 hidden whitespace-pre-wrap"></div>
                 
-                <div id="detail-actions" class="flex flex-wrap gap-2 mt-4 pt-2 border-t border-[#2a2a2a]"></div>
+                <div id="detail-actions" class="flex flex-wrap gap-2 mt-4 pt-2 border-t border-[#1e2a36]"></div>
             </div>
 
             <!-- Stats Grid -->
             <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
                 <div class="stat-card">
-                    <span class="text-[10px] text-[#888] uppercase font-bold">Price USD</span>
+                    <span class="text-[10px] text-[#5a6a7a] uppercase font-bold">Price USD</span>
                     <span id="stat-price" class="stat-value text-white">$0.00</span>
                 </div>
                 <div class="stat-card">
-                    <span class="text-[10px] text-[#888] uppercase font-bold">Mkt Cap</span>
-                    <span id="stat-mcap" class="stat-value text-[#ea580c]">$0</span>
+                    <span class="text-[10px] text-[#5a6a7a] uppercase font-bold">Mkt Cap</span>
+                    <span id="stat-mcap" class="stat-value text-[#00d4aa]">$0</span>
                 </div>
                 <div class="stat-card">
                     <div class="flex justify-between items-center">
-                        <span class="text-[10px] text-[#888] uppercase font-bold">Holders</span>
+                        <span class="text-[10px] text-[#5a6a7a] uppercase font-bold">Holders</span>
                         <div class="flex gap-1">
-                            <button onclick="openHolderHistory()" class="text-[#888] hover:text-[#fb923c] p-1" title="Holder Growth"><i data-lucide="bar-chart" width="12"></i></button>
-                            <button onclick="toggleTopHoldersModal()" class="text-[#888] hover:text-[#fb923c] p-1" title="Top Holders"><i data-lucide="users" width="12"></i></button>
+                            <button onclick="openHolderHistory()" class="text-[#5a6a7a] hover:text-[#00ffcc] p-1" title="Holder Growth"><i data-lucide="bar-chart" width="12"></i></button>
+                            <button onclick="toggleTopHoldersModal()" class="text-[#5a6a7a] hover:text-[#00ffcc] p-1" title="Top Holders"><i data-lucide="users" width="12"></i></button>
                         </div>
                     </div>
                     <span id="stat-holders" class="stat-value text-[#3b82f6]">0</span>
                 </div>
                 <div class="stat-card">
                     <div class="flex justify-between">
-                         <div class="flex flex-col"><span class="text-[10px] text-[#888] uppercase font-bold">5m</span><span id="stat-chg5m" class="text-xs font-mono">-</span></div>
-                         <div class="flex flex-col text-right"><span class="text-[10px] text-[#888] uppercase font-bold">24h</span><span id="stat-chg24h" class="text-xs font-mono">-</span></div>
+                         <div class="flex flex-col"><span class="text-[10px] text-[#5a6a7a] uppercase font-bold">5m</span><span id="stat-chg5m" class="text-xs font-mono">-</span></div>
+                         <div class="flex flex-col text-right"><span class="text-[10px] text-[#5a6a7a] uppercase font-bold">24h</span><span id="stat-chg24h" class="text-xs font-mono">-</span></div>
                     </div>
                 </div>
             </div>
 
             <div class="flex justify-between items-center mb-2 px-1">
-                <div class="text-[#888] text-xs font-bold uppercase"><i data-lucide="activity" width="12" class="inline"></i> Live Chart <span id="chart-pool-name" class="ml-2 text-[10px] text-gray-500"></span></div>
-                <button onclick="toggleLpModal()" class="text-[10px] bg-[#0c0c0c] border border-[#2a2a2a] text-[#fb923c] px-2 py-1 rounded">LP Info</button>
+                <div class="text-[#5a6a7a] text-xs font-bold uppercase"><i data-lucide="activity" width="12" class="inline"></i> Live Chart <span id="chart-pool-name" class="ml-2 text-[10px] text-gray-500"></span></div>
+                <button onclick="toggleLpModal()" class="text-[10px] bg-[#0a0e12] border border-[#1e2a36] text-[#00ffcc] px-2 py-1 rounded">LP Info</button>
             </div>
 
             <div class="chart-wrapper">
-                <div class="flex items-center justify-between bg-[#0c0c0c] p-2 border-b border-[#2a2a2a]">
+                <div class="flex items-center justify-between bg-[#0a0e12] p-2 border-b border-[#1e2a36]">
                      <div class="flex gap-1">
                          <button onclick="setResolution('5')" class="res-btn active" id="res-5">5m</button>
                          <button onclick="setResolution('60')" class="res-btn" id="res-60">1h</button>
@@ -790,17 +791,17 @@
 
 <!-- MODALS -->
 <div id="wallet-modal" class="modal-overlay hidden">
-    <div class="modal-content bg-[#0c0c0c] border-2 border-[#ea580c] p-6 shadow-2xl animate-[slideUp_0.3s_ease-out]">
+    <div class="modal-content bg-[#0a0e12] border-2 border-[#00d4aa] p-6 shadow-2xl animate-[slideUp_0.3s_ease-out]">
         <div class="flex justify-between items-center mb-6">
             <h3 class="text-xl font-bold text-white">Connect Wallet</h3>
-            <button onclick="closeWalletModal()" class="text-[#888]"><i data-lucide="x" width="24"></i></button>
+            <button onclick="closeWalletModal()" class="text-[#5a6a7a]"><i data-lucide="x" width="24"></i></button>
         </div>
         <div class="space-y-3">
-            <button onclick="connectProvider('phantom')" class="w-full bg-[#161616] border border-[#2a2a2a] p-4 rounded-xl flex items-center gap-4 hover:border-[#ea580c] transition">
+            <button onclick="connectProvider('phantom')" class="w-full bg-[#111820] border border-[#1e2a36] p-4 rounded-xl flex items-center gap-4 hover:border-[#00d4aa] transition">
                 <div class="w-8 h-8 rounded-full bg-[#ab9ff2] flex items-center justify-center"><i data-lucide="ghost" width="16" class="text-white"></i></div>
                 <span class="text-white font-bold">Phantom</span>
             </button>
-            <button onclick="connectProvider('solflare')" class="w-full bg-[#161616] border border-[#2a2a2a] p-4 rounded-xl flex items-center gap-4 hover:border-[#ea580c] transition">
+            <button onclick="connectProvider('solflare')" class="w-full bg-[#111820] border border-[#1e2a36] p-4 rounded-xl flex items-center gap-4 hover:border-[#00d4aa] transition">
                 <div class="w-8 h-8 rounded-full bg-[#fc7226] flex items-center justify-center"><i data-lucide="flame" width="16" class="text-white"></i></div>
                 <span class="text-white font-bold">Solflare</span>
             </button>
@@ -809,41 +810,41 @@
 </div>
 
 <div id="api-docs-modal" class="modal-overlay hidden">
-    <div class="modal-content bg-[#0c0c0c] border-2 border-[#2a2a2a] p-6 shadow-2xl relative w-full max-w-3xl">
-        <button class="absolute top-4 right-4 text-[#888]" onclick="toggleApiModal()"><i data-lucide="x" width="24"></i></button>
+    <div class="modal-content bg-[#0a0e12] border-2 border-[#1e2a36] p-6 shadow-2xl relative w-full max-w-3xl">
+        <button class="absolute top-4 right-4 text-[#5a6a7a]" onclick="toggleApiModal()"><i data-lucide="x" width="24"></i></button>
         <div class="flex items-center gap-3 mb-6">
-            <div class="p-2 bg-[#161616] rounded-lg border border-[#2a2a2a] text-[#ea580c]"><i data-lucide="terminal" width="24"></i></div>
+            <div class="p-2 bg-[#111820] rounded-lg border border-[#1e2a36] text-[#00d4aa]"><i data-lucide="terminal" width="24"></i></div>
             <div>
                 <h3 class="text-xl font-bold text-white font-sans">HolDex API Documentation</h3>
-                <p class="text-xs text-[#888] font-mono">v1.0 Public Endpoint</p>
+                <p class="text-xs text-[#5a6a7a] font-mono">v1.0 Public Endpoint</p>
             </div>
         </div>
         
-        <div class="bg-[#0a0a0a] border border-[#2a2a2a] p-4 rounded-lg mb-6">
-            <h4 class="text-[#ea580c] font-bold mb-2 text-sm uppercase">Burn Credits Access</h4>
+        <div class="bg-[#050709] border border-[#1e2a36] p-4 rounded-lg mb-6">
+            <h4 class="text-[#00d4aa] font-bold mb-2 text-sm uppercase">Burn Credits Access</h4>
             <p class="text-sm text-[#e0e0e0] mb-2">HolDex uses a burn-based access system. Include your wallet in requests:</p>
             <div class="code-block text-xs py-2 px-3">x-wallet: YOUR_WALLET_ADDRESS</div>
             <div class="mt-3 text-xs">
-                <span class="text-[#888]">Eligibility:</span> <span class="text-[#fb923c]">Hold 10K+ $ASDFASDFA</span>
+                <span class="text-[#5a6a7a]">Eligibility:</span> <span class="text-[#00ffcc]">Hold 10K+ $ASDFASDFA</span>
                 <span class="mx-2 text-[#666]">|</span>
-                <span class="text-[#888]">Pricing:</span> <span class="text-[#22c55e]">1 burn = 1 call (forever)</span>
+                <span class="text-[#5a6a7a]">Pricing:</span> <span class="text-[#22c55e]">1 burn = 1 call (forever)</span>
             </div>
-            <p class="text-[10px] text-[#888] mt-2 italic">Power users who burned tokens = lifetime API access. Value creation rewarded.</p>
+            <p class="text-[10px] text-[#5a6a7a] mt-2 italic">Power users who burned tokens = lifetime API access. Value creation rewarded.</p>
         </div>
 
         <div class="space-y-6 overflow-y-auto max-h-[50vh] pr-2 custom-scrollbar">
              <!-- Endpoint 1 -->
              <div>
-                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/tokens</span></div>
-                 <p class="text-sm text-[#e0e0e0] mb-2">Fetch paginated token list. Params: <code class="text-[#ea580c]">filter=verified</code>, <code class="text-[#ea580c]">sort=kscore</code></p>
+                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#00ffcc] font-mono font-bold text-sm">/api/tokens</span></div>
+                 <p class="text-sm text-[#e0e0e0] mb-2">Fetch paginated token list. Params: <code class="text-[#00d4aa]">filter=verified</code>, <code class="text-[#00d4aa]">sort=kscore</code></p>
              </div>
 
              <!-- Endpoint 2 -->
              <div>
-                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/token/:mint</span></div>
+                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#00ffcc] font-mono font-bold text-sm">/api/token/:mint</span></div>
                  <p class="text-sm text-[#e0e0e0] mb-2">Full token data with K-Score, Credit Rating, Conviction Breakdown (verified only).</p>
                  <div class="code-block text-[10px]">
-<span class="text-[#888]">// conviction object (verified tokens)</span>
+<span class="text-[#5a6a7a]">// conviction object (verified tokens)</span>
 "conviction": {
   "score": 75,
   "accumulators": 8, "holders": 6,
@@ -860,10 +861,10 @@
 
              <!-- Endpoint 3: Holders -->
              <div>
-                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/token/:mint/holders</span></div>
+                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#00ffcc] font-mono font-bold text-sm">/api/token/:mint/holders</span></div>
                  <p class="text-sm text-[#e0e0e0] mb-2">Top 20 holders with role classification (Diamond/Gold/Silver/Rust).</p>
                  <div class="code-block text-[10px]">
-<span class="text-[#888]">// Each holder includes role metal</span>
+<span class="text-[#5a6a7a]">// Each holder includes role metal</span>
 "holders": [{
   "address": "5yBE...",
   "class": "accumulator",
@@ -875,14 +876,14 @@
 
              <!-- Endpoint 4: Evolution -->
              <div>
-                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/token/:mint/evolution</span></div>
+                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#00ffcc] font-mono font-bold text-sm">/api/token/:mint/evolution</span></div>
                  <p class="text-sm text-[#e0e0e0] mb-2">K-Score history for trajectory analysis (30/60/90 days).</p>
              </div>
 
              <!-- Endpoint 5: Candles -->
              <div>
-                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/token/:mint/candles</span></div>
-                 <p class="text-sm text-[#e0e0e0] mb-2">OHLCV data. Params: <code class="text-[#ea580c]">resolution</code> (5, 60, D), <code class="text-[#ea580c]">from</code>, <code class="text-[#ea580c]">to</code></p>
+                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#00ffcc] font-mono font-bold text-sm">/api/token/:mint/candles</span></div>
+                 <p class="text-sm text-[#e0e0e0] mb-2">OHLCV data. Params: <code class="text-[#00d4aa]">resolution</code> (5, 60, D), <code class="text-[#00d4aa]">from</code>, <code class="text-[#00d4aa]">to</code></p>
              </div>
 
              <!-- Burn Credits System -->
@@ -890,12 +891,12 @@
                  <h4 class="text-[#22c55e] font-bold mb-3 text-sm uppercase flex items-center gap-2"><i data-lucide="flame" width="14"></i> Burn Credits System</h4>
                  <p class="text-sm text-[#e0e0e0] mb-3">Hold to enter. Burn to use. 1 token burned = 1 API call forever.</p>
                  <div class="grid grid-cols-2 gap-2 text-center text-xs mb-3">
-                     <div class="bg-black/50 rounded p-2"><div class="text-[#888]">Eligibility</div><div class="text-[#fb923c] font-bold">Hold 10K+</div><div class="text-[#666]">$ASDFASDFA</div></div>
-                     <div class="bg-black/50 rounded p-2"><div class="text-[#888]">Pricing</div><div class="text-[#22c55e] font-bold">1:1</div><div class="text-[#22c55e]">1 burn = 1 call</div></div>
+                     <div class="bg-black/50 rounded p-2"><div class="text-[#5a6a7a]">Eligibility</div><div class="text-[#00ffcc] font-bold">Hold 10K+</div><div class="text-[#666]">$ASDFASDFA</div></div>
+                     <div class="bg-black/50 rounded p-2"><div class="text-[#5a6a7a]">Pricing</div><div class="text-[#22c55e] font-bold">1:1</div><div class="text-[#22c55e]">1 burn = 1 call</div></div>
                  </div>
-                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/credits/:wallet</span></div>
+                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#00ffcc] font-mono font-bold text-sm">/api/credits/:wallet</span></div>
                  <div class="code-block text-[10px]">
-<span class="text-[#888]">// Response</span>
+<span class="text-[#5a6a7a]">// Response</span>
 {
   "holdings": 50000,
   "burned": 10000,
@@ -906,37 +907,37 @@
              </div>
 
              <!-- Holder Role Metals -->
-             <div class="bg-[#161616] p-4 rounded-lg border border-[#2a2a2a]">
-                 <h4 class="text-[#ea580c] font-bold mb-3 text-sm uppercase">Holder Role Metals</h4>
+             <div class="bg-[#111820] p-4 rounded-lg border border-[#1e2a36]">
+                 <h4 class="text-[#00d4aa] font-bold mb-3 text-sm uppercase">Holder Role Metals</h4>
                  <div class="grid grid-cols-2 gap-2 text-xs">
-                     <div class="flex items-center gap-2"><span class="text-cyan-300">💎</span> <span class="text-[#e0e0e0]">Diamond</span> <span class="text-[#888]">Accumulator</span></div>
-                     <div class="flex items-center gap-2"><span class="text-yellow-400">🥇</span> <span class="text-[#e0e0e0]">Gold</span> <span class="text-[#888]">Holder</span></div>
-                     <div class="flex items-center gap-2"><span class="text-gray-400">🥈</span> <span class="text-[#e0e0e0]">Silver</span> <span class="text-[#888]">Reducer</span></div>
-                     <div class="flex items-center gap-2"><span class="text-orange-700">🔩</span> <span class="text-[#e0e0e0]">Rust</span> <span class="text-[#888]">Extractor</span></div>
+                     <div class="flex items-center gap-2"><span class="text-cyan-300">💎</span> <span class="text-[#e0e0e0]">Diamond</span> <span class="text-[#5a6a7a]">Accumulator</span></div>
+                     <div class="flex items-center gap-2"><span class="text-yellow-400">🥇</span> <span class="text-[#e0e0e0]">Gold</span> <span class="text-[#5a6a7a]">Holder</span></div>
+                     <div class="flex items-center gap-2"><span class="text-gray-400">🥈</span> <span class="text-[#e0e0e0]">Silver</span> <span class="text-[#5a6a7a]">Reducer</span></div>
+                     <div class="flex items-center gap-2"><span class="text-[#00d4aa]">🔩</span> <span class="text-[#e0e0e0]">Rust</span> <span class="text-[#5a6a7a]">Extractor</span></div>
                  </div>
-                 <p class="text-[10px] text-[#888] mt-3">Diamond+Gold ≥ 50% = Strong conviction. Below 50% = Exit liquidity risk.</p>
+                 <p class="text-[10px] text-[#5a6a7a] mt-3">Diamond+Gold ≥ 50% = Strong conviction. Below 50% = Exit liquidity risk.</p>
              </div>
         </div>
-        <button onclick="toggleApiModal()" class="w-full bg-[#161616] text-[#fb923c] py-3 rounded-lg font-bold text-sm mt-4">Close Documentation</button>
+        <button onclick="toggleApiModal()" class="w-full bg-[#111820] text-[#00ffcc] py-3 rounded-lg font-bold text-sm mt-4">Close Documentation</button>
     </div>
 </div>
 
 <div id="preview-modal" class="modal-overlay hidden">
-    <div class="modal-content bg-[#0c0c0c] border-2 border-[#2a2a2a] p-6 shadow-2xl relative w-full max-w-2xl">
-        <button class="absolute top-4 right-4 text-[#888]" onclick="closePreview()"><i data-lucide="x" width="24"></i></button>
+    <div class="modal-content bg-[#0a0e12] border-2 border-[#1e2a36] p-6 shadow-2xl relative w-full max-w-2xl">
+        <button class="absolute top-4 right-4 text-[#5a6a7a]" onclick="closePreview()"><i data-lucide="x" width="24"></i></button>
         <h3 class="text-xl font-bold text-white mb-4">Preview</h3>
         <div id="preview-container"></div>
-        <button onclick="closePreview()" class="w-full mt-4 bg-[#161616] text-[#fb923c] py-3 rounded-lg font-bold text-sm">Close</button>
+        <button onclick="closePreview()" class="w-full mt-4 bg-[#111820] text-[#00ffcc] py-3 rounded-lg font-bold text-sm">Close</button>
     </div>
 </div>
 
 <div id="lp-modal" class="modal-overlay hidden">
-    <div class="modal-content bg-[#0c0c0c] border-2 border-[#2a2a2a] p-6 shadow-2xl relative">
-        <button class="absolute top-4 right-4 text-[#888]" onclick="toggleLpModal()"><i data-lucide="x" width="24"></i></button>
+    <div class="modal-content bg-[#0a0e12] border-2 border-[#1e2a36] p-6 shadow-2xl relative">
+        <button class="absolute top-4 right-4 text-[#5a6a7a]" onclick="toggleLpModal()"><i data-lucide="x" width="24"></i></button>
         <h3 class="text-xl font-bold text-white mb-4">Liquidity Pools</h3>
         <div class="overflow-x-auto">
             <table class="w-full text-left text-sm text-[#e0e0e0]">
-                <thead class="text-[#888] uppercase text-xs font-bold border-b border-[#2a2a2a]">
+                <thead class="text-[#5a6a7a] uppercase text-xs font-bold border-b border-[#1e2a36]">
                     <tr><th class="px-2 py-2">DEX</th><th class="px-2 py-2 text-right">Price</th><th class="px-2 py-2 text-right">Liq</th></tr>
                 </thead>
                 <tbody id="lp-list-body"></tbody>
@@ -946,18 +947,18 @@
 </div>
 
 <div id="holder-modal" class="modal-overlay hidden">
-    <div class="modal-content bg-[#0c0c0c] border-2 border-[#2a2a2a] p-6 shadow-2xl relative w-full max-w-2xl">
-        <button class="absolute top-4 right-4 text-[#888]" onclick="closeHolderHistory()"><i data-lucide="x" width="24"></i></button>
+    <div class="modal-content bg-[#0a0e12] border-2 border-[#1e2a36] p-6 shadow-2xl relative w-full max-w-2xl">
+        <button class="absolute top-4 right-4 text-[#5a6a7a]" onclick="closeHolderHistory()"><i data-lucide="x" width="24"></i></button>
         <h3 class="text-xl font-bold text-white mb-2">Holder Growth</h3>
-        <div id="holder-chart-container" class="w-full h-64 bg-[#0a0a0a] rounded-xl border border-[#2a2a2a] overflow-hidden"></div>
+        <div id="holder-chart-container" class="w-full h-64 bg-[#050709] rounded-xl border border-[#1e2a36] overflow-hidden"></div>
     </div>
 </div>
 
 <div id="kscore-modal" class="modal-overlay hidden">
-    <div class="modal-content bg-[#0c0c0c] border-2 border-[#2a2a2a] p-6 shadow-2xl relative w-full max-w-lg">
-        <button class="absolute top-4 right-4 text-[#888]" onclick="toggleKScoreModal()"><i data-lucide="x" width="24"></i></button>
+    <div class="modal-content bg-[#0a0e12] border-2 border-[#1e2a36] p-6 shadow-2xl relative w-full max-w-lg">
+        <button class="absolute top-4 right-4 text-[#5a6a7a]" onclick="toggleKScoreModal()"><i data-lucide="x" width="24"></i></button>
         <h3 class="text-xl font-bold text-white mb-2">K-Score: Credit Rating for Tokens</h3>
-        <p class="text-sm text-[#888] mb-4">"Moody's for Memecoins" - Wallets don't lie.</p>
+        <p class="text-sm text-[#5a6a7a] mb-4">"Moody's for Memecoins" - Wallets don't lie.</p>
 
         <!-- Credit Ratings -->
         <div class="grid grid-cols-2 gap-2 mb-4 text-xs font-mono">
@@ -972,37 +973,37 @@
         </div>
 
         <!-- Holder Role Metals -->
-        <div class="bg-[#161616] p-4 rounded-lg border border-[#2a2a2a] mb-4">
-            <h4 class="text-[#ea580c] font-bold mb-2 text-xs uppercase">Top 20 Holder Classification</h4>
+        <div class="bg-[#111820] p-4 rounded-lg border border-[#1e2a36] mb-4">
+            <h4 class="text-[#00d4aa] font-bold mb-2 text-xs uppercase">Top 20 Holder Classification</h4>
             <div class="grid grid-cols-2 gap-2 text-xs">
-                <div class="flex items-center gap-2"><span class="text-cyan-300">💎</span> <span class="text-[#e0e0e0]">Diamond</span> <span class="text-[#888]">Ratio ≥2.0</span></div>
-                <div class="flex items-center gap-2"><span class="text-yellow-400">🥇</span> <span class="text-[#e0e0e0]">Gold</span> <span class="text-[#888]">Ratio ≥0.8</span></div>
-                <div class="flex items-center gap-2"><span class="text-gray-400">🥈</span> <span class="text-[#e0e0e0]">Silver</span> <span class="text-[#888]">Ratio ≥0.3</span></div>
-                <div class="flex items-center gap-2"><span class="text-orange-700">🔩</span> <span class="text-[#e0e0e0]">Rust</span> <span class="text-[#888]">Ratio &lt;0.3</span></div>
+                <div class="flex items-center gap-2"><span class="text-cyan-300">💎</span> <span class="text-[#e0e0e0]">Diamond</span> <span class="text-[#5a6a7a]">Ratio ≥2.0</span></div>
+                <div class="flex items-center gap-2"><span class="text-yellow-400">🥇</span> <span class="text-[#e0e0e0]">Gold</span> <span class="text-[#5a6a7a]">Ratio ≥0.8</span></div>
+                <div class="flex items-center gap-2"><span class="text-gray-400">🥈</span> <span class="text-[#e0e0e0]">Silver</span> <span class="text-[#5a6a7a]">Ratio ≥0.3</span></div>
+                <div class="flex items-center gap-2"><span class="text-[#00d4aa]">🔩</span> <span class="text-[#e0e0e0]">Rust</span> <span class="text-[#5a6a7a]">Ratio &lt;0.3</span></div>
             </div>
-            <p class="text-[10px] text-[#888] mt-2">Ratio = Buys / Sells. Diamond+Gold ≥50% = Strong.</p>
+            <p class="text-[10px] text-[#5a6a7a] mt-2">Ratio = Buys / Sells. Diamond+Gold ≥50% = Strong.</p>
         </div>
 
         <!-- Formula -->
-        <p class="text-xs text-[#888] mb-2">K = 100 × DiamondHands^0.50 × OrganicGrowth^0.35 × Longevity^0.15</p>
-        <p class="text-xs text-[#888] italic">Below 50% Diamond+Gold = you're exit liquidity. <strong class="text-[#ea580c]">Holdex it.</strong></p>
-        <button onclick="toggleKScoreModal()" class="w-full bg-[#161616] text-[#fb923c] py-3 rounded-lg font-bold text-sm mt-4">Close</button>
+        <p class="text-xs text-[#5a6a7a] mb-2">K = 100 × DiamondHands^0.50 × OrganicGrowth^0.35 × Longevity^0.15</p>
+        <p class="text-xs text-[#5a6a7a] italic">Below 50% Diamond+Gold = you're exit liquidity. <strong class="text-[#00d4aa]">Holdex it.</strong></p>
+        <button onclick="toggleKScoreModal()" class="w-full bg-[#111820] text-[#00ffcc] py-3 rounded-lg font-bold text-sm mt-4">Close</button>
     </div>
 </div>
 
 <!-- TOP HOLDERS MODAL (Orb AI Integration) -->
 <div id="top-holders-modal" class="modal-overlay hidden">
-    <div class="modal-content bg-[#0c0c0c] border-2 border-[#2a2a2a] p-6 shadow-2xl relative w-full max-w-2xl">
-        <button class="absolute top-4 right-4 text-[#888]" onclick="toggleTopHoldersModal()"><i data-lucide="x" width="24"></i></button>
+    <div class="modal-content bg-[#0a0e12] border-2 border-[#1e2a36] p-6 shadow-2xl relative w-full max-w-2xl">
+        <button class="absolute top-4 right-4 text-[#5a6a7a]" onclick="toggleTopHoldersModal()"><i data-lucide="x" width="24"></i></button>
         <div class="flex items-center gap-3 mb-4">
-            <div class="p-2 bg-[#161616] rounded-lg border border-[#2a2a2a] text-[#ea580c]"><i data-lucide="users" width="24"></i></div>
+            <div class="p-2 bg-[#111820] rounded-lg border border-[#1e2a36] text-[#00d4aa]"><i data-lucide="users" width="24"></i></div>
             <div>
                 <h3 class="text-xl font-bold text-white">Top 20 Holders</h3>
-                <p class="text-xs text-[#888]">Click wallet to analyze on Orb</p>
+                <p class="text-xs text-[#5a6a7a]">Click wallet to analyze on Orb</p>
             </div>
         </div>
 
-        <div id="top-holders-loading" class="text-center py-8 text-[#888]">
+        <div id="top-holders-loading" class="text-center py-8 text-[#5a6a7a]">
             <i data-lucide="loader-2" width="32" class="animate-spin mx-auto mb-2"></i>
             Loading holder data...
         </div>
@@ -1010,7 +1011,7 @@
         <div id="top-holders-content" class="hidden">
             <div class="overflow-x-auto max-h-[60vh]">
                 <table class="w-full text-left text-sm">
-                    <thead class="text-[#888] uppercase text-[10px] font-bold border-b border-[#2a2a2a] sticky top-0 bg-[#0c0c0c]">
+                    <thead class="text-[#5a6a7a] uppercase text-[10px] font-bold border-b border-[#1e2a36] sticky top-0 bg-[#0a0e12]">
                         <tr>
                             <th class="px-2 py-2">#</th>
                             <th class="px-2 py-2">Address</th>
@@ -1023,18 +1024,18 @@
                     <tbody id="top-holders-body" class="text-[#e0e0e0]"></tbody>
                 </table>
             </div>
-            <p class="text-[10px] text-[#888] mt-4 text-center italic">Powered by Orb (Helius) - AI wallet analysis</p>
+            <p class="text-[10px] text-[#5a6a7a] mt-4 text-center italic">Powered by Orb (Helius) - AI wallet analysis</p>
         </div>
 
-        <button onclick="toggleTopHoldersModal()" class="w-full bg-[#161616] text-[#fb923c] py-3 rounded-lg font-bold text-sm mt-4">Close</button>
+        <button onclick="toggleTopHoldersModal()" class="w-full bg-[#111820] text-[#00ffcc] py-3 rounded-lg font-bold text-sm mt-4">Close</button>
     </div>
 </div>
 
 <div id="how-it-works-modal" class="modal-overlay hidden">
-    <div class="modal-content bg-[#0c0c0c] border-2 border-[#2a2a2a] p-6 shadow-2xl relative w-full max-w-lg">
-        <button class="absolute top-4 right-4 text-[#888]" onclick="toggleHowItWorksModal()"><i data-lucide="x" width="24"></i></button>
+    <div class="modal-content bg-[#0a0e12] border-2 border-[#1e2a36] p-6 shadow-2xl relative w-full max-w-lg">
+        <button class="absolute top-4 right-4 text-[#5a6a7a]" onclick="toggleHowItWorksModal()"><i data-lucide="x" width="24"></i></button>
         <div class="flex items-center gap-3 mb-6">
-            <div class="p-2 bg-[#161616] rounded-lg border border-[#2a2a2a] text-[#ea580c]"><i data-lucide="info" width="24"></i></div>
+            <div class="p-2 bg-[#111820] rounded-lg border border-[#1e2a36] text-[#00d4aa]"><i data-lucide="info" width="24"></i></div>
             <div>
                 <h3 class="text-xl font-bold text-white font-sans">How HolDex Works</h3>
             </div>
@@ -1042,85 +1043,85 @@
         
         <div class="space-y-6 text-sm text-[#e0e0e0]">
             <div class="flex gap-3">
-                <div class="text-[#ea580c] mt-1"><i data-lucide="radar" width="20"></i></div>
+                <div class="text-[#00d4aa] mt-1"><i data-lucide="radar" width="20"></i></div>
                 <div>
                     <h4 class="font-bold text-white mb-1">Auto-Discovery</h4>
-                    <p class="text-[#888]">We listen to the Solana blockchain. New pools on Raydium & Pump.fun are indexed instantly once they hit significant volume.</p>
+                    <p class="text-[#5a6a7a]">We listen to the Solana blockchain. New pools on Raydium & Pump.fun are indexed instantly once they hit significant volume.</p>
                 </div>
             </div>
             <div class="flex gap-3">
                 <div class="text-[#22c55e] mt-1"><i data-lucide="search" width="20"></i></div>
                 <div>
                     <h4 class="font-bold text-white mb-1">Instant Search</h4>
-                    <p class="text-[#888]">Paste any CA (Contract Address) into the search bar to force-index a token instantly, regardless of volume.</p>
+                    <p class="text-[#5a6a7a]">Paste any CA (Contract Address) into the search bar to force-index a token instantly, regardless of volume.</p>
                 </div>
             </div>
             <div class="flex gap-3">
                 <div class="text-[#3b82f6] mt-1"><i data-lucide="shield-check" width="20"></i></div>
                 <div>
                     <h4 class="font-bold text-white mb-1">Community Verification</h4>
-                    <p class="text-[#888]">Devs can update social links via the Update tab. We verify these on-chain to give the green checkmark.</p>
+                    <p class="text-[#5a6a7a]">Devs can update social links via the Update tab. We verify these on-chain to give the green checkmark.</p>
                 </div>
             </div>
         </div>
         
-        <button onclick="toggleHowItWorksModal()" class="w-full bg-[#161616] text-[#fb923c] py-3 rounded-lg font-bold text-sm mt-6">Got it</button>
+        <button onclick="toggleHowItWorksModal()" class="w-full bg-[#111820] text-[#00ffcc] py-3 rounded-lg font-bold text-sm mt-6">Got it</button>
     </div>
 </div>
 
 <div id="info-modal" class="modal-overlay hidden">
-    <div class="modal-content bg-[#0c0c0c] border-2 border-[#2a2a2a] p-6 shadow-2xl relative w-full max-w-md">
-        <button class="absolute top-4 right-4 text-[#888]" onclick="toggleInfoModal()"><i data-lucide="x" width="24"></i></button>
+    <div class="modal-content bg-[#0a0e12] border-2 border-[#1e2a36] p-6 shadow-2xl relative w-full max-w-md">
+        <button class="absolute top-4 right-4 text-[#5a6a7a]" onclick="toggleInfoModal()"><i data-lucide="x" width="24"></i></button>
         <h3 class="text-xl font-bold text-white mb-4">Banner Upload</h3>
         <p class="text-sm text-[#e0e0e0] mb-4">We do not host images. Use Imgur:</p>
-        <ol class="list-decimal list-inside text-sm text-[#888] space-y-2 mb-4 font-mono">
-            <li>Go to <a href="https://imgur.com/upload" target="_blank" class="text-[#ea580c] underline">imgur.com</a></li>
+        <ol class="list-decimal list-inside text-sm text-[#5a6a7a] space-y-2 mb-4 font-mono">
+            <li>Go to <a href="https://imgur.com/upload" target="_blank" class="text-[#00d4aa] underline">imgur.com</a></li>
             <li>Upload your banner (1500x500px recommended).</li>
             <li>Right click image -> "Copy Image Address".</li>
             <li>Paste link here (must end in .jpg/.png).</li>
         </ol>
-        <button onclick="toggleInfoModal()" class="w-full bg-[#161616] text-[#fb923c] py-3 rounded-lg font-bold text-sm">Close</button>
+        <button onclick="toggleInfoModal()" class="w-full bg-[#111820] text-[#00ffcc] py-3 rounded-lg font-bold text-sm">Close</button>
     </div>
 </div>
 
 <div id="key-modal" class="modal-overlay hidden">
-    <div class="modal-content bg-[#0c0c0c] border-2 border-[#ea580c] p-8 shadow-2xl relative text-center w-full max-w-md">
-        <button class="absolute top-4 right-4 text-[#888]" onclick="closeKeyModal()"><i data-lucide="x" width="24"></i></button>
-        <div class="w-12 h-12 bg-[#161616] rounded-full flex items-center justify-center mx-auto mb-4 border border-[#ea580c] text-[#ea580c]"><i data-lucide="key" width="24"></i></div>
+    <div class="modal-content bg-[#0a0e12] border-2 border-[#00d4aa] p-8 shadow-2xl relative text-center w-full max-w-md">
+        <button class="absolute top-4 right-4 text-[#5a6a7a]" onclick="closeKeyModal()"><i data-lucide="x" width="24"></i></button>
+        <div class="w-12 h-12 bg-[#111820] rounded-full flex items-center justify-center mx-auto mb-4 border border-[#00d4aa] text-[#00d4aa]"><i data-lucide="key" width="24"></i></div>
         <h3 class="text-2xl font-bold text-white mb-2">Your API Key</h3>
-        <p class="text-xs text-[#888] mb-6">Keep this safe. It allows 1,000 reqs/day.</p>
+        <p class="text-xs text-[#5a6a7a] mb-6">Keep this safe. It allows 1,000 reqs/day.</p>
         
-        <div class="bg-[#0a0a0a] border border-[#2a2a2a] p-4 rounded-lg mb-6 relative">
-            <div id="generated-key-display" class="font-mono text-[#fb923c] text-lg break-all">...</div>
-            <button onclick="copyKey()" class="absolute top-2 right-2 text-[#888] hover:text-white"><i data-lucide="copy" width="16"></i></button>
+        <div class="bg-[#050709] border border-[#1e2a36] p-4 rounded-lg mb-6 relative">
+            <div id="generated-key-display" class="font-mono text-[#00ffcc] text-lg break-all">...</div>
+            <button onclick="copyKey()" class="absolute top-2 right-2 text-[#5a6a7a] hover:text-white"><i data-lucide="copy" width="16"></i></button>
         </div>
         
-        <button onclick="closeKeyModal()" class="w-full bg-[#161616] border border-[#2a2a2a] text-[#fb923c] py-2 rounded-lg text-xs font-bold">Done</button>
+        <button onclick="closeKeyModal()" class="w-full bg-[#111820] border border-[#1e2a36] text-[#00ffcc] py-2 rounded-lg text-xs font-bold">Done</button>
     </div>
 </div>
 
 <div id="apps-modal" class="modal-overlay hidden">
-    <div class="modal-content bg-[#0c0c0c] border-2 border-[#2a2a2a] p-6 shadow-2xl relative w-full max-w-sm">
-        <button class="absolute top-4 right-4 text-[#888]" onclick="toggleAppsModal()"><i data-lucide="x" width="24"></i></button>
+    <div class="modal-content bg-[#0a0e12] border-2 border-[#1e2a36] p-6 shadow-2xl relative w-full max-w-sm">
+        <button class="absolute top-4 right-4 text-[#5a6a7a]" onclick="toggleAppsModal()"><i data-lucide="x" width="24"></i></button>
         <h3 class="text-xl font-bold text-white mb-6 flex items-center gap-2">
-            <i data-lucide="grid" width="24" class="text-[#ea580c]"></i> Ecosystem
+            <i data-lucide="grid" width="24" class="text-[#00d4aa]"></i> Ecosystem
         </h3>
         <div class="space-y-3">
-            <a href="https://alonisthe.dev/ignition" target="_blank" class="block bg-[#161616] border border-[#2a2a2a] p-4 rounded-xl hover:border-[#ea580c] transition group">
-                <div class="font-bold text-white group-hover:text-[#ea580c]">Ignition</div>
-                <div class="text-xs text-[#888]">Launchpad & Tools</div>
+            <a href="https://alonisthe.dev/ignition" target="_blank" class="block bg-[#111820] border border-[#1e2a36] p-4 rounded-xl hover:border-[#00d4aa] transition group">
+                <div class="font-bold text-white group-hover:text-[#00d4aa]">Ignition</div>
+                <div class="text-xs text-[#5a6a7a]">Launchpad & Tools</div>
             </a>
-            <a href="https://alonisthe.dev/asdforecast" target="_blank" class="block bg-[#161616] border border-[#2a2a2a] p-4 rounded-xl hover:border-[#ea580c] transition group">
-                <div class="font-bold text-white group-hover:text-[#ea580c]">ASDForecast</div>
-                <div class="text-xs text-[#888]">Predictive Analytics</div>
+            <a href="https://alonisthe.dev/asdforecast" target="_blank" class="block bg-[#111820] border border-[#1e2a36] p-4 rounded-xl hover:border-[#00d4aa] transition group">
+                <div class="font-bold text-white group-hover:text-[#00d4aa]">ASDForecast</div>
+                <div class="text-xs text-[#5a6a7a]">Predictive Analytics</div>
             </a>
-            <a href="https://alonisthe.dev/burns" target="_blank" class="block bg-[#161616] border border-[#2a2a2a] p-4 rounded-xl hover:border-[#ea580c] transition group">
-                <div class="font-bold text-white group-hover:text-[#ea580c]">Flywheel</div>
-                <div class="text-xs text-[#888]">Burn Mechanisms</div>
+            <a href="https://alonisthe.dev/burns" target="_blank" class="block bg-[#111820] border border-[#1e2a36] p-4 rounded-xl hover:border-[#00d4aa] transition group">
+                <div class="font-bold text-white group-hover:text-[#00d4aa]">Flywheel</div>
+                <div class="text-xs text-[#5a6a7a]">Burn Mechanisms</div>
             </a>
-            <a href="/track-record.html" class="block bg-[#161616] border border-[#22c55e]/50 p-4 rounded-xl hover:border-[#22c55e] transition group">
+            <a href="/track-record.html" class="block bg-[#111820] border border-[#22c55e]/50 p-4 rounded-xl hover:border-[#22c55e] transition group">
                 <div class="font-bold text-[#22c55e] group-hover:text-[#4ade80]">Track Record</div>
-                <div class="text-xs text-[#888]">K-Score predictions vs reality</div>
+                <div class="text-xs text-[#5a6a7a]">K-Score predictions vs reality</div>
             </a>
         </div>
     </div>
@@ -1327,8 +1328,10 @@
             if(prev) prev.disabled = currentPage <= 1; 
             
             // Explicitly use currentLimit variable set by dropdown
-            let endpoint = `${API_URL}/api/tokens?sort=${currentSort}&direction=${currentDirection}&search=${encodeURIComponent(searchQuery)}&limit=${currentLimit}&page=${currentPage}`; 
-            if (isVerifiedFilter) endpoint += '&filter=verified'; 
+            // Use public endpoint for dashboard (no auth required)
+            let endpoint = `${API_URL}/api/tokens/public?sort=${currentSort}&direction=${currentDirection}&limit=${currentLimit}&page=${currentPage}`;
+            if (isVerifiedFilter) endpoint += '&filter=verified';
+            if (searchQuery) endpoint = `${API_URL}/api/tokens/public?search=${encodeURIComponent(searchQuery)}&limit=${currentLimit}`; 
             
             const res = await fetch(endpoint); 
             const data = await res.json(); 
@@ -1349,7 +1352,7 @@
         if (isZeroVolHidden) { displayTokens = displayTokens.filter(t => (t.volume24h || 0) > 0); } 
         
         if (displayTokens.length === 0) { 
-            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-[#888] font-mono">No tokens found.</td></tr>`; 
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-[#5a6a7a] font-mono">No tokens found.</td></tr>`; 
             return; 
         } 
         
@@ -1364,8 +1367,8 @@
             const img = t.image || `https://placehold.co/40x40/2a1005/7c2d12?text=${t.ticker?.[0]||'?'}`;
 
             return `
-            <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group border-b border-[#2a2a2a]/30">
-                <td class="bg-[#0c0c0c]">
+            <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group border-b border-[#1e2a36]/30">
+                <td class="bg-[#0a0e12]">
                     <div class="flex items-center gap-2">
                         <img src="${img}" class="img-token" onerror="this.src='https://placehold.co/40'">
                         <div class="flex flex-col min-w-0">
@@ -1373,7 +1376,7 @@
                                 <span class="font-bold text-white text-xs truncate font-sans">${t.ticker}</span>
                                 ${isVerified ? '<i data-lucide="shield-check" width="12" class="text-green-500 fill-green-500/20"></i>' : ''}
                             </div>
-                            <span class="text-[10px] text-[#888] truncate max-w-[80px]">${t.name}</span>
+                            <span class="text-[10px] text-[#5a6a7a] truncate max-w-[80px]">${t.name}</span>
                         </div>
                     </div>
                 </td>
@@ -1384,10 +1387,10 @@
                 <td class="text-right hidden md:table-cell">${formatPct(t.change24h)}</td>
                 
                 <td class="text-right font-mono text-[#22c55e] text-xs">${formatVal(t.volume24h)}</td>
-                <td class="text-right font-mono text-[#fb923c] text-xs">${formatVal(t.marketCap)}</td>
+                <td class="text-right font-mono text-[#00ffcc] text-xs">${formatVal(t.marketCap)}</td>
                 
                 <td class="text-right font-mono text-[#3b82f6] text-xs hidden md:table-cell">${formatHolders(t.holders)}</td>
-                <td class="text-right text-[10px] text-[#888] font-mono whitespace-nowrap hidden md:table-cell">${timeAgo(t.timestamp)}</td>
+                <td class="text-right text-[10px] text-[#5a6a7a] font-mono whitespace-nowrap hidden md:table-cell">${timeAgo(t.timestamp)}</td>
             </tr>`;
         }).join(''); 
         lucide.createIcons(); 
@@ -1519,7 +1522,7 @@
                 const media = document.getElementById('detail-media-container');
                 if (media) {
                     const imgUrl = t.image || 'https://placehold.co/80';
-                    media.innerHTML = `<img src="${imgUrl}" class="w-16 h-16 rounded-lg border-2 border-[#ea580c] bg-black object-cover">`;
+                    media.innerHTML = `<img src="${imgUrl}" class="w-16 h-16 rounded-lg border-2 border-[#00d4aa] bg-black object-cover">`;
                 }
 
                 const descEl = document.getElementById('detail-desc');
@@ -1536,15 +1539,15 @@
                 const actions = document.getElementById('detail-actions');
                 if (actions) {
                     let links = '';
-                    if(t.twitter) links += `<a href="${t.twitter}" target="_blank" class="bg-[#0c0c0c] border border-[#2a2a2a] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="twitter" width="16"></i></a>`;
-                    if(t.telegram) links += `<a href="${t.telegram}" target="_blank" class="bg-[#0c0c0c] border border-[#2a2a2a] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="send" width="16"></i></a>`;
-                    if(t.website) links += `<a href="${t.website}" target="_blank" class="bg-[#0c0c0c] border border-[#2a2a2a] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="globe" width="16"></i></a>`;
+                    if(t.twitter) links += `<a href="${t.twitter}" target="_blank" class="bg-[#0a0e12] border border-[#1e2a36] text-[#00ffcc] p-2 rounded hover:border-[#00d4aa]"><i data-lucide="twitter" width="16"></i></a>`;
+                    if(t.telegram) links += `<a href="${t.telegram}" target="_blank" class="bg-[#0a0e12] border border-[#1e2a36] text-[#00ffcc] p-2 rounded hover:border-[#00d4aa]"><i data-lucide="send" width="16"></i></a>`;
+                    if(t.website) links += `<a href="${t.website}" target="_blank" class="bg-[#0a0e12] border border-[#1e2a36] text-[#00ffcc] p-2 rounded hover:border-[#00d4aa]"><i data-lucide="globe" width="16"></i></a>`;
                     if(links === '' && t.socials) {
-                        if(t.socials.twitter) links += `<a href="${t.socials.twitter}" target="_blank" class="bg-[#0c0c0c] border border-[#2a2a2a] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="twitter" width="16"></i></a>`;
-                        if(t.socials.telegram) links += `<a href="${t.socials.telegram}" target="_blank" class="bg-[#0c0c0c] border border-[#2a2a2a] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="send" width="16"></i></a>`;
-                        if(t.socials.website) links += `<a href="${t.socials.website}" target="_blank" class="bg-[#0c0c0c] border border-[#2a2a2a] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="globe" width="16"></i></a>`;
+                        if(t.socials.twitter) links += `<a href="${t.socials.twitter}" target="_blank" class="bg-[#0a0e12] border border-[#1e2a36] text-[#00ffcc] p-2 rounded hover:border-[#00d4aa]"><i data-lucide="twitter" width="16"></i></a>`;
+                        if(t.socials.telegram) links += `<a href="${t.socials.telegram}" target="_blank" class="bg-[#0a0e12] border border-[#1e2a36] text-[#00ffcc] p-2 rounded hover:border-[#00d4aa]"><i data-lucide="send" width="16"></i></a>`;
+                        if(t.socials.website) links += `<a href="${t.socials.website}" target="_blank" class="bg-[#0a0e12] border border-[#1e2a36] text-[#00ffcc] p-2 rounded hover:border-[#00d4aa]"><i data-lucide="globe" width="16"></i></a>`;
                     }
-                    actions.innerHTML = links + `<button onclick="shareToken()" class="bg-[#0c0c0c] border border-[#2a2a2a] text-[#fb923c] p-2 rounded hover:border-[#ea580c] flex items-center gap-2 text-xs font-bold px-3"><i data-lucide="share-2" width="14"></i> Share</button>`;
+                    actions.innerHTML = links + `<button onclick="shareToken()" class="bg-[#0a0e12] border border-[#1e2a36] text-[#00ffcc] p-2 rounded hover:border-[#00d4aa] flex items-center gap-2 text-xs font-bold px-3"><i data-lucide="share-2" width="14"></i> Share</button>`;
                 }
                 
                 if(t.holderHistory) currentHolderHistory = t.holderHistory;
@@ -1553,7 +1556,7 @@
                 if (lpBody) {
                     if(t.pairs && t.pairs.length > 0) {
                         currentPoolAddress = t.pairs[0].address;
-                        lpBody.innerHTML = t.pairs.map(p => `<tr><td class="px-2 py-2 text-[#fb923c] font-bold text-xs">${p.dexId}</td><td class="px-2 py-2 text-right text-xs font-mono">$${(parseFloat(p.priceUsd)||0).toFixed(6)}</td><td class="px-2 py-2 text-right text-[#22c55e] text-xs font-mono">$${(parseFloat(p.liquidity?.usd)||0).toLocaleString()}</td></tr>`).join('');
+                        lpBody.innerHTML = t.pairs.map(p => `<tr><td class="px-2 py-2 text-[#00ffcc] font-bold text-xs">${p.dexId}</td><td class="px-2 py-2 text-right text-xs font-mono">$${(parseFloat(p.priceUsd)||0).toFixed(6)}</td><td class="px-2 py-2 text-right text-[#22c55e] text-xs font-mono">$${(parseFloat(p.liquidity?.usd)||0).toLocaleString()}</td></tr>`).join('');
                         const dexName = String(t.pairs[0].dex || t.pairs[0].dexId || "Unknown").toUpperCase();
                         const poolNameEl = document.getElementById('chart-pool-name');
                         if (poolNameEl) poolNameEl.innerText = `— ${dexName} (Largest Pool)`;
@@ -1601,7 +1604,7 @@
     window.toggleScale = () => {
         isLogScale = !isLogScale;
         const btn = document.getElementById('btn-scale');
-        if(btn) btn.style.color = isLogScale ? '#ea580c' : '#666';
+        if(btn) btn.style.color = isLogScale ? '#00d4aa' : '#5a6a7a';
         if(chartInstance) chartInstance.priceScale('right').applyOptions({ mode: isLogScale ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal });
     };
 
@@ -1688,10 +1691,10 @@
         chartInstance = LightweightCharts.createChart(container, {
             width: rect.width,
             height: rect.height,
-            layout: { background: { type: 'solid', color: '#0a0a0a' }, textColor: '#888' },
-            grid: { vertLines: { color: '#1a1a1a' }, horzLines: { color: '#1a1a1a' } },
-            timeScale: { borderColor: '#2a2a2a', timeVisible: true },
-            rightPriceScale: { borderColor: '#2a2a2a', mode: isLogScale ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal },
+            layout: { background: { type: 'solid', color: '#050709' }, textColor: '#5a6a7a' },
+            grid: { vertLines: { color: '#111820' }, horzLines: { color: '#111820' } },
+            timeScale: { borderColor: '#1e2a36', timeVisible: true },
+            rightPriceScale: { borderColor: '#1e2a36', mode: isLogScale ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal },
             leftPriceScale: { borderColor: '#3b82f6', visible: false, scaleMargins: { top: 0.1, bottom: 0.1 } },
             autoSize: false, // Managed by ResizeObserver
         });
@@ -1782,8 +1785,8 @@
         holderChart = LightweightCharts.createChart(container, {
             width: rect.width,
             height: rect.height,
-            layout: { background: { type: 'solid', color: '#0a0a0a' }, textColor: '#888' },
-            grid: { vertLines: { color: '#1a1a1a' }, horzLines: { color: '#1a1a1a' } },
+            layout: { background: { type: 'solid', color: '#050709' }, textColor: '#5a6a7a' },
+            grid: { vertLines: { color: '#111820' }, horzLines: { color: '#111820' } },
             rightPriceScale: { borderVisible: false },
             timeScale: { borderVisible: false, timeVisible: true }
         });
@@ -1869,12 +1872,12 @@
                 const decimals = data.decimals || 6;
 
                 tbody.innerHTML = data.holders.map((h, i) => `
-                    <tr class="border-b border-[#2a2a2a]/30 hover:bg-[#161616]/50">
-                        <td class="px-2 py-2 text-[#888] font-mono text-xs">${i + 1}</td>
+                    <tr class="border-b border-[#1e2a36]/30 hover:bg-[#111820]/50">
+                        <td class="px-2 py-2 text-[#5a6a7a] font-mono text-xs">${i + 1}</td>
                         <td class="px-2 py-2">
                             <div class="flex items-center gap-1">
                                 <span class="font-mono text-xs" title="${h.address}">${h.address.slice(0,4)}...${h.address.slice(-4)}</span>
-                                <button onclick="copyToClipboard('${h.address}')" class="text-[#888] hover:text-[#fb923c]"><i data-lucide="copy" width="10"></i></button>
+                                <button onclick="copyToClipboard('${h.address}')" class="text-[#5a6a7a] hover:text-[#00ffcc]"><i data-lucide="copy" width="10"></i></button>
                             </div>
                         </td>
                         <td class="px-2 py-2 text-right font-mono text-xs">${formatHolderBalance(h.balance, decimals)}</td>
@@ -1885,7 +1888,7 @@
                             <span class="conviction-pill conviction-${h.class}">${h.class}</span>
                         </td>
                         <td class="px-2 py-2 text-center">
-                            <a href="${h.orbUrl}" target="_blank" class="text-[#ea580c] hover:text-white text-xs font-bold flex items-center justify-center gap-1">
+                            <a href="${h.orbUrl}" target="_blank" class="text-[#00d4aa] hover:text-white text-xs font-bold flex items-center justify-center gap-1">
                                 <i data-lucide="external-link" width="12"></i> Orb
                             </a>
                         </td>
@@ -1896,7 +1899,7 @@
                 contentEl.classList.remove('hidden');
                 lucide.createIcons();
             } else {
-                tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-[#888]">No holder data available. Run K-Score update first.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-[#5a6a7a]">No holder data available. Run K-Score update first.</td></tr>';
                 loadingEl.classList.add('hidden');
                 contentEl.classList.remove('hidden');
             }
@@ -2125,7 +2128,7 @@
     window.openPreview = () => {
         const desc = document.getElementById('update-description').value;
         const prevContainer = document.getElementById('preview-container');
-        prevContainer.innerHTML = `<div class="p-4 bg-[#0a0a0a] rounded-lg border border-[#2a2a2a]"><h4 class="text-orange-500 font-bold mb-2">Preview</h4><p class="text-white text-sm whitespace-pre-wrap">${desc || 'No description...'}</p></div>`;
+        prevContainer.innerHTML = `<div class="p-4 bg-[#050709] rounded-lg border border-[#1e2a36]"><h4 class="text-[#00d4aa] font-bold mb-2">Preview</h4><p class="text-white text-sm whitespace-pre-wrap">${desc || 'No description...'}</p></div>`;
         toggleModal('preview-modal');
     };
     
@@ -2173,13 +2176,13 @@
             const data = await res.json();
             if (data.success && listDiv) {
                 if (data.keys.length === 0) {
-                    listDiv.innerHTML = '<div class="text-center py-4 text-[#888] text-xs">No API keys yet. Click "New Key" to create one.</div>';
+                    listDiv.innerHTML = '<div class="text-center py-4 text-[#5a6a7a] text-xs">No API keys yet. Click "New Key" to create one.</div>';
                     return;
                 }
                 listDiv.innerHTML = data.keys.map(k => {
                     const tierColors = {
-                        free: { bg: 'bg-[#ea580c]/30', text: 'text-[#888]', border: 'border-[#2a2a2a]' },
-                        pro: { bg: 'bg-[#fb923c]/10', text: 'text-[#fb923c]', border: 'border-[#fb923c]' },
+                        free: { bg: 'bg-[#ea580c]/30', text: 'text-[#5a6a7a]', border: 'border-[#1e2a36]' },
+                        pro: { bg: 'bg-[#fb923c]/10', text: 'text-[#00ffcc]', border: 'border-[#fb923c]' },
                         enterprise: { bg: 'bg-[#22c55e]/10', text: 'text-[#22c55e]', border: 'border-[#22c55e]' }
                     };
                     const tc = tierColors[k.tier] || tierColors.free;
@@ -2192,7 +2195,7 @@
                         <div class="bg-black rounded-lg p-3 border ${tc.border}">
                             <div class="flex justify-between items-start mb-2">
                                 <div>
-                                    <span class="font-mono text-[#fb923c] text-sm">${k.key_preview}</span>
+                                    <span class="font-mono text-[#00ffcc] text-sm">${k.key_preview}</span>
                                     <span class="ml-2 px-2 py-0.5 rounded text-xs ${tc.bg} ${tc.text} uppercase font-bold">${k.tier}</span>
                                     ${!k.is_active ? '<span class="ml-1 px-2 py-0.5 rounded text-xs bg-red-900/30 text-red-500">REVOKED</span>' : ''}
                                 </div>
@@ -2202,7 +2205,7 @@
                                 <div class="flex-1 bg-[#1a0f08] rounded-full h-2 overflow-hidden">
                                     <div class="h-full ${usagePct > 80 ? 'bg-red-500' : usagePct > 50 ? 'bg-yellow-500' : 'bg-[#22c55e]'}" style="width: ${Math.min(usagePct, 100)}%"></div>
                                 </div>
-                                <span class="text-[#888] font-mono">${k.requests_today.toLocaleString()}/${k.requests_limit.toLocaleString()}</span>
+                                <span class="text-[#5a6a7a] font-mono">${k.requests_today.toLocaleString()}/${k.requests_limit.toLocaleString()}</span>
                             </div>
                         </div>
                     `;
@@ -2233,10 +2236,10 @@
 
                 if (credits.holdings < 10000) {
                     holdingsEl.classList.add('text-red-500');
-                    holdingsEl.classList.remove('text-[#fb923c]');
+                    holdingsEl.classList.remove('text-[#00ffcc]');
                 } else {
                     holdingsEl.classList.remove('text-red-500');
-                    holdingsEl.classList.add('text-[#fb923c]');
+                    holdingsEl.classList.add('text-[#00ffcc]');
                 }
 
                 if (credits.remainingCalls === 0) {
@@ -2345,7 +2348,7 @@
     function timeAgo(ts) { if(!ts) return ''; const s = Math.floor((Date.now()-ts)/1000); if(s<60)return'Just now'; if(s<3600)return Math.floor(s/60)+'m'; if(s<86400)return Math.floor(s/3600)+'h'; return Math.floor(s/86400)+'d'; }
     const formatMoney = (val) => { if (val === undefined || val === null || isNaN(val)) return "$0.00"; return val < 0.01 ? '$' + val.toExponential(2) : '$' + val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 }); };
     const formatCompact = (val) => { if (val === undefined || val === null || isNaN(val)) return "$0"; return '$' + new Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val); };
-    const formatPct = (val) => { if (val === undefined || val === null || isNaN(val)) return `<span class="text-[#888]">-</span>`; const cls = val > 0 ? 'pill-green' : (val < 0 ? 'pill-red' : 'text-gray-400'); return `<span class="pill ${cls}">${val > 0 ? '+' : ''}${val.toFixed(2)}%</span>`; };
+    const formatPct = (val) => { if (val === undefined || val === null || isNaN(val)) return `<span class="text-[#5a6a7a]">-</span>`; const cls = val > 0 ? 'pill-green' : (val < 0 ? 'pill-red' : 'text-gray-400'); return `<span class="pill ${cls}">${val > 0 ? '+' : ''}${val.toFixed(2)}%</span>`; };
 
     function cleanupChart() { if (chartInstance) { chartInstance.remove(); chartInstance = null; candleSeries = null; } document.getElementById('tv-chart').innerHTML = ''; }
     
@@ -2467,11 +2470,11 @@
     function switchPnlTab(tab) {
         currentPnlTab = tab;
         document.getElementById('pnl-tab-holdings').className = tab === 'holdings'
-            ? 'text-xs px-2 py-1 rounded bg-[#ea580c] text-[#fb923c]'
-            : 'text-xs px-2 py-1 rounded text-[#888] hover:text-[#fb923c]';
+            ? 'text-xs px-2 py-1 rounded bg-[#ea580c] text-[#00ffcc]'
+            : 'text-xs px-2 py-1 rounded text-[#5a6a7a] hover:text-[#00ffcc]';
         document.getElementById('pnl-tab-history').className = tab === 'history'
-            ? 'text-xs px-2 py-1 rounded bg-[#ea580c] text-[#fb923c]'
-            : 'text-xs px-2 py-1 rounded text-[#888] hover:text-[#fb923c]';
+            ? 'text-xs px-2 py-1 rounded bg-[#ea580c] text-[#00ffcc]'
+            : 'text-xs px-2 py-1 rounded text-[#5a6a7a] hover:text-[#00ffcc]';
         renderPnlTable();
     }
 
@@ -2482,7 +2485,7 @@
 
         const tokens = currentPnlData.tokens || [];
         if (tokens.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-[#888]">No swap data found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-[#5a6a7a]">No swap data found</td></tr>';
             return;
         }
 
@@ -2490,7 +2493,7 @@
             // Filter tokens with holdings
             const holdings = tokens.filter(t => (t.actualHolding || t.onChainBalance || 0) > 0.000001);
             if (holdings.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-[#888]">No current holdings</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-[#5a6a7a]">No current holdings</td></tr>';
                 return;
             }
 
@@ -2507,11 +2510,11 @@
                 const unrealizedPct = t.unrealizedPnlPercent !== undefined ? ` (${t.unrealizedPnlPercent >= 0 ? '+' : ''}${t.unrealizedPnlPercent.toFixed(0)}%)` : '';
 
                 tbody.innerHTML += `
-                    <tr class="border-b border-[#2a2a2a]/30 hover:bg-[#1a1a1a] cursor-pointer" onclick="navigateTo('token/${t.mint}')">
+                    <tr class="border-b border-[#1e2a36]/30 hover:bg-[#111820] cursor-pointer" onclick="navigateTo('token/${t.mint}')">
                         <td class="px-4 py-3">
                             <div class="flex items-center gap-2">
-                                <span class="text-[#fb923c]">${t.mint.slice(0,4)}...${t.mint.slice(-4)}</span>
-                                ${t.source === 'airdrop/transfer' ? '<span class="text-[9px] text-[#888] bg-[#1a1a1a] px-1 rounded">AIRDROP</span>' : ''}
+                                <span class="text-[#00ffcc]">${t.mint.slice(0,4)}...${t.mint.slice(-4)}</span>
+                                ${t.source === 'airdrop/transfer' ? '<span class="text-[9px] text-[#5a6a7a] bg-[#111820] px-1 rounded">AIRDROP</span>' : ''}
                             </div>
                         </td>
                         <td class="px-4 py-3 text-right text-[#e0e0e0]">${formatNumber(balance)}</td>
@@ -2529,9 +2532,9 @@
                 const pnlCls = pnlVal >= 0 ? 'text-green-400' : 'text-red-400';
 
                 tbody.innerHTML += `
-                    <tr class="border-b border-[#2a2a2a]/30 hover:bg-[#1a1a1a] cursor-pointer" onclick="navigateTo('token/${t.mint}')">
+                    <tr class="border-b border-[#1e2a36]/30 hover:bg-[#111820] cursor-pointer" onclick="navigateTo('token/${t.mint}')">
                         <td class="px-4 py-3">
-                            <span class="text-[#fb923c]">${t.mint.slice(0,4)}...${t.mint.slice(-4)}</span>
+                            <span class="text-[#00ffcc]">${t.mint.slice(0,4)}...${t.mint.slice(-4)}</span>
                         </td>
                         <td class="px-4 py-3 text-right text-[#e0e0e0]">${t.buyCount || 0} / ${t.sellCount || 0}</td>
                         <td class="px-4 py-3 text-right text-[#e0e0e0]">${(t.totalBought || 0).toFixed(2)}</td>

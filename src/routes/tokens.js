@@ -1461,6 +1461,118 @@ function init(deps) {
         }
     });
 
+    /**
+     * PUBLIC Dashboard Endpoint
+     * No auth required - for homepage display
+     * K-Score only shown for verified tokens
+     * Rate limited by IP (generous)
+     */
+    const publicRateLimit = rateLimit({
+        windowMs: 60 * 1000,
+        max: 60, // 60 req/min per IP
+        message: { success: false, error: 'Rate limit. Try again shortly.' }
+    });
+
+    router.get('/tokens/public', cacheControl(5, 15), publicRateLimit, async (req, res) => {
+        let { sort = 'volume', page = 1, direction = 'desc', limit = 20, filter, search = '' } = req.query;
+        try {
+            limit = Math.min(Math.max(parseInt(limit) || 20, 1), 50);
+            page = Math.max(parseInt(page) || 1, 1);
+
+            const redis = getClient();
+            const cacheKey = `public:tokens:${sort}:${page}:${direction}:${limit}:${filter || 'all'}:${search}`;
+
+            if (redis && !search) {
+                try {
+                    const cached = await redis.get(cacheKey);
+                    if (cached) {
+                        res.setHeader('X-Cache', 'HIT');
+                        return res.json(JSON.parse(cached));
+                    }
+                } catch(_) {}
+            }
+
+            let rows = [];
+
+            // Handle search
+            if (search.length > 0) {
+                const isAddress = isValidPubkey(search);
+                if (isAddress) {
+                    rows = await db.all(`SELECT mint, name, symbol, image, priceUsd, marketCap, volume24h, change24h, change1h, change5m, holders, timestamp, hasCommunityUpdate, k_score FROM tokens WHERE mint = $1`, [search]);
+                } else {
+                    // SECURITY: Use parameterized LIKE
+                    rows = await db.all(`SELECT mint, name, symbol, image, priceUsd, marketCap, volume24h, change24h, change1h, change5m, holders, timestamp, hasCommunityUpdate, k_score FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) LIMIT $2`, [`%${search}%`, limit]);
+                }
+            } else {
+                const dir = direction === 'asc' ? 'ASC' : 'DESC';
+                let sortCol = 'volume24h';
+                switch(sort) {
+                    case 'newest': sortCol = 'timestamp'; break;
+                    case 'mcap': sortCol = 'marketCap'; break;
+                    case 'volume': sortCol = 'volume24h'; break;
+                    case '24h': sortCol = 'change24h'; break;
+                    case '1h': sortCol = 'change1h'; break;
+                    case 'holders': sortCol = 'holders'; break;
+                    case 'kscore': sortCol = 'k_score'; break;
+                    default: sortCol = 'volume24h';
+                }
+
+                // SECURITY: Whitelist filter
+                let whereClause = 'WHERE volume24h > 0';
+                if (filter === 'verified') {
+                    whereClause += ' AND hasCommunityUpdate = TRUE';
+                }
+
+                const offset = (page - 1) * limit;
+                rows = await db.all(
+                    `SELECT mint, name, symbol, image, priceUsd, marketCap, volume24h, change24h, change1h, change5m, holders, timestamp, hasCommunityUpdate, k_score
+                     FROM tokens ${whereClause}
+                     ORDER BY COALESCE(${sortCol}, 0) ${dir}
+                     LIMIT $1 OFFSET $2`,
+                    [limit, offset]
+                );
+            }
+
+            const tokens = rows.map(r => {
+                const isVerified = r.hascommunityupdate || r.hasCommunityUpdate;
+                const isNative = isNativeToken(r.mint);
+                const kScore = (isVerified || isNative) ? (r.k_score || 0) : null;
+                const rank = kScore !== null ? getKRank(kScore, r.mint) : null;
+
+                return {
+                    mint: r.mint,
+                    name: r.name,
+                    symbol: r.symbol,
+                    image: r.image,
+                    price: r.priceusd || r.priceUsd,
+                    mcap: r.marketcap || r.marketCap,
+                    volume24h: r.volume24h,
+                    change24h: r.change24h,
+                    change1h: r.change1h,
+                    change5m: r.change5m,
+                    holders: r.holders,
+                    age: r.timestamp,
+                    verified: isVerified,
+                    k_score: kScore,
+                    metal_rank: rank?.tier || null,
+                    metal_icon: rank?.icon || null
+                };
+            });
+
+            const response = { success: true, page, limit, tokens };
+
+            if (redis) {
+                try { await redis.setEx(cacheKey, 10, JSON.stringify(response)); } catch(_) {}
+            }
+
+            res.setHeader('X-Cache', 'MISS');
+            res.json(response);
+        } catch(e) {
+            logger.error('[PublicTokens]', e.message);
+            res.status(500).json({ success: false, error: 'Server error' });
+        }
+    });
+
     router.get('/tokens', cacheControl(2, 5), unifiedRateLimiter, async (req, res) => {
         let { search = '', sort = 'kscore', page = 1, filter, direction = 'desc', limit = 20 } = req.query;
         try {
