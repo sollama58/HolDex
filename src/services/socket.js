@@ -8,9 +8,17 @@ let io;
 
 async function initSocket(server) {
     // 1. Initialize Socket.io
+    // SECURITY: Never fallback to wildcard - use explicit origins only
+    const allowedOrigins = config.CORS_ORIGINS === '*' ? '*' : (config.CORS_ORIGINS || [
+        'https://www.alonisthe.dev',
+        'https://alonisthe.dev',
+        'http://localhost:3000',
+        'http://localhost:5173'
+    ]);
+
     io = new Server(server, {
         cors: {
-            origin: config.CORS_ORIGINS || "*", 
+            origin: allowedOrigins,
             methods: ["GET", "POST"]
         },
         transports: ['websocket', 'polling'],

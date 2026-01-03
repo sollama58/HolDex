@@ -799,12 +799,22 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
+    // SECURITY: Escape LIKE special characters to prevent pattern injection
+    const escapeLikePattern = (str) => str.replace(/[%_\\]/g, '\\$&');
+
     router.post('/admin/update-key', requireAdmin, async (req, res) => {
         const { key_id, tier, limit } = req.body;
         try {
-            if (!key_id) return res.status(400).json({ success: false, error: "key_id required" });
-            // Find by key_hash prefix
-            await db.run(`UPDATE api_keys SET tier = $1, requests_limit = $2 WHERE key_hash LIKE $3`, [tier, parseInt(limit), key_id + '%']);
+            if (!key_id || typeof key_id !== 'string' || key_id.length < 8) {
+                return res.status(400).json({ success: false, error: "Valid key_id required (min 8 chars)" });
+            }
+            // SECURITY: Escape LIKE pattern and validate tier
+            const VALID_TIERS = ['free', 'pro', 'enterprise'];
+            const safeTier = VALID_TIERS.includes(tier) ? tier : 'free';
+            const safeLimit = Math.max(0, Math.min(parseInt(limit) || 1000, 10000000));
+            const safePattern = escapeLikePattern(key_id) + '%';
+
+            await db.run(`UPDATE api_keys SET tier = $1, requests_limit = $2 WHERE key_hash LIKE $3 ESCAPE '\\'`, [safeTier, safeLimit, safePattern]);
             res.json({ success: true, message: "Key Updated Successfully" });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
@@ -812,7 +822,11 @@ function init(deps) {
     router.post('/admin/revoke-key', requireAdmin, async (req, res) => {
         const { key_id } = req.body;
         try {
-            await db.run('UPDATE api_keys SET is_active = FALSE WHERE key_hash LIKE $1', [key_id + '%']);
+            if (!key_id || typeof key_id !== 'string' || key_id.length < 8) {
+                return res.status(400).json({ success: false, error: "Valid key_id required" });
+            }
+            const safePattern = escapeLikePattern(key_id) + '%';
+            await db.run(`UPDATE api_keys SET is_active = FALSE WHERE key_hash LIKE $1 ESCAPE '\\'`, [safePattern]);
             res.json({ success: true, message: "Key Revoked" });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
@@ -820,7 +834,11 @@ function init(deps) {
     router.post('/admin/delete-key', requireAdmin, async (req, res) => {
         const { key_id } = req.body;
         try {
-            await db.run('DELETE FROM api_keys WHERE key_hash LIKE $1', [key_id + '%']);
+            if (!key_id || typeof key_id !== 'string' || key_id.length < 8) {
+                return res.status(400).json({ success: false, error: "Valid key_id required" });
+            }
+            const safePattern = escapeLikePattern(key_id) + '%';
+            await db.run(`DELETE FROM api_keys WHERE key_hash LIKE $1 ESCAPE '\\'`, [safePattern]);
             res.json({ success: true, message: "Key Deleted" });
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
