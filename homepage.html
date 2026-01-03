@@ -53,10 +53,13 @@
         .holdex-table th:first-child { text-align: left; padding-left: 12px; position: sticky; left: 0; z-index: 30; background: #141414; border-right: 1px solid #252525; }
         .holdex-table td { padding: 8px 8px; border-bottom: 1px solid #1a1a1a; vertical-align: middle; font-family: 'JetBrains Mono', monospace; white-space: nowrap; font-size: 12px; }
         .holdex-table td:first-child { padding-left: 12px; position: sticky; left: 0; z-index: 10; background: #0a0a0a; border-right: 1px solid #252525; }
+        .holdex-table tr { transition: background 0.15s ease; }
         .holdex-table tr:hover td { background: rgba(234, 88, 12, 0.08); }
-        .holdex-table tr:hover td:first-child { background: #121212; } 
+        .holdex-table tr:hover td:first-child { background: #121212; }
+        .holdex-table tr:active td { background: rgba(234, 88, 12, 0.15); } 
 
-        .img-token { width: 32px; height: 32px; border-radius: 6px; border: 2px solid #252525; object-fit: cover; flex-shrink: 0; background: #000; }
+        .img-token { width: 32px; height: 32px; border-radius: 6px; border: 2px solid #252525; object-fit: cover; flex-shrink: 0; background: #000; transition: transform 0.2s, border-color 0.2s; }
+        .holdex-table tr:hover .img-token { transform: scale(1.05); border-color: #ea580c; }
         .pill { padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; font-family: 'JetBrains Mono'; }
         .pill-green { background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4); }
         .pill-red { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
@@ -68,8 +71,9 @@
         .search-box::placeholder { color: #737373; }
         .clear-search { position: absolute; right: 46px; top: 50%; transform: translateY(-50%); color: #737373; cursor: pointer; display: none; }
         
-        .nav-btn { background: transparent; color: #737373; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 800; transition: all 0.2s; border: 2px solid transparent; }
+        .nav-btn { background: transparent; color: #737373; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 800; transition: all 0.2s; border: 2px solid transparent; outline: none; }
         .nav-btn:hover { color: #fb923c; }
+        .nav-btn:focus-visible { box-shadow: 0 0 0 2px #ea580c; }
         .nav-btn.active { background: #141414; color: #ea580c; border-color: #252525; box-shadow: 0 4px 0 #000; }
 
         .filter-toggle { background: #141414; border: 1px solid #252525; color: #737373; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 11px; font-weight: 700; transition: all 0.2s ease; display: flex; align-items: center; gap: 6px; white-space: nowrap; flex-shrink: 0; }
@@ -129,6 +133,32 @@
         .modal-content { max-height: 85vh; overflow-y: auto; width: 100%; border-radius: 16px 16px 0 0; background: #0a0a0a; border: 1px solid #252525; box-shadow: 0 -10px 40px rgba(234,88,12,0.1); }
         @media (min-width: 768px) { .modal-content { border-radius: 16px; width: auto; min-width: 400px; max-width: 800px; } }
 
+        /* Mobile-First Responsive Improvements */
+        @media (max-width: 640px) {
+            /* Larger touch targets on mobile */
+            .nav-btn, .refresh-btn, .filter-toggle { min-height: 44px; min-width: 44px; }
+            .bottom-nav-item { min-height: 48px; padding: 6px; }
+            /* Better text sizing */
+            .holdex-table td { font-size: 11px; padding: 10px 6px; }
+            .holdex-table th { font-size: 10px; padding: 12px 6px; }
+            .img-token { width: 28px; height: 28px; }
+            /* Truncate long token names */
+            .holdex-table td:first-child .flex-col span { max-width: 70px; overflow: hidden; text-overflow: ellipsis; }
+            /* Compact pagination */
+            #page-display { font-size: 14px; }
+            /* Hide less important columns on very small screens */
+            .sort-icon { display: none; }
+            /* Prevent horizontal scroll on table controls */
+            #table-controls { flex-wrap: wrap; gap: 8px; }
+            #table-controls > * { flex-shrink: 0; }
+            .search-container { order: 10; width: 100%; margin-top: 8px; }
+        }
+        @media (max-width: 400px) {
+            .holdex-table td:first-child .flex-col span { max-width: 55px; }
+            .stat-value { font-size: 14px; }
+            .action-btn { padding: 10px 12px; font-size: 12px; }
+        }
+
         /* Animation */
         @keyframes spin { 100% { transform: rotate(360deg); } }
         .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
@@ -160,8 +190,25 @@
         #detail-banner-img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; }
 
         /* Sort Icon in Header */
-        .sort-icon { display: inline-block; transition: transform 0.2s; }
+        .sort-icon { display: inline-block; transition: transform 0.2s; opacity: 0.5; }
+        .sort-icon.active { opacity: 1; }
+        .sort-icon.desc { transform: rotate(180deg); }
         th[data-sort] { cursor: pointer; user-select: none; }
+        th[data-sort]:hover { color: #fff; background: #1a1a1a; }
+        th[data-sort].sorted { color: #fff; }
+
+        /* Skeleton Loader */
+        .skeleton { background: linear-gradient(90deg, #1a1a1a 25%, #252525 50%, #1a1a1a 75%); background-size: 200% 100%; animation: skeleton-loading 1.5s infinite; border-radius: 4px; }
+        @keyframes skeleton-loading { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+        .skeleton-row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid #1a1a1a; }
+        .skeleton-avatar { width: 32px; height: 32px; border-radius: 6px; }
+        .skeleton-text { height: 12px; flex: 1; }
+        .skeleton-short { height: 12px; width: 60px; }
+
+        /* Search Loading Spinner */
+        .search-spinner { position: absolute; right: 46px; top: 50%; transform: translateY(-50%); display: none; }
+        .search-spinner.active { display: block; }
+        .search-spinner i { animation: spin 1s linear infinite; color: #ea580c; }
 
         /* K-Score Metal Rank Badges (aligned with Credit Grades) */
         .k-rank { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono'; }
@@ -322,7 +369,8 @@
                 <div class="relative flex-grow search-container">
                     <input type="text" id="search" placeholder="Holdex it... paste CA or ticker" class="search-box">
                     <i id="clear-search-btn" data-lucide="x" width="16" class="clear-search" onclick="clearSearch()"></i>
-                    <i id="help-btn" data-lucide="help-circle" width="18" class="absolute right-3 top-1/2 -translate-y-1/2 text-[#737373]" onclick="toggleHowItWorksModal()"></i>
+                    <span id="search-spinner" class="search-spinner"><i data-lucide="loader-2" width="16"></i></span>
+                    <i id="help-btn" data-lucide="help-circle" width="18" class="absolute right-3 top-1/2 -translate-y-1/2 text-[#737373] cursor-pointer hover:text-[#ea580c] transition" onclick="toggleHowItWorksModal()" title="How K-Score works"></i>
                 </div>
                 <button id="manual-refresh" onclick="handleManualRefresh()" class="refresh-btn" title="Refresh Data">
                     <i data-lucide="refresh-cw" width="18"></i>
@@ -365,19 +413,19 @@
                 <table class="holdex-table">
                     <thead>
                         <tr>
-                            <th class="sort-header w-auto md:w-[30%]" data-sort="newest" onclick="setSort('newest')">Asset <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
+                            <th class="sort-header w-auto md:w-[30%]" data-sort="newest" onclick="setSort('newest')" title="Token name and symbol. Click to sort by newest.">Asset <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
                             <!-- K-SCORE HEADER: Updated to be sortable but keep help icon -->
-                            <th class="sort-header text-[#ea580c] border-b-[#ea580c] border-b-2 hidden md:table-cell cursor-pointer" data-sort="kscore" onclick="setSort('kscore')">
+                            <th class="sort-header text-[#ea580c] border-b-[#ea580c] border-b-2 hidden md:table-cell cursor-pointer" data-sort="kscore" onclick="setSort('kscore')" title="K-Score: Diamond Hands + Organic Growth + Longevity. Higher = stronger holders.">
                                 Score <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i>
                                 <i data-lucide="help-circle" width="12" class="inline ml-1 text-[#737373] hover:text-white" onclick="event.stopPropagation(); toggleKScoreModal()"></i>
                             </th>
                             <!-- PRICE COLUMN REMOVED -->
-                            <th class="sort-header hidden md:table-cell" data-sort="1h" onclick="setSort('1h')">1h% <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
-                            <th class="sort-header hidden md:table-cell" data-sort="24h" onclick="setSort('24h')">24h% <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
-                            <th class="sort-header" data-sort="volume" onclick="setSort('volume')">Vol <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
-                            <th class="sort-header" data-sort="mcap" onclick="setSort('mcap')">MCap <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
-                            <th class="sort-header hidden md:table-cell" data-sort="holders" onclick="setSort('holders')">Holders <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
-                            <th class="sort-header hidden md:table-cell" data-sort="age" onclick="setSort('age')">Age <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
+                            <th class="sort-header hidden md:table-cell" data-sort="1h" onclick="setSort('1h')" title="Price change in the last hour">1h% <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
+                            <th class="sort-header hidden md:table-cell" data-sort="24h" onclick="setSort('24h')" title="Price change in the last 24 hours">24h% <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
+                            <th class="sort-header" data-sort="volume" onclick="setSort('volume')" title="24-hour trading volume in USD">Vol <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
+                            <th class="sort-header" data-sort="mcap" onclick="setSort('mcap')" title="Market capitalization (price × supply)">MCap <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
+                            <th class="sort-header hidden md:table-cell" data-sort="holders" onclick="setSort('holders')" title="Number of unique wallet addresses holding this token">Holders <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
+                            <th class="sort-header hidden md:table-cell" data-sort="age" onclick="setSort('age')" title="Time since token creation">Age <i data-lucide="arrow-down-up" width="12" class="sort-icon inline ml-1 opacity-30"></i></th>
                         </tr>
                     </thead>
                     <tbody id="table-body">
@@ -387,14 +435,21 @@
             </div>
 
             <!-- Pagination -->
-            <div class="bg-[#141414] p-4 border-t-2 border-[#252525] flex justify-between items-center mt-auto">
-                <button id="btn-prev" onclick="changePage(-1)" class="nav-btn flex items-center gap-2 disabled:opacity-50" disabled>
+            <div class="bg-[#141414] p-4 border-t-2 border-[#252525] flex justify-center items-center gap-4 mt-auto">
+                <button id="btn-first" onclick="goToPage(1)" class="nav-btn px-3 py-2 disabled:opacity-30" title="Go to first page">
+                    <i data-lucide="chevrons-left" width="16"></i>
+                </button>
+                <button id="btn-prev" onclick="changePage(-1)" class="nav-btn px-3 py-2 disabled:opacity-30" disabled title="Previous page">
                     <i data-lucide="chevron-left" width="16"></i>
                 </button>
-                <span id="page-display" class="text-[#fb923c] font-mono font-bold text-sm">Page 1</span>
-                <button id="btn-next" onclick="changePage(1)" class="nav-btn flex items-center gap-2">
+                <div class="flex items-center gap-2 bg-[#0a0a0a] px-4 py-2 rounded-lg border border-[#252525]">
+                    <span class="text-[#737373] text-xs">PAGE</span>
+                    <span id="page-display" class="text-[#fb923c] font-mono font-bold text-lg min-w-[24px] text-center">1</span>
+                </div>
+                <button id="btn-next" onclick="changePage(1)" class="nav-btn px-3 py-2 disabled:opacity-30" title="Next page">
                     <i data-lucide="chevron-right" width="16"></i>
                 </button>
+                <span id="pagination-info" class="text-[#737373] text-xs font-mono hidden md:inline"></span>
             </div>
         </div>
     </div>
@@ -1406,7 +1461,7 @@
 
         // Stats
         const formatVal = (v) => v ? '$'+ new Intl.NumberFormat('en',{notation:'compact'}).format(v) : '--';
-        document.getElementById('popover-mcap').textContent = formatVal(token.marketCap);
+        document.getElementById('popover-mcap').textContent = formatVal(token.mcap || token.marketCap || 0);
         document.getElementById('popover-vol').textContent = formatVal(token.volume24h);
 
         // Conviction (if available)
@@ -1506,7 +1561,7 @@
         const safeSetText = (id, txt) => { const el = document.getElementById(id); if(el) el.innerText = txt; };
         const safeSetHTML = (id, htm) => { const el = document.getElementById(id); if(el) el.innerHTML = htm; };
         safeSetText('stat-price', formatMoney(data.priceUsd));
-        safeSetText('stat-mcap', formatCompact(data.marketCap));
+        safeSetText('stat-mcap', formatCompact(data.mcap || data.marketCap || 0));
         safeSetHTML('stat-chg5m', formatPct(data.change5m));
         safeSetHTML('stat-chg24h', formatPct(data.change24h));
         safeSetText('stat-holders', formatHolders(data.holders));
@@ -1551,29 +1606,59 @@
     }
 
     // --- FETCH LIST ---
-    async function fetchList() { 
-        try { 
-            const pDisplay = document.getElementById('page-display'); 
-            const prev = document.getElementById('btn-prev'); 
-            const next = document.getElementById('btn-next'); 
-            if(pDisplay) pDisplay.innerText = `Page ${currentPage}`; 
-            if(prev) prev.disabled = currentPage <= 1; 
-            
+    let isLoading = false;
+    let isInitialLoad = true;
+
+    async function fetchList() {
+        const spinner = document.getElementById('search-spinner');
+        const tbody = document.getElementById('table-body');
+
+        try {
+            // Show loading state
+            isLoading = true;
+            if (spinner) spinner.classList.add('active');
+
+            // Show skeleton on initial load
+            if (isInitialLoad && tbody) {
+                tbody.innerHTML = Array(10).fill(0).map(() => `
+                    <tr class="skeleton-row">
+                        <td class="bg-[#0a0a0a]"><div class="flex items-center gap-2"><div class="skeleton skeleton-avatar"></div><div class="flex flex-col gap-1"><div class="skeleton skeleton-text" style="width:60px"></div><div class="skeleton skeleton-short" style="width:40px"></div></div></div></td>
+                        <td class="hidden md:table-cell"><div class="skeleton skeleton-short"></div></td>
+                        <td class="hidden md:table-cell"><div class="skeleton skeleton-short"></div></td>
+                        <td class="hidden md:table-cell"><div class="skeleton skeleton-short"></div></td>
+                        <td><div class="skeleton skeleton-short"></div></td>
+                        <td><div class="skeleton skeleton-short"></div></td>
+                        <td class="hidden md:table-cell"><div class="skeleton skeleton-short"></div></td>
+                        <td class="hidden md:table-cell"><div class="skeleton skeleton-short"></div></td>
+                    </tr>
+                `).join('');
+            }
+
+            const next = document.getElementById('btn-next');
+            updatePaginationUI();
+
             // Explicitly use currentLimit variable set by dropdown
             // Use public endpoint for dashboard (no auth required)
             let endpoint = `${API_URL}/api/tokens/public?sort=${currentSort}&direction=${currentDirection}&limit=${currentLimit}&page=${currentPage}`;
             if (isVerifiedFilter) endpoint += '&filter=verified';
-            if (searchQuery) endpoint = `${API_URL}/api/tokens/public?search=${encodeURIComponent(searchQuery)}&limit=${currentLimit}`; 
-            
-            const res = await fetch(endpoint); 
-            const data = await res.json(); 
-            
-            if (data.success) { 
-                renderTable(data.tokens); 
+            if (searchQuery) endpoint = `${API_URL}/api/tokens/public?search=${encodeURIComponent(searchQuery)}&limit=${currentLimit}`;
+
+            const res = await fetch(endpoint);
+            const data = await res.json();
+
+            if (data.success) {
+                renderTable(data.tokens);
                 // Ensure pagination respects dynamic limit
-                if(next) next.disabled = data.tokens.length < currentLimit; 
+                if(next) next.disabled = data.tokens.length < currentLimit;
             }
-        } catch (e) { console.error("API Error", e); } 
+            isInitialLoad = false;
+        } catch (e) {
+            console.error("API Error", e);
+            if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-red-400 font-mono">Failed to load tokens. Retrying...</td></tr>`;
+        } finally {
+            isLoading = false;
+            if (spinner) spinner.classList.remove('active');
+        }
     }
 
     // Store tokens for popover access
@@ -1598,15 +1683,23 @@
             const score = t.kScore || t.k_score || 0;
 
             const kScoreDisplay = renderKScore(score, isVerified, t.mint);
-            const formatPct = (v) => (v !== undefined && v !== null) ? `<span class="pill ${v>0?'pill-green':'pill-red'}">${v.toFixed(1)}%</span>` : '-';
-            const formatVal = (v) => v ? '$'+ new Intl.NumberFormat('en',{notation:'compact'}).format(v) : '-';
+            const formatPct = (v) => (v !== undefined && v !== null && !isNaN(v)) ? `<span class="pill ${v>0?'pill-green':'pill-red'}">${Number(v).toFixed(1)}%</span>` : '-';
+            const formatVal = (v) => (v && v > 0) ? '$'+ new Intl.NumberFormat('en',{notation:'compact'}).format(v) : '-';
+
+            // Normalize field names (API returns 'mcap' and 'volume24h')
+            const volume = t.volume24h || t.volume_24h || 0;
+            const mcap = t.mcap || t.marketCap || t.marketcap || t.market_cap || 0;
+            const change1h = t.change1h || t.change_1h;
+            const change24h = t.change24h || t.change_24h;
 
             // SECURITY: Sanitize image URL and escape text content
-            const safeTickerChar = escapeHtml(t.ticker?.[0] || '?');
+            // FIX: Use 'symbol' from API (was 'ticker')
+            const ticker = t.symbol || t.ticker || 'UNK';
+            const safeTickerChar = escapeHtml(ticker?.[0] || '?');
             const img = sanitizeUrl(t.image) || `https://placehold.co/40x40/0a0a0a/ea580c?text=${safeTickerChar}`;
             const safeMint = escapeJs(t.mint);
-            const safeTicker = escapeHtml(t.ticker);
-            const safeName = escapeHtml(t.name);
+            const safeTicker = escapeHtml(ticker);
+            const safeName = escapeHtml(t.name || 'Unknown');
 
             return `
             <tr onclick="navigateTo('token/${safeMint}')" data-token-idx="${idx}" class="cursor-pointer group border-b border-[#252525]/30">
@@ -1625,11 +1718,11 @@
 
                 <td class="text-right font-mono font-bold hidden md:table-cell">${kScoreDisplay}</td>
                 <!-- Price Removed, replaced with 1h% -->
-                <td class="text-right hidden md:table-cell">${formatPct(t.change1h)}</td>
-                <td class="text-right hidden md:table-cell">${formatPct(t.change24h)}</td>
+                <td class="text-right hidden md:table-cell">${formatPct(change1h)}</td>
+                <td class="text-right hidden md:table-cell">${formatPct(change24h)}</td>
 
-                <td class="text-right font-mono text-[#22c55e] text-xs">${formatVal(t.volume24h)}</td>
-                <td class="text-right font-mono text-[#fb923c] text-xs">${formatVal(t.marketCap)}</td>
+                <td class="text-right font-mono text-[#22c55e] text-xs">${formatVal(volume)}</td>
+                <td class="text-right font-mono text-[#fb923c] text-xs">${formatVal(mcap)}</td>
 
                 <td class="text-right font-mono text-[#fb923c] text-xs hidden md:table-cell">${formatHolders(t.holders)}</td>
                 <td class="text-right text-[10px] text-[#737373] font-mono whitespace-nowrap hidden md:table-cell">${timeAgo(t.timestamp)}</td>
@@ -1681,13 +1774,15 @@
                 
                 // Handle mixed casing and normalization
                 // This ensures we always get a boolean regardless of 0/1/"true"/"false"
-                const rawStatus = t.hasCommunityUpdate || t.has_community_update;
+                const rawStatus = t.hasCommunityUpdate || t.has_community_update || t.hascommunityupdate;
                 const isVerified = (rawStatus === true || rawStatus === 1 || rawStatus === 'true');
-                console.log(`🔍 Verified Status for ${t.ticker}:`, isVerified, `(Raw: ${rawStatus})`); // Debug log
+                // FIX: Use 'symbol' from API (was 'ticker')
+                const ticker = t.symbol || t.ticker || 'UNK';
+                console.log(`🔍 Verified Status for ${ticker}:`, isVerified, `(Raw: ${rawStatus})`);
 
                 const tickerEl = document.getElementById('detail-ticker');
                 const nameEl = document.getElementById('detail-name');
-                if (tickerEl) tickerEl.innerText = t.ticker || 'UNK';
+                if (tickerEl) tickerEl.innerText = ticker;
                 if (nameEl) nameEl.innerText = t.name || 'Unknown';
                 
                 const price = t.priceUsd || 0;
@@ -1695,7 +1790,7 @@
                 if (priceEl) priceEl.innerText = (price < 0.01 && price > 0) ? '$'+price.toExponential(2) : '$'+price.toFixed(6);
                 
                 const mcapEl = document.getElementById('stat-mcap');
-                if (mcapEl) mcapEl.innerText = '$' + new Intl.NumberFormat('en', {notation:'compact'}).format(t.marketCap||0);
+                if (mcapEl) mcapEl.innerText = '$' + new Intl.NumberFormat('en', {notation:'compact'}).format(t.mcap || t.marketCap || 0);
                 
                 const holdersEl = document.getElementById('stat-holders');
                 if (holdersEl) holdersEl.innerText = formatHolders(t.holders);
@@ -2229,8 +2324,9 @@
                 currentUpdateTokenData = t;
                 document.getElementById('token-preview-info').classList.remove('hidden');
                 document.getElementById('update-token-img').src = t.image || 'https://placehold.co/40';
-                document.getElementById('update-token-name').innerText = t.name;
-                document.getElementById('update-token-ticker').innerText = t.ticker;
+                document.getElementById('update-token-name').innerText = t.name || 'Unknown';
+                // FIX: Use 'symbol' from API (was 'ticker')
+                document.getElementById('update-token-ticker').innerText = t.symbol || t.ticker || 'UNK';
                 if(t.twitter) document.getElementById('update-twitter').value = t.twitter;
                 if(t.telegram) document.getElementById('update-telegram').value = t.telegram;
                 if(t.website) document.getElementById('update-website').value = t.website;
@@ -2550,8 +2646,48 @@
     window.copyKey = () => { navigator.clipboard.writeText(document.getElementById('generated-key-display').innerText); alert('Copied'); };
 
     // Standard Helpers
-    function changePage(d) { currentPage += d; if(currentPage<1) currentPage=1; fetchList(); }
-    window.setSort = (s) => { if(currentSort===s) currentDirection = currentDirection==='desc'?'asc':'desc'; else { currentSort=s; currentDirection='desc'; } currentPage=1; fetchList(); };
+    function changePage(d) { currentPage += d; if(currentPage<1) currentPage=1; updatePaginationUI(); fetchList(); }
+    function goToPage(p) { currentPage = Math.max(1, p); updatePaginationUI(); fetchList(); }
+    function updatePaginationUI() {
+        const first = document.getElementById('btn-first');
+        const prev = document.getElementById('btn-prev');
+        const pDisplay = document.getElementById('page-display');
+        const info = document.getElementById('pagination-info');
+        if (first) first.disabled = currentPage <= 1;
+        if (prev) prev.disabled = currentPage <= 1;
+        if (pDisplay) pDisplay.innerText = currentPage;
+        if (info) info.innerText = `Showing ${currentLimit} tokens per page`;
+    }
+    window.goToPage = goToPage;
+    window.setSort = (s) => {
+        if(currentSort === s) {
+            currentDirection = currentDirection === 'desc' ? 'asc' : 'desc';
+        } else {
+            currentSort = s;
+            currentDirection = 'desc';
+        }
+        currentPage = 1;
+        // Update visual sort indicators
+        document.querySelectorAll('.sort-header').forEach(th => {
+            th.classList.remove('sorted', 'text-[#ea580c]', 'border-b-[#ea580c]', 'border-b-2');
+            const icon = th.querySelector('.sort-icon');
+            if (icon) {
+                icon.classList.remove('active', 'desc');
+                icon.classList.add('opacity-30');
+            }
+        });
+        const activeHeader = document.querySelector(`th[data-sort="${s}"]`);
+        if (activeHeader) {
+            activeHeader.classList.add('sorted', 'text-[#ea580c]');
+            const icon = activeHeader.querySelector('.sort-icon');
+            if (icon) {
+                icon.classList.add('active');
+                icon.classList.remove('opacity-30');
+                if (currentDirection === 'asc') icon.classList.add('desc'); // rotate for asc
+            }
+        }
+        fetchList();
+    };
     window.toggleVerifiedFilter = () => { isVerifiedFilter=!isVerifiedFilter; document.getElementById('filter-verified').classList.toggle('active'); fetchList(); };
     window.toggleZeroVolFilter = () => { isZeroVolHidden=!isZeroVolHidden; document.getElementById('filter-zerovol').classList.toggle('active'); fetchList(); };
     window.handleManualRefresh = () => fetchList();
