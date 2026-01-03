@@ -368,6 +368,10 @@ async function deltaConvictionAnalysis(db, mint) {
     let reducers = 0;
     let extractors = 0;
 
+    // TOP 20 for breakdown (sorted by balance DESC from loadHolderSnapshots)
+    const TOP_20_FOR_BREAKDOWN = 20;
+    const top20Addresses = new Set(snapshots.slice(0, TOP_20_FOR_BREAKDOWN).map(s => s.holder));
+
     // OPTIMIZATION: Process snapshots in parallel batches (5x faster)
     const BATCH_SIZE = 5;
     for (let i = 0; i < snapshots.length; i += BATCH_SIZE) {
@@ -415,11 +419,14 @@ async function deltaConvictionAnalysis(db, mint) {
                     updated++;
                     logger.debug(`[Delta] ${holder.slice(0,8)}: +${txCount} txs → ${convictionClass}`);
                 }
-                switch (convictionClass) {
-                    case 'accumulator': accumulators++; break;
-                    case 'holder': holders++; break;
-                    case 'reducer': reducers++; break;
-                    case 'extractor': extractors++; break;
+                // Only count top 20 for breakdown (matches conviction score calculation)
+                if (top20Addresses.has(holder)) {
+                    switch (convictionClass) {
+                        case 'accumulator': accumulators++; break;
+                        case 'holder': holders++; break;
+                        case 'reducer': reducers++; break;
+                        case 'extractor': extractors++; break;
+                    }
                 }
             }
         }
@@ -430,10 +437,11 @@ async function deltaConvictionAnalysis(db, mint) {
         }
     }
 
-    const analyzed = snapshots.length;
+    // Analyzed = top 20 only (matches conviction score calculation)
+    const analyzed = Math.min(snapshots.length, TOP_20_FOR_BREAKDOWN);
     const score = analyzed > 0 ? Math.round(((accumulators + holders) / analyzed) * 100) : 0;
 
-    logger.info(`[Delta] ${mint.slice(0,8)}: ${score}% (${updated} updated, ${accumulators} acc, ${holders} hold)`);
+    logger.info(`[Delta] ${mint.slice(0,8)}: ${score}% (${updated} updated, ${accumulators} acc, ${holders} hold, top ${analyzed})`);
 
     return {
         score,
@@ -904,7 +912,11 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
                 if (ageMinutes < 30) {
                     let accumulators = 0, holders = 0, reducers = 0, extractors = 0;
 
-                    for (const snap of snapshots) {
+                    // Only count TOP 20 for breakdown (sorted by balance DESC)
+                    const TOP_20 = 20;
+                    const top20Snapshots = snapshots.slice(0, TOP_20);
+
+                    for (const snap of top20Snapshots) {
                         switch (snap.conviction_class) {
                             case 'accumulator': accumulators++; break;
                             case 'holder': holders++; break;
@@ -913,7 +925,7 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
                         }
                     }
 
-                    const analyzed = snapshots.length;
+                    const analyzed = top20Snapshots.length;
                     const score = analyzed > 0 ? Math.round(((accumulators + holders) / analyzed) * 100) : 0;
 
                     // Use stored holder count from DB (0 RPC calls)
