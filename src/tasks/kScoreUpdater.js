@@ -258,6 +258,33 @@ async function saveHolderSnapshots(db, mint, holders) {
 }
 
 /**
+ * Prune stale holders - keep only top 20 by balance
+ * Removes holders that are no longer in the top 20 on-chain
+ */
+async function pruneStaleHolders(db, mint) {
+    try {
+        const result = await db.run(`
+            DELETE FROM holder_snapshots
+            WHERE mint = $1 AND holder NOT IN (
+                SELECT holder FROM holder_snapshots
+                WHERE mint = $1
+                ORDER BY balance DESC
+                LIMIT 20
+            )
+        `, [mint]);
+
+        const deleted = result?.rowCount || 0;
+        if (deleted > 0) {
+            logger.debug(`[Prune] ${mint.slice(0,8)}: Removed ${deleted} stale holders`);
+        }
+        return deleted;
+    } catch (e) {
+        logger.warn(`[Prune] ${mint.slice(0,8)}: Failed to prune: ${e.message}`);
+        return 0;
+    }
+}
+
+/**
  * Load existing holder snapshots for a token
  */
 async function loadHolderSnapshots(db, mint) {
@@ -1086,6 +1113,9 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
         if (db && snapshotData.length > 0) {
             const { saved, failed } = await saveHolderSnapshots(db, mint, snapshotData);
             logger.info(`[Snapshot] ${mint.slice(0,8)}: Saved ${saved}/${snapshotData.length} holder snapshots${failed > 0 ? ` (${failed} failed)` : ''}`);
+
+            // 6. Prune stale holders (keep only top 20 by balance)
+            await pruneStaleHolders(db, mint);
         }
 
         const score = Math.round(((accumulators + holders) / analyzed) * 100);
