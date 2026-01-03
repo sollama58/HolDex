@@ -123,19 +123,12 @@ module.exports = {
     FEE_TOKEN_AMOUNT: parseFloat(process.env.FEE_TOKEN_AMOUNT) || 5000,
     FEE_TOKEN_MINT: process.env.FEE_TOKEN_MINT || '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump',
 
-    // --- API TIER PRICING ($ASDFASDFA) ---
-    // Self-service tier upgrades - pay with $ASDFASDFA, no admin needed
-    API_TIER_PRICING: {
-        pro: {
-            tokens: 25000,       // 25,000 $ASDFASDFA for pro tier
-            limit: 100000,       // 100k requests/day
-            label: 'Pro'
-        },
-        enterprise: {
-            tokens: 100000,      // 100,000 $ASDFASDFA for enterprise tier
-            limit: 1000000,      // 1M requests/day
-            label: 'Enterprise'
-        }
+    // --- BURN CREDITS SYSTEM ---
+    // "Hold to enter. Burn to use. 1 token burned = 1 API call forever."
+    BURN_CREDITS: {
+        minHoldings: 10000,      // Must hold 10K $ASDFASDFA to access API
+        callsPerBurn: 1,         // 1 token burned = 1 API call
+        philosophy: 'Burn = Value Creation = Lifetime API Access'
     },
     
     // --- MEMORY PROTECTION ---

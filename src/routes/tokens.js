@@ -490,117 +490,94 @@ function init(deps) {
         } catch (e) { console.error(e); res.status(500).json({ success: false, error: "Server Error" }); }
     });
 
-    // --- API TIER UPGRADE (Self-service with $ASDFASDFA) ---
-    // "No admins. Just $ASDFASDFA."
-    router.get('/api-tier-pricing', (req, res) => {
+    // --- BURN CREDITS SYSTEM ---
+    // "Hold to enter. Burn to use. 1 token burned = 1 call forever."
+    const burnCredits = require('../services/burnCredits');
+
+    // Get burn credit pricing info
+    router.get('/api-pricing', (req, res) => {
         res.json({
             success: true,
+            system: 'burn-credits',
+            philosophy: 'Hold to enter. Burn to use.',
             tokenMint: config.FEE_TOKEN_MINT,
-            treasury: config.TREASURY_WALLET,
-            tiers: {
-                free: { tokens: 0, limit: 1000, label: 'Free' },
-                ...config.API_TIER_PRICING
-            }
+            requirements: {
+                minHoldings: burnCredits.MIN_HOLDINGS,
+                minHoldingsFormatted: `${burnCredits.MIN_HOLDINGS.toLocaleString()} $ASDFASDFA`
+            },
+            pricing: {
+                ratio: '1:1',
+                description: '1 token burned = 1 API call (lifetime)',
+                burnMethods: [
+                    'Transfer to treasury wallet',
+                    'Transfer to burn address (1111...)',
+                    'SPL Token burn instruction'
+                ]
+            },
+            burnAddresses: Array.from(burnCredits.BURN_ADDRESSES)
         });
     });
 
-    router.post('/upgrade-api-tier', async (req, res) => {
-        const { wallet, signature, key_id, tier, tx_signature } = req.body;
+    // Check wallet's burn credits
+    router.get('/credits/:wallet', async (req, res) => {
+        const { wallet } = req.params;
+
+        if (!wallet || wallet.length < 32) {
+            return res.status(400).json({ success: false, error: 'Invalid wallet address' });
+        }
 
         try {
-            // 1. Validate inputs
-            if (!wallet || !signature || !key_id || !tier || !tx_signature) {
-                return res.status(400).json({
-                    success: false,
-                    error: "Missing required fields: wallet, signature, key_id, tier, tx_signature"
-                });
-            }
+            const { getSolanaConnection } = require('../services/solana');
+            const connection = getSolanaConnection();
 
-            // 2. Validate tier exists
-            const tierConfig = config.API_TIER_PRICING[tier];
-            if (!tierConfig) {
-                return res.status(400).json({
-                    success: false,
-                    error: `Invalid tier. Available: ${Object.keys(config.API_TIER_PRICING).join(', ')}`
-                });
-            }
-
-            // 3. Verify wallet signature
-            const msg = new TextEncoder().encode("Upgrade HolDex API Tier");
-            const sigBytes = Buffer.from(signature, 'base64');
-            const pubBytes = new PublicKey(wallet).toBytes();
-            const verified = nacl.sign.detached.verify(msg, sigBytes, pubBytes);
-
-            if (!verified) {
-                return res.status(403).json({ success: false, error: "Invalid wallet signature" });
-            }
-
-            // 4. Find the API key and verify ownership
-            const apiKey = await db.get(
-                'SELECT * FROM api_keys WHERE key_hash LIKE $1 AND owner = $2',
-                [key_id + '%', wallet]
-            );
-
-            if (!apiKey) {
-                return res.status(404).json({
-                    success: false,
-                    error: "API key not found or not owned by this wallet"
-                });
-            }
-
-            if (!apiKey.is_active) {
-                return res.status(400).json({ success: false, error: "API key is revoked" });
-            }
-
-            // 5. Check if already at this tier or higher
-            const tierOrder = { free: 0, pro: 1, enterprise: 2 };
-            if (tierOrder[apiKey.tier] >= tierOrder[tier]) {
-                return res.status(400).json({
-                    success: false,
-                    error: `Already at ${apiKey.tier} tier (same or higher than ${tier})`
-                });
-            }
-
-            // 6. Verify payment signature hasn't been used
-            try {
-                await verifyPayment(tx_signature, wallet);
-            } catch (payErr) {
-                return res.status(402).json({ success: false, error: payErr.message });
-            }
-
-            // 7. Record the upgrade transaction (prevent replay)
-            await db.run(`
-                INSERT INTO token_updates (mint, signature, payer, status, submittedAt, description)
-                VALUES ($1, $2, $3, 'approved', $4, $5)
-            `, [
-                'API_TIER_UPGRADE',
-                tx_signature,
-                wallet,
-                Date.now(),
-                `Upgrade to ${tier}: ${tierConfig.tokens} $ASDFASDFA`
-            ]);
-
-            // 8. Upgrade the API key
-            await db.run(`
-                UPDATE api_keys
-                SET tier = $1, requests_limit = $2
-                WHERE key_hash LIKE $3
-            `, [tier, tierConfig.limit, key_id + '%']);
-
-            logger.info(`[TierUpgrade] ${wallet.slice(0,8)} upgraded to ${tier} (key: ${key_id})`);
+            const status = await burnCredits.getCreditStatus(connection, db, wallet);
 
             res.json({
                 success: true,
-                message: `Upgraded to ${tierConfig.label} tier!`,
-                tier: tier,
-                newLimit: tierConfig.limit,
-                key_id: key_id
+                credits: status,
+                eligible: status.holdingEligible && status.remainingCalls > 0,
+                message: !status.holdingEligible
+                    ? `Hold ${burnCredits.MIN_HOLDINGS.toLocaleString()}+ $ASDFASDFA to access API`
+                    : status.remainingCalls === 0
+                        ? 'Burn $ASDFASDFA to earn API calls (1 token = 1 call)'
+                        : `${status.remainingCalls.toLocaleString()} API calls remaining`
             });
 
         } catch (e) {
-            logger.error(`[TierUpgrade] Error: ${e.message}`);
-            res.status(500).json({ success: false, error: "Upgrade failed" });
+            logger.error(`[Credits] Error: ${e.message}`);
+            res.status(500).json({ success: false, error: 'Failed to check credits' });
         }
+    });
+
+    // Refresh burn cache for a wallet (after new burn)
+    router.post('/credits/:wallet/refresh', async (req, res) => {
+        const { wallet } = req.params;
+
+        try {
+            burnCredits.invalidateCache(wallet);
+            const burned = await burnCredits.getWalletBurns(wallet);
+
+            res.json({
+                success: true,
+                wallet,
+                burned,
+                message: `Refreshed. Total burned: ${burned.toLocaleString()} $ASDFASDFA`
+            });
+
+        } catch (e) {
+            logger.error(`[Credits] Refresh error: ${e.message}`);
+            res.status(500).json({ success: false, error: 'Failed to refresh' });
+        }
+    });
+
+    // Legacy tier pricing (deprecated, redirects to new system)
+    router.get('/api-tier-pricing', (req, res) => {
+        res.json({
+            success: true,
+            deprecated: true,
+            message: 'Tier system replaced by burn credits. See /api/api-pricing',
+            redirect: '/api/api-pricing'
+        });
     });
 
     // --- ADMIN ROUTES ---

@@ -160,6 +160,15 @@ async function initDB() {
                     change_percent DOUBLE PRECISION DEFAULT 0,
                     PRIMARY KEY (mint, timestamp)
                 );
+
+                -- Wallet credits for burn-based API access
+                -- "Burn = Value Creation = Lifetime API Access"
+                CREATE TABLE IF NOT EXISTS wallet_credits (
+                    wallet TEXT PRIMARY KEY,
+                    used_calls BIGINT DEFAULT 0,
+                    last_call BIGINT,
+                    created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000
+                );
             `);
 
             // Add new columns if they don't exist (migration-safe)

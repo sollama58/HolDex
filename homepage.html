@@ -362,27 +362,47 @@
                         </div>
                     </div>
 
-                    <!-- Tier Upgrade Banner -->
+                    <!-- Burn Credits Banner -->
                     <div class="bg-gradient-to-r from-[#2a1005] to-[#1a1005] border border-[#7c2d12] rounded-lg p-3">
                         <div class="flex items-center gap-2 mb-2">
-                            <span class="text-[#fb923c] font-bold text-xs uppercase">Upgrade with $ASDFASDFA</span>
-                            <span class="text-[#9a3412] text-xs">No admins. Just tokens.</span>
+                            <span class="text-[#fb923c] font-bold text-xs uppercase">Burn = API Calls</span>
+                            <span class="text-[#9a3412] text-xs">Hold to enter. Burn to use.</span>
                         </div>
-                        <div class="grid grid-cols-3 gap-2 text-center text-xs">
-                            <div class="bg-black/50 rounded p-2">
-                                <div class="text-[#9a3412]">Free</div>
-                                <div class="text-[#fb923c] font-bold">1K/day</div>
-                                <div class="text-[#7c2d12]">$0</div>
-                            </div>
+                        <div class="grid grid-cols-2 gap-2 text-center text-xs">
                             <div class="bg-black/50 rounded p-2 border border-[#fb923c]/30">
-                                <div class="text-[#fb923c]">Pro</div>
-                                <div class="text-[#22c55e] font-bold">100K/day</div>
-                                <div class="text-[#fb923c]">25K $ASDF</div>
+                                <div class="text-[#9a3412]">Eligibility</div>
+                                <div class="text-[#fb923c] font-bold">Hold 10K+</div>
+                                <div class="text-[#7c2d12]">$ASDFASDFA</div>
                             </div>
                             <div class="bg-black/50 rounded p-2 border border-[#22c55e]/30">
-                                <div class="text-[#22c55e]">Enterprise</div>
-                                <div class="text-[#22c55e] font-bold">1M/day</div>
-                                <div class="text-[#22c55e]">100K $ASDF</div>
+                                <div class="text-[#9a3412]">Pricing</div>
+                                <div class="text-[#22c55e] font-bold">1:1</div>
+                                <div class="text-[#22c55e]">1 burn = 1 call</div>
+                            </div>
+                        </div>
+                        <div class="text-center text-[10px] text-[#9a3412] mt-2 italic">
+                            Burn $ASDFASDFA → Earn API calls forever. Power users rewarded.
+                        </div>
+                    </div>
+
+                    <!-- My Credits -->
+                    <div id="my-credits" class="hidden bg-black/50 rounded-lg p-3 border border-[#22c55e]/30">
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="text-[#22c55e] font-bold text-xs uppercase">Your Credits</span>
+                            <button onclick="refreshCredits()" class="text-[10px] text-[#9a3412] hover:text-[#fb923c]"><i data-lucide="refresh-cw" width="10"></i></button>
+                        </div>
+                        <div class="grid grid-cols-3 gap-2 text-center text-xs">
+                            <div>
+                                <div class="text-[#9a3412]">Holdings</div>
+                                <div id="credits-holdings" class="text-[#fb923c] font-bold">-</div>
+                            </div>
+                            <div>
+                                <div class="text-[#9a3412]">Burned</div>
+                                <div id="credits-burned" class="text-[#22c55e] font-bold">-</div>
+                            </div>
+                            <div>
+                                <div class="text-[#9a3412]">Remaining</div>
+                                <div id="credits-remaining" class="text-[#22c55e] font-bold">-</div>
                             </div>
                         </div>
                     </div>
@@ -800,16 +820,15 @@
         </div>
         
         <div class="bg-[#0f0502] border border-[#7c2d12] p-4 rounded-lg mb-6">
-            <h4 class="text-[#ea580c] font-bold mb-2 text-sm uppercase">Authentication & Rate Limits</h4>
-            <p class="text-sm text-[#ffedd5] mb-2">HolDex uses API keys for authentication. Include your key in the request header:</p>
-            <div class="code-block text-xs py-2 px-3">x-api-key: YOUR_KEY_HERE</div>
+            <h4 class="text-[#ea580c] font-bold mb-2 text-sm uppercase">Burn Credits Access</h4>
+            <p class="text-sm text-[#ffedd5] mb-2">HolDex uses a burn-based access system. Include your wallet in requests:</p>
+            <div class="code-block text-xs py-2 px-3">x-wallet: YOUR_WALLET_ADDRESS</div>
             <div class="mt-3 text-xs">
-                <span class="text-[#9a3412]">Free:</span> <span class="text-[#fb923c]">1K/day</span>
+                <span class="text-[#9a3412]">Eligibility:</span> <span class="text-[#fb923c]">Hold 10K+ $ASDFASDFA</span>
                 <span class="mx-2 text-[#7c2d12]">|</span>
-                <span class="text-[#fb923c]">Pro:</span> <span class="text-[#22c55e]">100K/day</span> <span class="text-[#9a3412]">(25K $ASDF)</span>
-                <span class="mx-2 text-[#7c2d12]">|</span>
-                <span class="text-[#22c55e]">Enterprise:</span> <span class="text-[#22c55e]">1M/day</span> <span class="text-[#9a3412]">(100K $ASDF)</span>
+                <span class="text-[#9a3412]">Pricing:</span> <span class="text-[#22c55e]">1 burn = 1 call (forever)</span>
             </div>
+            <p class="text-[10px] text-[#9a3412] mt-2 italic">Power users who burned tokens = lifetime API access. Value creation rewarded.</p>
         </div>
 
         <div class="space-y-6 overflow-y-auto max-h-[50vh] pr-2 custom-scrollbar">
@@ -866,24 +885,22 @@
                  <p class="text-sm text-[#ffedd5] mb-2">OHLCV data. Params: <code class="text-[#ea580c]">resolution</code> (5, 60, D), <code class="text-[#ea580c]">from</code>, <code class="text-[#ea580c]">to</code></p>
              </div>
 
-             <!-- API Tier Upgrade -->
+             <!-- Burn Credits System -->
              <div class="bg-gradient-to-r from-[#22c55e]/10 to-transparent p-4 rounded-lg border border-[#22c55e]/30">
-                 <h4 class="text-[#22c55e] font-bold mb-3 text-sm uppercase flex items-center gap-2"><i data-lucide="zap" width="14"></i> Self-Service Tier Upgrade</h4>
-                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-blue-900/30 text-blue-400 text-xs font-bold font-mono border border-blue-500/30">POST</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/upgrade-api-tier</span></div>
-                 <p class="text-sm text-[#ffedd5] mb-2">Upgrade API tier with $ASDFASDFA tokens. No admins needed.</p>
-                 <div class="grid grid-cols-3 gap-2 text-center text-xs mb-3">
-                     <div class="bg-black/50 rounded p-2"><div class="text-[#9a3412]">Free</div><div class="text-[#fb923c] font-bold">1K/day</div></div>
-                     <div class="bg-black/50 rounded p-2"><div class="text-[#fb923c]">Pro</div><div class="text-[#22c55e] font-bold">100K/day</div><div class="text-[#fb923c] text-[10px]">25K $ASDF</div></div>
-                     <div class="bg-black/50 rounded p-2"><div class="text-[#22c55e]">Enterprise</div><div class="text-[#22c55e] font-bold">1M/day</div><div class="text-[#22c55e] text-[10px]">100K $ASDF</div></div>
+                 <h4 class="text-[#22c55e] font-bold mb-3 text-sm uppercase flex items-center gap-2"><i data-lucide="flame" width="14"></i> Burn Credits System</h4>
+                 <p class="text-sm text-[#ffedd5] mb-3">Hold to enter. Burn to use. 1 token burned = 1 API call forever.</p>
+                 <div class="grid grid-cols-2 gap-2 text-center text-xs mb-3">
+                     <div class="bg-black/50 rounded p-2"><div class="text-[#9a3412]">Eligibility</div><div class="text-[#fb923c] font-bold">Hold 10K+</div><div class="text-[#7c2d12]">$ASDFASDFA</div></div>
+                     <div class="bg-black/50 rounded p-2"><div class="text-[#9a3412]">Pricing</div><div class="text-[#22c55e] font-bold">1:1</div><div class="text-[#22c55e]">1 burn = 1 call</div></div>
                  </div>
+                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/credits/:wallet</span></div>
                  <div class="code-block text-[10px]">
-<span class="text-[#9a3412]">// Request body</span>
+<span class="text-[#9a3412]">// Response</span>
 {
-  "wallet": "your-wallet-pubkey",
-  "signature": "base64-signature",
-  "key_id": "abc12345",
-  "tier": "pro",
-  "tx_signature": "payment-tx-sig"
+  "holdings": 50000,
+  "burned": 10000,
+  "usedCalls": 2500,
+  "remainingCalls": 7500
 }
                  </div>
              </div>
@@ -2195,95 +2212,59 @@
         } catch (e) { console.error('fetchMyKeys error:', e); }
     }
 
-    // API Tier Upgrade with $ASDFASDFA
-    async function upgradeApiTier(keyId, targetTier) {
-        if (!walletAddress || !walletProvider) {
-            openWalletModal();
-            return;
-        }
-
-        const tierPricing = { pro: 25000, enterprise: 100000 };
-        const cost = tierPricing[targetTier];
-        if (!cost) return alert('Invalid tier');
-
-        if (!confirm(`Upgrade to ${targetTier.toUpperCase()} tier?\n\nCost: ${cost.toLocaleString()} $ASDFASDFA\nNew Limit: ${targetTier === 'pro' ? '100,000' : '1,000,000'} requests/day\n\nThis will transfer tokens to the treasury.`)) {
-            return;
-        }
+    // Burn Credits System
+    async function fetchCredits() {
+        if (!walletAddress) return;
 
         try {
-            // 1. Get fee config
-            const feeRes = await fetch(`${API_URL}/api/config/fees`);
-            const feeData = await feeRes.json();
-            if (!feeData.success) throw new Error('Failed to get fee config');
+            const res = await fetch(`${API_URL}/api/credits/${walletAddress}`);
+            const data = await res.json();
 
-            const tokenMint = feeData.tokenMint;
-            const treasury = feeData.treasury;
+            if (data.success) {
+                const credits = data.credits;
+                document.getElementById('my-credits').classList.remove('hidden');
+                document.getElementById('credits-holdings').textContent = credits.holdings.toLocaleString();
+                document.getElementById('credits-burned').textContent = credits.burned.toLocaleString();
+                document.getElementById('credits-remaining').textContent = credits.remainingCalls.toLocaleString();
 
-            // 2. Get blockhash
-            const bhRes = await fetch(`${API_URL}/api/proxy/blockhash`);
-            const bhData = await bhRes.json();
-            if (!bhData.success) throw new Error('Failed to get blockhash');
+                // Color code based on status
+                const holdingsEl = document.getElementById('credits-holdings');
+                const remainingEl = document.getElementById('credits-remaining');
 
-            // 3. Build transaction
-            const { PublicKey, Transaction, SystemProgram } = solanaWeb3;
-            const { TOKEN_PROGRAM_ID, getAssociatedTokenAddress, createTransferInstruction } = window.splToken;
+                if (credits.holdings < 10000) {
+                    holdingsEl.classList.add('text-red-500');
+                    holdingsEl.classList.remove('text-[#fb923c]');
+                } else {
+                    holdingsEl.classList.remove('text-red-500');
+                    holdingsEl.classList.add('text-[#fb923c]');
+                }
 
-            const payerPubkey = new PublicKey(walletAddress);
-            const treasuryPubkey = new PublicKey(treasury);
-            const tokenMintPubkey = new PublicKey(tokenMint);
-
-            const payerAta = await getAssociatedTokenAddress(tokenMintPubkey, payerPubkey);
-            const treasuryAta = await getAssociatedTokenAddress(tokenMintPubkey, treasuryPubkey);
-
-            const tx = new Transaction();
-            tx.recentBlockhash = bhData.blockhash;
-            tx.feePayer = payerPubkey;
-
-            // Token transfer (6 decimals)
-            const tokenAmount = cost * 1_000_000;
-            tx.add(createTransferInstruction(payerAta, treasuryAta, payerPubkey, tokenAmount, [], TOKEN_PROGRAM_ID));
-
-            // 4. Sign and send
-            const signedTx = await walletProvider.signTransaction(tx);
-            const sendRes = await fetch(`${API_URL}/api/proxy/send-tx`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ signedTx: Buffer.from(signedTx.serialize()).toString('base64') })
-            });
-            const sendData = await sendRes.json();
-            if (!sendData.success) throw new Error(sendData.error || 'Transaction failed');
-
-            // 5. Get upgrade signature
-            const upgradeSignature = await getAuthSignature('Upgrade HolDex API Tier');
-
-            // 6. Call upgrade endpoint
-            const upgradeRes = await fetch(`${API_URL}/api/upgrade-api-tier`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    wallet: walletAddress,
-                    signature: upgradeSignature,
-                    key_id: keyId,
-                    tier: targetTier,
-                    tx_signature: sendData.signature
-                })
-            });
-            const upgradeData = await upgradeRes.json();
-
-            if (upgradeData.success) {
-                alert(`Success! Upgraded to ${targetTier.toUpperCase()} tier.\nNew limit: ${upgradeData.newLimit.toLocaleString()} requests/day`);
-                fetchMyKeys(); // Refresh the list
-            } else {
-                throw new Error(upgradeData.error || 'Upgrade failed');
+                if (credits.remainingCalls === 0) {
+                    remainingEl.classList.add('text-red-500');
+                    remainingEl.classList.remove('text-[#22c55e]');
+                } else {
+                    remainingEl.classList.remove('text-red-500');
+                    remainingEl.classList.add('text-[#22c55e]');
+                }
             }
-
         } catch (e) {
-            console.error('Upgrade error:', e);
-            alert('Upgrade failed: ' + e.message);
+            console.error('fetchCredits error:', e);
         }
     }
 
-    window.upgradeApiTier = upgradeApiTier;
+    async function refreshCredits() {
+        if (!walletAddress) return;
+
+        try {
+            await fetch(`${API_URL}/api/credits/${walletAddress}/refresh`, { method: 'POST' });
+            await fetchCredits();
+        } catch (e) {
+            console.error('refreshCredits error:', e);
+        }
+    }
+
+    window.fetchCredits = fetchCredits;
+    window.refreshCredits = refreshCredits;
 
     window.requestApiKey = requestApiKey; window.fetchMyKeys = fetchMyKeys; window.closeKeyModal = () => toggleModal('key-modal');
     window.copyKey = () => { navigator.clipboard.writeText(document.getElementById('generated-key-display').innerText); alert('Copied'); };
@@ -2337,6 +2318,7 @@
             updateWalletUI(true);
             closeWalletModal();
             checkBalances(); // Check balances on connect
+            fetchCredits(); // Fetch burn credits
         } catch (e) { console.error(e); }
     };
     
