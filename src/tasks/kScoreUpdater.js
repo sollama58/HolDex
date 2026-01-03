@@ -963,37 +963,39 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
                     const analyzed = top20Snapshots.length;
                     const score = analyzed > 0 ? Math.round(((accumulators + holders) / analyzed) * 100) : 0;
 
-                    // Use stored holder count from DB (0 RPC calls)
-                    // This is updated periodically by deep refresh, not on every K-Score calc
+                    // Use stored holder counts from DB (0 RPC calls)
+                    // These are updated by deep refresh, not webhook mode
                     const tokenData = await db.get(
-                        'SELECT holders FROM tokens WHERE mint = $1',
+                        'SELECT holders, real_holders, total_holders FROM tokens WHERE mint = $1',
                         [mint]
                     );
-                    let storedHolderCount = tokenData?.holders || 0;
 
-                    // SECURITY: Detect corrupted holder count (feedback loop prevention)
-                    // If stored count equals snapshot count (max 20), it's likely corrupted
-                    // Fall back to last known good value from history
-                    if (storedHolderCount <= snapshots.length) {
+                    // WEBHOOK MODE: Preserve on-chain data, don't estimate
+                    // real_holders = holders with $1+ value (from deep refresh)
+                    // total_holders = all token accounts (from deep refresh)
+                    // holders = legacy field (kept for compatibility)
+                    let storedRealHolders = tokenData?.real_holders || tokenData?.holders || 0;
+                    let storedTotalHolders = tokenData?.total_holders || tokenData?.holders || 0;
+
+                    // SECURITY: Detect corrupted data (value <= snapshot count is suspicious)
+                    if (storedRealHolders <= snapshots.length || storedTotalHolders <= snapshots.length) {
                         const lastGood = await db.get(
-                            `SELECT holders FROM k_score_history
+                            `SELECT real_holders, holders FROM holder_history
                              WHERE mint = $1 AND holders > 50
                              ORDER BY date DESC LIMIT 1`,
                             [mint]
                         );
-                        if (lastGood?.holders) {
-                            logger.warn(`[Webhook Mode] ${mint.slice(0,8)}: Corrupted holder count detected (${storedHolderCount}), using history (${lastGood.holders})`);
-                            storedHolderCount = lastGood.holders;
+                        if (lastGood) {
+                            logger.warn(`[Webhook Mode] ${mint.slice(0,8)}: Using historical data (real: ${lastGood.real_holders}, total: ${lastGood.holders})`);
+                            storedRealHolders = lastGood.real_holders || lastGood.holders || storedRealHolders;
+                            storedTotalHolders = lastGood.holders || storedTotalHolders;
                         }
                     }
 
-                    // Estimate real holders from snapshot count (holders with balance > dust)
-                    // In webhook mode, snapshots only contain significant holders
-                    const realHoldersCount = storedHolderCount > snapshots.length
-                        ? Math.floor(storedHolderCount * 0.7)
-                        : snapshots.length;
+                    // Use stored values - DO NOT estimate or multiply
+                    const realHoldersCount = storedRealHolders;
 
-                    logger.info(`[Webhook Mode] ${mint.slice(0,8)}: ${score}% conviction from cache (${analyzed} analyzed, ${storedHolderCount} total, ${ageMinutes.toFixed(0)}m old) - 0 RPC`);
+                    logger.info(`[Webhook Mode] ${mint.slice(0,8)}: ${score}% conviction from cache (${analyzed} analyzed, ${storedTotalHolders} total, ${storedRealHolders} real, ${ageMinutes.toFixed(0)}m old) - 0 RPC`);
 
                     return {
                         score,
@@ -1002,10 +1004,11 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
                         holders,
                         reducers,
                         extractors,
-                        realHoldersCount,
-                        totalHolders: storedHolderCount,
+                        realHoldersCount: storedRealHolders,
+                        totalHolders: storedTotalHolders,
                         allHolders: null,  // Not fetched in webhook mode
-                        isWebhookMode: true
+                        isWebhookMode: true,
+                        preserveHolders: true  // Signal: don't overwrite on-chain data
                     };
                 }
                 // No snapshots in DB yet - will fall through to delta/polling mode
@@ -2555,7 +2558,10 @@ async function updateSingleToken(deps, mint) {
             conviction_reducers: conviction.reducers || 0,
             conviction_extractors: conviction.extractors || 0,
             conviction_analyzed: conviction.analyzed || 0,
-            holders: conviction.realHoldersCount || 0,
+            // IMPORTANT: In webhook mode, preserve on-chain holder data
+            holders: conviction.preserveHolders ? (token.holders || conviction.realHoldersCount || 0) : (conviction.realHoldersCount || 0),
+            real_holders: conviction.preserveHolders ? (token.real_holders || conviction.realHoldersCount || 0) : (conviction.realHoldersCount || 0),
+            total_holders: conviction.preserveHolders ? (token.total_holders || conviction.totalHolders || 0) : (conviction.totalHolders || 0),
             last_k_score_update: updateTimestamp,
             // Market
             priceusd: token.priceusd || 0,
@@ -2570,6 +2576,17 @@ async function updateSingleToken(deps, mint) {
 
         const signatures = signAllCategories(tokenForSigning);
 
+        // Determine holder values based on mode
+        const holdersValue = conviction.preserveHolders
+            ? (token.holders || conviction.realHoldersCount || 0)
+            : (conviction.realHoldersCount || 0);
+        const realHoldersValue = conviction.preserveHolders
+            ? (token.real_holders || conviction.realHoldersCount || 0)
+            : (conviction.realHoldersCount || 0);
+        const totalHoldersValue = conviction.preserveHolders
+            ? (token.total_holders || conviction.totalHolders || 0)
+            : (conviction.totalHolders || 0);
+
         await db.run(`
             UPDATE tokens
             SET k_score = $1,
@@ -2581,25 +2598,27 @@ async function updateSingleToken(deps, mint) {
                 conviction_extractors = $7,
                 conviction_analyzed = $8,
                 holders = $9,
-                last_holder_check = $10,
-                burned_amount = $11,
-                burned_percent = $12,
-                initial_supply = $13,
-                is_pump_fun = $14,
-                bonding_curve_complete = $15,
-                mint_authority_revoked = $16,
-                freeze_authority_revoked = $17,
-                is_mutable_supply = $18,
-                sig_identity = $19,
-                sig_security = $20,
-                sig_lp = $21,
-                sig_supply = $22,
-                sig_kscore = $23,
-                sig_market = $24,
-                sig_origin = $25,
-                sig_full = $26,
-                chaos_nonce = $27
-            WHERE mint = $28
+                real_holders = $10,
+                total_holders = $11,
+                last_holder_check = $12,
+                burned_amount = $13,
+                burned_percent = $14,
+                initial_supply = $15,
+                is_pump_fun = $16,
+                bonding_curve_complete = $17,
+                mint_authority_revoked = $18,
+                freeze_authority_revoked = $19,
+                is_mutable_supply = $20,
+                sig_identity = $21,
+                sig_security = $22,
+                sig_lp = $23,
+                sig_supply = $24,
+                sig_kscore = $25,
+                sig_market = $26,
+                sig_origin = $27,
+                sig_full = $28,
+                chaos_nonce = $29
+            WHERE mint = $30
         `, [
             smoothedScore,
             updateTimestamp.toString(),
@@ -2609,7 +2628,9 @@ async function updateSingleToken(deps, mint) {
             conviction.reducers || 0,
             conviction.extractors || 0,
             conviction.analyzed || 0,
-            conviction.realHoldersCount || 0,
+            holdersValue,
+            realHoldersValue,
+            totalHoldersValue,
             updateTimestamp.toString(),
             burnedAmount,
             burn.burnPct || 0,

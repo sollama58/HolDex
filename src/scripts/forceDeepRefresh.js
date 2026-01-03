@@ -54,13 +54,15 @@ async function heliusRpc(method, params) {
 }
 
 /**
- * Fetch real holder count from on-chain
+ * Fetch holder data from on-chain
+ * Returns { totalHolders, realHolders } where realHolders = holders with $1+ value
  */
-async function fetchRealHolderCount(mint) {
-    let holders = [];
+async function fetchHolderData(mint, priceUsd = 0, decimals = 6) {
+    let allHolders = [];
     let cursor = null;
     let pageCount = 0;
     const MAX_PAGES = 10;
+    const MIN_USD_VALUE = 1; // $1 minimum
 
     while (pageCount < MAX_PAGES) {
         const params = { mint, limit: 1000 };
@@ -71,7 +73,7 @@ async function fetchRealHolderCount(mint) {
 
         for (const acc of result.token_accounts) {
             if (acc.amount > 0) {
-                holders.push({ address: acc.owner, balance: acc.amount });
+                allHolders.push({ address: acc.owner, balance: acc.amount });
             }
         }
 
@@ -83,17 +85,34 @@ async function fetchRealHolderCount(mint) {
         await sleep(200);
     }
 
-    return holders.length;
+    const totalHolders = allHolders.length;
+
+    // Calculate real holders ($1+ value)
+    let realHolders = 0;
+    if (priceUsd > 0) {
+        const divisor = Math.pow(10, decimals);
+        for (const h of allHolders) {
+            const usdValue = (h.balance / divisor) * priceUsd;
+            if (usdValue >= MIN_USD_VALUE) {
+                realHolders++;
+            }
+        }
+    } else {
+        // Fallback: all holders are "real"
+        realHolders = totalHolders;
+    }
+
+    return { totalHolders, realHolders };
 }
 
 async function main() {
     console.log('═══════════════════════════════════════════════════════════════════');
-    console.log('             FORCE DEEP REFRESH - Fix Corrupted Data               ');
+    console.log('             FORCE DEEP REFRESH - On-Chain Truth                   ');
     console.log('═══════════════════════════════════════════════════════════════════\n');
 
-    // Get all verified tokens
+    // Get all verified tokens with price for $1+ calculation
     const tokens = await db.all(`
-        SELECT mint, symbol, holders, k_score
+        SELECT mint, symbol, holders, real_holders, total_holders, priceusd, k_score
         FROM tokens
         WHERE hascommunityupdate = TRUE
         ORDER BY symbol
@@ -102,26 +121,27 @@ async function main() {
     console.log(`Found ${tokens.length} verified tokens to refresh\n`);
 
     for (const token of tokens) {
-        console.log(`\n[${token.symbol}] Current holders: ${token.holders}`);
+        const currentReal = token.real_holders || token.holders || 0;
+        const currentTotal = token.total_holders || token.holders || 0;
+        console.log(`\n[${token.symbol}] Current: real=${currentReal}, total=${currentTotal}`);
 
         try {
-            // Fetch real holder count from on-chain
-            const realHolderCount = await fetchRealHolderCount(token.mint);
+            // Fetch holder data from on-chain with price for $1+ calculation
+            const priceUsd = parseFloat(token.priceusd) || 0;
+            const { totalHolders, realHolders } = await fetchHolderData(token.mint, priceUsd, 6);
 
-            console.log(`[${token.symbol}] On-chain holders: ${realHolderCount}`);
+            console.log(`[${token.symbol}] On-chain: real=${realHolders} ($1+), total=${totalHolders}`);
 
-            if (realHolderCount !== token.holders) {
-                // Update the database
-                await db.run(`
-                    UPDATE tokens
-                    SET holders = $1
-                    WHERE mint = $2
-                `, [realHolderCount, token.mint]);
+            // Update the database with both values
+            await db.run(`
+                UPDATE tokens
+                SET holders = $1,
+                    real_holders = $2,
+                    total_holders = $3
+                WHERE mint = $4
+            `, [realHolders, realHolders, totalHolders, token.mint]);
 
-                console.log(`[${token.symbol}] ✅ FIXED: ${token.holders} → ${realHolderCount}`);
-            } else {
-                console.log(`[${token.symbol}] ✓ Already correct`);
-            }
+            console.log(`[${token.symbol}] ✅ UPDATED: real=${realHolders}, total=${totalHolders}`);
 
             // Rate limit between tokens
             await sleep(500);
@@ -137,19 +157,20 @@ async function main() {
 
     // Show updated data
     const updated = await db.all(`
-        SELECT symbol, holders, k_score, conviction_score
+        SELECT symbol, real_holders, total_holders, k_score, conviction_score
         FROM tokens
         WHERE hascommunityupdate = TRUE
         ORDER BY k_score DESC
     `);
 
     console.log('Updated Token Data:');
-    console.log('Symbol'.padEnd(15) + 'Holders'.padEnd(10) + 'K-Score'.padEnd(10) + 'Conviction');
-    console.log('-'.repeat(45));
+    console.log('Symbol'.padEnd(12) + 'Real($1+)'.padEnd(12) + 'Total'.padEnd(10) + 'K-Score'.padEnd(10) + 'Conv%');
+    console.log('-'.repeat(55));
     for (const t of updated) {
         console.log(
-            t.symbol.padEnd(15) +
-            String(t.holders).padEnd(10) +
+            t.symbol.padEnd(12) +
+            String(t.real_holders || 0).padEnd(12) +
+            String(t.total_holders || 0).padEnd(10) +
             String(t.k_score).padEnd(10) +
             String(t.conviction_score)
         );
