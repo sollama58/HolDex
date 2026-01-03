@@ -188,10 +188,12 @@ app.get('/token/:mint', async (req, res, next) => {
 
         // Inject Client-Side Redirect Script (To enable SPA hash routing)
         // This converts /token/:mint -> /#token/:mint so the JS app loads the view
+        // SECURITY: Use JSON.stringify for JavaScript context (escapes all special chars)
+        const jsSafeMint = JSON.stringify(mint).slice(1, -1); // Remove quotes from stringify
         const redirectScript = `
             <script>
                 if (!window.location.hash) {
-                    history.replaceState(null, null, '/#token/${safeMint}');
+                    history.replaceState(null, null, '/#token/${jsSafeMint}');
                 }
             </script>
         `;
