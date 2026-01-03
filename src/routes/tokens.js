@@ -838,9 +838,14 @@ function init(deps) {
                 tokenData.priceUsd = tokenData.priceUsd || tokenData.priceusd || 0;
                 tokenData.volume24h = tokenData.volume24h || 0;
                 tokenData.holders = tokenData.holders || 0;
-                tokenData.kScore = tokenData.k_score || tokenData.kScore || 0;
-                tokenData.kRank = getKRank(tokenData.kScore);
-                tokenData.creditRating = await getCreditRatingWithTrajectory(db, mint, tokenData.kScore);
+
+                // SECURITY: K-Score and conviction only for verified tokens
+                const isVerified = token.hasCommunityUpdate || token.hascommunityupdate || false;
+                tokenData.kScore = isVerified ? (tokenData.k_score || tokenData.kScore || 0) : null;
+                tokenData.kRank = tokenData.kScore !== null ? getKRank(tokenData.kScore) : null;
+                tokenData.creditRating = tokenData.kScore !== null
+                    ? await getCreditRatingWithTrajectory(db, mint, tokenData.kScore)
+                    : null;
 
                 // GASdf Integration Fields
                 // Burn data
@@ -853,15 +858,15 @@ function init(deps) {
                 tokenData.bondingCurveComplete = token.bonding_curve_complete || false;
                 tokenData.launchDate = token.timestamp ? new Date(parseInt(token.timestamp)).toISOString() : null;
 
-                // Conviction breakdown (for GASdf)
-                tokenData.conviction = {
+                // Conviction breakdown - only for verified tokens
+                tokenData.conviction = isVerified ? {
                     score: token.conviction_score || 0,
                     accumulators: token.conviction_accumulators || 0,
                     holders: token.conviction_holders || 0,
                     reducers: token.conviction_reducers || 0,
                     extractors: token.conviction_extractors || 0,
                     analyzed: token.conviction_analyzed || 0
-                };
+                } : null;
 
                 // Mayhem Mode (mutable supply) fields
                 tokenData.security = {
@@ -1064,37 +1069,44 @@ function init(deps) {
                 lastUpdate: Date.now(),
                 page,
                 limit,
-                tokens: rows.map(r => ({
-                    mint: r.mint,
-                    name: r.name,
-                    ticker: r.symbol,
-                    image: r.image,
-                    marketCap: r.marketcap || r.marketCap || 0,
-                    volume24h: r.volume24h || 0,
-                    priceUsd: r.priceusd || r.priceUsd || 0,
-                    change24h: r.change24h || 0,
-                    change1h: r.change1h || 0,
-                    change5m: r.change5m || 0,
-                    liquidity: r.liquidity || 0,
-                    holders: r.holders || 0,
-                    hasCommunityUpdate: r.hasCommunityUpdate || r.hascommunityupdate || false,
-                    timestamp: parseInt(r.timestamp),
-                    kScore: r.k_score || 0,
-                    kRank: getKRank(r.k_score || 0),
-                    creditRating: getCreditRating(r.k_score || 0),
-                    // GASdf fields (lightweight version for list)
-                    burnedPercent: r.burned_percent || 0,
-                    isPumpFun: r.is_pump_fun || false,
-                    convictionScore: r.conviction_score || 0,
-                    // Conviction breakdown
-                    conviction_accumulators: r.conviction_accumulators || 0,
-                    conviction_holders: r.conviction_holders || 0,
-                    conviction_reducers: r.conviction_reducers || 0,
-                    conviction_extractors: r.conviction_extractors || 0,
-                    // Mayhem Mode indicator
-                    isMutableSupply: r.is_mutable_supply || false,
-                    supplyChange24h: r.supply_change_24h || 0
-                }))
+                tokens: rows.map(r => {
+                    // SECURITY: Only show K-Score/conviction for verified tokens
+                    const isVerified = r.hasCommunityUpdate || r.hascommunityupdate || false;
+                    const kScore = isVerified ? (r.k_score || 0) : null;
+
+                    return {
+                        mint: r.mint,
+                        name: r.name,
+                        ticker: r.symbol,
+                        image: r.image,
+                        marketCap: r.marketcap || r.marketCap || 0,
+                        volume24h: r.volume24h || 0,
+                        priceUsd: r.priceusd || r.priceUsd || 0,
+                        change24h: r.change24h || 0,
+                        change1h: r.change1h || 0,
+                        change5m: r.change5m || 0,
+                        liquidity: r.liquidity || 0,
+                        holders: r.holders || 0,
+                        hasCommunityUpdate: isVerified,
+                        timestamp: parseInt(r.timestamp),
+                        // K-Score only for verified tokens (deep analysis done)
+                        kScore: kScore,
+                        kRank: kScore !== null ? getKRank(kScore) : null,
+                        creditRating: kScore !== null ? getCreditRating(kScore) : null,
+                        // GASdf fields (lightweight version for list)
+                        burnedPercent: r.burned_percent || 0,
+                        isPumpFun: r.is_pump_fun || false,
+                        // Conviction only for verified tokens
+                        convictionScore: isVerified ? (r.conviction_score || 0) : null,
+                        conviction_accumulators: isVerified ? (r.conviction_accumulators || 0) : null,
+                        conviction_holders: isVerified ? (r.conviction_holders || 0) : null,
+                        conviction_reducers: isVerified ? (r.conviction_reducers || 0) : null,
+                        conviction_extractors: isVerified ? (r.conviction_extractors || 0) : null,
+                        // Mayhem Mode indicator
+                        isMutableSupply: r.is_mutable_supply || false,
+                        supplyChange24h: r.supply_change_24h || 0
+                    };
+                })
             };
 
             if (isGenericView && redis) { try { await redis.set(cacheKey, JSON.stringify(responsePayload), 'EX', 3); } catch(_e) { /* ignore */ } }
@@ -1189,6 +1201,8 @@ function init(deps) {
         try {
             const result = await smartCache('track-record', 300, async () => {
                 // 1. K-Score vs Security correlation
+                // SECURITY: Only show verified tokens (community submitted)
+                // This ensures we only display tokens we've deeply analyzed
                 const securityCorr = await db.all(`
                     SELECT
                         CASE
@@ -1200,12 +1214,12 @@ function init(deps) {
                         SUM(CASE WHEN mint_authority_revoked = true AND freeze_authority_revoked = true THEN 1 ELSE 0 END) as secure,
                         SUM(CASE WHEN mint_authority_revoked = false OR freeze_authority_revoked = false THEN 1 ELSE 0 END) as unsafe
                     FROM tokens
-                    WHERE k_score IS NOT NULL
+                    WHERE k_score IS NOT NULL AND hasCommunityUpdate = TRUE
                     GROUP BY tier
                     ORDER BY tier DESC
                 `);
 
-                // 2. Tier distribution with details
+                // 2. Tier distribution with details (verified tokens only)
                 const tierDetails = await db.all(`
                     SELECT
                         symbol,
@@ -1221,11 +1235,11 @@ function init(deps) {
                         freeze_authority_revoked,
                         hasCommunityUpdate as verified
                     FROM tokens
-                    WHERE k_score IS NOT NULL
+                    WHERE k_score IS NOT NULL AND hasCommunityUpdate = TRUE
                     ORDER BY k_score DESC
                 `);
 
-                // 3. K-Score evolution (tokens with history)
+                // 3. K-Score evolution (verified tokens with history)
                 const evolution = await db.all(`
                     SELECT
                         h.mint,
@@ -1237,12 +1251,13 @@ function init(deps) {
                         COUNT(*) as data_points
                     FROM k_score_history h
                     JOIN tokens t ON t.mint = h.mint
+                    WHERE t.hasCommunityUpdate = TRUE
                     GROUP BY h.mint, t.symbol, t.k_score
                     HAVING COUNT(*) >= 2
                     ORDER BY t.k_score DESC
                 `);
 
-                // 4. Extractor analysis (sell pressure indicator)
+                // 4. Extractor analysis (verified tokens only)
                 const extractorAnalysis = await db.all(`
                     SELECT
                         symbol,
@@ -1255,7 +1270,7 @@ function init(deps) {
                             ELSE 0
                         END as extractor_pct
                     FROM tokens
-                    WHERE k_score IS NOT NULL AND conviction_extractors IS NOT NULL
+                    WHERE k_score IS NOT NULL AND conviction_extractors IS NOT NULL AND hasCommunityUpdate = TRUE
                     ORDER BY extractor_pct DESC
                 `);
 

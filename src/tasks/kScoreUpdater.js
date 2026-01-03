@@ -2332,6 +2332,8 @@ async function detectTokenCategory(db, mint) {
 
 /**
  * Update single token score immediately (for admin approval)
+ * SECURITY: Only runs full analysis for verified tokens (hasCommunityUpdate = TRUE)
+ * This prevents API abuse and saves Helius credits
  */
 async function updateSingleToken(deps, mint) {
     const { db, broadcast } = deps;
@@ -2339,7 +2341,14 @@ async function updateSingleToken(deps, mint) {
         const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
         if (!token) return;
 
-        logger.info(`[K-Score] Immediate calc for ${token.name || token.symbol}`);
+        // SECURITY: Only run deep analysis for verified tokens
+        const isVerified = token.hasCommunityUpdate || token.hascommunityupdate;
+        if (!isVerified) {
+            logger.warn(`[K-Score] Skipping ${token.symbol || mint.slice(0,8)} - not verified (hasCommunityUpdate=false)`);
+            return null;
+        }
+
+        logger.info(`[K-Score] Immediate calc for ${token.name || token.symbol} (verified)`);
         const result = await computeScoreInternal(mint, token, false, db);
         const conviction = result.conviction || {};
         const burn = result.burn || {};
