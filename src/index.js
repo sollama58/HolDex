@@ -45,8 +45,10 @@ app.use(compression());
 // This optimization prevents disk I/O on every page load
 const HOMEPAGE_PATH = path.join(__dirname, '../homepage.html');
 const TRACKRECORD_PATH = path.join(__dirname, '../track-record.html');
+const THEMEPREVIEW_PATH = path.join(__dirname, '../theme-preview.html');
 let HOMEPAGE_TEMPLATE = '';
 let TRACKRECORD_TEMPLATE = '';
+let THEMEPREVIEW_TEMPLATE = '';
 
 try {
     HOMEPAGE_TEMPLATE = fs.readFileSync(HOMEPAGE_PATH, 'utf8');
@@ -62,6 +64,14 @@ try {
 } catch (e) {
     logger.warn(`⚠️ Track record template not found: ${e.message}`);
     TRACKRECORD_TEMPLATE = ''; // Optional page, don't fail
+}
+
+try {
+    THEMEPREVIEW_TEMPLATE = fs.readFileSync(THEMEPREVIEW_PATH, 'utf8');
+    logger.info('✅ Template: theme-preview.html loaded into memory');
+} catch (e) {
+    logger.warn(`⚠️ Theme preview template not found: ${e.message}`);
+    THEMEPREVIEW_TEMPLATE = ''; // Optional page, don't fail
 }
 
 // CORS CONFIGURATION
@@ -219,6 +229,15 @@ app.get('/track-record.html', (req, res) => {
         res.send(TRACKRECORD_TEMPLATE);
     } else {
         res.status(404).send('Track record page not available');
+    }
+});
+
+// Serve Theme Preview page (for cult vote)
+app.get('/theme-preview.html', (req, res) => {
+    if (THEMEPREVIEW_TEMPLATE) {
+        res.send(THEMEPREVIEW_TEMPLATE);
+    } else {
+        res.status(404).send('Theme preview page not available');
     }
 });
 
