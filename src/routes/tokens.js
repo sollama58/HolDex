@@ -17,6 +17,16 @@ const apiKeyRateLimit = rateLimit({
     legacyHeaders: false,
     keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip
 });
+
+// SECURITY: Rate limit for proxy endpoints (prevents RPC abuse)
+const proxyRateLimit = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 30, // 30 requests per minute
+    message: { success: false, error: 'Rate limit exceeded. Try again shortly.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip
+});
 const { smartCache, aggregateAndSaveToken } = require('../services/database');
 const { getSolanaConnection } = require('../services/solana'); 
 const config = require('../config/env');
@@ -242,14 +252,15 @@ function init(deps) {
     }
 
     // --- PROXY ROUTES ---
-    router.get('/proxy/blockhash', async (req, res) => {
+    // SECURITY: Rate limited to prevent RPC abuse
+    router.get('/proxy/blockhash', proxyRateLimit, async (req, res) => {
         try {
             const { blockhash, lastValidBlockHeight } = await solanaConnection.getLatestBlockhash('confirmed');
             res.json({ success: true, blockhash, lastValidBlockHeight });
         } catch (_e) { res.status(500).json({ success: false, error: "Network Busy" }); }
     });
 
-    router.post('/proxy/send-tx', async (req, res) => {
+    router.post('/proxy/send-tx', proxyRateLimit, async (req, res) => {
         try {
             const { signedTx } = req.body;
             if (!signedTx) return res.status(400).json({ success: false, error: "No transaction data" });
@@ -545,7 +556,8 @@ function init(deps) {
     router.get('/credits/:wallet', async (req, res) => {
         const { wallet } = req.params;
 
-        if (!wallet || wallet.length < 32) {
+        // SECURITY: Validate as proper Solana address, not just length check
+        if (!wallet || !isValidPubkey(wallet)) {
             return res.status(400).json({ success: false, error: 'Invalid wallet address' });
         }
 
@@ -574,8 +586,14 @@ function init(deps) {
 
     // Refresh burn cache for a wallet (after new burn)
     // This triggers a Helius API call - use sparingly
-    router.post('/credits/:wallet/refresh', async (req, res) => {
+    // SECURITY: Rate limited to prevent Helius API abuse
+    router.post('/credits/:wallet/refresh', apiKeyRateLimit, async (req, res) => {
         const { wallet } = req.params;
+
+        // SECURITY: Validate wallet address
+        if (!wallet || !isValidPubkey(wallet)) {
+            return res.status(400).json({ success: false, error: 'Invalid wallet address' });
+        }
 
         try {
             burnCredits.invalidateCache(wallet);
@@ -807,7 +825,28 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: e.message }); }
     });
 
-    router.get('/admin/backup/updates', requireAdmin, async (req, res) => { try { const updates = await db.all('SELECT * FROM token_updates ORDER BY submittedAt DESC'); const keys = await db.all('SELECT * FROM api_keys'); res.setHeader('Content-Type', 'application/json'); res.setHeader('Content-Disposition', `attachment; filename=holdex_full_backup_${Date.now()}.json`); res.json({ success: true, timestamp: Date.now(), updates: updates, api_keys: keys }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    router.get('/admin/backup/updates', requireAdmin, async (req, res) => {
+        try {
+            const updates = await db.all('SELECT * FROM token_updates ORDER BY submittedAt DESC');
+            // SECURITY: Never expose key_hash in backup - only metadata
+            const keys = await db.all(`
+                SELECT key_prefix, owner, wallet, tier, requests_limit, requests_today,
+                       last_reset, is_active, created_at
+                FROM api_keys
+            `);
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Content-Disposition', `attachment; filename=holdex_backup_${Date.now()}.json`);
+            res.json({
+                success: true,
+                timestamp: Date.now(),
+                updates: updates,
+                api_keys_metadata: keys,
+                warning: 'API key hashes excluded for security. Keys must be regenerated after restore.'
+            });
+        } catch (e) {
+            res.status(500).json({ success: false, error: e.message });
+        }
+    });
     
     router.post('/admin/restore/updates', requireAdmin, async (req, res) => { 
         const { updates, api_keys } = req.body; 
@@ -999,21 +1038,24 @@ function init(deps) {
                 });
             }
 
+            // SECURITY: Validate and clamp days parameter
+            const daysNum = Math.min(Math.max(parseInt(days) || 30, 1), 365);
+
             const kScoreHistory = await db.all(`
                 SELECT date, k_score, conviction_score, holders
                 FROM k_score_history
                 WHERE mint = $1
-                  AND date >= CURRENT_DATE - INTERVAL '${parseInt(days)} days'
+                  AND date >= CURRENT_DATE - $2 * INTERVAL '1 day'
                 ORDER BY date ASC
-            `, [mint]);
+            `, [mint, daysNum]);
 
             const holderHistory = await db.all(`
                 SELECT date, holders, real_holders
                 FROM holder_history
                 WHERE mint = $1
-                  AND date >= CURRENT_DATE - INTERVAL '${parseInt(days)} days'
+                  AND date >= CURRENT_DATE - $2 * INTERVAL '1 day'
                 ORDER BY date ASC
-            `, [mint]);
+            `, [mint, daysNum]);
 
             const timeline = new Map();
             kScoreHistory.forEach(h => {
@@ -1361,9 +1403,13 @@ function init(deps) {
                     orderBy = `COALESCE(${sortColumn}, 0) ${dir}`;
                 }
 
+                // SECURITY: Whitelist filter values to prevent injection
+                const VALID_FILTERS = ['verified', 'all', undefined, ''];
                 let whereClause = '';
                 if (filter === 'verified') {
                     whereClause = 'WHERE hasCommunityUpdate = TRUE';
+                } else if (filter && !VALID_FILTERS.includes(filter)) {
+                    return res.status(400).json({ success: false, error: 'Invalid filter value' });
                 }
 
                 const offset = (page - 1) * limit;

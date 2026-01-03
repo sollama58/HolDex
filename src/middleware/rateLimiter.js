@@ -88,8 +88,12 @@ const rateLimiter = async (req, res, next) => {
 
     } catch (e) {
         logger.error(`RateLimit Error: ${e.message}`);
-        // Fail open to avoid service disruption
-        next(); 
+        // SECURITY: Fail closed - don't allow unauthenticated access on errors
+        return res.status(503).json({
+            success: false,
+            error: 'Service temporarily unavailable',
+            retry_after: 30
+        });
     }
 };
 

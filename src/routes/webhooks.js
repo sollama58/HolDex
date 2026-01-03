@@ -87,22 +87,26 @@ function init(deps) {
             if (config.WEBHOOK_SECRET) {
                 const authHeader = req.headers['authorization'];
 
-                if (authHeader) {
-                    // Constant-time comparison to prevent timing attacks
-                    const expected = Buffer.from(config.WEBHOOK_SECRET);
-                    const received = Buffer.from(authHeader);
-
-                    if (expected.length === received.length &&
-                        require('crypto').timingSafeEqual(expected, received)) {
-                        // Auth verified
-                    } else {
-                        logger.warn('⚠️  Webhook auth mismatch');
-                        return res.status(401).json({ error: 'Unauthorized' });
-                    }
-                } else {
-                    // No auth header - log but allow (for transition period)
-                    logger.debug('Webhook without auth header (legacy)');
+                if (!authHeader) {
+                    // SECURITY: Reject requests without auth when secret is configured
+                    logger.warn('⚠️  Webhook request rejected - no auth header');
+                    return res.status(401).json({ error: 'Authorization required' });
                 }
+
+                // Constant-time comparison to prevent timing attacks
+                const expected = Buffer.from(config.WEBHOOK_SECRET);
+                const received = Buffer.from(authHeader);
+
+                if (expected.length !== received.length ||
+                    !require('crypto').timingSafeEqual(expected, received)) {
+                    logger.warn('⚠️  Webhook auth mismatch');
+                    return res.status(401).json({ error: 'Unauthorized' });
+                }
+                // Auth verified - continue processing
+            } else if (process.env.NODE_ENV === 'production') {
+                // SECURITY: Reject in production if no secret configured
+                logger.error('❌ WEBHOOK_SECRET not configured in production');
+                return res.status(503).json({ error: 'Webhook not configured' });
             }
 
             const events = Array.isArray(req.body) ? req.body : [req.body];

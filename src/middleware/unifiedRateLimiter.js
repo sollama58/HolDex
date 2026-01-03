@@ -149,8 +149,12 @@ const unifiedRateLimiter = async (req, res, next) => {
 
     } catch (e) {
         logger.error(`[UnifiedRateLimiter] Error: ${e.message}`);
-        // Fail open during transition (remove this later)
-        next();
+        // SECURITY: Fail closed - don't allow unauthenticated access on errors
+        return res.status(503).json({
+            success: false,
+            error: 'Service temporarily unavailable',
+            retry_after: 30
+        });
     }
 };
 
