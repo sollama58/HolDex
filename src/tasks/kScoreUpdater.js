@@ -932,13 +932,16 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
             );
 
             // If we have cached data, use it (webhook mode)
+            // OPTIMIZATION: In webhook mode, snapshots ARE the source of truth
+            // Webhooks update them in real-time, so no staleness check needed
+            // Even "stale" snapshots are valid - they just mean no activity
             if (snapshots && snapshots.length > 0) {
-                // Check freshness (snapshots should be updated by webhook in real-time)
                 const newestSnapshot = Math.max(...snapshots.map(s => s.updated_at || 0));
                 const ageMinutes = (Date.now() - newestSnapshot) / 60000;
 
-                // If snapshots are reasonably fresh (< 30 min), use them
-                if (ageMinutes < 30) {
+                // Always use cached data in webhook mode (0 API calls)
+                // Staleness just means no new transfers happened - that's valid data
+                {
                     let accumulators = 0, holders = 0, reducers = 0, extractors = 0;
 
                     // Only count TOP 20 for breakdown (sorted by balance DESC)
@@ -984,18 +987,20 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
                         isWebhookMode: true
                     };
                 }
-
-                logger.info(`[Webhook Mode] ${mint.slice(0,8)}: Snapshots stale (${ageMinutes.toFixed(0)}m), falling back to polling`);
+                // No snapshots in DB yet - will fall through to delta/polling mode
+                logger.info(`[Webhook Mode] ${mint.slice(0,8)}: No snapshots in DB, need initial analysis`);
             }
         }
 
         // ============================================
         // POLLING MODE: Traditional API-based analysis
         // ============================================
+        // Only runs when webhooks are OFF or no snapshots exist yet
 
         // 0. Try delta analysis first (if snapshots exist and are fresh)
         // OPTIMIZATION: Use cached holder count from DB - avoid expensive fetchTokenHolders
-        if (db) {
+        // NOTE: Delta mode is for NON-WEBHOOK mode only (when we need to poll for updates)
+        if (db && !config.USE_WEBHOOKS) {
             const deltaResult = await deltaConvictionAnalysis(db, mint);
             if (deltaResult) {
                 // Delta succeeded - use cached holder count from tokens table
@@ -2112,12 +2117,29 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         // ============================================
         // MAYHEM MODE: REFRESH SUPPLY
         // ============================================
+        // OPTIMIZATION: Only refresh supply during deep refresh (24h) or first check
+        // Supply changes are rare - no need to hit RPC every cycle
 
         let supplyData = null;
         let volatilityData = null;
 
         if (db && HELIUS_API_KEY) {
-            supplyData = await refreshSupply(db, mint, decimals);
+            const supplyLastCheck = parseInt(dbData?.supply_last_check || 0);
+            const supplyNeedsRefresh = forceDeepRefreshMode ||
+                                       supplyLastCheck === 0 ||
+                                       (Date.now() - supplyLastCheck > 86400000); // 24h
+
+            if (supplyNeedsRefresh) {
+                supplyData = await refreshSupply(db, mint, decimals);
+                logger.debug(`[Supply] ${mint.slice(0,8)}: Refreshed (deep mode)`);
+            } else {
+                // Use cached supply data (0 API calls)
+                supplyData = {
+                    currentSupply: parseFloat(dbData?.supply || 0) / Math.pow(10, decimals),
+                    isMutable: !!dbData?.is_mutable_supply,
+                    cached: true
+                };
+            }
             volatilityData = await getSupplyVolatility(db, mint);
         }
 
@@ -2157,8 +2179,36 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         }
 
         // Check LP burn/lock status
+        // OPTIMIZATION: LP status is cached - only check on deep refresh or first time
+        // LP burn/lock is effectively permanent once done
         if (db) {
-            lpData = await checkLPStatus(db, mint);
+            // Check if we have cached LP data (stored in tokens table)
+            // LP status rarely changes - only refresh during deep mode
+            const hasCachedLP = dbData?.lp_burn_pct !== undefined && dbData?.lp_burn_pct !== null;
+
+            if (hasCachedLP && !forceDeepRefreshMode) {
+                // Use cached LP data (0 API calls)
+                lpData = {
+                    lpBurnPct: dbData.lp_burn_pct || 0,
+                    lpLockedPct: dbData.lp_locked_pct || 0,
+                    lpStatus: dbData.lp_status || 'unknown',
+                    cached: true
+                };
+                logger.debug(`[LP] ${mint.slice(0,8)}: Using cached (${lpData.lpBurnPct}% burn)`);
+            } else {
+                // First time or deep refresh - check on-chain
+                lpData = await checkLPStatus(db, mint);
+                // Cache LP data in DB
+                if (lpData) {
+                    await db.run(`
+                        UPDATE tokens SET
+                            lp_burn_pct = $1,
+                            lp_locked_pct = $2,
+                            lp_status = $3
+                        WHERE mint = $4
+                    `, [lpData.lpBurnPct || 0, lpData.lpLockedPct || 0, lpData.lpStatus || 'unknown', mint]);
+                }
+            }
         }
 
         // ============================================
