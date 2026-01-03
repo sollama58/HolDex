@@ -22,6 +22,7 @@ const COLORS = {
     accent: '#58a6ff',
 
     // Grade colors
+    native: '#6366f1',   // Infrastructure (indigo)
     diamond: '#b9f2ff',
     platinum: '#e5e4e2',
     gold: '#ffd700',
@@ -40,6 +41,7 @@ const COLORS = {
 
 // Grade configurations
 const GRADES = {
+    native: { min: null, icon: '🏛️', label: 'Native', credit: 'Infrastructure', color: COLORS.native },
     diamond: { min: 90, icon: '💎', label: 'Diamond', credit: 'A1 Prime', color: COLORS.diamond },
     platinum: { min: 80, icon: '💠', label: 'Platinum', credit: 'A2 Excellent', color: COLORS.platinum },
     gold: { min: 70, icon: '🥇', label: 'Gold', credit: 'A3 Good', color: COLORS.gold },
@@ -50,7 +52,21 @@ const GRADES = {
     rust: { min: 0, icon: '🔩', label: 'Rust', credit: 'D Junk', color: COLORS.rust }
 };
 
-function getGrade(score) {
+// Native tokens - Infrastructure, not rated
+const NATIVE_TOKENS = new Set([
+    'So11111111111111111111111111111111111111112',  // Wrapped SOL
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
+    'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',  // mSOL (Marinade)
+    'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn', // JitoSOL
+    'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1',  // bSOL (Blaze)
+    'jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v',  // JupSOL
+    '7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj', // stSOL (Lido)
+]);
+
+function getGrade(score, mint = null) {
+    // Native tokens are infrastructure - not rated
+    if (mint && NATIVE_TOKENS.has(mint)) return GRADES.native;
     if (score >= 90) return GRADES.diamond;
     if (score >= 80) return GRADES.platinum;
     if (score >= 70) return GRADES.gold;
@@ -182,7 +198,7 @@ async function generateKScoreCard(token) {
     const ctx = canvas.getContext('2d');
 
     const score = Math.round(token.k_score || 0);
-    const grade = getGrade(score);
+    const grade = getGrade(score, token.mint);
 
     // === BACKGROUND ===
     // Gradient background

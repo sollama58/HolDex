@@ -49,9 +49,35 @@ const solanaConnection = getSolanaConnection();
 const pendingRefreshes = new Set();
 
 /**
+ * Native tokens - Infrastructure, not rated
+ * "K-Score is for the jungle. SOL and USDC are the roads. We don't rate roads."
+ */
+const NATIVE_TOKENS = new Set([
+    'So11111111111111111111111111111111111111112',  // Wrapped SOL
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
+    'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',  // mSOL (Marinade)
+    'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn', // JitoSOL
+    'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1',  // bSOL (Blaze)
+    'jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v',  // JupSOL
+    '7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj', // stSOL (Lido)
+]);
+
+/**
+ * Check if a token is a native/infrastructure token
+ */
+function isNativeToken(mint) {
+    return NATIVE_TOKENS.has(mint);
+}
+
+/**
  * K-Score Metal Rank Tiers (aligned with Credit Grades)
  */
-function getKRank(score) {
+function getKRank(score, mint = null) {
+    // Native tokens are infrastructure - not rated
+    if (mint && isNativeToken(mint)) {
+        return { tier: 'Native', icon: '🏛️', level: 9, isNative: true };
+    }
     if (score >= 90) return { tier: 'Diamond', icon: '💎', level: 8 };
     if (score >= 80) return { tier: 'Platinum', icon: '💠', level: 7 };
     if (score >= 70) return { tier: 'Gold', icon: '🥇', level: 6 };
@@ -65,7 +91,11 @@ function getKRank(score) {
 /**
  * Credit Rating System - "Moody's for Memecoins"
  */
-function getCreditRating(score) {
+function getCreditRating(score, mint = null) {
+    // Native tokens are infrastructure - not rated
+    if (mint && isNativeToken(mint)) {
+        return { grade: '—', label: 'Infrastructure', color: '#6366f1', isNative: true };
+    }
     if (score >= 90) return { grade: 'A1', label: 'Prime', color: '#00ff88' };
     if (score >= 80) return { grade: 'A2', label: 'Excellent', color: '#00dd77' };
     if (score >= 70) return { grade: 'A3', label: 'Good', color: '#00bb66' };
@@ -125,7 +155,13 @@ async function calculateTrajectory(db, mint, currentScore) {
  * Get Credit Rating with Trajectory (for GASdf integration)
  */
 async function getCreditRatingWithTrajectory(db, mint, score) {
-    const base = getCreditRating(score);
+    const base = getCreditRating(score, mint);
+
+    // Native tokens don't have trajectory
+    if (base.isNative) {
+        return { ...base, trajectory: null, delta30d: null, dataPoints: 0 };
+    }
+
     const { trajectory, delta30d, dataPoints } = await calculateTrajectory(db, mint, score);
 
     return {
@@ -957,12 +993,14 @@ function init(deps) {
                 tokenData.holders = tokenData.holders || 0;
 
                 // SECURITY: K-Score and conviction only for verified tokens
+                // Native tokens get special tier regardless of verification
+                const isNative = isNativeToken(mint);
                 const isVerified = token.hasCommunityUpdate || token.hascommunityupdate || false;
                 tokenData.kScore = isVerified ? (tokenData.k_score || tokenData.kScore || 0) : null;
-                tokenData.kRank = tokenData.kScore !== null ? getKRank(tokenData.kScore) : null;
-                tokenData.creditRating = tokenData.kScore !== null
-                    ? await getCreditRatingWithTrajectory(db, mint, tokenData.kScore)
-                    : null;
+                tokenData.kRank = isNative ? getKRank(null, mint) : (tokenData.kScore !== null ? getKRank(tokenData.kScore, mint) : null);
+                tokenData.creditRating = isNative
+                    ? await getCreditRatingWithTrajectory(db, mint, null)
+                    : (tokenData.kScore !== null ? await getCreditRatingWithTrajectory(db, mint, tokenData.kScore) : null);
 
                 // GASdf Integration Fields
                 // Burn data
@@ -1201,6 +1239,8 @@ function init(deps) {
                 limit,
                 tokens: rows.map(r => {
                     // SECURITY: Only show K-Score/conviction for verified tokens
+                    // Native tokens get special tier regardless of verification
+                    const isNative = isNativeToken(r.mint);
                     const isVerified = r.hasCommunityUpdate || r.hascommunityupdate || false;
                     const kScore = isVerified ? (r.k_score || 0) : null;
 
@@ -1220,9 +1260,10 @@ function init(deps) {
                         hasCommunityUpdate: isVerified,
                         timestamp: parseInt(r.timestamp),
                         // K-Score only for verified tokens (deep analysis done)
+                        // Native tokens get special tier
                         kScore: kScore,
-                        kRank: kScore !== null ? getKRank(kScore) : null,
-                        creditRating: kScore !== null ? getCreditRating(kScore) : null,
+                        kRank: isNative ? getKRank(null, r.mint) : (kScore !== null ? getKRank(kScore, r.mint) : null),
+                        creditRating: isNative ? getCreditRating(null, r.mint) : (kScore !== null ? getCreditRating(kScore, r.mint) : null),
                         // GASdf fields (lightweight version for list)
                         burnedPercent: r.burned_percent || 0,
                         isPumpFun: r.is_pump_fun || false,

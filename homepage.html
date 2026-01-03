@@ -168,6 +168,7 @@
         .k-rank-gold { background: rgba(255, 215, 0, 0.2); color: #ffd700; border: 1px solid rgba(255, 215, 0, 0.4); text-shadow: 0 0 8px rgba(255, 215, 0, 0.3); }  /* A3 [70-79] */
         .k-rank-platinum { background: rgba(229, 228, 226, 0.2); color: #e5e4e2; border: 1px solid rgba(229, 228, 226, 0.5); text-shadow: 0 0 10px rgba(229, 228, 226, 0.4); }  /* A2 [80-89] */
         .k-rank-diamond { background: rgba(185, 242, 255, 0.15); color: #b9f2ff; border: 1px solid rgba(185, 242, 255, 0.5); text-shadow: 0 0 12px rgba(185, 242, 255, 0.5); animation: diamond-glow 2s ease-in-out infinite; }  /* A1 [90-99] */
+        .k-rank-native { background: rgba(99, 102, 241, 0.2); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.5); text-shadow: 0 0 10px rgba(99, 102, 241, 0.4); }  /* Infrastructure - SOL, USDC, etc. */
         @keyframes diamond-glow { 0%, 100% { box-shadow: 0 0 5px rgba(185, 242, 255, 0.3); } 50% { box-shadow: 0 0 15px rgba(185, 242, 255, 0.6); } }
 
         /* Credit Rating Badges - "Moody's for Memecoins" */
@@ -180,6 +181,7 @@
         .credit-b3 { background: rgba(249, 115, 22, 0.2); color: #f97316; border: 1px solid rgba(249, 115, 22, 0.5); }
         .credit-c { background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.5); }
         .credit-d { background: rgba(127, 29, 29, 0.3); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.4); animation: danger-pulse 1.5s ease-in-out infinite; }
+        .credit-native { background: rgba(99, 102, 241, 0.2); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.5); }  /* Infrastructure */
         @keyframes danger-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
 
         /* Conviction Class Colors (Metal Ranks) */
@@ -1026,9 +1028,27 @@
     let userSolBalance = 0;
     let userTokenBalance = 0;
 
+    // Native tokens - Infrastructure, not rated
+    // "K-Score is for the jungle. SOL and USDC are the roads. We don't rate roads."
+    const NATIVE_TOKENS = new Set([
+        'So11111111111111111111111111111111111111112',  // Wrapped SOL
+        'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+        'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', // USDT
+        'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',  // mSOL (Marinade)
+        'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn', // JitoSOL
+        'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1',  // bSOL (Blaze)
+        'jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v',  // JupSOL
+        '7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj', // stSOL (Lido)
+    ]);
+
+    function isNativeToken(mint) {
+        return NATIVE_TOKENS.has(mint);
+    }
+
     // K-Score Metal Ranks
-    // K-Score: 0-99 for memecoins, 100 reserved for native tokens (SOL)
-    function getKRank(score) {
+    function getKRank(score, mint = null) {
+        // Native tokens are infrastructure - not rated
+        if (mint && isNativeToken(mint)) return { rank: 'Native', icon: '🏛️', class: 'k-rank-native', tier: 9, isNative: true };
         if (score >= 90) return { rank: 'Diamond', icon: '💎', class: 'k-rank-diamond', tier: 8 };   // A1 [90-99]
         if (score >= 80) return { rank: 'Platinum', icon: '💠', class: 'k-rank-platinum', tier: 7 }; // A2 [80-89]
         if (score >= 70) return { rank: 'Gold', icon: '🥇', class: 'k-rank-gold', tier: 6 };         // A3 [70-79]
@@ -1040,7 +1060,9 @@
     }
 
     // Credit Rating System - "Moody's for Memecoins"
-    function getCreditRating(score) {
+    function getCreditRating(score, mint = null) {
+        // Native tokens are infrastructure - not rated
+        if (mint && isNativeToken(mint)) return { grade: '—', label: 'Infrastructure', class: 'credit-native', isNative: true };
         if (score >= 90) return { grade: 'A1', label: 'Prime', class: 'credit-a1' };
         if (score >= 80) return { grade: 'A2', label: 'Excellent', class: 'credit-a2' };
         if (score >= 70) return { grade: 'A3', label: 'Good', class: 'credit-a3' };
