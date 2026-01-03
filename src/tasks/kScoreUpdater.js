@@ -21,6 +21,7 @@ const { logger } = require('../services');
 const priceService = require('../services/priceService');
 const bs58 = require('bs58');
 const { getClient: getRedisClient } = require('../services/redis');
+const verification = require('../services/verificationService');
 
 // ============================================
 // HELIUS CONFIG
@@ -2744,8 +2745,56 @@ function start(deps) {
         updateKScores({ ...deps, forceDeepRefresh: true });
     }, DEEP_INTERVAL);
 
+    // ============================================
+    // STALENESS DETECTION & REFRESH
+    // Check for stale tokens every 2 hours and trigger refresh
+    // ============================================
+    const STALENESS_CHECK_INTERVAL = 2 * 60 * 60 * 1000; // 2 hours
+
+    setInterval(async () => {
+        try {
+            const staleTokens = await verification.getStaleTokens(deps.db);
+
+            if (staleTokens.length > 0) {
+                logger.warn(`[Staleness] Found ${staleTokens.length} stale tokens (>${verification.STALENESS_THRESHOLD_MS / (60*60*1000)}h old)`);
+
+                // Refresh up to 5 stale tokens per cycle
+                const tokensToRefresh = staleTokens.slice(0, 5);
+
+                for (const token of tokensToRefresh) {
+                    logger.info(`[Staleness] Refreshing stale token: ${token.symbol} (${token.ageHours}h old)`);
+                    try {
+                        await updateSingleToken(deps, token.mint);
+
+                        // Log the refresh to audit trail
+                        verification.logAudit(deps.db, {
+                            action: 'staleness_refresh',
+                            entity: 'token',
+                            entityId: token.mint,
+                            oldValue: { ageHours: token.ageHours, k_score: token.k_score },
+                            source: 'staleness_detector',
+                            metadata: { reason: 'No holder activity in staleness window' }
+                        }).catch(_e => {});
+
+                    } catch (err) {
+                        logger.error(`[Staleness] Failed to refresh ${token.symbol}: ${err.message}`);
+                    }
+                }
+            }
+        } catch (err) {
+            logger.error(`[Staleness] Check failed: ${err.message}`);
+        }
+    }, STALENESS_CHECK_INTERVAL);
+
     // Run once after startup (delay 30s to let other services init)
     setTimeout(() => updateKScores(deps), 30000);
+
+    // Initialize audit table (async, non-blocking)
+    setTimeout(() => {
+        verification.ensureAuditTable(deps.db).catch(err => {
+            logger.error(`[Audit] Table init failed: ${err.message}`);
+        });
+    }, 5000);
 }
 
 /**

@@ -14,9 +14,14 @@ const logger = require('../services/logger');
 const config = require('../config/env');
 const { getClient } = require('../services/redis');
 const { isValidSolanaAddress, sanitizeError, isValidTimestamp } = require('../utils/validation');
+const verification = require('../services/verificationService');
 
 // Security: Replay attack prevention via Redis (cluster-safe, persistent)
 const REPLAY_WINDOW_SECONDS = 300; // 5 minutes TTL
+
+// Verification settings
+const VERIFY_CRITICAL_TX = config.VERIFY_WEBHOOK_TX !== 'false'; // Default: true
+const CRITICAL_AMOUNT_THRESHOLD = 1000000000; // 1B tokens = verify on-chain
 
 // Known DEX/AMM pool programs to exclude from holder tracking
 const POOL_PROGRAMS = new Set([
@@ -131,6 +136,27 @@ function init(deps) {
 
                 const transfers = event.tokenTransfers || [];
 
+                // ============================================
+                // VERIFICATION: On-chain transaction validation
+                // For large transfers, verify the transaction exists on-chain
+                // ============================================
+                const hasLargeTransfer = transfers.some(t => parseInt(t.tokenAmount) > CRITICAL_AMOUNT_THRESHOLD);
+
+                if (VERIFY_CRITICAL_TX && hasLargeTransfer && txSignature) {
+                    const txVerification = await verification.verifyTransaction(txSignature, {
+                        timestamp: event.timestamp,
+                        transfers: transfers.map(t => ({ mint: t.mint }))
+                    });
+
+                    if (!txVerification.verified) {
+                        logger.warn(`⚠️  [Webhook] TX verification failed: ${txSignature.slice(0, 8)}... - ${txVerification.error || 'mismatch'}`);
+                        skipped++;
+                        continue; // Skip unverified large transactions
+                    }
+
+                    logger.debug(`✅ [Webhook] TX verified on-chain: ${txSignature.slice(0, 8)}... via ${txVerification.provider}`);
+                }
+
                 for (const transfer of transfers) {
                     const { mint, fromUserAccount, toUserAccount, tokenAmount } = transfer;
 
@@ -193,6 +219,26 @@ function init(deps) {
                                     ELSE 'extractor'
                                 END
                         `, [mint, fromUserAccount, -amount, now, amount]);
+                    }
+
+                    // ============================================
+                    // AUDIT: Log significant transfers (async, non-blocking)
+                    // ============================================
+                    if (amount > CRITICAL_AMOUNT_THRESHOLD) {
+                        // Fire and forget - don't block webhook response
+                        verification.logAudit(db, {
+                            action: 'transfer',
+                            entity: 'holder',
+                            entityId: mint,
+                            newValue: {
+                                from: fromUserAccount,
+                                to: toUserAccount,
+                                amount,
+                                signature: txSignature
+                            },
+                            source: 'helius_webhook',
+                            metadata: { timestamp: event.timestamp }
+                        }).catch(_e => {}); // Ignore audit failures
                     }
 
                     processed++;

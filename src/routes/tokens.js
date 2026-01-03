@@ -38,6 +38,7 @@ const cacheControl = require('../middleware/httpCache');
 const unifiedRateLimiter = require('../middleware/unifiedRateLimiter');
 const { indexTokenOnChain } = require('../services/indexer');
 const { addTokenToMasterWebhook } = require('../services/heliusWebhook');
+const verification = require('../services/verificationService');
 
 // Lazy load canvas-based card generator (avoid build failures on workers without native deps)
 let generateKScoreCard = null;
@@ -323,6 +324,97 @@ function init(deps) {
                 timestamp: new Date().toISOString()
             });
         }
+    });
+
+    // ============================================
+    // VERIFICATION ENDPOINTS
+    // "Don't Trust, Verify" - Data integrity checks
+    // ============================================
+
+    /**
+     * GET /api/token/:mint/verify
+     * Generate a verification report for a token
+     * Shows: staleness, holder verification, RPC diversity, audit trail
+     */
+    router.get('/token/:mint/verify', cacheControl(60, 300), unifiedRateLimiter, async (req, res) => {
+        const { mint } = req.params;
+
+        if (!isValidPubkey(mint)) {
+            return res.status(400).json({ success: false, error: 'Invalid mint address' });
+        }
+
+        try {
+            const report = await verification.generateVerificationReport(db, mint);
+            res.json({ success: true, report });
+        } catch (e) {
+            logger.error(`[Verify] Report failed for ${mint}: ${e.message}`);
+            res.status(500).json({ success: false, error: 'Verification failed' });
+        }
+    });
+
+    /**
+     * GET /api/token/:mint/audit
+     * Get audit history for a token
+     */
+    router.get('/token/:mint/audit', cacheControl(30, 60), unifiedRateLimiter, async (req, res) => {
+        const { mint } = req.params;
+        const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+
+        if (!isValidPubkey(mint)) {
+            return res.status(400).json({ success: false, error: 'Invalid mint address' });
+        }
+
+        try {
+            const entries = await verification.getAuditHistory(db, 'token', mint, limit);
+            res.json({
+                success: true,
+                mint,
+                entries,
+                count: entries.length
+            });
+        } catch (e) {
+            logger.error(`[Audit] History failed for ${mint}: ${e.message}`);
+            res.status(500).json({ success: false, error: 'Audit lookup failed' });
+        }
+    });
+
+    /**
+     * GET /api/stale-tokens
+     * List tokens with stale conviction data
+     */
+    router.get('/stale-tokens', cacheControl(300, 600), async (req, res) => {
+        try {
+            const staleTokens = await verification.getStaleTokens(db);
+            res.json({
+                success: true,
+                threshold_hours: verification.STALENESS_THRESHOLD_MS / (60 * 60 * 1000),
+                tokens: staleTokens,
+                count: staleTokens.length
+            });
+        } catch (e) {
+            logger.error(`[Staleness] List failed: ${e.message}`);
+            res.status(500).json({ success: false, error: 'Staleness check failed' });
+        }
+    });
+
+    /**
+     * GET /api/rpc-status
+     * Show RPC provider health for transparency
+     */
+    router.get('/rpc-status', cacheControl(30, 60), (req, res) => {
+        const providers = verification.RPC_PROVIDERS.map(p => ({
+            name: p.name,
+            healthy: p.healthy,
+            priority: p.priority,
+            failures: p.failures
+        }));
+
+        res.json({
+            success: true,
+            providers,
+            healthyCount: providers.filter(p => p.healthy).length,
+            totalCount: providers.length
+        });
     });
 
     // PUBLIC: Candle Chart
