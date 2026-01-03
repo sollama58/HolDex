@@ -10,7 +10,8 @@ const logger = require('./services/logger');
 const { initDB, getDB } = require('./services/database');
 const { connectRedis } = require('./services/redis');
 const { startSnapshotter } = require('./indexer/tasks/snapshotter');
-const kScoreUpdater = require('./tasks/kScoreUpdater'); 
+const kScoreUpdater = require('./tasks/kScoreUpdater');
+const integrityWatchdog = require('./tasks/integrityWatchdog');
 // REMOVED: const { startNewTokenListener } = require('./services/new_token_listener'); 
 const { initSocket } = require('./services/socket'); 
 const tokensRoutes = require('./routes/tokens');
@@ -284,7 +285,8 @@ async function startServer() {
         // Start Background Tasks
         startSnapshotter();
         kScoreUpdater.start({ db: getDB() });
-        
+        integrityWatchdog.start({ db: getDB() });
+
         // Initialize Routes
         app.use('/api', tokensRoutes.init({ db: getDB() }));
         app.use('/webhook', webhooksRoutes.init({ db: getDB() }));

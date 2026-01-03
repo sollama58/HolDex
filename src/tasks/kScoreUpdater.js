@@ -23,6 +23,7 @@ const bs58 = require('bs58');
 const { getClient: getRedisClient } = require('../services/redis');
 const verification = require('../services/verificationService');
 const { signAllCategories } = require('../utils/dataSignature');
+const { saveSnapshot } = require('./integrityWatchdog');
 
 // ============================================
 // HELIUS CONFIG
@@ -2612,6 +2613,9 @@ async function updateSingleToken(deps, mint) {
             mint
         ]);
 
+        // Save snapshot for integrity watchdog (self-healing)
+        await saveSnapshot(mint, tokenForSigning);
+
         // Save holder history snapshot (daily)
         await saveHolderHistory(db, mint, conviction.totalHolders || 0, conviction.realHoldersCount || 0);
 
@@ -2815,6 +2819,9 @@ async function updateKScores(deps) {
                     batchSignatures.chaos_nonce,
                     t.mint
                 ]);
+
+                // Save snapshot for integrity watchdog (self-healing)
+                await saveSnapshot(t.mint, batchTokenForSigning);
 
                 // Save holder history snapshot (daily)
                 await saveHolderHistory(db, t.mint, conviction.totalHolders || 0, conviction.realHoldersCount || 0);
