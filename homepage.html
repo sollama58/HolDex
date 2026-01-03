@@ -72,32 +72,36 @@
         .nav-btn:hover { color: #fb923c; }
         .nav-btn.active { background: #141414; color: #ea580c; border-color: #252525; box-shadow: 0 4px 0 #000; }
 
-        .filter-toggle { background: #141414; border: 1px solid #252525; color: #737373; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 11px; font-weight: 700; transition: all 0.2s; display: flex; align-items: center; gap: 6px; white-space: nowrap; flex-shrink: 0; }
-        .filter-toggle.active { border-color: #22c55e; color: #4ade80; background: rgba(34, 197, 94, 0.1); }
+        .filter-toggle { background: #141414; border: 1px solid #252525; color: #737373; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 11px; font-weight: 700; transition: all 0.2s ease; display: flex; align-items: center; gap: 6px; white-space: nowrap; flex-shrink: 0; }
+        .filter-toggle:hover { border-color: #ea580c; color: #fb923c; }
+        .filter-toggle.active { border-color: #22c55e; color: #4ade80; background: rgba(34, 197, 94, 0.1); box-shadow: 0 0 12px rgba(34, 197, 94, 0.15); }
 
-        .refresh-btn { background: #141414; border: 1px solid #252525; color: #fb923c; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; transition: all 0.2s; flex-shrink: 0; }
+        .refresh-btn { background: #141414; border: 1px solid #252525; color: #fb923c; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; border-radius: 8px; cursor: pointer; transition: all 0.2s ease; flex-shrink: 0; }
+        .refresh-btn:hover { border-color: #ea580c; background: #1a1a1a; transform: scale(1.05); }
         .refresh-btn:disabled i { animation: spin 1s linear infinite; }
-        
-        /* Select Dropdown Style */
+
+        /* Select Dropdown Style - Orb Markets inspired */
         .limit-select {
             background: #141414;
             border: 1px solid #252525;
-            color: #737373;
-            padding: 8px 8px;
+            color: #a0a0a0;
+            padding: 8px 12px;
             border-radius: 8px;
             cursor: pointer;
             font-size: 11px;
             font-weight: 700;
             outline: none;
-            transition: all 0.2s;
+            transition: all 0.2s ease;
             appearance: none;
             -webkit-appearance: none;
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23737373' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
             background-repeat: no-repeat;
             background-position: right 8px center;
-            padding-right: 24px;
+            padding-right: 28px;
         }
-        .limit-select:focus { border-color: #ea580c; color: #fb923c; }
+        .limit-select:hover { border-color: #ea580c; color: #fb923c; }
+        .limit-select:focus { border-color: #ea580c; color: #fb923c; box-shadow: 0 0 12px rgba(234, 88, 12, 0.2); }
+        .limit-select option { background: #141414; color: #fafafa; padding: 8px; }
 
         /* Chart Styles */
         .chart-wrapper { width: 100%; height: 400px; background: #0a0a0a; border-radius: 16px; overflow: hidden; border: 1px solid #252525; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
@@ -192,9 +196,106 @@
         .conviction-extractor { color: #cd853f; background: rgba(139, 69, 19, 0.2); border: 1px solid rgba(139, 69, 19, 0.5); } /* Rust */
         .conviction-unknown { color: #888888; background: rgba(68, 68, 68, 0.15); border: 1px solid rgba(68, 68, 68, 0.4); } /* Iron */
         .conviction-pill { padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: 700; text-transform: uppercase; }
+
+        /* Token Popover - Orb Markets inspired */
+        .token-popover {
+            position: fixed;
+            z-index: 100;
+            background: #141414;
+            border: 1px solid #252525;
+            border-radius: 12px;
+            padding: 16px;
+            min-width: 280px;
+            max-width: 320px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(234,88,12,0.1);
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(8px);
+            transition: opacity 0.2s, transform 0.2s, visibility 0.2s;
+            pointer-events: none;
+        }
+        .token-popover.visible {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+        .token-popover::before {
+            content: '';
+            position: absolute;
+            top: -6px;
+            left: 20px;
+            width: 12px;
+            height: 12px;
+            background: #141414;
+            border-left: 1px solid #252525;
+            border-top: 1px solid #252525;
+            transform: rotate(45deg);
+        }
+        .popover-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #252525; }
+        .popover-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .popover-stat { background: #0a0a0a; border-radius: 8px; padding: 8px; }
+        .popover-stat-label { font-size: 10px; color: #737373; text-transform: uppercase; margin-bottom: 2px; }
+        .popover-stat-value { font-size: 14px; font-weight: 700; font-family: 'JetBrains Mono'; }
+        .popover-conviction { margin-top: 12px; padding-top: 12px; border-top: 1px solid #252525; }
+        .popover-conviction-bar { height: 6px; background: #0a0a0a; border-radius: 3px; overflow: hidden; display: flex; margin-top: 6px; }
+
+        /* Refined hover effects */
+        .holdex-table tr { transition: background 0.15s ease; }
+        .holdex-table tr:hover td { background: rgba(234, 88, 12, 0.06); }
+        .holdex-table tr:hover td:first-child { background: rgba(20, 20, 20, 0.95); }
+        .img-token { transition: transform 0.2s, border-color 0.2s; }
+        .holdex-table tr:hover .img-token { transform: scale(1.05); border-color: #ea580c; }
     </style>
 </head>
 <body>
+
+<!-- TOKEN POPOVER - Orb Markets inspired, credit: helius.dev -->
+<div id="token-popover" class="token-popover">
+    <div class="popover-header">
+        <img id="popover-img" class="w-10 h-10 rounded-lg border border-[#252525]" src="">
+        <div>
+            <div class="flex items-center gap-2">
+                <span id="popover-ticker" class="font-bold text-white"></span>
+                <span id="popover-verified" class="hidden"><i data-lucide="shield-check" width="14" class="text-green-500 fill-green-500/20"></i></span>
+            </div>
+            <div id="popover-name" class="text-xs text-[#737373] truncate max-w-[180px]"></div>
+        </div>
+    </div>
+    <div class="popover-stats">
+        <div class="popover-stat">
+            <div class="popover-stat-label">K-Score</div>
+            <div id="popover-kscore" class="popover-stat-value text-[#ea580c]">--</div>
+        </div>
+        <div class="popover-stat">
+            <div class="popover-stat-label">Credit</div>
+            <div id="popover-credit" class="popover-stat-value">--</div>
+        </div>
+        <div class="popover-stat">
+            <div class="popover-stat-label">MCap</div>
+            <div id="popover-mcap" class="popover-stat-value text-[#fb923c]">--</div>
+        </div>
+        <div class="popover-stat">
+            <div class="popover-stat-label">Vol 24h</div>
+            <div id="popover-vol" class="popover-stat-value text-[#22c55e]">--</div>
+        </div>
+    </div>
+    <div id="popover-conviction" class="popover-conviction hidden">
+        <div class="flex items-center justify-between text-[10px]">
+            <span class="text-[#737373] uppercase">Conviction</span>
+            <span id="popover-conviction-pct" class="text-[#fb923c] font-bold">--</span>
+        </div>
+        <div class="popover-conviction-bar">
+            <div id="popover-bar-acc" class="h-full bg-[#b9f2ff]" style="width:0%"></div>
+            <div id="popover-bar-hold" class="h-full bg-[#c0c0c0]" style="width:0%"></div>
+            <div id="popover-bar-red" class="h-full bg-[#b87333]" style="width:0%"></div>
+            <div id="popover-bar-ext" class="h-full bg-[#cd853f]" style="width:0%"></div>
+        </div>
+        <div class="flex justify-between text-[9px] mt-1 text-[#737373]">
+            <span>💎 Acc</span><span>🥈 Hold</span><span>🥉 Red</span><span>🔩 Ext</span>
+        </div>
+    </div>
+    <div class="text-center text-[10px] text-[#737373] mt-3 pt-2 border-t border-[#252525]">Click for details</div>
+</div>
 
 <!-- TOP NAVIGATION -->
 <nav class="sticky top-0 z-40 px-3 py-3 md:px-6 md:py-4">
@@ -209,7 +310,10 @@
                 </div>
                 <div>
                     <h1 class="text-2xl md:text-3xl brand-text tracking-tight font-sans">HolDex</h1>
-                    <p class="text-[10px] md:text-xs text-[#737373] font-mono hidden md:block">Holdex it. Wallets don't lie.</p>
+                    <div class="hidden md:flex items-center gap-2">
+                        <p class="text-[10px] md:text-xs text-[#737373] font-mono">Holdex it. Wallets don't lie.</p>
+                        <a href="https://helius.dev" target="_blank" class="text-[9px] text-[#737373] hover:text-[#fb923c] border border-[#252525] px-1.5 py-0.5 rounded bg-[#141414] transition">⚡ Helius</a>
+                    </div>
                 </div>
             </div>
         </div>
@@ -415,7 +519,15 @@
                     </div>
                 </div>
             </div>
-             <div class="border-t border-[#252525] pt-8 flex justify-between items-center text-xs text-[#737373]"><div>&copy; 2025 HolDex Protocol. All rights reserved.</div><div class="font-mono">v2.5.0 (Stable)</div></div>
+             <div class="border-t border-[#252525] pt-8 flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-[#737373]">
+                 <div>&copy; 2025 HolDex Protocol. All rights reserved.</div>
+                 <a href="https://helius.dev" target="_blank" class="flex items-center gap-2 text-[#737373] hover:text-[#ea580c] transition group">
+                     <span>Powered by</span>
+                     <span class="font-bold text-[#fb923c] group-hover:text-[#ea580c]">Helius</span>
+                     <span class="text-[10px] opacity-60">RPC & DAS</span>
+                 </a>
+                 <div class="font-mono">v2.5.0 (Stable)</div>
+             </div>
         </div>
     </div>
 
@@ -1212,6 +1324,76 @@
         return `<span class="credit-badge ${gradeClass}" title="${label} (K=${score})">${grade}</span>`;
     }
 
+    // --- POPOVER SYSTEM (Orb Markets inspired, credit: helius.dev) ---
+    let popoverTimeout = null;
+    let currentPopoverToken = null;
+    const popoverEl = document.getElementById('token-popover');
+
+    function showTokenPopover(e, token) {
+        if (!popoverEl || window.innerWidth < 768) return; // Desktop only
+        clearTimeout(popoverTimeout);
+        currentPopoverToken = token;
+
+        const isVerified = token.hasCommunityUpdate || token.has_community_update;
+        const score = token.kScore || token.k_score || 0;
+        const img = token.image || `https://placehold.co/40x40/0a0a0a/ea580c?text=${token.ticker?.[0]||'?'}`;
+
+        // Populate popover
+        document.getElementById('popover-img').src = img;
+        document.getElementById('popover-ticker').textContent = token.ticker;
+        document.getElementById('popover-name').textContent = token.name;
+        document.getElementById('popover-verified').classList.toggle('hidden', !isVerified);
+
+        // K-Score & Credit
+        if (isVerified && score > 0) {
+            document.getElementById('popover-kscore').textContent = score;
+            const { grade, label } = getCreditRating(score);
+            document.getElementById('popover-credit').innerHTML = `<span class="credit-badge ${getCreditRating(score).class}">${grade}</span>`;
+        } else {
+            document.getElementById('popover-kscore').textContent = isVerified ? '⏳' : '🔒';
+            document.getElementById('popover-credit').textContent = isVerified ? '...' : 'Locked';
+        }
+
+        // Stats
+        const formatVal = (v) => v ? '$'+ new Intl.NumberFormat('en',{notation:'compact'}).format(v) : '--';
+        document.getElementById('popover-mcap').textContent = formatVal(token.marketCap);
+        document.getElementById('popover-vol').textContent = formatVal(token.volume24h);
+
+        // Conviction (if available)
+        const conv = token.conviction;
+        const convEl = document.getElementById('popover-conviction');
+        if (isVerified && conv && conv.accumulators !== undefined) {
+            convEl.classList.remove('hidden');
+            const total = (conv.accumulators || 0) + (conv.holders || 0) + (conv.reducers || 0) + (conv.extractors || 0);
+            if (total > 0) {
+                const diamondPct = ((conv.accumulators + conv.holders) / total * 100).toFixed(0);
+                document.getElementById('popover-conviction-pct').textContent = `${diamondPct}% 💎`;
+                document.getElementById('popover-bar-acc').style.width = (conv.accumulators / total * 100) + '%';
+                document.getElementById('popover-bar-hold').style.width = (conv.holders / total * 100) + '%';
+                document.getElementById('popover-bar-red').style.width = (conv.reducers / total * 100) + '%';
+                document.getElementById('popover-bar-ext').style.width = (conv.extractors / total * 100) + '%';
+            }
+        } else {
+            convEl.classList.add('hidden');
+        }
+
+        // Position popover
+        const rect = e.target.closest('tr').getBoundingClientRect();
+        popoverEl.style.left = Math.max(16, rect.left) + 'px';
+        popoverEl.style.top = (rect.bottom + 8) + 'px';
+
+        popoverEl.classList.add('visible');
+        lucide.createIcons();
+    }
+
+    function hideTokenPopover() {
+        clearTimeout(popoverTimeout);
+        popoverTimeout = setTimeout(() => {
+            if (popoverEl) popoverEl.classList.remove('visible');
+            currentPopoverToken = null;
+        }, 150);
+    }
+
     // Charts
     let chartInstance = null;
     let candleSeries = null;
@@ -1344,19 +1526,23 @@
         } catch (e) { console.error("API Error", e); } 
     }
 
-    function renderTable(tokens) { 
-        const tbody = document.getElementById('table-body'); 
-        if(!tbody) return; 
-        
-        let displayTokens = tokens; 
-        if (isZeroVolHidden) { displayTokens = displayTokens.filter(t => (t.volume24h || 0) > 0); } 
-        
-        if (displayTokens.length === 0) { 
-            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-[#737373] font-mono">No tokens found.</td></tr>`; 
-            return; 
-        } 
-        
-        tbody.innerHTML = displayTokens.map(t => {
+    // Store tokens for popover access
+    let cachedTokens = [];
+
+    function renderTable(tokens) {
+        const tbody = document.getElementById('table-body');
+        if(!tbody) return;
+
+        let displayTokens = tokens;
+        if (isZeroVolHidden) { displayTokens = displayTokens.filter(t => (t.volume24h || 0) > 0); }
+        cachedTokens = displayTokens; // Cache for popover
+
+        if (displayTokens.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-[#737373] font-mono">No tokens found.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = displayTokens.map((t, idx) => {
             // Handle both camelCase and snake_case for verification status
             const isVerified = t.hasCommunityUpdate || t.has_community_update;
             const score = t.kScore || t.k_score || 0;
@@ -1364,10 +1550,10 @@
             const kScoreDisplay = renderKScore(score, isVerified, t.mint);
             const formatPct = (v) => (v !== undefined && v !== null) ? `<span class="pill ${v>0?'pill-green':'pill-red'}">${v.toFixed(1)}%</span>` : '-';
             const formatVal = (v) => v ? '$'+ new Intl.NumberFormat('en',{notation:'compact'}).format(v) : '-';
-            const img = t.image || `https://placehold.co/40x40/2a1005/7c2d12?text=${t.ticker?.[0]||'?'}`;
+            const img = t.image || `https://placehold.co/40x40/0a0a0a/ea580c?text=${t.ticker?.[0]||'?'}`;
 
             return `
-            <tr onclick="navigateTo('token/${t.mint}')" class="cursor-pointer group border-b border-[#252525]/30">
+            <tr onclick="navigateTo('token/${t.mint}')" data-token-idx="${idx}" class="cursor-pointer group border-b border-[#252525]/30">
                 <td class="bg-[#0a0a0a]">
                     <div class="flex items-center gap-2">
                         <img src="${img}" class="img-token" onerror="this.src='https://placehold.co/40'">
@@ -1385,15 +1571,26 @@
                 <!-- Price Removed, replaced with 1h% -->
                 <td class="text-right hidden md:table-cell">${formatPct(t.change1h)}</td>
                 <td class="text-right hidden md:table-cell">${formatPct(t.change24h)}</td>
-                
+
                 <td class="text-right font-mono text-[#22c55e] text-xs">${formatVal(t.volume24h)}</td>
                 <td class="text-right font-mono text-[#fb923c] text-xs">${formatVal(t.marketCap)}</td>
-                
+
                 <td class="text-right font-mono text-[#fb923c] text-xs hidden md:table-cell">${formatHolders(t.holders)}</td>
                 <td class="text-right text-[10px] text-[#737373] font-mono whitespace-nowrap hidden md:table-cell">${timeAgo(t.timestamp)}</td>
             </tr>`;
-        }).join(''); 
-        lucide.createIcons(); 
+        }).join('');
+        lucide.createIcons();
+
+        // Attach popover events (desktop only)
+        if (window.innerWidth >= 768) {
+            tbody.querySelectorAll('tr[data-token-idx]').forEach(row => {
+                row.addEventListener('mouseenter', (e) => {
+                    const idx = parseInt(row.dataset.tokenIdx);
+                    if (cachedTokens[idx]) showTokenPopover(e, cachedTokens[idx]);
+                });
+                row.addEventListener('mouseleave', hideTokenPopover);
+            });
+        }
     }
 
     // --- DETAIL VIEW ---
