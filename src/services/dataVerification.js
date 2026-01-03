@@ -12,7 +12,7 @@
 
 const config = require('../config/env');
 const logger = require('./logger');
-const { verifyToken, batchVerify } = require('../utils/dataSignature');
+const { verifyAllSignatures } = require('../utils/dataSignature');
 const { getClient: getRedisClient } = require('./redis');
 
 const VERIFY_MODE = config.VERIFY_DATA_MODE || 'strict';
@@ -84,9 +84,9 @@ async function removeFromRecalcQueue(mint) {
 }
 
 /**
- * Verify a single token's data integrity
- * @param {Object} token - Token from database
- * @returns {Object} { token, verified, tampered, reason }
+ * Verify a single token's data integrity (8-category system)
+ * @param {Object} token - Token from database with signatures
+ * @returns {Object} { token, verified, tampered, tamperedCategories, reason }
  */
 function verifySingleToken(token) {
     if (!token) return { token: null, verified: false, tampered: false, reason: 'no_token' };
@@ -96,13 +96,14 @@ function verifySingleToken(token) {
         return { token, verified: true, tampered: false, reason: 'verification_disabled' };
     }
 
-    const result = verifyToken(token);
+    const result = verifyAllSignatures(token);
 
-    if (result.tampered) {
-        logger.warn(`[DataVerify] TAMPERED: ${token.mint?.slice(0, 8)} - signature mismatch`);
+    if (result.tampered.length > 0) {
+        const tamperedStr = result.tampered.join(',');
+        logger.warn(`[DataVerify] TAMPERED: ${token.mint?.slice(0, 8)} - categories: ${tamperedStr}`);
 
         // Queue for recalculation (fire-and-forget)
-        queueForRecalculation(token.mint, 'signature_mismatch').catch(() => {});
+        queueForRecalculation(token.mint, `tampered:${tamperedStr}`).catch(() => {});
 
         if (VERIFY_MODE === 'strict') {
             // In strict mode, mark token as unverified
@@ -110,22 +111,25 @@ function verifySingleToken(token) {
                 token: {
                     ...token,
                     _integrity: 'tampered',
-                    _verified: false
+                    _verified: false,
+                    _tamperedCategories: result.tampered
                 },
                 verified: false,
                 tampered: true,
+                tamperedCategories: result.tampered,
                 reason: 'signature_mismatch'
             };
         }
     }
 
-    if (!result.verified && result.reason === 'missing_signature') {
-        // Token hasn't been re-signed yet (migration period)
+    if (result.unsigned.length > 0) {
+        // Token hasn't been fully signed yet (migration period)
         return {
             token: {
                 ...token,
                 _integrity: 'unsigned',
-                _verified: false
+                _verified: false,
+                _unsignedCategories: result.unsigned
             },
             verified: false,
             tampered: false,
@@ -136,71 +140,93 @@ function verifySingleToken(token) {
     return {
         token: {
             ...token,
-            _integrity: 'verified',
+            _integrity: result.chaosVerified ? 'chaos_verified' : 'verified',
             _verified: true
         },
-        verified: result.verified,
+        verified: result.valid,
         tampered: false,
-        reason: result.reason
+        reason: result.chaosVerified ? 'chaos_verified' : 'verified'
     };
 }
 
 /**
- * Verify multiple tokens
- * @param {Array} tokens - Tokens from database
+ * Verify multiple tokens (8-category system)
+ * @param {Array} tokens - Tokens from database with signatures
  * @returns {Object} { tokens, stats }
  */
 function verifyTokens(tokens) {
     if (!tokens || tokens.length === 0) {
-        return { tokens: [], stats: { total: 0, verified: 0, tampered: 0, unsigned: 0 } };
+        return { tokens: [], stats: { total: 0, verified: 0, tampered: 0, unsigned: 0, chaosVerified: 0 } };
     }
 
     // Skip verification if disabled
     if (VERIFY_MODE === 'off') {
         return {
             tokens: tokens.map(t => ({ ...t, _integrity: 'unchecked', _verified: true })),
-            stats: { total: tokens.length, verified: tokens.length, tampered: 0, unsigned: 0 }
+            stats: { total: tokens.length, verified: tokens.length, tampered: 0, unsigned: 0, chaosVerified: 0 }
         };
     }
 
-    const { valid, tampered, unsigned } = batchVerify(tokens);
+    // Process each token through 8-category verification
+    const verifiedTokens = [];
+    const tamperedList = [];
+    const unsignedList = [];
+    let chaosVerifiedCount = 0;
+
+    for (const token of tokens) {
+        const result = verifyAllSignatures(token);
+
+        if (result.tampered.length > 0) {
+            tamperedList.push({ token, categories: result.tampered });
+        } else if (result.unsigned.length > 0) {
+            unsignedList.push({ token, categories: result.unsigned });
+            verifiedTokens.push({
+                ...token,
+                _integrity: 'unsigned',
+                _verified: false,
+                _unsignedCategories: result.unsigned
+            });
+        } else {
+            if (result.chaosVerified) chaosVerifiedCount++;
+            verifiedTokens.push({
+                ...token,
+                _integrity: result.chaosVerified ? 'chaos_verified' : 'verified',
+                _verified: true
+            });
+        }
+    }
 
     const stats = {
         total: tokens.length,
-        verified: valid.length,
-        tampered: tampered.length,
-        unsigned: unsigned.length
+        verified: tokens.length - tamperedList.length - unsignedList.length,
+        tampered: tamperedList.length,
+        unsigned: unsignedList.length,
+        chaosVerified: chaosVerifiedCount
     };
 
-    if (tampered.length > 0) {
-        logger.warn(`[DataVerify] ALERT: ${tampered.length}/${tokens.length} tokens with invalid signatures`);
-        tampered.forEach(({ token, reason }) => {
-            logger.warn(`[DataVerify] Tampered: ${token.mint?.slice(0, 8)} ${token.symbol} - ${reason}`);
+    if (tamperedList.length > 0) {
+        logger.warn(`[DataVerify] ALERT: ${tamperedList.length}/${tokens.length} tokens with invalid signatures`);
+        for (const { token, categories } of tamperedList) {
+            logger.warn(`[DataVerify] Tampered: ${token.mint?.slice(0, 8)} ${token.symbol} - categories: ${categories.join(',')}`);
             // Queue tampered tokens for recalculation (fire-and-forget)
-            queueForRecalculation(token.mint, 'signature_mismatch').catch(() => {});
-        });
+            queueForRecalculation(token.mint, `tampered:${categories.join(',')}`).catch(() => {});
+        }
     }
 
-    // Build result array with integrity flags
-    const verifiedTokens = [];
-
-    for (const token of valid) {
-        verifiedTokens.push({ ...token, _integrity: 'verified', _verified: true });
-    }
-
-    for (const { token } of unsigned) {
-        verifiedTokens.push({ ...token, _integrity: 'unsigned', _verified: false });
-    }
-
-    // In strict mode, exclude tampered tokens
-    // In warn mode, include them with flag
+    // In warn mode, include tampered tokens with flag
+    // In strict mode, exclude them
     if (VERIFY_MODE === 'warn') {
-        for (const { token } of tampered) {
-            verifiedTokens.push({ ...token, _integrity: 'tampered', _verified: false });
+        for (const { token, categories } of tamperedList) {
+            verifiedTokens.push({
+                ...token,
+                _integrity: 'tampered',
+                _verified: false,
+                _tamperedCategories: categories
+            });
         }
     } else {
         // Strict mode: tampered tokens are excluded but logged
-        for (const { token } of tampered) {
+        for (const { token } of tamperedList) {
             logger.error(`[DataVerify] EXCLUDED tampered token: ${token.mint} ${token.symbol}`);
         }
     }
@@ -210,15 +236,21 @@ function verifyTokens(tokens) {
 
 /**
  * Get list of tampered token mints (for recalculation queue)
- * @param {Array} tokens - Tokens from database
- * @returns {Array} List of tampered mint addresses
+ * @param {Array} tokens - Tokens from database with signatures
+ * @returns {Array} List of { mint, categories } for tampered tokens
  */
 function getTamperedMints(tokens) {
     if (!tokens || tokens.length === 0) return [];
     if (VERIFY_MODE === 'off') return [];
 
-    const { tampered } = batchVerify(tokens);
-    return tampered.map(({ token }) => token.mint);
+    const tampered = [];
+    for (const token of tokens) {
+        const result = verifyAllSignatures(token);
+        if (result.tampered.length > 0) {
+            tampered.push({ mint: token.mint, categories: result.tampered });
+        }
+    }
+    return tampered;
 }
 
 /**
@@ -230,8 +262,8 @@ function needsRecalculation(token) {
     if (!token) return false;
     if (VERIFY_MODE === 'off') return false;
 
-    const { tampered } = verifyToken(token);
-    return tampered;
+    const result = verifyAllSignatures(token);
+    return result.tampered.length > 0;
 }
 
 module.exports = {

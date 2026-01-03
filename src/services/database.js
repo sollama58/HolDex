@@ -201,9 +201,18 @@ async function initDB() {
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS lp_burn_pct DOUBLE PRECISION DEFAULT NULL`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS lp_locked_pct DOUBLE PRECISION DEFAULT NULL`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS lp_status TEXT DEFAULT NULL`,
-                // DATA INTEGRITY: Proof-of-History signature for K-Score data
-                // Signed with HMAC-SHA256 to detect tampering even if DB credentials are leaked
-                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS data_signature TEXT DEFAULT NULL`,
+                // DATA INTEGRITY: 8-Category Signature System (42 colonnes - Controlled Chaos)
+                // $asdfasdfa philosophy: Don't Trust, Verify
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS data_signature TEXT DEFAULT NULL`, // Legacy
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_identity TEXT DEFAULT NULL`,   // name|symbol|image|decimals
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_security TEXT DEFAULT NULL`,   // mint_auth|freeze_auth|mutable|verified
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_lp TEXT DEFAULT NULL`,         // lp_burn|lp_locked|lp_status
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_supply TEXT DEFAULT NULL`,     // supply|initial|burned
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_kscore TEXT DEFAULT NULL`,     // k_score|conviction|holders
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_market TEXT DEFAULT NULL`,     // price|mcap|liquidity
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_origin TEXT DEFAULT NULL`,     // is_pump|bonding|timestamp|metadata
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_full TEXT DEFAULT NULL`,       // HMAC(all sigs + chaos)
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS chaos_nonce TEXT DEFAULT NULL`,    // Random entropy - 42nd column
             ];
 
             // PERFORMANCE: Add indexes for frequently queried columns

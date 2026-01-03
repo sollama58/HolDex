@@ -22,7 +22,7 @@ const priceService = require('../services/priceService');
 const bs58 = require('bs58');
 const { getClient: getRedisClient } = require('../services/redis');
 const verification = require('../services/verificationService');
-const { signData } = require('../utils/dataSignature');
+const { signAllCategories } = require('../utils/dataSignature');
 
 // ============================================
 // HELIUS CONFIG
@@ -2503,14 +2503,53 @@ async function updateSingleToken(deps, mint) {
         const burnedAmount = burn.burned || 0;
         const initialSupply = currentSupply + burnedAmount;
 
-        // Generate data signature (Proof-of-History)
+        // Generate 8-category signatures (Don't Trust, Verify)
         const updateTimestamp = Date.now();
-        const dataSignature = signData({
+
+        // Build complete token object for signing all categories
+        const tokenForSigning = {
             mint,
+            // Identity
+            name: token.name || '',
+            symbol: token.symbol || '',
+            image: token.image || '',
+            decimals: token.decimals || 9,
+            // Security
+            mint_authority_revoked: security.mintAuthorityRevoked || false,
+            freeze_authority_revoked: security.freezeAuthorityRevoked || false,
+            is_mutable_supply: supply.isMutable || false,
+            hasCommunityUpdate: token.hasCommunityUpdate || token.hascommunityupdate || false,
+            // LP (from token if available)
+            lp_burn_pct: token.lp_burn_pct || 0,
+            lp_locked_pct: token.lp_locked_pct || 0,
+            lp_status: token.lp_status || 'unknown',
+            // Supply
+            supply: token.supply || '0',
+            initial_supply: initialSupply > 0 ? initialSupply.toString() : token.supply || '0',
+            burned_amount: burnedAmount,
+            burned_percent: burn.burnPct || 0,
+            // K-Score
             k_score: smoothedScore,
             conviction_score: conviction.score || 0,
-            last_k_score_update: updateTimestamp
-        });
+            conviction_accumulators: conviction.accumulators || 0,
+            conviction_holders: conviction.holders || 0,
+            conviction_reducers: conviction.reducers || 0,
+            conviction_extractors: conviction.extractors || 0,
+            conviction_analyzed: conviction.analyzed || 0,
+            holders: conviction.realHoldersCount || 0,
+            last_k_score_update: updateTimestamp,
+            // Market
+            priceusd: token.priceusd || 0,
+            marketcap: token.marketcap || 0,
+            liquidity: token.liquidity || 0,
+            // Origin
+            is_pump_fun: category.isPumpFun,
+            bonding_curve_complete: category.bondingCurveComplete,
+            timestamp: token.timestamp || 0,
+            metadata: token.metadata || ''
+        };
+
+        const signatures = signAllCategories(tokenForSigning);
 
         await db.run(`
             UPDATE tokens
@@ -2532,8 +2571,16 @@ async function updateSingleToken(deps, mint) {
                 mint_authority_revoked = $16,
                 freeze_authority_revoked = $17,
                 is_mutable_supply = $18,
-                data_signature = $19
-            WHERE mint = $20
+                sig_identity = $19,
+                sig_security = $20,
+                sig_lp = $21,
+                sig_supply = $22,
+                sig_kscore = $23,
+                sig_market = $24,
+                sig_origin = $25,
+                sig_full = $26,
+                chaos_nonce = $27
+            WHERE mint = $28
         `, [
             smoothedScore,
             updateTimestamp.toString(),
@@ -2553,7 +2600,15 @@ async function updateSingleToken(deps, mint) {
             security.mintAuthorityRevoked || false,
             security.freezeAuthorityRevoked || false,
             supply.isMutable || false,
-            dataSignature,
+            signatures.sig_identity,
+            signatures.sig_security,
+            signatures.sig_lp,
+            signatures.sig_supply,
+            signatures.sig_kscore,
+            signatures.sig_market,
+            signatures.sig_origin,
+            signatures.sig_full,
+            signatures.chaos_nonce,
             mint
         ]);
 
@@ -2652,14 +2707,53 @@ async function updateKScores(deps) {
                     realHoldersCount: safeInt(conviction.realHoldersCount, 10000000)
                 };
 
-                // Generate data signature (Proof-of-History)
+                // Generate 8-category signatures (Don't Trust, Verify)
                 const batchUpdateTimestamp = Date.now();
-                const batchDataSignature = signData({
+
+                // Build complete token object for signing all categories
+                const batchTokenForSigning = {
                     mint: t.mint,
+                    // Identity
+                    name: t.name || '',
+                    symbol: t.symbol || '',
+                    image: t.image || '',
+                    decimals: t.decimals || 9,
+                    // Security
+                    mint_authority_revoked: safeBool(security.mintAuthorityRevoked),
+                    freeze_authority_revoked: safeBool(security.freezeAuthorityRevoked),
+                    is_mutable_supply: safeBool(supply.isMutable),
+                    hasCommunityUpdate: t.hasCommunityUpdate || t.hascommunityupdate || false,
+                    // LP (from token if available)
+                    lp_burn_pct: t.lp_burn_pct || 0,
+                    lp_locked_pct: t.lp_locked_pct || 0,
+                    lp_status: t.lp_status || 'unknown',
+                    // Supply
+                    supply: t.supply || '0',
+                    initial_supply: initialSupply > 0 ? initialSupply.toString() : t.supply || '0',
+                    burned_amount: safeFloat(burnedAmount),
+                    burned_percent: safeFloat(burn.burnPct, 100),
+                    // K-Score
                     k_score: smoothedScore,
                     conviction_score: validatedConviction.score,
-                    last_k_score_update: batchUpdateTimestamp
-                });
+                    conviction_accumulators: validatedConviction.accumulators,
+                    conviction_holders: validatedConviction.holders,
+                    conviction_reducers: validatedConviction.reducers,
+                    conviction_extractors: validatedConviction.extractors,
+                    conviction_analyzed: validatedConviction.analyzed,
+                    holders: validatedConviction.realHoldersCount,
+                    last_k_score_update: batchUpdateTimestamp,
+                    // Market
+                    priceusd: t.priceusd || 0,
+                    marketcap: t.marketcap || 0,
+                    liquidity: t.liquidity || 0,
+                    // Origin
+                    is_pump_fun: safeBool(category.isPumpFun),
+                    bonding_curve_complete: safeBool(category.bondingCurveComplete),
+                    timestamp: t.timestamp || 0,
+                    metadata: t.metadata || ''
+                };
+
+                const batchSignatures = signAllCategories(batchTokenForSigning);
 
                 await db.run(`
                     UPDATE tokens
@@ -2681,8 +2775,16 @@ async function updateKScores(deps) {
                         mint_authority_revoked = $16,
                         freeze_authority_revoked = $17,
                         is_mutable_supply = $18,
-                        data_signature = $19
-                    WHERE mint = $20
+                        sig_identity = $19,
+                        sig_security = $20,
+                        sig_lp = $21,
+                        sig_supply = $22,
+                        sig_kscore = $23,
+                        sig_market = $24,
+                        sig_origin = $25,
+                        sig_full = $26,
+                        chaos_nonce = $27
+                    WHERE mint = $28
                 `, [
                     smoothedScore,
                     batchUpdateTimestamp.toString(),
@@ -2702,7 +2804,15 @@ async function updateKScores(deps) {
                     safeBool(security.mintAuthorityRevoked),
                     safeBool(security.freezeAuthorityRevoked),
                     safeBool(supply.isMutable),
-                    batchDataSignature,
+                    batchSignatures.sig_identity,
+                    batchSignatures.sig_security,
+                    batchSignatures.sig_lp,
+                    batchSignatures.sig_supply,
+                    batchSignatures.sig_kscore,
+                    batchSignatures.sig_market,
+                    batchSignatures.sig_origin,
+                    batchSignatures.sig_full,
+                    batchSignatures.chaos_nonce,
                     t.mint
                 ]);
 
