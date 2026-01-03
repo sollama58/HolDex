@@ -785,28 +785,66 @@
              <!-- Endpoint 1 -->
              <div>
                  <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/tokens</span></div>
-                 <p class="text-sm text-[#ffedd5] mb-2">Fetch a paginated list of top performing tokens.</p>
-                 <div class="code-block">
-<span class="text-[#9a3412]">// Response</span>
-{
-  "success": true,
-  "tokens": [
-    { "mint": "So111...", "ticker": "SOL", "priceUsd": 150.2, ... }
-  ]
-}
-                 </div>
+                 <p class="text-sm text-[#ffedd5] mb-2">Fetch paginated token list. Params: <code class="text-[#ea580c]">filter=verified</code>, <code class="text-[#ea580c]">sort=kscore</code></p>
              </div>
-             
+
              <!-- Endpoint 2 -->
              <div>
                  <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/token/:mint</span></div>
-                 <p class="text-sm text-[#ffedd5] mb-2">Get detailed metadata, K-Score, and pool info for a specific token.</p>
+                 <p class="text-sm text-[#ffedd5] mb-2">Full token data with K-Score, Credit Rating, Conviction Breakdown (verified only).</p>
+                 <div class="code-block text-[10px]">
+<span class="text-[#9a3412]">// conviction object (verified tokens)</span>
+"conviction": {
+  "score": 75,
+  "accumulators": 8, "holders": 6,
+  "reducers": 4, "extractors": 2,
+  "roles": {
+    "accumulator": { "icon": "💎", "metal": "Diamond" },
+    "holder": { "icon": "🥇", "metal": "Gold" },
+    "reducer": { "icon": "🥈", "metal": "Silver" },
+    "extractor": { "icon": "🔩", "metal": "Rust" }
+  }
+}
+                 </div>
              </div>
 
-             <!-- Endpoint 3 -->
+             <!-- Endpoint 3: Holders -->
+             <div>
+                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/token/:mint/holders</span></div>
+                 <p class="text-sm text-[#ffedd5] mb-2">Top 20 holders with role classification (Diamond/Gold/Silver/Rust).</p>
+                 <div class="code-block text-[10px]">
+<span class="text-[#9a3412]">// Each holder includes role metal</span>
+"holders": [{
+  "address": "5yBE...",
+  "class": "accumulator",
+  "role": { "icon": "💎", "metal": "Diamond", "impact": "bullish" },
+  "buys": 12, "sells": 3
+}]
+                 </div>
+             </div>
+
+             <!-- Endpoint 4: Evolution -->
+             <div>
+                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/token/:mint/evolution</span></div>
+                 <p class="text-sm text-[#ffedd5] mb-2">K-Score history for trajectory analysis (30/60/90 days).</p>
+             </div>
+
+             <!-- Endpoint 5: Candles -->
              <div>
                  <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/token/:mint/candles</span></div>
-                 <p class="text-sm text-[#ffedd5] mb-2">Fetch OHLCV data. Params: <code class="text-[#ea580c]">resolution</code> (5, 60, D), <code class="text-[#ea580c]">from</code>, <code class="text-[#ea580c]">to</code> (unix timestamp).</p>
+                 <p class="text-sm text-[#ffedd5] mb-2">OHLCV data. Params: <code class="text-[#ea580c]">resolution</code> (5, 60, D), <code class="text-[#ea580c]">from</code>, <code class="text-[#ea580c]">to</code></p>
+             </div>
+
+             <!-- Holder Role Metals -->
+             <div class="bg-[#451a03] p-4 rounded-lg border border-[#7c2d12]">
+                 <h4 class="text-[#ea580c] font-bold mb-3 text-sm uppercase">Holder Role Metals</h4>
+                 <div class="grid grid-cols-2 gap-2 text-xs">
+                     <div class="flex items-center gap-2"><span class="text-cyan-300">💎</span> <span class="text-[#ffedd5]">Diamond</span> <span class="text-[#9a3412]">Accumulator</span></div>
+                     <div class="flex items-center gap-2"><span class="text-yellow-400">🥇</span> <span class="text-[#ffedd5]">Gold</span> <span class="text-[#9a3412]">Holder</span></div>
+                     <div class="flex items-center gap-2"><span class="text-gray-400">🥈</span> <span class="text-[#ffedd5]">Silver</span> <span class="text-[#9a3412]">Reducer</span></div>
+                     <div class="flex items-center gap-2"><span class="text-orange-700">🔩</span> <span class="text-[#ffedd5]">Rust</span> <span class="text-[#9a3412]">Extractor</span></div>
+                 </div>
+                 <p class="text-[10px] text-[#9a3412] mt-3">Diamond+Gold ≥ 50% = Strong conviction. Below 50% = Exit liquidity risk.</p>
              </div>
         </div>
         <button onclick="toggleApiModal()" class="w-full bg-[#451a03] text-[#fb923c] py-3 rounded-lg font-bold text-sm mt-4">Close Documentation</button>
@@ -846,30 +884,38 @@
 </div>
 
 <div id="kscore-modal" class="modal-overlay hidden">
-    <div class="modal-content bg-[#2a1005] border-2 border-[#7c2d12] p-6 shadow-2xl relative w-full max-w-md">
+    <div class="modal-content bg-[#2a1005] border-2 border-[#7c2d12] p-6 shadow-2xl relative w-full max-w-lg">
         <button class="absolute top-4 right-4 text-[#9a3412]" onclick="toggleKScoreModal()"><i data-lucide="x" width="24"></i></button>
-        <h3 class="text-xl font-bold text-white mb-4">Credit Rating System</h3>
-        <p class="text-sm text-[#ffedd5] mb-4">Moody's for Memecoins - analyzing holder conviction:</p>
+        <h3 class="text-xl font-bold text-white mb-2">K-Score: Credit Rating for Tokens</h3>
+        <p class="text-sm text-[#9a3412] mb-4">"Moody's for Memecoins" - Wallets don't lie.</p>
 
+        <!-- Credit Ratings -->
         <div class="grid grid-cols-2 gap-2 mb-4 text-xs font-mono">
-            <div class="flex items-center gap-2"><span class="credit-badge credit-a1">A1</span> Prime Quality</div>
-            <div class="flex items-center gap-2"><span class="credit-badge credit-a2">A2</span> Excellent</div>
-            <div class="flex items-center gap-2"><span class="credit-badge credit-a3">A3</span> Good</div>
-            <div class="flex items-center gap-2"><span class="credit-badge credit-b1">B1</span> Fair</div>
-            <div class="flex items-center gap-2"><span class="credit-badge credit-b2">B2</span> Speculative</div>
-            <div class="flex items-center gap-2"><span class="credit-badge credit-b3">B3</span> V.Speculative</div>
-            <div class="flex items-center gap-2"><span class="credit-badge credit-c">C</span> High Risk</div>
-            <div class="flex items-center gap-2"><span class="credit-badge credit-d">D</span> Default</div>
+            <div class="flex items-center gap-2"><span class="credit-badge credit-a1">A1</span> 💎 Diamond (90+)</div>
+            <div class="flex items-center gap-2"><span class="credit-badge credit-a2">A2</span> 💠 Platinum (80-89)</div>
+            <div class="flex items-center gap-2"><span class="credit-badge credit-a3">A3</span> 🥇 Gold (70-79)</div>
+            <div class="flex items-center gap-2"><span class="credit-badge credit-b1">B1</span> 🥈 Silver (60-69)</div>
+            <div class="flex items-center gap-2"><span class="credit-badge credit-b2">B2</span> 🥉 Bronze (50-59)</div>
+            <div class="flex items-center gap-2"><span class="credit-badge credit-b3">B3</span> 🟤 Copper (40-49)</div>
+            <div class="flex items-center gap-2"><span class="credit-badge credit-c">C</span> ⚫ Iron (20-39)</div>
+            <div class="flex items-center gap-2"><span class="credit-badge credit-d">D</span> 🔩 Rust (&lt;20)</div>
         </div>
 
-        <p class="text-xs text-[#9a3412] mb-3">Based on K-Score (0-100) which analyzes:</p>
-        <ul class="list-disc list-inside text-xs text-[#9a3412] space-y-1 mb-4">
-            <li><span class="text-[#ea580c]">Accumulators</span> - Holders still buying</li>
-            <li><span class="text-[#ea580c]">Diamond Hands</span> - Holding strong</li>
-            <li><span class="text-[#ea580c]">Reducers</span> - Taking profit</li>
-            <li><span class="text-[#ea580c]">Extractors</span> - Dumping</li>
-        </ul>
-        <p class="text-xs text-[#9a3412] italic">Higher grades = stronger community conviction.</p>
+        <!-- Holder Role Metals -->
+        <div class="bg-[#451a03] p-4 rounded-lg border border-[#7c2d12] mb-4">
+            <h4 class="text-[#ea580c] font-bold mb-2 text-xs uppercase">Top 20 Holder Classification</h4>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+                <div class="flex items-center gap-2"><span class="text-cyan-300">💎</span> <span class="text-[#ffedd5]">Diamond</span> <span class="text-[#9a3412]">Ratio ≥2.0</span></div>
+                <div class="flex items-center gap-2"><span class="text-yellow-400">🥇</span> <span class="text-[#ffedd5]">Gold</span> <span class="text-[#9a3412]">Ratio ≥0.8</span></div>
+                <div class="flex items-center gap-2"><span class="text-gray-400">🥈</span> <span class="text-[#ffedd5]">Silver</span> <span class="text-[#9a3412]">Ratio ≥0.3</span></div>
+                <div class="flex items-center gap-2"><span class="text-orange-700">🔩</span> <span class="text-[#ffedd5]">Rust</span> <span class="text-[#9a3412]">Ratio &lt;0.3</span></div>
+            </div>
+            <p class="text-[10px] text-[#9a3412] mt-2">Ratio = Buys / Sells. Diamond+Gold ≥50% = Strong.</p>
+        </div>
+
+        <!-- Formula -->
+        <p class="text-xs text-[#9a3412] mb-2">K = 100 × DiamondHands^0.50 × OrganicGrowth^0.35 × Longevity^0.15</p>
+        <p class="text-xs text-[#9a3412] italic">Below 50% Diamond+Gold = you're exit liquidity. <strong class="text-[#ea580c]">Holdex it.</strong></p>
         <button onclick="toggleKScoreModal()" class="w-full bg-[#451a03] text-[#fb923c] py-3 rounded-lg font-bold text-sm mt-4">Close</button>
     </div>
 </div>
