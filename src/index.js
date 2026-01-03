@@ -41,10 +41,12 @@ app.use(helmet({
 
 app.use(compression());
 
-// PRE-LOAD HOMEPAGE TEMPLATE INTO MEMORY
+// PRE-LOAD TEMPLATES INTO MEMORY
 // This optimization prevents disk I/O on every page load
 const HOMEPAGE_PATH = path.join(__dirname, '../homepage.html');
+const TRACKRECORD_PATH = path.join(__dirname, '../track-record.html');
 let HOMEPAGE_TEMPLATE = '';
+let TRACKRECORD_TEMPLATE = '';
 
 try {
     HOMEPAGE_TEMPLATE = fs.readFileSync(HOMEPAGE_PATH, 'utf8');
@@ -52,6 +54,14 @@ try {
 } catch (e) {
     logger.error(`❌ Template Load Error: ${e.message}`);
     process.exit(1); // Fail fast if template is missing
+}
+
+try {
+    TRACKRECORD_TEMPLATE = fs.readFileSync(TRACKRECORD_PATH, 'utf8');
+    logger.info('✅ Template: track-record.html loaded into memory');
+} catch (e) {
+    logger.warn(`⚠️ Track record template not found: ${e.message}`);
+    TRACKRECORD_TEMPLATE = ''; // Optional page, don't fail
 }
 
 // CORS CONFIGURATION
@@ -199,6 +209,15 @@ app.get('/token/:mint', async (req, res, next) => {
 // Serve Root - Crucial for handling /#token/... links
 app.get('/', (req, res) => {
     res.send(HOMEPAGE_TEMPLATE);
+});
+
+// Serve Track Record page
+app.get('/track-record.html', (req, res) => {
+    if (TRACKRECORD_TEMPLATE) {
+        res.send(TRACKRECORD_TEMPLATE);
+    } else {
+        res.status(404).send('Track record page not available');
+    }
 });
 
 // Handle /about and /update for direct linking (with redirect to hash)
