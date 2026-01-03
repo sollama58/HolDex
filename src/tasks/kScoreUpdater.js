@@ -478,6 +478,7 @@ async function deltaConvictionAnalysis(db, mint) {
         holders,
         reducers,
         extractors,
+        snapshotCount: snapshots.length,  // Total snapshots in cache
         isDelta: true
     };
 }
@@ -993,26 +994,39 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
         // ============================================
 
         // 0. Try delta analysis first (if snapshots exist and are fresh)
+        // OPTIMIZATION: Use cached holder count from DB - avoid expensive fetchTokenHolders
         if (db) {
             const deltaResult = await deltaConvictionAnalysis(db, mint);
             if (deltaResult) {
-                // Delta succeeded, we still need holder counts
-                const allHolders = await fetchTokenHolders(mint);
-                let realHoldersCount = 0;
-                if (priceUsd > 0) {
-                    const divisor = Math.pow(10, decimals);
-                    for (const h of allHolders) {
-                        const usdValue = (h.balance / divisor) * priceUsd;
-                        if (usdValue >= MIN_USD_VALUE) realHoldersCount++;
-                    }
-                } else {
-                    realHoldersCount = allHolders.length;
+                // Delta succeeded - use cached holder count from tokens table
+                // This is updated by: webhooks, periodic holder scan, or previous full analysis
+                const tokenRow = await db.get(
+                    'SELECT holders, priceusd FROM tokens WHERE mint = $1',
+                    [mint]
+                );
+                const cachedHolders = tokenRow?.holders || 0;
+                const cachedPrice = tokenRow?.priceusd || priceUsd;
+
+                // Estimate real holders from snapshot data (no API call!)
+                // Real holders = holders with $1+ value
+                let realHoldersCount = cachedHolders;
+                if (cachedPrice > 0 && deltaResult.snapshotCount > 0) {
+                    // Use snapshot data to estimate % of real holders
+                    // This is an approximation based on top holders having value
+                    realHoldersCount = Math.max(
+                        deltaResult.snapshotCount,
+                        Math.floor(cachedHolders * 0.8) // Conservative: 80% are real
+                    );
                 }
+
+                logger.info(`[Delta] ${mint.slice(0,8)}: Using cached holder count (${cachedHolders}) - 0 API calls`);
+
                 return {
                     ...deltaResult,
                     realHoldersCount,
-                    totalHolders: allHolders.length,
-                    allHolders
+                    totalHolders: cachedHolders,
+                    allHolders: null,  // Not fetched in delta mode
+                    isDeltaMode: true
                 };
             }
         }
@@ -2110,11 +2124,36 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         // ============================================
         // SECURITY CHECK (ELIMINATORY)
         // ============================================
+        // OPTIMIZATION: Use cached security data if available
+        // Security status rarely changes - only check once per token, then use DB
 
         let lpData = null;
 
-        if (HELIUS_API_KEY) {
+        const hasCachedSecurity = dbData?.mint_authority_revoked !== null ||
+                                   dbData?.freeze_authority_revoked !== null;
+
+        if (hasCachedSecurity) {
+            // Use cached security data (0 API calls)
+            securityData = {
+                mintAuthorityRevoked: !!dbData.mint_authority_revoked,
+                freezeAuthorityRevoked: !!dbData.freeze_authority_revoked,
+                isSecure: !!dbData.mint_authority_revoked && !!dbData.freeze_authority_revoked,
+                maxScore: (!!dbData.mint_authority_revoked && !!dbData.freeze_authority_revoked) ? 100 : 50,
+                cached: true
+            };
+            logger.debug(`[Security] ${mint.slice(0,8)}: Using cached (mint=${securityData.mintAuthorityRevoked}, freeze=${securityData.freezeAuthorityRevoked})`);
+        } else if (HELIUS_API_KEY) {
+            // First time - fetch and cache
             securityData = await checkTokenSecurity(mint);
+            // Cache in DB for future cycles
+            if (db && securityData) {
+                await db.run(`
+                    UPDATE tokens SET
+                        mint_authority_revoked = $1,
+                        freeze_authority_revoked = $2
+                    WHERE mint = $3
+                `, [securityData.mintAuthorityRevoked, securityData.freezeAuthorityRevoked, mint]);
+            }
         }
 
         // Check LP burn/lock status
@@ -2129,15 +2168,17 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         if (!skipConviction && HELIUS_API_KEY) {
             convictionData = await calculateConvictionAndHolders(mint, priceUsd, decimals, db);
 
-            // In webhook mode (0 RPC), skip burn recalculation - use stored values
-            if (convictionData?.isWebhookMode) {
+            // In webhook/delta mode, skip burn recalculation - use stored values
+            // Burns are immutable, no need to recalculate every cycle
+            if (convictionData?.isWebhookMode || convictionData?.isDeltaMode) {
                 // Use cached burn data from DB
                 burnData = {
                     burnedPercent: dbData?.burned_percent || 0,
                     totalSupply: dbData?.supply || 0,
                     decimals: dbData?.decimals || 9
                 };
-                logger.info(`[Webhook Mode] ${mint.slice(0,8)}: Using cached burn data (${burnData.burnedPercent}%)`);
+                const mode = convictionData?.isWebhookMode ? 'Webhook' : 'Delta';
+                logger.debug(`[${mode}] ${mint.slice(0,8)}: Using cached burn (${burnData.burnedPercent}%)`);
             } else {
                 // Full analysis mode - calculate burn from holders
                 burnData = await calculateBurn(mint, convictionData.allHolders || [], {
