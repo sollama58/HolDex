@@ -143,5 +143,14 @@ module.exports = {
     USE_WEBHOOKS: !!(process.env.WEBHOOK_URL || process.env.API_URL),
     // WEBHOOK_SECRET: Secret for verifying Helius webhook signatures (HMAC-SHA256)
     // CRITICAL: Set this in production to prevent webhook spoofing
-    WEBHOOK_SECRET: process.env.WEBHOOK_SECRET || null
+    WEBHOOK_SECRET: process.env.WEBHOOK_SECRET || null,
+
+    // --- DATA INTEGRITY (Proof-of-History) ---
+    // Signs K-Score data with HMAC-SHA256 to detect tampering
+    // Even if DB credentials are leaked, attackers cannot forge valid signatures
+    DATA_SIGNING_SECRET: process.env.DATA_SIGNING_SECRET || null,
+
+    // VERIFY_DATA: Enable signature verification on API responses
+    // Set to 'strict' to reject tampered data, 'warn' to log only
+    VERIFY_DATA_MODE: process.env.VERIFY_DATA_MODE || 'strict'
 };

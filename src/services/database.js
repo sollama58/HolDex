@@ -201,6 +201,9 @@ async function initDB() {
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS lp_burn_pct DOUBLE PRECISION DEFAULT NULL`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS lp_locked_pct DOUBLE PRECISION DEFAULT NULL`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS lp_status TEXT DEFAULT NULL`,
+                // DATA INTEGRITY: Proof-of-History signature for K-Score data
+                // Signed with HMAC-SHA256 to detect tampering even if DB credentials are leaked
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS data_signature TEXT DEFAULT NULL`,
             ];
 
             // PERFORMANCE: Add indexes for frequently queried columns

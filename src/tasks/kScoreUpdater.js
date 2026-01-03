@@ -22,6 +22,7 @@ const priceService = require('../services/priceService');
 const bs58 = require('bs58');
 const { getClient: getRedisClient } = require('../services/redis');
 const verification = require('../services/verificationService');
+const { signData } = require('../utils/dataSignature');
 
 // ============================================
 // HELIUS CONFIG
@@ -2502,6 +2503,15 @@ async function updateSingleToken(deps, mint) {
         const burnedAmount = burn.burned || 0;
         const initialSupply = currentSupply + burnedAmount;
 
+        // Generate data signature (Proof-of-History)
+        const updateTimestamp = Date.now();
+        const dataSignature = signData({
+            mint,
+            k_score: smoothedScore,
+            conviction_score: conviction.score || 0,
+            last_k_score_update: updateTimestamp
+        });
+
         await db.run(`
             UPDATE tokens
             SET k_score = $1,
@@ -2521,11 +2531,12 @@ async function updateSingleToken(deps, mint) {
                 bonding_curve_complete = $15,
                 mint_authority_revoked = $16,
                 freeze_authority_revoked = $17,
-                is_mutable_supply = $18
-            WHERE mint = $19
+                is_mutable_supply = $18,
+                data_signature = $19
+            WHERE mint = $20
         `, [
             smoothedScore,
-            Date.now().toString(),
+            updateTimestamp.toString(),
             conviction.score || 0,
             conviction.accumulators || 0,
             conviction.holders || 0,
@@ -2533,7 +2544,7 @@ async function updateSingleToken(deps, mint) {
             conviction.extractors || 0,
             conviction.analyzed || 0,
             conviction.realHoldersCount || 0,
-            Date.now().toString(),
+            updateTimestamp.toString(),
             burnedAmount,
             burn.burnPct || 0,
             initialSupply > 0 ? initialSupply.toString() : null,
@@ -2542,6 +2553,7 @@ async function updateSingleToken(deps, mint) {
             security.mintAuthorityRevoked || false,
             security.freezeAuthorityRevoked || false,
             supply.isMutable || false,
+            dataSignature,
             mint
         ]);
 
@@ -2640,6 +2652,15 @@ async function updateKScores(deps) {
                     realHoldersCount: safeInt(conviction.realHoldersCount, 10000000)
                 };
 
+                // Generate data signature (Proof-of-History)
+                const batchUpdateTimestamp = Date.now();
+                const batchDataSignature = signData({
+                    mint: t.mint,
+                    k_score: smoothedScore,
+                    conviction_score: validatedConviction.score,
+                    last_k_score_update: batchUpdateTimestamp
+                });
+
                 await db.run(`
                     UPDATE tokens
                     SET k_score = $1,
@@ -2659,11 +2680,12 @@ async function updateKScores(deps) {
                         bonding_curve_complete = $15,
                         mint_authority_revoked = $16,
                         freeze_authority_revoked = $17,
-                        is_mutable_supply = $18
-                    WHERE mint = $19
+                        is_mutable_supply = $18,
+                        data_signature = $19
+                    WHERE mint = $20
                 `, [
                     smoothedScore,
-                    Date.now().toString(),
+                    batchUpdateTimestamp.toString(),
                     validatedConviction.score,
                     validatedConviction.accumulators,
                     validatedConviction.holders,
@@ -2671,7 +2693,7 @@ async function updateKScores(deps) {
                     validatedConviction.extractors,
                     validatedConviction.analyzed,
                     validatedConviction.realHoldersCount,
-                    Date.now().toString(),
+                    batchUpdateTimestamp.toString(),
                     safeFloat(burnedAmount),
                     safeFloat(burn.burnPct, 100),
                     initialSupply > 0 ? initialSupply.toString() : null,
@@ -2680,6 +2702,7 @@ async function updateKScores(deps) {
                     safeBool(security.mintAuthorityRevoked),
                     safeBool(security.freezeAuthorityRevoked),
                     safeBool(supply.isMutable),
+                    batchDataSignature,
                     t.mint
                 ]);
 

@@ -39,6 +39,7 @@ const unifiedRateLimiter = require('../middleware/unifiedRateLimiter');
 const { indexTokenOnChain } = require('../services/indexer');
 const { addTokenToMasterWebhook } = require('../services/heliusWebhook');
 const verification = require('../services/verificationService');
+const dataVerification = require('../services/dataVerification');
 
 // Lazy load canvas-based card generator (avoid build failures on workers without native deps)
 let generateKScoreCard = null;
@@ -1233,6 +1234,12 @@ function init(deps) {
 
                 if (!token) return { success: false, error: "Token not found" };
 
+                // DATA INTEGRITY: Verify token signature (Proof-of-History)
+                const { verified: dataVerified, tampered, reason } = dataVerification.verifySingleToken(token);
+                if (tampered) {
+                    logger.warn(`[DataVerify] Single token tampered: ${mint} - ${reason}`);
+                }
+
                 const now = Date.now();
                 const isStale = !token.timestamp || (now - token.timestamp > 300000); 
                 if (isStale && pairs.length > 0 && !pendingRefreshes.has(mint)) {
@@ -1324,6 +1331,11 @@ function init(deps) {
                 if (tokenData.symbol) tokenData.ticker = tokenData.symbol;
                 if (tokenData.metadata) { try { const meta = typeof tokenData.metadata === 'string' ? JSON.parse(tokenData.metadata) : tokenData.metadata; const comm = meta.community || {}; tokenData.banner = comm.banner || meta.banner; tokenData.description = comm.description || meta.description; tokenData.twitter = comm.twitter || meta.twitter; tokenData.telegram = comm.telegram || meta.telegram; tokenData.website = comm.website || meta.website; } catch (_e) { /* ignore */ } }
                 if (pairs.length > 0) { const mainPool = pairs[0]; if (mainPool.price_usd > 0) tokenData.priceUsd = mainPool.price_usd; }
+
+                // Add data integrity status
+                tokenData._dataVerified = dataVerified;
+                tokenData._integrityStatus = tampered ? 'tampered' : (dataVerified ? 'verified' : 'unsigned');
+
                 return { success: true, token: { ...tokenData, pairs: formattedPairs, holderHistory } };
             });
             res.json(result);
@@ -1638,12 +1650,27 @@ function init(deps) {
                 rows = await db.all(`SELECT * FROM tokens ${whereClause} ORDER BY ${orderBy} LIMIT $1 OFFSET $2`, [limit, offset]);
             }
 
+            // DATA INTEGRITY: Verify token signatures (Proof-of-History)
+            // Detects tampering even if DB credentials are compromised
+            const { tokens: verifiedRows, stats: verifyStats } = dataVerification.verifyTokens(rows);
+
+            // Log verification stats (only if there are issues)
+            if (verifyStats.tampered > 0 || verifyStats.unsigned > verifyStats.total * 0.5) {
+                logger.info(`[DataVerify] Tokens: ${verifyStats.verified}/${verifyStats.total} verified, ${verifyStats.tampered} tampered, ${verifyStats.unsigned} unsigned`);
+            }
+
             const responsePayload = {
                 success: true,
                 lastUpdate: Date.now(),
                 page,
                 limit,
-                tokens: rows.map(r => {
+                // Include verification stats in response header
+                _integrity: {
+                    verified: verifyStats.verified,
+                    total: verifyStats.total,
+                    tampered: verifyStats.tampered
+                },
+                tokens: verifiedRows.map(r => {
                     // SECURITY: Only show K-Score/conviction for verified tokens
                     // Native tokens get special tier regardless of verification
                     const isNative = isNativeToken(r.mint);
@@ -1681,7 +1708,9 @@ function init(deps) {
                         conviction_extractors: isVerified ? (r.conviction_extractors || 0) : null,
                         // Mayhem Mode indicator
                         isMutableSupply: r.is_mutable_supply || false,
-                        supplyChange24h: r.supply_change_24h || 0
+                        supplyChange24h: r.supply_change_24h || 0,
+                        // Data integrity status (Proof-of-History)
+                        _dataVerified: r._verified || false
                     };
                 })
             };
