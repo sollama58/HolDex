@@ -568,7 +568,36 @@ function init(deps) {
         } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
     });
     
-    router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => { const { mint } = req.body; if (!mint || !isValidPubkey(mint)) return res.status(400).json({ success: false, error: "Invalid mint" }); try { const newScore = await updateSingleToken({ db }, mint); res.json({ success: true, message: `K-Score Updated: ${newScore}` }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    // K-Score refresh with per-token rate limiting (1 hour cooldown)
+    router.post('/admin/refresh-kscore', requireAdmin, async (req, res) => {
+        const { mint, force } = req.body;
+        if (!mint || !isValidPubkey(mint)) return res.status(400).json({ success: false, error: "Invalid mint" });
+
+        try {
+            // Per-token rate limiting (skip if force=true from admin)
+            if (!force) {
+                const redis = getClient();
+                if (redis) {
+                    const cooldownKey = `kscore:cooldown:${mint}`;
+                    const lastRun = await redis.get(cooldownKey);
+                    if (lastRun) {
+                        const elapsed = Date.now() - parseInt(lastRun);
+                        const remaining = Math.ceil((3600000 - elapsed) / 60000); // minutes
+                        return res.status(429).json({
+                            success: false,
+                            error: `Rate limited. Try again in ${remaining} min.`,
+                            lastRun: new Date(parseInt(lastRun)).toISOString()
+                        });
+                    }
+                    // Set cooldown (1 hour TTL)
+                    await redis.set(cooldownKey, Date.now().toString(), { EX: 3600 });
+                }
+            }
+
+            const newScore = await updateSingleToken({ db }, mint);
+            res.json({ success: true, message: `K-Score Updated: ${newScore}` });
+        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+    });
 
     // --- API KEY ADMIN ---
     router.get('/admin/keys', requireAdmin, async (req, res) => {
@@ -1364,6 +1393,120 @@ function init(deps) {
             res.json({ success: true, ...result });
         } catch (e) {
             logger.error(`[TrackRecord] Error: ${e.message}`);
+            res.status(500).json({ success: false, error: e.message });
+        }
+    });
+
+    /**
+     * GET /api/token/:mint/evolution
+     * K-Score evolution with price correlation for overlay charts
+     * SECURITY: Only available for verified tokens (hasCommunityUpdate=TRUE)
+     */
+    router.get('/token/:mint/evolution', cacheControl(60, 120), async (req, res) => {
+        const { mint } = req.params;
+        const { days = 30 } = req.query;
+
+        if (!isValidPubkey(mint)) {
+            return res.status(400).json({ success: false, error: 'Invalid mint address' });
+        }
+
+        try {
+            // SECURITY: Only for verified tokens
+            const token = await db.get(`
+                SELECT symbol, name, hasCommunityUpdate, priceusd, marketcap, k_score
+                FROM tokens WHERE mint = $1
+            `, [mint]);
+
+            if (!token) {
+                return res.status(404).json({ success: false, error: 'Token not found' });
+            }
+
+            if (!(token.hascommunityupdate || token.hasCommunityUpdate)) {
+                return res.json({
+                    success: true,
+                    mint,
+                    verified: false,
+                    message: 'K-Score evolution requires community verification',
+                    evolution: []
+                });
+            }
+
+            // Get K-Score history
+            const kScoreHistory = await db.all(`
+                SELECT date, k_score, conviction_score, holders
+                FROM k_score_history
+                WHERE mint = $1
+                  AND date >= CURRENT_DATE - INTERVAL '${parseInt(days)} days'
+                ORDER BY date ASC
+            `, [mint]);
+
+            // Get holder history for the same period
+            const holderHistory = await db.all(`
+                SELECT date, holders, real_holders
+                FROM holder_history
+                WHERE mint = $1
+                  AND date >= CURRENT_DATE - INTERVAL '${parseInt(days)} days'
+                ORDER BY date ASC
+            `, [mint]);
+
+            // Create combined timeline
+            const timeline = new Map();
+
+            // Add K-Score data
+            kScoreHistory.forEach(h => {
+                const dateKey = new Date(h.date).toISOString().split('T')[0];
+                timeline.set(dateKey, {
+                    date: dateKey,
+                    kScore: h.k_score,
+                    conviction: h.conviction_score,
+                    holders: h.holders
+                });
+            });
+
+            // Merge holder history
+            holderHistory.forEach(h => {
+                const dateKey = new Date(h.date).toISOString().split('T')[0];
+                const existing = timeline.get(dateKey) || { date: dateKey };
+                existing.holders = h.holders || existing.holders;
+                existing.realHolders = h.real_holders;
+                timeline.set(dateKey, existing);
+            });
+
+            // Convert to array and sort
+            const evolution = Array.from(timeline.values()).sort((a, b) =>
+                new Date(a.date) - new Date(b.date)
+            );
+
+            // Calculate trajectory
+            let trajectory = 'stable';
+            if (evolution.length >= 3) {
+                const firstWeek = evolution.slice(0, Math.ceil(evolution.length / 3));
+                const lastWeek = evolution.slice(-Math.ceil(evolution.length / 3));
+                const avgFirst = firstWeek.reduce((sum, e) => sum + (e.kScore || 0), 0) / firstWeek.length;
+                const avgLast = lastWeek.reduce((sum, e) => sum + (e.kScore || 0), 0) / lastWeek.length;
+                const delta = avgLast - avgFirst;
+                if (delta > 5) trajectory = 'improving';
+                else if (delta < -5) trajectory = 'declining';
+            }
+
+            res.json({
+                success: true,
+                mint,
+                symbol: token.symbol,
+                name: token.name,
+                verified: true,
+                current: {
+                    kScore: token.k_score,
+                    price: token.priceusd,
+                    marketCap: token.marketcap
+                },
+                trajectory,
+                dataPoints: evolution.length,
+                evolution
+            });
+
+        } catch (e) {
+            logger.error(`[Evolution] Error: ${e.message}`);
             res.status(500).json({ success: false, error: e.message });
         }
     });

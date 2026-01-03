@@ -692,6 +692,7 @@
                          <button onclick="setChartMode('price')" class="res-btn active" id="mode-price">Price</button>
                          <button onclick="setChartMode('mcap')" class="res-btn" id="mode-mcap">MCap</button>
                          <button onclick="toggleScale()" class="res-btn" id="btn-scale">Log</button>
+                         <button onclick="toggleKScoreOverlay()" class="res-btn" id="btn-kscore" title="K-Score overlay (verified tokens only)" style="display:none;">K</button>
                      </div>
                 </div>
                 <div id="tv-chart" style="flex-grow: 1; position: relative; width: 100%;"></div>
@@ -1060,6 +1061,7 @@
     // Charts
     let chartInstance = null;
     let candleSeries = null;
+    let kScoreSeries = null;  // K-Score overlay line
     let holderChart = null;
     let holderAreaSeries = null;
     let currentResolution = '60';
@@ -1068,6 +1070,7 @@
     let currentNormalizedSupply = 1;
     let currentHolderHistory = [];
     let chartResizeObserver = null;
+    let showKScoreOverlay = false;  // Toggle for K-Score overlay
 
     // Socket
     let socket = null;
@@ -1410,7 +1413,16 @@
                 if (loadingDiv) loadingDiv.classList.add('hidden');
                 if (contentDiv) contentDiv.style.display = 'block';
                 lucide.createIcons();
-                
+
+                // Show K-Score overlay button only for verified tokens
+                const kScoreBtn = document.getElementById('btn-kscore');
+                if (kScoreBtn) {
+                    kScoreBtn.style.display = isVerified ? 'block' : 'none';
+                    // Reset overlay state when switching tokens
+                    showKScoreOverlay = false;
+                    kScoreBtn.classList.remove('active');
+                }
+
                 // Force a layout update before chart init to ensure container has dimensions
                 requestAnimationFrame(() => {
                     initChart(mint, currentPoolAddress);
@@ -1440,9 +1452,69 @@
         if(chartInstance) chartInstance.priceScale('right').applyOptions({ mode: isLogScale ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal });
     };
 
+    // K-Score overlay toggle
+    window.toggleKScoreOverlay = () => {
+        showKScoreOverlay = !showKScoreOverlay;
+        const btn = document.getElementById('btn-kscore');
+        if(btn) btn.classList.toggle('active', showKScoreOverlay);
+
+        if(chartInstance && kScoreSeries) {
+            kScoreSeries.applyOptions({ visible: showKScoreOverlay });
+            chartInstance.priceScale('left').applyOptions({ visible: showKScoreOverlay });
+        }
+
+        // Fetch K-Score data if enabling
+        if(showKScoreOverlay && currentMint) {
+            fetchKScoreEvolution(currentMint);
+        }
+    };
+
+    // Fetch and display K-Score evolution overlay
+    async function fetchKScoreEvolution(mint) {
+        if (!chartInstance || !kScoreSeries) return;
+        try {
+            const res = await fetch(`${API_URL}/api/token/${mint}/evolution?days=30`);
+            const data = await res.json();
+
+            if(data.success && data.verified && data.evolution?.length > 0) {
+                // Convert daily K-Score data to chart format
+                const kScoreData = data.evolution
+                    .filter(e => e.kScore !== null && e.kScore !== undefined)
+                    .map(e => ({
+                        time: Math.floor(new Date(e.date).getTime() / 1000),
+                        value: e.kScore
+                    }))
+                    .sort((a, b) => a.time - b.time);
+
+                // Deduplicate by time
+                const unique = [];
+                const times = new Set();
+                kScoreData.forEach(d => {
+                    if(!times.has(d.time)) {
+                        times.add(d.time);
+                        unique.push(d);
+                    }
+                });
+
+                if(unique.length > 0) {
+                    kScoreSeries.setData(unique);
+                }
+            }
+        } catch(e) {
+            console.error('K-Score overlay fetch error:', e);
+        }
+    }
+
     function initChart(mint, poolAddress) {
         // If chart exists, just fetch data
         if (chartInstance) {
+            // Clear K-Score overlay when switching tokens
+            if (kScoreSeries) {
+                kScoreSeries.setData([]);
+                kScoreSeries.applyOptions({ visible: false });
+            }
+            chartInstance.priceScale('left').applyOptions({ visible: false });
+
             fetchCandles(mint, poolAddress);
             return;
         }
@@ -1461,17 +1533,29 @@
         container.innerHTML = ''; // Clear any previous
         
         chartInstance = LightweightCharts.createChart(container, {
-            width: rect.width, 
+            width: rect.width,
             height: rect.height,
             layout: { background: { type: 'solid', color: '#1a0a05' }, textColor: '#9a3412' },
             grid: { vertLines: { color: '#2a1005' }, horzLines: { color: '#2a1005' } },
             timeScale: { borderColor: '#7c2d12', timeVisible: true },
             rightPriceScale: { borderColor: '#7c2d12', mode: isLogScale ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal },
+            leftPriceScale: { borderColor: '#3b82f6', visible: false, scaleMargins: { top: 0.1, bottom: 0.1 } },
             autoSize: false, // Managed by ResizeObserver
         });
-        
+
         candleSeries = chartInstance.addCandlestickSeries({ upColor: '#22c55e', downColor: '#ef4444', borderVisible: false, wickUpColor: '#22c55e', wickDownColor: '#ef4444' });
-        
+
+        // K-Score overlay line (hidden by default, shown for verified tokens)
+        kScoreSeries = chartInstance.addLineSeries({
+            color: '#3b82f6',
+            lineWidth: 2,
+            priceScaleId: 'left',
+            priceFormat: { type: 'custom', formatter: (v) => `K: ${Math.round(v)}` },
+            crosshairMarkerVisible: true,
+            lastValueVisible: true,
+            visible: false
+        });
+
         fetchCandles(mint, poolAddress);
     }
     
