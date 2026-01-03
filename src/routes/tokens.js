@@ -7,6 +7,7 @@ const nacl = require('tweetnacl');
 const _bs58 = require('bs58');
 const { isValidPubkey } = require('../utils/solana');
 const { hashApiKey } = require('../utils/apiKeyHash');
+const { sanitizeError } = require('../utils/validation');
 
 // Strict rate limit for API key generation (5 per hour per IP)
 const apiKeyRateLimit = rateLimit({
@@ -273,8 +274,9 @@ function init(deps) {
     });
 
     // --- HEALTH CHECK ---
+    // SECURITY: Rate limit health endpoint (M2)
     // Returns system health including Helius API status, circuit breaker, and rate limits
-    router.get('/health', async (req, res) => {
+    router.get('/health', proxyRateLimit, async (req, res) => {
         try {
             const redis = getClient();
             const heliusHealth = getHealthStatus();
@@ -382,8 +384,9 @@ function init(deps) {
     /**
      * GET /api/stale-tokens
      * List tokens with stale conviction data
+     * SECURITY: Rate limited (M2)
      */
-    router.get('/stale-tokens', cacheControl(300, 600), async (req, res) => {
+    router.get('/stale-tokens', cacheControl(300, 600), proxyRateLimit, async (req, res) => {
         try {
             const staleTokens = await verification.getStaleTokens(db);
             res.json({
@@ -401,8 +404,9 @@ function init(deps) {
     /**
      * GET /api/rpc-status
      * Show RPC provider health for transparency
+     * SECURITY: Rate limited (M2)
      */
-    router.get('/rpc-status', cacheControl(30, 60), (req, res) => {
+    router.get('/rpc-status', cacheControl(30, 60), proxyRateLimit, (req, res) => {
         const providers = verification.RPC_PROVIDERS.map(p => ({
             name: p.name,
             healthy: p.healthy,
@@ -483,14 +487,16 @@ function init(deps) {
                 return { success: true, candles, source: 'internal' };
             });
             res.json(result);
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+        } catch (e) { res.status(500).json({ success: false, error: sanitizeError(e) }); }
     });
 
-    router.get('/config/fees', (req, res) => {
+    // SECURITY: Rate limit config endpoints (M2)
+    router.get('/config/fees', proxyRateLimit, (req, res) => {
         res.json({ success: true, solFee: config.FEE_SOL, tokenFee: config.FEE_TOKEN_AMOUNT, tokenMint: config.FEE_TOKEN_MINT, treasury: config.TREASURY_WALLET });
     });
 
-    router.get('/proxy/balance/:wallet', async (req, res) => {
+    // SECURITY: Rate limit balance proxy (M2)
+    router.get('/proxy/balance/:wallet', proxyRateLimit, async (req, res) => {
         try {
             const { wallet } = req.params;
             const tokenMint = req.query.tokenMint || config.FEE_TOKEN_MINT;
@@ -505,7 +511,8 @@ function init(deps) {
         } catch (_e) { res.status(500).json({ success: false, error: "Failed to fetch balance" }); }
     });
 
-    router.post('/request-update', async (req, res) => {
+    // SECURITY: Rate limit update requests (M2)
+    router.post('/request-update', proxyRateLimit, async (req, res) => {
         const { mint, twitter, website, telegram, banner, description, signature, userPublicKey, ctoUser } = req.body;
         try {
             // SECURITY: Validate mint address properly
@@ -622,7 +629,8 @@ function init(deps) {
     // Burn credits already required at top of init()
 
     // Get burn credit pricing info
-    router.get('/api-pricing', (req, res) => {
+    // SECURITY: Rate limited (M2)
+    router.get('/api-pricing', proxyRateLimit, (req, res) => {
         res.json({
             success: true,
             system: 'burn-credits',
@@ -646,7 +654,8 @@ function init(deps) {
     });
 
     // Check wallet's burn credits
-    router.get('/credits/:wallet', async (req, res) => {
+    // SECURITY: Rate limited (M2)
+    router.get('/credits/:wallet', proxyRateLimit, async (req, res) => {
         const { wallet } = req.params;
 
         // SECURITY: Validate as proper Solana address, not just length check
@@ -732,7 +741,7 @@ function init(deps) {
             } 
             const updates = await db.all(sql); 
             res.json({ success: true, updates }); 
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+        } catch (e) { res.status(500).json({ success: false, error: sanitizeError(e) }); } 
     });
 
     router.post('/admin/approve-update', requireAdmin, async (req, res) => { 
@@ -772,11 +781,11 @@ function init(deps) {
 
             await updateSingleToken({ db }, request.mint);
             res.json({ success: true });
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+        } catch (e) { res.status(500).json({ success: false, error: sanitizeError(e) }); }
     });
 
-    router.post('/admin/reject-update', requireAdmin, async (req, res) => { const { id } = req.body; try { await db.run(`UPDATE token_updates SET status = 'rejected' WHERE id = $1`, [id]); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
-    router.get('/admin/token/:mint', requireAdmin, async (req, res) => { const { mint } = req.params; if (!isValidPubkey(mint)) return res.status(400).json({ success: false, error: "Invalid mint" }); try { const token = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]); if (!token) return res.status(404).json({ success: false, error: "Token not found" }); let meta = {}; try { if (typeof token.metadata === 'string') meta = JSON.parse(token.metadata); else meta = token.metadata || {}; } catch(_e) { /* ignore */ } const community = meta.community || {}; res.json({ success: true, token: { ...token, ticker: token.symbol, twitter: community.twitter || meta.twitter, website: community.website || meta.website, telegram: community.telegram || meta.telegram, banner: community.banner || meta.banner, description: community.description || meta.description } }); } catch (e) { res.status(500).json({ success: false, error: e.message }); } });
+    router.post('/admin/reject-update', requireAdmin, async (req, res) => { const { id } = req.body; try { await db.run(`UPDATE token_updates SET status = 'rejected' WHERE id = $1`, [id]); res.json({ success: true }); } catch (e) { res.status(500).json({ success: false, error: sanitizeError(e) }); } });
+    router.get('/admin/token/:mint', requireAdmin, async (req, res) => { const { mint } = req.params; if (!isValidPubkey(mint)) return res.status(400).json({ success: false, error: "Invalid mint" }); try { const token = await db.get(`SELECT * FROM tokens WHERE mint = $1`, [mint]); if (!token) return res.status(404).json({ success: false, error: "Token not found" }); let meta = {}; try { if (typeof token.metadata === 'string') meta = JSON.parse(token.metadata); else meta = token.metadata || {}; } catch(_e) { /* ignore */ } const community = meta.community || {}; res.json({ success: true, token: { ...token, ticker: token.symbol, twitter: community.twitter || meta.twitter, website: community.website || meta.website, telegram: community.telegram || meta.telegram, banner: community.banner || meta.banner, description: community.description || meta.description } }); } catch (e) { res.status(500).json({ success: false, error: sanitizeError(e) }); } });
     
     router.post('/admin/update-token', requireAdmin, async (req, res) => {
         const { mint, twitter, website, telegram, banner, description } = req.body;
@@ -801,7 +810,7 @@ function init(deps) {
             await db.run(`UPDATE tokens SET metadata = $1, hasCommunityUpdate = TRUE WHERE mint = $2`, [jsonStr, mint]); 
             await updateSingleToken({ db }, mint); 
             res.json({ success: true }); 
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+        } catch (e) { res.status(500).json({ success: false, error: sanitizeError(e) }); } 
     });
     
     router.post('/admin/delete-token', requireAdmin, async (req, res) => {
@@ -826,7 +835,7 @@ function init(deps) {
             if (redis) { await redis.del(`token:detail:${mint}`); } 
             
             res.json({ success: true, message: "Token and all history permanently deleted." }); 
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); } 
+        } catch (e) { res.status(500).json({ success: false, error: sanitizeError(e) }); } 
     });
     
     // K-Score refresh with per-token rate limiting (1 hour cooldown)
@@ -857,7 +866,7 @@ function init(deps) {
 
             const newScore = await updateSingleToken({ db }, mint);
             res.json({ success: true, message: `K-Score Updated: ${newScore}` });
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+        } catch (e) { res.status(500).json({ success: false, error: sanitizeError(e) }); }
     });
 
     // --- API KEY ADMIN ---
@@ -876,7 +885,7 @@ function init(deps) {
                 created_at: k.created_at
             }));
             res.json({ success: true, keys: maskedKeys });
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+        } catch (e) { res.status(500).json({ success: false, error: sanitizeError(e) }); }
     });
 
     router.post('/admin/generate-key', requireAdmin, async (req, res) => {
@@ -889,7 +898,7 @@ function init(deps) {
             const limit = tier === 'pro' ? 100000 : (tier === 'enterprise' ? 1000000 : 1000);
             await db.run(`INSERT INTO api_keys (key_hash, key_prefix, owner, tier, requests_limit, created_at) VALUES ($1, $2, $3, $4, $5, $6)`, [keyHash, keyPrefix, owner, tier || 'free', limit, Date.now()]);
             res.json({ success: true, key, message: "Save this key! It won't be shown again." });
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+        } catch (e) { res.status(500).json({ success: false, error: sanitizeError(e) }); }
     });
 
     // SECURITY: Escape LIKE special characters to prevent pattern injection
@@ -909,7 +918,7 @@ function init(deps) {
 
             await db.run(`UPDATE api_keys SET tier = $1, requests_limit = $2 WHERE key_hash LIKE $3 ESCAPE '\\'`, [safeTier, safeLimit, safePattern]);
             res.json({ success: true, message: "Key Updated Successfully" });
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+        } catch (e) { res.status(500).json({ success: false, error: sanitizeError(e) }); }
     });
 
     router.post('/admin/revoke-key', requireAdmin, async (req, res) => {
@@ -921,7 +930,7 @@ function init(deps) {
             const safePattern = escapeLikePattern(key_id) + '%';
             await db.run(`UPDATE api_keys SET is_active = FALSE WHERE key_hash LIKE $1 ESCAPE '\\'`, [safePattern]);
             res.json({ success: true, message: "Key Revoked" });
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+        } catch (e) { res.status(500).json({ success: false, error: sanitizeError(e) }); }
     });
 
     router.post('/admin/delete-key', requireAdmin, async (req, res) => {
@@ -933,7 +942,7 @@ function init(deps) {
             const safePattern = escapeLikePattern(key_id) + '%';
             await db.run(`DELETE FROM api_keys WHERE key_hash LIKE $1 ESCAPE '\\'`, [safePattern]);
             res.json({ success: true, message: "Key Deleted" });
-        } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+        } catch (e) { res.status(500).json({ success: false, error: sanitizeError(e) }); }
     });
 
     router.get('/admin/backup/updates', requireAdmin, async (req, res) => {
@@ -955,7 +964,7 @@ function init(deps) {
                 warning: 'API key hashes excluded for security. Keys must be regenerated after restore.'
             });
         } catch (e) {
-            res.status(500).json({ success: false, error: e.message });
+            res.status(500).json({ success: false, error: sanitizeError(e) });
         }
     });
     
@@ -1111,7 +1120,7 @@ function init(deps) {
             res.json({ success: true, results, message: `Update Log: ${results.updates.restored} added, ${results.updates.merged} merged. Keys: ${results.keys.restored} added, ${results.keys.merged} merged.` });
 
         } catch (e) { 
-            res.status(500).json({ success: false, error: e.message }); 
+            res.status(500).json({ success: false, error: sanitizeError(e) }); 
         }
     });
 
@@ -1120,8 +1129,9 @@ function init(deps) {
      * K-Score evolution with price correlation for overlay charts
      * SECURITY: Only available for verified tokens (hasCommunityUpdate=TRUE)
      * NOTE: Must be defined BEFORE /token/:mint to avoid route conflict
+     * SECURITY: Rate limited (M2)
      */
-    router.get('/token/:mint/evolution', cacheControl(60, 120), async (req, res) => {
+    router.get('/token/:mint/evolution', cacheControl(60, 120), proxyRateLimit, async (req, res) => {
         const { mint } = req.params;
         const { days = 30 } = req.query;
 
@@ -1202,7 +1212,7 @@ function init(deps) {
 
         } catch (e) {
             logger.error(`[Evolution] Error: ${e.message}`);
-            res.status(500).json({ success: false, error: e.message });
+            res.status(500).json({ success: false, error: sanitizeError(e) });
         }
     });
 
@@ -1339,7 +1349,7 @@ function init(deps) {
                 return { success: true, token: { ...tokenData, pairs: formattedPairs, holderHistory } };
             });
             res.json(result);
-        } catch(e) { res.status(500).json({ success: false, error: e.message }); }
+        } catch(e) { res.status(500).json({ success: false, error: sanitizeError(e) }); }
     });
 
     // --- K-SCORE CARD IMAGE (for Twitter/social sharing) ---
@@ -1469,7 +1479,7 @@ function init(deps) {
                 })
             });
         } catch(e) {
-            res.status(500).json({ success: false, error: e.message });
+            res.status(500).json({ success: false, error: sanitizeError(e) });
         }
     });
 
@@ -1512,8 +1522,9 @@ function init(deps) {
                 if (isAddress) {
                     rows = await db.all(`SELECT mint, name, symbol, image, priceUsd, marketCap, volume24h, change24h, change1h, change5m, holders, timestamp, hasCommunityUpdate, k_score FROM tokens WHERE mint = $1`, [search]);
                 } else {
-                    // SECURITY: Use parameterized LIKE
-                    rows = await db.all(`SELECT mint, name, symbol, image, priceUsd, marketCap, volume24h, change24h, change1h, change5m, holders, timestamp, hasCommunityUpdate, k_score FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) LIMIT $2`, [`%${search}%`, limit]);
+                    // SECURITY: Escape LIKE pattern to prevent injection (M9)
+                    const safeSearch = `%${escapeLikePattern(search)}%`;
+                    rows = await db.all(`SELECT mint, name, symbol, image, priceUsd, marketCap, volume24h, change24h, change1h, change5m, holders, timestamp, hasCommunityUpdate, k_score FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) LIMIT $2`, [safeSearch, limit]);
                 }
             } else {
                 const dir = direction === 'asc' ? 'ASC' : 'DESC';
@@ -1609,7 +1620,9 @@ function init(deps) {
                     rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
                     if (rows.length === 0) { await indexTokenOnChain(search); rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]); }
                 } else {
-                    rows = await db.all(`SELECT * FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) LIMIT $2`, [`%${search}%`, limit]);
+                    // SECURITY: Escape LIKE pattern to prevent injection (M9)
+                    const safeSearch = `%${escapeLikePattern(search)}%`;
+                    rows = await db.all(`SELECT * FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) LIMIT $2`, [safeSearch, limit]);
                 }
             } else {
                 const dir = direction.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
@@ -1719,7 +1732,7 @@ function init(deps) {
             res.setHeader('X-Cache', 'MISS');
             return res.json(responsePayload);
 
-        } catch (e) { res.status(500).json({ success: false, tokens: [], error: e.message }); }
+        } catch (e) { res.status(500).json({ success: false, tokens: [], error: sanitizeError(e) }); }
     });
 
     // ==================================
@@ -1760,7 +1773,7 @@ function init(deps) {
             });
         } catch (e) {
             logger.error(`[PnL] Wallet error: ${e.message}`);
-            res.status(500).json({ success: false, error: e.message });
+            res.status(500).json({ success: false, error: sanitizeError(e) });
         }
     });
 
@@ -1790,7 +1803,7 @@ function init(deps) {
             });
         } catch (e) {
             logger.error(`[PnL] Token error: ${e.message}`);
-            res.status(500).json({ success: false, error: e.message });
+            res.status(500).json({ success: false, error: sanitizeError(e) });
         }
     });
 
@@ -1802,8 +1815,9 @@ function init(deps) {
      * GET /api/track-record
      * Public track record of K-Score predictions vs reality
      * No API key required - this is proof of concept for organic growth
+     * SECURITY: Rate limited (M2)
      */
-    router.get('/track-record', cacheControl(300, 600), async (req, res) => {
+    router.get('/track-record', cacheControl(300, 600), proxyRateLimit, async (req, res) => {
         try {
             const result = await smartCache('track-record', 300, async () => {
                 // 1. K-Score vs Security correlation
@@ -1957,7 +1971,7 @@ function init(deps) {
             res.json({ success: true, ...result });
         } catch (e) {
             logger.error(`[TrackRecord] Error: ${e.message}`);
-            res.status(500).json({ success: false, error: e.message });
+            res.status(500).json({ success: false, error: sanitizeError(e) });
         }
     });
 

@@ -6,9 +6,33 @@ const { hashApiKey } = require('../utils/apiKeyHash');
 // Cache key details in memory for 60 seconds to avoid hitting Postgres on every request
 const KEY_CACHE = new Map();
 
+// SECURITY: In-memory fallback rate limiting when Redis is down (H2)
+const FALLBACK_WINDOW = 60 * 1000; // 1 minute window for fallback
+const fallbackTracker = {};
+
+// Clean up old fallback entries every 5 minutes
+setInterval(() => {
+    const now = Date.now();
+    for (const key in fallbackTracker) {
+        if (now > fallbackTracker[key].resetTime) {
+            delete fallbackTracker[key];
+        }
+    }
+}, 5 * 60 * 1000);
+
 const rateLimiter = async (req, res, next) => {
     // 1. Get Key from Header or Query
-    const apiKey = req.headers['x-api-key'] || req.query.api_key;
+    const headerKey = req.headers['x-api-key'];
+    const queryKey = req.query.api_key;
+
+    // SECURITY: Deprecate API key in query params (M1)
+    // Query params are logged in access logs, browser history, and can be cached
+    if (queryKey && !headerKey) {
+        logger.warn(`[RateLimiter] DEPRECATED: API key used in query params from ${req.ip}`);
+        res.setHeader('X-Deprecated', 'api_key query parameter - use x-api-key header instead');
+    }
+
+    const apiKey = headerKey || queryKey;
     if (!apiKey) return res.status(401).json({ success: false, error: 'API Key Required' });
 
     try {
@@ -80,8 +104,36 @@ const rateLimiter = async (req, res, next) => {
             // Attach user info to request for downstream use
             req.apiUser = { owner: keyData.owner, tier: keyData.tier };
         } else {
-            // Fallback if Redis is down: Allow request but log warning
-            logger.warn('Redis unavailable for rate limiting. Request allowed.');
+            // SECURITY: In-memory fallback rate limiting when Redis is down (H2)
+            logger.warn('Redis unavailable - using in-memory fallback rate limiting');
+            const keyHash = hashApiKey(apiKey);
+
+            if (!fallbackTracker[keyHash]) {
+                fallbackTracker[keyHash] = { count: 0, resetTime: Date.now() + FALLBACK_WINDOW };
+            }
+
+            // Reset window if expired
+            if (Date.now() > fallbackTracker[keyHash].resetTime) {
+                fallbackTracker[keyHash] = { count: 0, resetTime: Date.now() + FALLBACK_WINDOW };
+            }
+
+            fallbackTracker[keyHash].count++;
+
+            // Apply stricter fallback limit (10% of normal limit)
+            const fallbackLimit = Math.ceil(keyData.requests_limit * 0.1);
+            if (fallbackTracker[keyHash].count > fallbackLimit) {
+                logger.warn(`[RateLimiter] Fallback limit exceeded for key: ${keyHash.slice(0, 8)}...`);
+                return res.status(429).json({
+                    success: false,
+                    error: 'Rate limit exceeded (degraded mode)',
+                    fallback: true,
+                    retryAfter: Math.ceil((fallbackTracker[keyHash].resetTime - Date.now()) / 1000)
+                });
+            }
+
+            res.setHeader('X-RateLimit-Fallback', 'true');
+            res.setHeader('X-RateLimit-Remaining', fallbackLimit - fallbackTracker[keyHash].count);
+            req.apiUser = { owner: keyData.owner, tier: keyData.tier };
         }
 
         next();

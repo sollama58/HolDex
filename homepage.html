@@ -1310,6 +1310,59 @@
         return { grade: 'D', label: 'Default', class: 'credit-d' };
     }
 
+    // ============================================
+    // SECURITY: XSS Prevention Utilities
+    // ============================================
+
+    /**
+     * Escape HTML special characters to prevent XSS
+     * @param {string} str - Untrusted string
+     * @returns {string} Safe HTML string
+     */
+    function escapeHtml(str) {
+        if (str === null || str === undefined) return '';
+        const div = document.createElement('div');
+        div.textContent = String(str);
+        return div.innerHTML;
+    }
+
+    /**
+     * Validate URL is safe (no javascript:, data:, vbscript: protocols)
+     * @param {string} url - URL to validate
+     * @returns {string} Safe URL or empty string
+     */
+    function sanitizeUrl(url) {
+        if (!url || typeof url !== 'string') return '';
+        try {
+            const parsed = new URL(url, window.location.origin);
+            if (['http:', 'https:'].includes(parsed.protocol)) {
+                return parsed.href;
+            }
+            return '';
+        } catch {
+            // If URL parsing fails, check for relative URLs
+            if (url.startsWith('/') && !url.startsWith('//')) {
+                return url;
+            }
+            return '';
+        }
+    }
+
+    /**
+     * Escape string for use in JavaScript context (onclick, etc.)
+     * @param {string} str - Untrusted string
+     * @returns {string} Safe JS string
+     */
+    function escapeJs(str) {
+        if (str === null || str === undefined) return '';
+        return String(str)
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, "\\'")
+            .replace(/"/g, '\\"')
+            .replace(/</g, '\\x3c')
+            .replace(/>/g, '\\x3e');
+    }
+
     function renderKScore(score, isVerified, mint = null) {
         // Native tokens always show Infrastructure badge
         if (mint && isNativeToken(mint)) {
@@ -1547,19 +1600,25 @@
             const kScoreDisplay = renderKScore(score, isVerified, t.mint);
             const formatPct = (v) => (v !== undefined && v !== null) ? `<span class="pill ${v>0?'pill-green':'pill-red'}">${v.toFixed(1)}%</span>` : '-';
             const formatVal = (v) => v ? '$'+ new Intl.NumberFormat('en',{notation:'compact'}).format(v) : '-';
-            const img = t.image || `https://placehold.co/40x40/0a0a0a/ea580c?text=${t.ticker?.[0]||'?'}`;
+
+            // SECURITY: Sanitize image URL and escape text content
+            const safeTickerChar = escapeHtml(t.ticker?.[0] || '?');
+            const img = sanitizeUrl(t.image) || `https://placehold.co/40x40/0a0a0a/ea580c?text=${safeTickerChar}`;
+            const safeMint = escapeJs(t.mint);
+            const safeTicker = escapeHtml(t.ticker);
+            const safeName = escapeHtml(t.name);
 
             return `
-            <tr onclick="navigateTo('token/${t.mint}')" data-token-idx="${idx}" class="cursor-pointer group border-b border-[#252525]/30">
+            <tr onclick="navigateTo('token/${safeMint}')" data-token-idx="${idx}" class="cursor-pointer group border-b border-[#252525]/30">
                 <td class="bg-[#0a0a0a]">
                     <div class="flex items-center gap-2">
                         <img src="${img}" class="img-token" onerror="this.src='https://placehold.co/40'">
                         <div class="flex flex-col min-w-0">
                             <div class="flex items-center gap-1">
-                                <span class="font-bold text-white text-xs truncate font-sans">${t.ticker}</span>
+                                <span class="font-bold text-white text-xs truncate font-sans">${safeTicker}</span>
                                 ${isVerified ? '<i data-lucide="shield-check" width="12" class="text-green-500 fill-green-500/20"></i>' : ''}
                             </div>
-                            <span class="text-[10px] text-[#737373] truncate max-w-[80px]">${t.name}</span>
+                            <span class="text-[10px] text-[#737373] truncate max-w-[80px]">${safeName}</span>
                         </div>
                     </div>
                 </td>
@@ -1733,13 +1792,20 @@
                 const actions = document.getElementById('detail-actions');
                 if (actions) {
                     let links = '';
-                    if(t.twitter) links += `<a href="${t.twitter}" target="_blank" class="bg-[#0a0a0a] border border-[#252525] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="twitter" width="16"></i></a>`;
-                    if(t.telegram) links += `<a href="${t.telegram}" target="_blank" class="bg-[#0a0a0a] border border-[#252525] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="send" width="16"></i></a>`;
-                    if(t.website) links += `<a href="${t.website}" target="_blank" class="bg-[#0a0a0a] border border-[#252525] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="globe" width="16"></i></a>`;
+                    // SECURITY: Validate URLs to prevent javascript: protocol XSS (C2)
+                    const safeTwitter = sanitizeUrl(t.twitter);
+                    const safeTelegram = sanitizeUrl(t.telegram);
+                    const safeWebsite = sanitizeUrl(t.website);
+                    if(safeTwitter) links += `<a href="${safeTwitter}" target="_blank" rel="noopener noreferrer" class="bg-[#0a0a0a] border border-[#252525] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="twitter" width="16"></i></a>`;
+                    if(safeTelegram) links += `<a href="${safeTelegram}" target="_blank" rel="noopener noreferrer" class="bg-[#0a0a0a] border border-[#252525] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="send" width="16"></i></a>`;
+                    if(safeWebsite) links += `<a href="${safeWebsite}" target="_blank" rel="noopener noreferrer" class="bg-[#0a0a0a] border border-[#252525] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="globe" width="16"></i></a>`;
                     if(links === '' && t.socials) {
-                        if(t.socials.twitter) links += `<a href="${t.socials.twitter}" target="_blank" class="bg-[#0a0a0a] border border-[#252525] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="twitter" width="16"></i></a>`;
-                        if(t.socials.telegram) links += `<a href="${t.socials.telegram}" target="_blank" class="bg-[#0a0a0a] border border-[#252525] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="send" width="16"></i></a>`;
-                        if(t.socials.website) links += `<a href="${t.socials.website}" target="_blank" class="bg-[#0a0a0a] border border-[#252525] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="globe" width="16"></i></a>`;
+                        const safeSocialTwitter = sanitizeUrl(t.socials.twitter);
+                        const safeSocialTelegram = sanitizeUrl(t.socials.telegram);
+                        const safeSocialWebsite = sanitizeUrl(t.socials.website);
+                        if(safeSocialTwitter) links += `<a href="${safeSocialTwitter}" target="_blank" rel="noopener noreferrer" class="bg-[#0a0a0a] border border-[#252525] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="twitter" width="16"></i></a>`;
+                        if(safeSocialTelegram) links += `<a href="${safeSocialTelegram}" target="_blank" rel="noopener noreferrer" class="bg-[#0a0a0a] border border-[#252525] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="send" width="16"></i></a>`;
+                        if(safeSocialWebsite) links += `<a href="${safeSocialWebsite}" target="_blank" rel="noopener noreferrer" class="bg-[#0a0a0a] border border-[#252525] text-[#fb923c] p-2 rounded hover:border-[#ea580c]"><i data-lucide="globe" width="16"></i></a>`;
                     }
                     actions.innerHTML = links + `<button onclick="shareToken()" class="bg-[#0a0a0a] border border-[#252525] text-[#fb923c] p-2 rounded hover:border-[#ea580c] flex items-center gap-2 text-xs font-bold px-3"><i data-lucide="share-2" width="14"></i> Share</button>`;
                 }
@@ -1750,10 +1816,11 @@
                 if (lpBody) {
                     if(t.pairs && t.pairs.length > 0) {
                         currentPoolAddress = t.pairs[0].address;
-                        lpBody.innerHTML = t.pairs.map(p => `<tr><td class="px-2 py-2 text-[#fb923c] font-bold text-xs">${p.dexId}</td><td class="px-2 py-2 text-right text-xs font-mono">$${(parseFloat(p.priceUsd)||0).toFixed(6)}</td><td class="px-2 py-2 text-right text-[#22c55e] text-xs font-mono">$${(parseFloat(p.liquidity?.usd)||0).toLocaleString()}</td></tr>`).join('');
-                        const dexName = String(t.pairs[0].dex || t.pairs[0].dexId || "Unknown").toUpperCase();
+                        // SECURITY: Escape dexId to prevent XSS (M11)
+                        lpBody.innerHTML = t.pairs.map(p => `<tr><td class="px-2 py-2 text-[#fb923c] font-bold text-xs">${escapeHtml(p.dexId)}</td><td class="px-2 py-2 text-right text-xs font-mono">$${(parseFloat(p.priceUsd)||0).toFixed(6)}</td><td class="px-2 py-2 text-right text-[#22c55e] text-xs font-mono">$${(parseFloat(p.liquidity?.usd)||0).toLocaleString()}</td></tr>`).join('');
+                        const dexName = escapeHtml(String(t.pairs[0].dex || t.pairs[0].dexId || "Unknown").toUpperCase());
                         const poolNameEl = document.getElementById('chart-pool-name');
-                        if (poolNameEl) poolNameEl.innerText = `— ${dexName} (Largest Pool)`;
+                        if (poolNameEl) poolNameEl.textContent = `— ${dexName} (Largest Pool)`;
                     } else {
                         lpBody.innerHTML = '<tr><td colspan="3" class="text-center p-2 text-xs">No pools</td></tr>';
                         currentPoolAddress = null;
@@ -2065,29 +2132,37 @@
             if (data.success && data.holders.length > 0) {
                 const decimals = data.decimals || 6;
 
-                tbody.innerHTML = data.holders.map((h, i) => `
+                // SECURITY: Escape all holder data to prevent XSS (H3)
+                tbody.innerHTML = data.holders.map((h, i) => {
+                    const safeAddr = escapeHtml(h.address || '');
+                    const safeAddrJs = escapeJs(h.address || '');
+                    const safeClass = escapeHtml(h.class || 'unknown');
+                    const safeOrbUrl = sanitizeUrl(h.orbUrl);
+                    const safeBuys = parseInt(h.buys) || 0;
+                    const safeSells = parseInt(h.sells) || 0;
+                    return `
                     <tr class="border-b border-[#252525]/30 hover:bg-[#141414]/50">
                         <td class="px-2 py-2 text-[#737373] font-mono text-xs">${i + 1}</td>
                         <td class="px-2 py-2">
                             <div class="flex items-center gap-1">
-                                <span class="font-mono text-xs" title="${h.address}">${h.address.slice(0,4)}...${h.address.slice(-4)}</span>
-                                <button onclick="copyToClipboard('${h.address}')" class="text-[#737373] hover:text-[#fb923c]"><i data-lucide="copy" width="10"></i></button>
+                                <span class="font-mono text-xs" title="${safeAddr}">${safeAddr.slice(0,4)}...${safeAddr.slice(-4)}</span>
+                                <button onclick="copyToClipboard('${safeAddrJs}')" class="text-[#737373] hover:text-[#fb923c]"><i data-lucide="copy" width="10"></i></button>
                             </div>
                         </td>
                         <td class="px-2 py-2 text-right font-mono text-xs">${formatHolderBalance(h.balance, decimals)}</td>
                         <td class="px-2 py-2 text-center font-mono text-[10px]">
-                            <span class="text-[#4ade80]">${h.buys}</span>/<span class="text-[#ef4444]">${h.sells}</span>
+                            <span class="text-[#4ade80]">${safeBuys}</span>/<span class="text-[#ef4444]">${safeSells}</span>
                         </td>
                         <td class="px-2 py-2 text-center">
-                            <span class="conviction-pill conviction-${h.class}">${h.class}</span>
+                            <span class="conviction-pill conviction-${safeClass}">${safeClass}</span>
                         </td>
                         <td class="px-2 py-2 text-center">
-                            <a href="${h.orbUrl}" target="_blank" class="text-[#ea580c] hover:text-white text-xs font-bold flex items-center justify-center gap-1">
+                            ${safeOrbUrl ? `<a href="${safeOrbUrl}" target="_blank" rel="noopener noreferrer" class="text-[#ea580c] hover:text-white text-xs font-bold flex items-center justify-center gap-1">
                                 <i data-lucide="external-link" width="12"></i> Orb
-                            </a>
+                            </a>` : '<span class="text-[#737373] text-xs">-</span>'}
                         </td>
-                    </tr>
-                `).join('');
+                    </tr>`;
+                }).join('');
 
                 loadingEl.classList.add('hidden');
                 contentEl.classList.remove('hidden');
@@ -2322,7 +2397,9 @@
     window.openPreview = () => {
         const desc = document.getElementById('update-description').value;
         const prevContainer = document.getElementById('preview-container');
-        prevContainer.innerHTML = `<div class="p-4 bg-[#000000] rounded-lg border border-[#252525]"><h4 class="text-[#ea580c] font-bold mb-2">Preview</h4><p class="text-white text-sm whitespace-pre-wrap">${desc || 'No description...'}</p></div>`;
+        // SECURITY: Escape user input to prevent XSS (H4)
+        const safeDesc = escapeHtml(desc) || 'No description...';
+        prevContainer.innerHTML = `<div class="p-4 bg-[#000000] rounded-lg border border-[#252525]"><h4 class="text-[#ea580c] font-bold mb-2">Preview</h4><p class="text-white text-sm whitespace-pre-wrap">${safeDesc}</p></div>`;
         toggleModal('preview-modal');
     };
     
@@ -2373,33 +2450,39 @@
                     listDiv.innerHTML = '<div class="text-center py-4 text-[#737373] text-xs">No API keys yet. Click "New Key" to create one.</div>';
                     return;
                 }
+                // SECURITY: Escape all API key data to prevent XSS (H5)
                 listDiv.innerHTML = data.keys.map(k => {
                     const tierColors = {
                         free: { bg: 'bg-[#ea580c]/30', text: 'text-[#737373]', border: 'border-[#252525]' },
                         pro: { bg: 'bg-[#fb923c]/10', text: 'text-[#fb923c]', border: 'border-[#fb923c]' },
                         enterprise: { bg: 'bg-[#22c55e]/10', text: 'text-[#22c55e]', border: 'border-[#22c55e]' }
                     };
+                    const safeTier = escapeHtml(k.tier);
                     const tc = tierColors[k.tier] || tierColors.free;
-                    const usagePct = Math.round((k.requests_today / k.requests_limit) * 100);
+                    const usagePct = Math.round((parseInt(k.requests_today) || 0) / (parseInt(k.requests_limit) || 1) * 100);
                     const canUpgrade = k.tier !== 'enterprise' && k.is_active;
                     const nextTier = k.tier === 'free' ? 'pro' : 'enterprise';
                     const nextCost = k.tier === 'free' ? '25K' : '100K';
+                    const safeKeyId = escapeJs(k.key_id);
+                    const safeKeyPreview = escapeHtml(k.key_preview);
+                    const safeReqToday = (parseInt(k.requests_today) || 0).toLocaleString();
+                    const safeReqLimit = (parseInt(k.requests_limit) || 0).toLocaleString();
 
                     return `
                         <div class="bg-black rounded-lg p-3 border ${tc.border}">
                             <div class="flex justify-between items-start mb-2">
                                 <div>
-                                    <span class="font-mono text-[#fb923c] text-sm">${k.key_preview}</span>
-                                    <span class="ml-2 px-2 py-0.5 rounded text-xs ${tc.bg} ${tc.text} uppercase font-bold">${k.tier}</span>
+                                    <span class="font-mono text-[#fb923c] text-sm">${safeKeyPreview}</span>
+                                    <span class="ml-2 px-2 py-0.5 rounded text-xs ${tc.bg} ${tc.text} uppercase font-bold">${safeTier}</span>
                                     ${!k.is_active ? '<span class="ml-1 px-2 py-0.5 rounded text-xs bg-red-900/30 text-red-500">REVOKED</span>' : ''}
                                 </div>
-                                ${canUpgrade ? `<button onclick="upgradeApiTier('${k.key_id}', '${nextTier}')" class="text-xs px-2 py-1 rounded border border-[#22c55e] text-[#22c55e] hover:bg-green-900/20 flex items-center gap-1"><i data-lucide="zap" width="10"></i> ${nextCost} $ASDF</button>` : ''}
+                                ${canUpgrade ? `<button onclick="upgradeApiTier('${safeKeyId}', '${nextTier}')" class="text-xs px-2 py-1 rounded border border-[#22c55e] text-[#22c55e] hover:bg-green-900/20 flex items-center gap-1"><i data-lucide="zap" width="10"></i> ${nextCost} $ASDF</button>` : ''}
                             </div>
                             <div class="flex items-center gap-2 text-xs">
                                 <div class="flex-1 bg-[#1a1a1a] rounded-full h-2 overflow-hidden">
                                     <div class="h-full ${usagePct > 80 ? 'bg-red-500' : usagePct > 50 ? 'bg-yellow-500' : 'bg-[#22c55e]'}" style="width: ${Math.min(usagePct, 100)}%"></div>
                                 </div>
-                                <span class="text-[#737373] font-mono">${k.requests_today.toLocaleString()}/${k.requests_limit.toLocaleString()}</span>
+                                <span class="text-[#737373] font-mono">${safeReqToday}/${safeReqLimit}</span>
                             </div>
                         </div>
                     `;
@@ -2691,7 +2774,10 @@
                 return;
             }
 
+            // SECURITY: Escape token data to prevent XSS (M12)
             for (const t of holdings) {
+                const safeMint = escapeHtml(t.mint || '');
+                const safeMintJs = escapeJs(t.mint || '');
                 const balance = t.actualHolding || t.onChainBalance || 0;
                 const value = t.currentValueSol || 0;
                 const cost = t.remainingCostBasisSol || 0;
@@ -2704,10 +2790,10 @@
                 const unrealizedPct = t.unrealizedPnlPercent !== undefined ? ` (${t.unrealizedPnlPercent >= 0 ? '+' : ''}${t.unrealizedPnlPercent.toFixed(0)}%)` : '';
 
                 tbody.innerHTML += `
-                    <tr class="border-b border-[#252525]/30 hover:bg-[#141414] cursor-pointer" onclick="navigateTo('token/${t.mint}')">
+                    <tr class="border-b border-[#252525]/30 hover:bg-[#141414] cursor-pointer" onclick="navigateTo('token/${safeMintJs}')">
                         <td class="px-4 py-3">
                             <div class="flex items-center gap-2">
-                                <span class="text-[#fb923c]">${t.mint.slice(0,4)}...${t.mint.slice(-4)}</span>
+                                <span class="text-[#fb923c]">${safeMint.slice(0,4)}...${safeMint.slice(-4)}</span>
                                 ${t.source === 'airdrop/transfer' ? '<span class="text-[9px] text-[#737373] bg-[#141414] px-1 rounded">AIRDROP</span>' : ''}
                             </div>
                         </td>
@@ -2722,18 +2808,20 @@
         } else {
             // History view - show all trades
             for (const t of tokens) {
+                const safeMint = escapeHtml(t.mint || '');
+                const safeMintJs = escapeJs(t.mint || '');
                 const pnlVal = t.realizedPnlSol || 0;
                 const pnlCls = pnlVal >= 0 ? 'text-green-400' : 'text-red-400';
 
                 tbody.innerHTML += `
-                    <tr class="border-b border-[#252525]/30 hover:bg-[#141414] cursor-pointer" onclick="navigateTo('token/${t.mint}')">
+                    <tr class="border-b border-[#252525]/30 hover:bg-[#141414] cursor-pointer" onclick="navigateTo('token/${safeMintJs}')">
                         <td class="px-4 py-3">
-                            <span class="text-[#fb923c]">${t.mint.slice(0,4)}...${t.mint.slice(-4)}</span>
+                            <span class="text-[#fb923c]">${safeMint.slice(0,4)}...${safeMint.slice(-4)}</span>
                         </td>
-                        <td class="px-4 py-3 text-right text-[#e0e0e0]">${t.buyCount || 0} / ${t.sellCount || 0}</td>
-                        <td class="px-4 py-3 text-right text-[#e0e0e0]">${(t.totalBought || 0).toFixed(2)}</td>
-                        <td class="px-4 py-3 text-right text-[#e0e0e0]">${(t.totalCostSol || 0).toFixed(4)}</td>
-                        <td class="px-4 py-3 text-right text-[#e0e0e0]">${(t.totalProceedsSol || 0).toFixed(4)}</td>
+                        <td class="px-4 py-3 text-right text-[#e0e0e0]">${parseInt(t.buyCount) || 0} / ${parseInt(t.sellCount) || 0}</td>
+                        <td class="px-4 py-3 text-right text-[#e0e0e0]">${(parseFloat(t.totalBought) || 0).toFixed(2)}</td>
+                        <td class="px-4 py-3 text-right text-[#e0e0e0]">${(parseFloat(t.totalCostSol) || 0).toFixed(4)}</td>
+                        <td class="px-4 py-3 text-right text-[#e0e0e0]">${(parseFloat(t.totalProceedsSol) || 0).toFixed(4)}</td>
                         <td class="px-4 py-3 text-right ${pnlCls}">${pnlVal >= 0 ? '+' : ''}${pnlVal.toFixed(4)}</td>
                     </tr>
                 `;

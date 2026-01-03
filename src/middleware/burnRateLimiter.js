@@ -101,10 +101,50 @@ const burnRateLimiter = async (req, res, next) => {
 
     } catch (e) {
         logger.error(`[BurnRateLimiter] Error: ${e.message}`);
-        // Fail open for now (don't break API during transition)
+        // SECURITY: Fail-closed with strict fallback rate limiting (C3)
+        // If the burn system fails, apply emergency limits to prevent abuse
+        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
+        if (!failedRequestTracker[ip]) {
+            failedRequestTracker[ip] = { count: 0, resetTime: Date.now() + FALLBACK_WINDOW };
+        }
+
+        // Reset window if expired
+        if (Date.now() > failedRequestTracker[ip].resetTime) {
+            failedRequestTracker[ip] = { count: 0, resetTime: Date.now() + FALLBACK_WINDOW };
+        }
+
+        failedRequestTracker[ip].count++;
+
+        if (failedRequestTracker[ip].count > FALLBACK_MAX_REQUESTS) {
+            logger.warn(`[BurnRateLimiter] Fallback limit exceeded for ${ip}`);
+            return res.status(429).json({
+                success: false,
+                error: 'Rate limit exceeded (fallback mode)',
+                retryAfter: Math.ceil((failedRequestTracker[ip].resetTime - Date.now()) / 1000)
+            });
+        }
+
+        // Allow with degraded service warning
+        res.setHeader('X-RateLimit-Fallback', 'true');
+        res.setHeader('X-RateLimit-Remaining', FALLBACK_MAX_REQUESTS - failedRequestTracker[ip].count);
         next();
     }
 };
+
+// SECURITY: In-memory fallback rate limiting when burn system fails
+const FALLBACK_MAX_REQUESTS = 20; // Max requests per window when system is degraded
+const FALLBACK_WINDOW = 60 * 1000; // 1 minute window
+const failedRequestTracker = {}; // In-memory tracker
+
+// Clean up old entries every 5 minutes
+setInterval(() => {
+    const now = Date.now();
+    for (const ip in failedRequestTracker) {
+        if (now > failedRequestTracker[ip].resetTime) {
+            delete failedRequestTracker[ip];
+        }
+    }
+}, 5 * 60 * 1000);
 
 /**
  * Middleware factory: Optional burn check (doesn't deduct, just checks)

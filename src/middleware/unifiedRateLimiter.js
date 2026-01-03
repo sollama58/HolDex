@@ -24,7 +24,16 @@ const logger = require('../services/logger');
  * Unified middleware: API Key or Wallet → Check holdings → Check burns → Deduct
  */
 const unifiedRateLimiter = async (req, res, next) => {
-    const apiKey = req.headers['x-api-key'] || req.query.api_key;
+    const headerApiKey = req.headers['x-api-key'];
+    const queryApiKey = req.query.api_key;
+
+    // SECURITY: Deprecate API key in query params (M1)
+    if (queryApiKey && !headerApiKey) {
+        logger.warn(`[UnifiedRateLimiter] DEPRECATED: API key used in query params from ${req.ip}`);
+        res.setHeader('X-Deprecated', 'api_key query parameter - use x-api-key header instead');
+    }
+
+    const apiKey = headerApiKey || queryApiKey;
     const walletDirect = req.headers['x-wallet'] || req.query.wallet;
 
     let wallet = null;
@@ -162,7 +171,15 @@ const unifiedRateLimiter = async (req, res, next) => {
  * Light check (no deduction) - for status endpoints
  */
 const checkOnly = async (req, res, next) => {
-    const apiKey = req.headers['x-api-key'] || req.query.api_key;
+    const headerApiKey = req.headers['x-api-key'];
+    const queryApiKey = req.query.api_key;
+
+    // SECURITY: Deprecate API key in query params (M1)
+    if (queryApiKey && !headerApiKey) {
+        res.setHeader('X-Deprecated', 'api_key query parameter - use x-api-key header instead');
+    }
+
+    const apiKey = headerApiKey || queryApiKey;
     const walletDirect = req.headers['x-wallet'] || req.query.wallet;
 
     if (!apiKey && !walletDirect) {

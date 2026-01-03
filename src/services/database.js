@@ -20,7 +20,22 @@ async function initDB() {
     initPromise = (async () => {
         try {
             const isLocal = config.DATABASE_URL.includes('localhost') || config.DATABASE_URL.includes('127.0.0.1');
-            const sslConfig = isLocal ? false : { rejectUnauthorized: false };
+
+            // SECURITY: SSL Configuration (H1)
+            // In production, prefer SSL verification. Set DB_SSL_REJECT_UNAUTHORIZED=true for strict mode.
+            // Default to false for Render's managed Postgres (uses internal certs)
+            const strictSsl = process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true';
+            let sslConfig;
+
+            if (isLocal) {
+                sslConfig = false;
+            } else {
+                sslConfig = { rejectUnauthorized: strictSsl };
+                if (!strictSsl && config.NODE_ENV === 'production') {
+                    logger.warn('⚠️ SECURITY: SSL certificate verification disabled (DB_SSL_REJECT_UNAUTHORIZED != true)');
+                    logger.warn('⚠️ Set DB_SSL_REJECT_UNAUTHORIZED=true in production for MITM protection');
+                }
+            }
 
             // SCALABILITY FIX: Reduced max connections from 50 to 10.
             // With 3 services (API, Worker, Listener) running, 50 * 3 = 150 connections

@@ -28,6 +28,16 @@ function validateEnv() {
         errors.push('WEBHOOK_SECRET is required when webhooks are enabled in production');
     }
 
+    // SECURITY: Data signing secret required in production for integrity verification (M6)
+    if (isProduction && !process.env.DATA_SIGNING_SECRET) {
+        errors.push('DATA_SIGNING_SECRET is required in production for K-Score integrity verification');
+    }
+
+    // Validate DATA_SIGNING_SECRET strength
+    if (process.env.DATA_SIGNING_SECRET && process.env.DATA_SIGNING_SECRET.length < 32) {
+        warnings.push('DATA_SIGNING_SECRET should be at least 32 characters for security');
+    }
+
     // MEDIUM: Warn about missing optional but recommended vars
     if (!process.env.HELIUS_API_KEY) {
         warnings.push('HELIUS_API_KEY not set - some features will be limited');
