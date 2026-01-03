@@ -969,11 +969,29 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
                         'SELECT holders FROM tokens WHERE mint = $1',
                         [mint]
                     );
-                    const storedHolderCount = tokenData?.holders || snapshots.length;
+                    let storedHolderCount = tokenData?.holders || 0;
+
+                    // SECURITY: Detect corrupted holder count (feedback loop prevention)
+                    // If stored count equals snapshot count (max 20), it's likely corrupted
+                    // Fall back to last known good value from history
+                    if (storedHolderCount <= snapshots.length) {
+                        const lastGood = await db.get(
+                            `SELECT holders FROM k_score_history
+                             WHERE mint = $1 AND holders > 50
+                             ORDER BY date DESC LIMIT 1`,
+                            [mint]
+                        );
+                        if (lastGood?.holders) {
+                            logger.warn(`[Webhook Mode] ${mint.slice(0,8)}: Corrupted holder count detected (${storedHolderCount}), using history (${lastGood.holders})`);
+                            storedHolderCount = lastGood.holders;
+                        }
+                    }
 
                     // Estimate real holders from snapshot count (holders with balance > dust)
                     // In webhook mode, snapshots only contain significant holders
-                    const realHoldersCount = Math.max(snapshots.length, Math.floor(storedHolderCount * 0.7));
+                    const realHoldersCount = storedHolderCount > snapshots.length
+                        ? Math.floor(storedHolderCount * 0.7)
+                        : snapshots.length;
 
                     logger.info(`[Webhook Mode] ${mint.slice(0,8)}: ${score}% conviction from cache (${analyzed} analyzed, ${storedHolderCount} total, ${ageMinutes.toFixed(0)}m old) - 0 RPC`);
 
