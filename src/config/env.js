@@ -118,10 +118,25 @@ module.exports = {
     HELIUS_API_KEY: heliusKey || '',
 
     // --- PAYMENT CONFIGURATION ---
-    TREASURY_WALLET: process.env.TREASURY_WALLET || null, // REQUIRED - set in production 
-    FEE_SOL: parseFloat(process.env.FEE_SOL) || 0.1, 
+    TREASURY_WALLET: process.env.TREASURY_WALLET || null, // REQUIRED - set in production
+    FEE_SOL: parseFloat(process.env.FEE_SOL) || 0.1,
     FEE_TOKEN_AMOUNT: parseFloat(process.env.FEE_TOKEN_AMOUNT) || 5000,
     FEE_TOKEN_MINT: process.env.FEE_TOKEN_MINT || '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump',
+
+    // --- API TIER PRICING ($ASDFASDFA) ---
+    // Self-service tier upgrades - pay with $ASDFASDFA, no admin needed
+    API_TIER_PRICING: {
+        pro: {
+            tokens: 25000,       // 25,000 $ASDFASDFA for pro tier
+            limit: 100000,       // 100k requests/day
+            label: 'Pro'
+        },
+        enterprise: {
+            tokens: 100000,      // 100,000 $ASDFASDFA for enterprise tier
+            limit: 1000000,      // 1M requests/day
+            label: 'Enterprise'
+        }
+    },
     
     // --- MEMORY PROTECTION ---
     ENABLE_RPC_HOLDER_CHECK: process.env.ENABLE_RPC_HOLDER_CHECK !== 'false',
