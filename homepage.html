@@ -1073,10 +1073,14 @@
         return { grade: 'D', label: 'Default', class: 'credit-d' };
     }
 
-    function renderKScore(score, isVerified) {
+    function renderKScore(score, isVerified, mint = null) {
+        // Native tokens always show Infrastructure badge
+        if (mint && isNativeToken(mint)) {
+            return '<span class="credit-badge credit-native" title="Infrastructure - Not Rated">🏛️</span>';
+        }
         if (!isVerified) return '<span class="text-gray-600" title="Verify token to unlock K-Score">🔒</span>';
         if (score <= 0) return '<span class="animate-pulse" title="Calculating...">⏳</span>';
-        const { grade, label, class: gradeClass } = getCreditRating(score);
+        const { grade, label, class: gradeClass } = getCreditRating(score, mint);
         return `<span class="credit-badge ${gradeClass}" title="${label} (K=${score})">${grade}</span>`;
     }
 
@@ -1227,7 +1231,7 @@
             const isVerified = t.hasCommunityUpdate || t.has_community_update;
             const score = t.kScore || t.k_score || 0;
 
-            const kScoreDisplay = renderKScore(score, isVerified);
+            const kScoreDisplay = renderKScore(score, isVerified, t.mint);
             const formatPct = (v) => (v !== undefined && v !== null) ? `<span class="pill ${v>0?'pill-green':'pill-red'}">${v.toFixed(1)}%</span>` : '-';
             const formatVal = (v) => v ? '$'+ new Intl.NumberFormat('en',{notation:'compact'}).format(v) : '-';
             const img = t.image || `https://placehold.co/40x40/2a1005/7c2d12?text=${t.ticker?.[0]||'?'}`;
@@ -1320,7 +1324,7 @@
                     const kScoreValEl = document.getElementById('stat-kscore');
                     const score = t.kScore || t.k_score || 0;
                     if (kScoreValEl) {
-                        kScoreValEl.innerHTML = renderKScore(score, isVerified);
+                        kScoreValEl.innerHTML = renderKScore(score, isVerified, mint);
                     }
                 }
 
