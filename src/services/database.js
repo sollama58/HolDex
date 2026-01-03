@@ -109,7 +109,7 @@ async function initDB() {
 
                 CREATE TABLE IF NOT EXISTS active_trackers ( pool_address TEXT PRIMARY KEY, priority INTEGER DEFAULT 1, last_check BIGINT DEFAULT 0 );
                 CREATE TABLE IF NOT EXISTS token_updates ( id SERIAL PRIMARY KEY, mint TEXT, twitter TEXT, website TEXT, telegram TEXT, banner TEXT, description TEXT, submittedAt BIGINT, status TEXT DEFAULT 'pending', signature TEXT, payer TEXT );
-                CREATE TABLE IF NOT EXISTS api_keys ( key_hash TEXT PRIMARY KEY, key_prefix TEXT, owner TEXT, tier TEXT DEFAULT 'free', requests_limit INTEGER DEFAULT 1000, requests_today INTEGER DEFAULT 0, last_reset BIGINT DEFAULT 0, is_active BOOLEAN DEFAULT TRUE, created_at BIGINT );
+                CREATE TABLE IF NOT EXISTS api_keys ( key_hash TEXT PRIMARY KEY, key_prefix TEXT, owner TEXT, wallet TEXT, tier TEXT DEFAULT 'free', requests_limit INTEGER DEFAULT 1000, requests_today INTEGER DEFAULT 0, last_reset BIGINT DEFAULT 0, is_active BOOLEAN DEFAULT TRUE, created_at BIGINT );
 
                 CREATE TABLE IF NOT EXISTS holder_snapshots (
                     mint TEXT NOT NULL,
@@ -173,6 +173,10 @@ async function initDB() {
 
             // Add new columns if they don't exist (migration-safe)
             const migrations = [
+                // API Keys: Add columns for burn credits system
+                `ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS wallet TEXT`,
+                `ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_hash TEXT`,
+                `ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_prefix TEXT`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS initial_supply TEXT`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS burned_amount DOUBLE PRECISION DEFAULT 0`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS burned_percent DOUBLE PRECISION DEFAULT 0`,

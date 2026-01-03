@@ -25,7 +25,7 @@ const { getClient } = require('../services/redis');
 const { snapshotPools } = require('../indexer/tasks/snapshotter'); 
 const logger = require('../services/logger');
 const cacheControl = require('../middleware/httpCache');
-const apiKeyAuth = require('../middleware/apiKeyAuth');
+const unifiedRateLimiter = require('../middleware/unifiedRateLimiter');
 const { indexTokenOnChain } = require('../services/indexer');
 const { addTokenToMasterWebhook } = require('../services/heliusWebhook');
 
@@ -201,6 +201,9 @@ const requireAdmin = (req, res, next) => {
 function init(deps) {
     const { db } = deps;
 
+    // Burn Credits System - "Hold to enter. Burn to use."
+    const burnCredits = require('../services/burnCredits');
+
     // --- HELPER FUNCTIONS ---
     function sanitizeUrl(url) {
         if (!url || typeof url !== 'string') return "";
@@ -312,7 +315,7 @@ function init(deps) {
     });
 
     // PUBLIC: Candle Chart
-    router.get('/token/:mint/candles', cacheControl(30, 60), apiKeyAuth(false), async (req, res) => {
+    router.get('/token/:mint/candles', cacheControl(30, 60), unifiedRateLimiter, async (req, res) => {
         const { mint } = req.params;
         const { resolution = '5', from, to, poolAddress } = req.query;
 
@@ -424,39 +427,45 @@ function init(deps) {
         } catch (_e) { res.status(500).json({ success: false, error: "Submission failed" }); }
     });
 
-    // --- API KEY GENERATION ---
+    // --- API KEY GENERATION (Wallet-Linked) ---
+    // Key is just an alias for wallet - credits come from burns
     router.post('/request-api-key', apiKeyRateLimit, async (req, res) => {
         const { wallet, signature } = req.body;
         try {
             if (!wallet || !signature) return res.status(400).json({ success: false, error: "Wallet and Signature required" });
-            
+
             const msg = new TextEncoder().encode("Request HolDex API Key");
             const sigBytes = Buffer.from(signature, 'base64');
             const pubBytes = new PublicKey(wallet).toBytes();
             const verified = nacl.sign.detached.verify(msg, sigBytes, pubBytes);
             if (!verified) return res.status(403).json({ success: false, error: "Invalid Signature" });
-            
+
             const result = await db.get('SELECT COUNT(*) as count FROM api_keys WHERE owner = $1', [wallet]);
             const count = parseInt(result?.count || 0);
-            
+
             if (count >= 5) {
                 return res.status(400).json({ success: false, error: "Limit reached (5 Keys). Revoke old keys first." });
             }
-            
+
             const key = 'hx_' + require('crypto').randomBytes(16).toString('hex');
             const keyHash = hashApiKey(key);
-            const keyPrefix = key.substring(0, 7); // Store prefix for identification
-            const defaultLimit = 1000;
-            const defaultTier = 'free';
+            const keyPrefix = key.substring(0, 7);
 
-            await db.run(`INSERT INTO api_keys (key_hash, key_prefix, owner, tier, requests_limit, created_at) VALUES ($1, $2, $3, $4, $5, $6)`, [keyHash, keyPrefix, wallet, defaultTier, defaultLimit, Date.now()]);
+            // Store key linked to wallet (wallet column = owner for backwards compat)
+            await db.run(
+                `INSERT INTO api_keys (key_hash, key_prefix, owner, wallet, created_at) VALUES ($1, $2, $3, $3, $4)`,
+                [keyHash, keyPrefix, wallet, Date.now()]
+            );
 
             res.json({
                 success: true,
                 key, // Only time user sees the full key!
-                tier: defaultTier,
-                requests_limit: defaultLimit,
-                message: "Save this key! It won't be shown again."
+                wallet,
+                message: "Key linked to wallet. Credits come from your burns.",
+                system: {
+                    gate: "Hold 10K+ $ASDFASDFA",
+                    credits: "1 burn = 1 call forever"
+                }
             });
         } catch (e) { console.error(e); res.status(500).json({ success: false, error: "Server Error" }); }
     });
@@ -473,26 +482,40 @@ function init(deps) {
 
             if (!verified) return res.status(403).json({ success: false, error: "Invalid Signature" });
 
-            const keys = await db.all('SELECT key_hash, key_prefix, tier, requests_limit, requests_today, is_active, created_at FROM api_keys WHERE owner = $1 ORDER BY created_at DESC', [wallet]);
+            // Fetch keys and credit status in parallel
+            const [keys, creditStatus] = await Promise.all([
+                db.all('SELECT key_hash, key_prefix, is_active, created_at FROM api_keys WHERE owner = $1 ORDER BY created_at DESC', [wallet]),
+                burnCredits.getCreditStatus(getSolanaConnection(), db, wallet)
+            ]);
 
             // Return masked keys (user can't see full key after creation)
             const maskedKeys = (keys || []).map(k => ({
-                key_id: k.key_hash.substring(0, 8), // Short ID for reference
+                key_id: k.key_hash.substring(0, 8),
                 key_preview: k.key_prefix + '...****',
-                tier: k.tier,
-                requests_limit: k.requests_limit,
-                requests_today: k.requests_today,
                 is_active: k.is_active,
                 created_at: k.created_at
             }));
 
-            res.json({ success: true, keys: maskedKeys });
+            res.json({
+                success: true,
+                wallet,
+                keys: maskedKeys,
+                credits: {
+                    holdings: creditStatus.holdings,
+                    burned: creditStatus.burned,
+                    used: creditStatus.usedCalls,
+                    remaining: creditStatus.remainingCalls,
+                    eligible: creditStatus.holdingEligible && creditStatus.remainingCalls > 0
+                },
+                system: {
+                    gate: `Hold ${burnCredits.MIN_HOLDINGS.toLocaleString()}+ $ASDFASDFA`,
+                    credits: '1 burn = 1 call forever'
+                }
+            });
         } catch (e) { console.error(e); res.status(500).json({ success: false, error: "Server Error" }); }
     });
 
-    // --- BURN CREDITS SYSTEM ---
-    // "Hold to enter. Burn to use. 1 token burned = 1 call forever."
-    const burnCredits = require('../services/burnCredits');
+    // Burn credits already required at top of init()
 
     // Get burn credit pricing info
     router.get('/api-pricing', (req, res) => {
@@ -1029,7 +1052,7 @@ function init(deps) {
         }
     });
 
-    router.get('/token/:mint', cacheControl(3, 5), apiKeyAuth(false), async (req, res) => {
+    router.get('/token/:mint', cacheControl(3, 5), unifiedRateLimiter, async (req, res) => {
         const { mint } = req.params;
 
         // SECURITY: Validate mint address
@@ -1209,7 +1232,7 @@ function init(deps) {
 
     // --- TOP HOLDERS (for Orb AI integration) ---
     // SECURITY: Only return holder data for verified tokens (deep analysis done)
-    router.get('/token/:mint/top-holders', cacheControl(60, 120), apiKeyAuth(false), async (req, res) => {
+    router.get('/token/:mint/top-holders', cacheControl(60, 120), unifiedRateLimiter, async (req, res) => {
         const { mint } = req.params;
 
         // SECURITY: Validate mint address
@@ -1285,7 +1308,7 @@ function init(deps) {
         }
     });
 
-    router.get('/tokens', cacheControl(2, 5), apiKeyAuth(false), async (req, res) => {
+    router.get('/tokens', cacheControl(2, 5), unifiedRateLimiter, async (req, res) => {
         let { search = '', sort = 'kscore', page = 1, filter, direction = 'desc', limit = 20 } = req.query;
         try {
             // Validate Limit
@@ -1415,7 +1438,7 @@ function init(deps) {
      *   - maxPages: Max pages of transactions to fetch (default 10, max 50)
      *   - since: Unix timestamp to filter transactions after
      */
-    router.get('/wallet/:address/pnl', cacheControl(60, 120), apiKeyAuth(false), async (req, res) => {
+    router.get('/wallet/:address/pnl', cacheControl(60, 120), unifiedRateLimiter, async (req, res) => {
         const { address } = req.params;
 
         if (!isValidPubkey(address)) {
@@ -1447,7 +1470,7 @@ function init(deps) {
      * GET /wallet/:address/token/:mint/pnl
      * Calculate PnL for a specific token in a wallet
      */
-    router.get('/wallet/:address/token/:mint/pnl', cacheControl(60, 120), apiKeyAuth(false), async (req, res) => {
+    router.get('/wallet/:address/token/:mint/pnl', cacheControl(60, 120), unifiedRateLimiter, async (req, res) => {
         const { address, mint } = req.params;
 
         if (!isValidPubkey(address)) {
