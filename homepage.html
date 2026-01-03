@@ -614,8 +614,11 @@
 
                 <!-- Conviction Breakdown -->
                 <div id="conviction-breakdown" class="hidden mt-3 p-4 bg-[#1a0a02] rounded-lg border border-[#7c2d12]">
-                    <div class="text-xs text-[#fb923c] uppercase font-bold mb-3 flex items-center gap-2">
+                    <div class="text-xs text-[#fb923c] uppercase font-bold mb-3 flex items-center justify-between">
                         <span>Top 20 Holders Conviction</span>
+                        <a href="/track-record.html" class="text-[10px] text-[#22c55e] hover:text-[#4ade80] flex items-center gap-1 font-normal normal-case">
+                            <i data-lucide="bar-chart-2" width="12"></i> Track Record
+                        </a>
                     </div>
                     <div class="grid grid-cols-4 gap-3 text-center">
                         <div class="flex flex-col items-center gap-1">
@@ -708,17 +711,17 @@
         <i data-lucide="upload-cloud" width="20"></i>
         <span>Update</span>
     </button>
-    <button class="bottom-nav-item" onclick="toggleAppsModal()" id="nav-apps">
-        <i data-lucide="grid" width="20"></i>
-        <span>Apps</span>
-    </button>
+    <a href="/track-record.html" class="bottom-nav-item" id="nav-track">
+        <i data-lucide="bar-chart-2" width="20"></i>
+        <span>K-Score</span>
+    </a>
     <button class="bottom-nav-item" onclick="navigateTo('wallet')" id="nav-wallet">
         <i data-lucide="wallet" width="20"></i>
         <span>PnL</span>
     </button>
-    <button class="bottom-nav-item" onclick="navigateTo('about')" id="nav-about">
-        <i data-lucide="info" width="20"></i>
-        <span>About</span>
+    <button class="bottom-nav-item" onclick="toggleAppsModal()" id="nav-apps">
+        <i data-lucide="grid" width="20"></i>
+        <span>Apps</span>
     </button>
     <button class="bottom-nav-item" onclick="toggleApiModal()">
         <i data-lucide="code-2" width="20"></i>
