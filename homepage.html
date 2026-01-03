@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>HolDex | The Terminal Fire Explorer</title>
+    <title>HolDex | Holdex it. K encrypts the money.</title>
     
     <script src="https://bundle.run/buffer@6.0.3"></script>
     <script>
@@ -208,6 +208,7 @@
                 </div>
                 <div>
                     <h1 class="text-2xl md:text-3xl brand-text tracking-tight font-sans">HolDex</h1>
+                    <p class="text-[10px] md:text-xs text-[#9a3412] font-mono hidden md:block">Holdex it. Wallets don't lie.</p>
                 </div>
             </div>
         </div>
@@ -217,7 +218,7 @@
             <!-- Search Row -->
             <div class="flex gap-2 w-full md:w-[400px]">
                 <div class="relative flex-grow search-container">
-                    <input type="text" id="search" placeholder="Search mint or ticker..." class="search-box">
+                    <input type="text" id="search" placeholder="Holdex it... paste CA or ticker" class="search-box">
                     <i id="clear-search-btn" data-lucide="x" width="16" class="clear-search" onclick="clearSearch()"></i>
                     <i id="help-btn" data-lucide="help-circle" width="18" class="absolute right-3 top-1/2 -translate-y-1/2 text-[#9a3412]" onclick="toggleHowItWorksModal()"></i>
                 </div>
@@ -305,17 +306,27 @@
                 </div>
                 <div>
                     <h2 class="text-3xl md:text-5xl font-bold text-white tracking-tight font-sans">About HolDex</h2>
-                    <p class="text-[#ea580c] font-mono text-sm md:text-lg mt-1">The High-Velocity Terminal for Solana Assets</p>
+                    <p class="text-[#ea580c] font-mono text-sm md:text-lg mt-1">Holdex it. K encrypts the money.</p>
                 </div>
             </div>
+
+            <!-- Holdex It Banner -->
+            <div class="bg-gradient-to-r from-[#451a03] to-[#7c2d12] p-6 rounded-xl border-2 border-[#ea580c] text-center">
+                <p class="text-2xl md:text-3xl font-bold text-white mb-2">"Before you ape, <span class="text-[#ea580c]">Holdex it.</span>"</p>
+                <p class="text-[#ffedd5] text-sm md:text-base">Wallets don't lie. Charts can be painted. TG can be botted. But on-chain behavior is permanent.</p>
+            </div>
+
             <div class="grid md:grid-cols-2 gap-8">
                 <div>
                     <h3 class="text-2xl font-bold text-white mb-4">Core Philosophy</h3>
                     <p class="text-[#ffedd5] leading-relaxed mb-4 text-sm md:text-base">
-                        HolDex is built for traders who demand raw speed and absolute truth. We provide a <strong>terminal-grade interface</strong> that cuts through the clutter, now enhanced with <strong>Daily Holder Tracking</strong> and deep historical analysis.
+                        <strong>K-Score</strong> is the credit rating for tokens. Same logic banks use to rate bonds. Same logic we use to rate memecoins. <strong>A1 Prime. B2 Speculative. D Junk.</strong> You already know what these mean.
+                    </p>
+                    <p class="text-[#ffedd5] leading-relaxed mb-4 text-sm md:text-base">
+                        We analyze <strong>Top 20 holders</strong> and classify each wallet: 💎 Diamond (Accumulators), 🥇 Gold (Holders), 🥈 Silver (Reducers), 🔩 Rust (Extractors). <strong>Below 50% Diamond+Gold = you're exit liquidity.</strong>
                     </p>
                     <p class="text-[#ffedd5] leading-relaxed text-sm md:text-base">
-                        We prioritize <strong>community verification</strong> and <strong>on-chain data integrity</strong>. Our proprietary indexing engine snapshots liquidity pools directly from the Solana RPC, ensuring you see price action as it happens.
+                        K-Score doesn't pick winners. <strong>It filters losers.</strong> In a game where 90% rug, not losing is the edge.
                     </p>
                 </div>
                 <div class="bg-[#451a03] p-6 rounded-xl border border-[#7c2d12] flex flex-col justify-center shadow-inner">
@@ -326,9 +337,9 @@
                 </div>
             </div>
             <div class="grid md:grid-cols-3 gap-6">
-                <div class="feature-box"><div class="text-[#fb923c] mb-2"><i data-lucide="lock" width="24"></i></div><h4 class="font-bold text-white text-lg">K-Score Protocol</h4><p class="text-sm text-[#9a3412]">Our "Conviction Score" analyzes holder distribution and token velocity to rate asset health.</p></div>
-                <div class="feature-box"><div class="text-[#22c55e] mb-2"><i data-lucide="users" width="24"></i></div><h4 class="font-bold text-white text-lg">Community Verified</h4><p class="text-sm text-[#9a3412]">Projects can verify their identity on-chain, earning the green badge and higher visibility.</p></div>
-                <div class="feature-box"><div class="text-[#a855f7] mb-2"><i data-lucide="zap" width="24"></i></div><h4 class="font-bold text-white text-lg">Zero Bloat</h4><p class="text-sm text-[#9a3412]">No ads. No trackers. Just data. Built for maximum performance on any device.</p></div>
+                <div class="feature-box"><div class="text-[#fb923c] mb-2"><i data-lucide="shield-check" width="24"></i></div><h4 class="font-bold text-white text-lg">K-Score Protocol</h4><p class="text-sm text-[#9a3412]">Credit rating for tokens. 3 pillars: Diamond Hands (50%), Organic Growth (35%), Longevity (15%). Weighted geometric mean.</p></div>
+                <div class="feature-box"><div class="text-[#22c55e] mb-2"><i data-lucide="filter" width="24"></i></div><h4 class="font-bold text-white text-lg">Anti-Sybil: $1 Min</h4><p class="text-sm text-[#9a3412]">Only wallets holding $1+ count as real holders. Dust wallets don't count. Bots don't count. Real conviction only.</p></div>
+                <div class="feature-box"><div class="text-[#a855f7] mb-2"><i data-lucide="badge-check" width="24"></i></div><h4 class="font-bold text-white text-lg">Verified = Unlocked</h4><p class="text-sm text-[#9a3412]">K-Score, Credit Rating, Top 20 Breakdown only visible for verified tokens. Data is power. Earn it.</p></div>
             </div>
             <div class="bg-[#0f0502] border border-[#7c2d12] rounded-xl p-8 relative overflow-hidden group hover:border-[#ea580c] transition-colors">
                 <div class="absolute top-4 right-4 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><i data-lucide="code" width="100" class="text-[#ea580c]"></i></div>
