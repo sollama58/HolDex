@@ -1439,7 +1439,7 @@
         clearTimeout(popoverTimeout);
         currentPopoverToken = token;
 
-        const isVerified = token.hasCommunityUpdate || token.has_community_update;
+        const isVerified = token.verified || token.hasCommunityUpdate || token.has_community_update;
         const score = token.kScore || token.k_score || 0;
         const img = token.image || `https://placehold.co/40x40/0a0a0a/ea580c?text=${token.ticker?.[0]||'?'}`;
 
@@ -1679,7 +1679,7 @@
 
         tbody.innerHTML = displayTokens.map((t, idx) => {
             // Handle both camelCase and snake_case for verification status
-            const isVerified = t.hasCommunityUpdate || t.has_community_update;
+            const isVerified = t.verified || t.hasCommunityUpdate || t.has_community_update;
             const score = t.kScore || t.k_score || 0;
 
             const kScoreDisplay = renderKScore(score, isVerified, t.mint);
@@ -1774,7 +1774,7 @@
                 
                 // Handle mixed casing and normalization
                 // This ensures we always get a boolean regardless of 0/1/"true"/"false"
-                const rawStatus = t.hasCommunityUpdate || t.has_community_update || t.hascommunityupdate;
+                const rawStatus = t.verified || t.hasCommunityUpdate || t.has_community_update || t.hascommunityupdate;
                 const isVerified = (rawStatus === true || rawStatus === 1 || rawStatus === 'true');
                 // FIX: Use 'symbol' from API (was 'ticker')
                 const ticker = t.symbol || t.ticker || 'UNK';
@@ -2331,7 +2331,7 @@
                 if(t.telegram) document.getElementById('update-telegram').value = t.telegram;
                 if(t.website) document.getElementById('update-website').value = t.website;
                 if(t.description) document.getElementById('update-description').value = t.description;
-                if(t.hasCommunityUpdate) { document.getElementById('update-cto-warning').classList.remove('hidden'); document.getElementById('update-cto-user').required = true; } 
+                if(t.verified || t.hasCommunityUpdate) { document.getElementById('update-cto-warning').classList.remove('hidden'); document.getElementById('update-cto-user').required = true; } 
                 else { document.getElementById('update-cto-warning').classList.add('hidden'); document.getElementById('update-cto-user').required = false; }
                 
                 checkSubmitEligibility();
