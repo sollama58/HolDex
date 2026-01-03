@@ -65,11 +65,24 @@
         @media (max-width: 640px) {
             .stat-value { font-size: 1.75rem; }
             .stat-card { padding: 12px; }
-            .token-row { padding: 10px 12px; gap: 8px; }
-            .token-row-mobile { flex-direction: column; align-items: flex-start; }
-            .token-row-mobile .mobile-top { display: flex; align-items: center; gap: 8px; width: 100%; }
-            .token-row-mobile .mobile-bar { width: 100%; margin-top: 8px; }
-            .hide-mobile { display: none; }
+            .token-row {
+                flex-direction: column !important;
+                align-items: stretch !important;
+                gap: 8px;
+                padding: 12px;
+            }
+            .token-row > div:first-child {
+                flex-wrap: wrap;
+                justify-content: space-between;
+            }
+            .token-row .conviction-bar {
+                height: 14px;
+                width: 100%;
+            }
+            .token-row > div.flex-1 {
+                width: 100%;
+                min-width: 100%;
+            }
         }
     </style>
 </head>
