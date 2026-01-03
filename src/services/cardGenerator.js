@@ -32,11 +32,19 @@ const COLORS = {
     iron: '#434343',
     rust: '#8b4513',
 
-    // Conviction colors
-    accumulator: '#3fb950',
-    holder: '#58a6ff',
-    reducer: '#d29922',
-    extractor: '#f85149'
+    // Conviction colors (holder role metals)
+    accumulator: '#b9f2ff',  // Diamond
+    holder: '#ffd700',       // Gold
+    reducer: '#c0c0c0',      // Silver
+    extractor: '#8b4513'     // Rust
+};
+
+// Holder Role configurations (conviction analysis)
+const HOLDER_ROLES = {
+    accumulator: { icon: '💎', metal: 'Diamond', label: 'Accumulators', color: COLORS.accumulator, impact: 'bullish' },
+    holder: { icon: '🥇', metal: 'Gold', label: 'Holders', color: COLORS.holder, impact: 'bullish' },
+    reducer: { icon: '🥈', metal: 'Silver', label: 'Reducers', color: COLORS.reducer, impact: 'neutral' },
+    extractor: { icon: '🔩', metal: 'Rust', label: 'Extractors', color: COLORS.extractor, impact: 'bearish' }
 };
 
 // Grade configurations
@@ -361,10 +369,10 @@ async function generateKScoreCard(token) {
     // Legend
     const legendY = barY + 50;
     const legendItems = [
-        { label: 'Accumulators', count: conviction.accumulators, color: COLORS.accumulator },
-        { label: 'Holders', count: conviction.holders, color: COLORS.holder },
-        { label: 'Reducers', count: conviction.reducers, color: COLORS.reducer },
-        { label: 'Extractors', count: conviction.extractors, color: COLORS.extractor }
+        { label: `${HOLDER_ROLES.accumulator.icon} ${HOLDER_ROLES.accumulator.metal}`, count: conviction.accumulators, color: HOLDER_ROLES.accumulator.color },
+        { label: `${HOLDER_ROLES.holder.icon} ${HOLDER_ROLES.holder.metal}`, count: conviction.holders, color: HOLDER_ROLES.holder.color },
+        { label: `${HOLDER_ROLES.reducer.icon} ${HOLDER_ROLES.reducer.metal}`, count: conviction.reducers, color: HOLDER_ROLES.reducer.color },
+        { label: `${HOLDER_ROLES.extractor.icon} ${HOLDER_ROLES.extractor.metal}`, count: conviction.extractors, color: HOLDER_ROLES.extractor.color }
     ];
 
     legendItems.forEach((item, i) => {
@@ -445,9 +453,20 @@ function formatNumber(num) {
     return num.toFixed(0);
 }
 
+/**
+ * Get holder role info from conviction class
+ * @param {string} convictionClass - 'accumulator', 'holder', 'reducer', 'extractor'
+ * @returns {Object} { icon, metal, label, color, impact }
+ */
+function getHolderRole(convictionClass) {
+    return HOLDER_ROLES[convictionClass] || HOLDER_ROLES.holder;
+}
+
 module.exports = {
     generateKScoreCard,
     getGrade,
+    getHolderRole,
+    HOLDER_ROLES,
     CARD_WIDTH,
     CARD_HEIGHT
 };

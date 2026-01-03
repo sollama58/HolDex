@@ -1014,13 +1014,21 @@ function init(deps) {
                 tokenData.launchDate = token.timestamp ? new Date(parseInt(token.timestamp)).toISOString() : null;
 
                 // Conviction breakdown - only for verified tokens
+                // Holder Role Metals: Diamond (Accumulators), Gold (Holders), Silver (Reducers), Rust (Extractors)
                 tokenData.conviction = isVerified ? {
                     score: token.conviction_score || 0,
                     accumulators: token.conviction_accumulators || 0,
                     holders: token.conviction_holders || 0,
                     reducers: token.conviction_reducers || 0,
                     extractors: token.conviction_extractors || 0,
-                    analyzed: token.conviction_analyzed || 0
+                    analyzed: token.conviction_analyzed || 0,
+                    // Holder role metals for UI display
+                    roles: {
+                        accumulator: { icon: '💎', metal: 'Diamond', impact: 'bullish' },
+                        holder: { icon: '🥇', metal: 'Gold', impact: 'bullish' },
+                        reducer: { icon: '🥈', metal: 'Silver', impact: 'neutral' },
+                        extractor: { icon: '🔩', metal: 'Rust', impact: 'bearish' }
+                    }
                 } : null;
 
                 // Mayhem Mode (mutable supply) fields
@@ -1151,20 +1159,36 @@ function init(deps) {
                 LIMIT 20
             `, [mint]);
 
+            // Holder role metals mapping
+            const ROLE_METALS = {
+                accumulator: { icon: '💎', metal: 'Diamond', impact: 'bullish' },
+                holder: { icon: '🥇', metal: 'Gold', impact: 'bullish' },
+                reducer: { icon: '🥈', metal: 'Silver', impact: 'neutral' },
+                extractor: { icon: '🔩', metal: 'Rust', impact: 'bearish' }
+            };
+
             res.json({
                 success: true,
                 mint,
                 decimals,
                 count: holders.length,
-                holders: holders.map(h => ({
-                    address: h.holder,
-                    balance: h.balance,
-                    class: h.conviction_class || 'unknown',
-                    buys: h.buy_count || 0,
-                    sells: h.sell_count || 0,
-                    netFlow: h.net_flow || 0,
-                    orbUrl: `https://orbmarkets.io/address/${h.holder}`
-                }))
+                holders: holders.map(h => {
+                    const role = ROLE_METALS[h.conviction_class] || ROLE_METALS.holder;
+                    return {
+                        address: h.holder,
+                        balance: h.balance,
+                        class: h.conviction_class || 'unknown',
+                        role: {
+                            icon: role.icon,
+                            metal: role.metal,
+                            impact: role.impact
+                        },
+                        buys: h.buy_count || 0,
+                        sells: h.sell_count || 0,
+                        netFlow: h.net_flow || 0,
+                        orbUrl: `https://orbmarkets.io/address/${h.holder}`
+                    };
+                })
             });
         } catch(e) {
             res.status(500).json({ success: false, error: e.message });
