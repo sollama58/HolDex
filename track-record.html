@@ -49,10 +49,10 @@
         .progress-green { background: linear-gradient(90deg, #166534, #22c55e); color: #fff; }
         .progress-red { background: linear-gradient(90deg, #991b1b, #ef4444); color: #fff; }
 
-        .token-row { background: #451a03; border: 1px solid #7c2d12; border-radius: 8px; padding: 12px 16px; display: flex; align-items: center; gap: 12px; transition: all 0.2s; }
-        .token-row:hover { border-color: #ea580c; transform: translateX(4px); }
+        .token-row { background: #451a03; border: 1px solid #7c2d12; border-radius: 8px; padding: 12px 16px; display: flex; align-items: center; gap: 12px; transition: all 0.2s; flex-wrap: wrap; }
+        .token-row:hover { border-color: #ea580c; }
 
-        .conviction-bar { height: 8px; border-radius: 4px; overflow: hidden; display: flex; }
+        .conviction-bar { height: 8px; border-radius: 4px; overflow: hidden; display: flex; min-width: 60px; }
         .conv-acc { background: #22c55e; }
         .conv-hold { background: #3b82f6; }
         .conv-red { background: #f59e0b; }
@@ -60,6 +60,17 @@
 
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
         .loading { animation: pulse 1.5s infinite; }
+
+        /* Mobile responsiveness */
+        @media (max-width: 640px) {
+            .stat-value { font-size: 1.75rem; }
+            .stat-card { padding: 12px; }
+            .token-row { padding: 10px 12px; gap: 8px; }
+            .token-row-mobile { flex-direction: column; align-items: flex-start; }
+            .token-row-mobile .mobile-top { display: flex; align-items: center; gap: 8px; width: 100%; }
+            .token-row-mobile .mobile-bar { width: 100%; margin-top: 8px; }
+            .hide-mobile { display: none; }
+        }
     </style>
 </head>
 <body class="p-4 md:p-8">
@@ -316,12 +327,16 @@
                 const changeColor = e.change > 0 ? 'text-green-400' : e.change < 0 ? 'text-red-400' : 'text-fire-text/60';
 
                 return `
-                    <div class="token-row">
-                        <span class="font-mono font-bold w-24">${e.symbol}</span>
-                        <span class="text-2xl">${trend}</span>
-                        <span class="font-mono">${e.first} → ${e.current}</span>
-                        <span class="font-mono ${changeColor}">(${e.change > 0 ? '+' : ''}${e.change})</span>
-                        <span class="text-fire-text/40 text-sm ml-auto">${e.dataPoints} data points</span>
+                    <div class="token-row flex-wrap">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <span class="text-xl">${trend}</span>
+                            <span class="font-mono font-bold truncate">${e.symbol}</span>
+                        </div>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="font-mono text-sm">${e.first} → ${e.current}</span>
+                            <span class="font-mono text-sm ${changeColor}">(${e.change > 0 ? '+' : ''}${e.change})</span>
+                        </div>
+                        <span class="text-fire-text/40 text-xs ml-auto">${e.dataPoints} pts</span>
                     </div>
                 `;
             }).join('');
@@ -341,16 +356,20 @@
                 const barColor = t.extractorPct > 40 ? 'bg-red-500' : t.extractorPct > 25 ? 'bg-yellow-500' : 'bg-green-500';
 
                 return `
-                    <div class="token-row">
-                        <span class="font-mono font-bold w-24">${t.symbol}</span>
-                        <span class="text-xl">${warning}</span>
-                        <div class="flex-1 mx-4">
-                            <div class="h-3 bg-fire-bg rounded-full overflow-hidden">
-                                <div class="${barColor} h-full rounded-full" style="width: ${Math.min(t.extractorPct, 100)}%"></div>
-                            </div>
+                    <div class="token-row flex-wrap">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <span class="text-xl">${warning}</span>
+                            <span class="font-mono font-bold truncate">${t.symbol}</span>
+                            <span class="tier-badge ${TIER_CLASSES[t.tier]} text-xs">${TIER_ICONS[t.tier]} ${t.kScore}</span>
                         </div>
-                        <span class="font-mono w-16 text-right">${t.extractorPct}%</span>
-                        <span class="tier-badge ${TIER_CLASSES[t.tier]} ml-2">${TIER_ICONS[t.tier]} ${t.kScore}</span>
+                        <div class="flex items-center gap-2 flex-1 min-w-[120px]">
+                            <div class="flex-1">
+                                <div class="h-3 bg-fire-bg rounded-full overflow-hidden">
+                                    <div class="${barColor} h-full rounded-full" style="width: ${Math.min(t.extractorPct, 100)}%"></div>
+                                </div>
+                            </div>
+                            <span class="font-mono text-sm">${t.extractorPct}%</span>
+                        </div>
                     </div>
                 `;
             }).join('');
@@ -367,10 +386,13 @@
                 const extPct = total > 0 ? (t.breakdown.extractors / total * 100) : 0;
 
                 return `
-                    <div class="token-row">
-                        <span class="tier-badge ${TIER_CLASSES[t.tier]}">${TIER_ICONS[t.tier]} ${t.kScore}</span>
-                        <span class="font-mono font-bold w-28">${t.symbol}</span>
-                        <div class="flex-1 mx-4">
+                    <div class="token-row flex-wrap">
+                        <div class="flex items-center gap-2 min-w-0 shrink-0">
+                            <span class="tier-badge ${TIER_CLASSES[t.tier]} text-xs">${TIER_ICONS[t.tier]} ${t.kScore}</span>
+                            <span class="font-mono font-bold truncate max-w-[100px]">${t.symbol}</span>
+                            <span class="${t.secure ? 'text-green-400' : 'text-red-400'} text-sm">${t.secure ? '✓' : '⚠️'}</span>
+                        </div>
+                        <div class="flex-1 min-w-[100px]">
                             <div class="conviction-bar">
                                 <div class="conv-acc" style="width: ${accPct}%"></div>
                                 <div class="conv-hold" style="width: ${holdPct}%"></div>
@@ -378,11 +400,8 @@
                                 <div class="conv-ext" style="width: ${extPct}%"></div>
                             </div>
                         </div>
-                        <span class="text-fire-text/60 text-sm font-mono w-32">
+                        <span class="text-fire-text/60 text-xs font-mono shrink-0">
                             ${t.breakdown.accumulators}/${t.breakdown.holders}/${t.breakdown.reducers}/${t.breakdown.extractors}
-                        </span>
-                        <span class="${t.secure ? 'text-green-400' : 'text-red-400'} text-sm">
-                            ${t.secure ? '✓' : '⚠️'}
                         </span>
                     </div>
                 `;
