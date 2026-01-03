@@ -955,6 +955,7 @@ function init(deps) {
     });
 
     // --- TOP HOLDERS (for Orb AI integration) ---
+    // SECURITY: Only return holder data for verified tokens (deep analysis done)
     router.get('/token/:mint/top-holders', cacheControl(60, 120), apiKeyAuth(false), async (req, res) => {
         const { mint } = req.params;
 
@@ -964,9 +965,21 @@ function init(deps) {
         }
 
         try {
-            // Get token decimals for proper balance formatting
-            const token = await db.get('SELECT decimals FROM tokens WHERE mint = $1', [mint]);
-            const decimals = token?.decimals || 6;
+            // SECURITY: Only return data for verified tokens
+            const token = await db.get('SELECT decimals, hasCommunityUpdate FROM tokens WHERE mint = $1', [mint]);
+
+            if (!token || !(token.hasCommunityUpdate || token.hascommunityupdate)) {
+                return res.json({
+                    success: true,
+                    mint,
+                    verified: false,
+                    message: 'Top holder analysis requires community verification',
+                    count: 0,
+                    holders: []
+                });
+            }
+
+            const decimals = token.decimals || 6;
 
             const holders = await db.all(`
                 SELECT
