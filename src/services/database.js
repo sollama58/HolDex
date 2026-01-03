@@ -177,6 +177,9 @@ async function initDB() {
                 `ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS wallet TEXT`,
                 `ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_hash TEXT`,
                 `ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_prefix TEXT`,
+                // Wallet Credits: Add columns for cached burns
+                `ALTER TABLE wallet_credits ADD COLUMN IF NOT EXISTS total_burned DOUBLE PRECISION DEFAULT 0`,
+                `ALTER TABLE wallet_credits ADD COLUMN IF NOT EXISTS last_burn_check BIGINT DEFAULT 0`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS initial_supply TEXT`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS burned_amount DOUBLE PRECISION DEFAULT 0`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS burned_percent DOUBLE PRECISION DEFAULT 0`,

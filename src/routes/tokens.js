@@ -573,12 +573,13 @@ function init(deps) {
     });
 
     // Refresh burn cache for a wallet (after new burn)
+    // This triggers a Helius API call - use sparingly
     router.post('/credits/:wallet/refresh', async (req, res) => {
         const { wallet } = req.params;
 
         try {
             burnCredits.invalidateCache(wallet);
-            const burned = await burnCredits.getWalletBurns(wallet);
+            const burned = await burnCredits.refreshBurns(wallet, db);
 
             res.json({
                 success: true,
