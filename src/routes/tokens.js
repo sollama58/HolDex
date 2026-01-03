@@ -1517,14 +1517,16 @@ function init(deps) {
             let rows = [];
 
             // Handle search
+            const selectFields = `mint, name, symbol, image, priceUsd, marketCap, volume24h, change24h, change1h, change5m, holders, timestamp, hasCommunityUpdate, k_score,
+                                  conviction_score, conviction_accumulators, conviction_holders, conviction_reducers, conviction_extractors`;
             if (search.length > 0) {
                 const isAddress = isValidPubkey(search);
                 if (isAddress) {
-                    rows = await db.all(`SELECT mint, name, symbol, image, priceUsd, marketCap, volume24h, change24h, change1h, change5m, holders, timestamp, hasCommunityUpdate, k_score FROM tokens WHERE mint = $1`, [search]);
+                    rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE mint = $1`, [search]);
                 } else {
                     // SECURITY: Escape LIKE pattern to prevent injection (M9)
                     const safeSearch = `%${escapeLikePattern(search)}%`;
-                    rows = await db.all(`SELECT mint, name, symbol, image, priceUsd, marketCap, volume24h, change24h, change1h, change5m, holders, timestamp, hasCommunityUpdate, k_score FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) LIMIT $2`, [safeSearch, limit]);
+                    rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) LIMIT $2`, [safeSearch, limit]);
                 }
             } else {
                 const dir = direction === 'asc' ? 'ASC' : 'DESC';
@@ -1548,8 +1550,7 @@ function init(deps) {
 
                 const offset = (page - 1) * limit;
                 rows = await db.all(
-                    `SELECT mint, name, symbol, image, priceUsd, marketCap, volume24h, change24h, change1h, change5m, holders, timestamp, hasCommunityUpdate, k_score
-                     FROM tokens ${whereClause}
+                    `SELECT ${selectFields} FROM tokens ${whereClause}
                      ORDER BY COALESCE(${sortCol}, 0) ${dir}
                      LIMIT $1 OFFSET $2`,
                     [limit, offset]
@@ -1557,28 +1558,51 @@ function init(deps) {
             }
 
             const tokens = rows.map(r => {
-                const isVerified = r.hascommunityupdate || r.hasCommunityUpdate;
+                const isVerified = r.hascommunityupdate || r.hasCommunityUpdate || false;
                 const isNative = isNativeToken(r.mint);
                 const kScore = (isVerified || isNative) ? (r.k_score || 0) : null;
                 const rank = kScore !== null ? getKRank(kScore, r.mint) : null;
+                const credit = kScore !== null ? getCreditRating(kScore, r.mint) : null;
 
                 return {
                     mint: r.mint,
                     name: r.name,
                     symbol: r.symbol,
+                    // Aliases for frontend compatibility
+                    ticker: r.symbol,
                     image: r.image,
-                    price: r.priceusd || r.priceUsd,
-                    mcap: r.marketcap || r.marketCap,
-                    volume24h: r.volume24h,
-                    change24h: r.change24h,
-                    change1h: r.change1h,
-                    change5m: r.change5m,
-                    holders: r.holders,
+                    // Price fields (both names for compatibility)
+                    price: r.priceusd || r.priceUsd || 0,
+                    priceUsd: r.priceusd || r.priceUsd || 0,
+                    // MCap fields (both names)
+                    mcap: r.marketcap || r.marketCap || 0,
+                    marketCap: r.marketcap || r.marketCap || 0,
+                    volume24h: r.volume24h || 0,
+                    change24h: r.change24h || 0,
+                    change1h: r.change1h || 0,
+                    change5m: r.change5m || 0,
+                    holders: r.holders || 0,
                     age: r.timestamp,
+                    timestamp: r.timestamp,
+                    // Verification (both names)
                     verified: isVerified,
+                    hasCommunityUpdate: isVerified,
+                    // K-Score (both names)
                     k_score: kScore,
+                    kScore: kScore,
+                    // Metal rank
                     metal_rank: rank?.tier || null,
-                    metal_icon: rank?.icon || null
+                    metal_icon: rank?.icon || null,
+                    // Credit rating
+                    credit_rating: credit?.grade || null,
+                    creditRating: credit?.grade || null,
+                    // Conviction data (only for verified)
+                    conviction_score: isVerified ? (r.conviction_score || 0) : null,
+                    convictionScore: isVerified ? (r.conviction_score || 0) : null,
+                    conviction_accumulators: isVerified ? (r.conviction_accumulators || 0) : null,
+                    conviction_holders: isVerified ? (r.conviction_holders || 0) : null,
+                    conviction_reducers: isVerified ? (r.conviction_reducers || 0) : null,
+                    conviction_extractors: isVerified ? (r.conviction_extractors || 0) : null
                 };
             });
 
