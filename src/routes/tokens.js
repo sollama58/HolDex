@@ -1620,6 +1620,139 @@ function init(deps) {
         }
     });
 
+    // ============================================
+    // PUBLIC TOKEN DETAIL (No Auth Required)
+    // For frontend token detail view
+    // ============================================
+    router.get('/token/:mint/public', cacheControl(5, 15), publicRateLimit, async (req, res) => {
+        const { mint } = req.params;
+
+        // SECURITY: Validate mint address
+        if (!isValidPubkey(mint)) {
+            return res.status(400).json({ success: false, error: 'Invalid mint address' });
+        }
+
+        const cacheKey = `public:token:${mint}`;
+        try {
+            const redis = getClient();
+            if (redis) {
+                try {
+                    const cached = await redis.get(cacheKey);
+                    if (cached) {
+                        res.setHeader('X-Cache', 'HIT');
+                        return res.json(JSON.parse(cached));
+                    }
+                } catch(_) {}
+            }
+
+            // Parallel queries for performance
+            let [token, pairs, holderHistory] = await Promise.all([
+                db.get('SELECT * FROM tokens WHERE mint = $1', [mint]),
+                db.all('SELECT * FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC LIMIT 10', [mint]),
+                db.all('SELECT count, timestamp FROM holders_history WHERE mint = $1 ORDER BY timestamp ASC LIMIT 100', [mint])
+            ]);
+
+            if (!token) {
+                return res.status(404).json({ success: false, error: 'Token not found' });
+            }
+
+            // Build token data
+            const isNative = isNativeToken(mint);
+            const isVerified = token.hasCommunityUpdate || token.hascommunityupdate || false;
+
+            const tokenData = {
+                mint: token.mint,
+                name: token.name,
+                symbol: token.symbol,
+                ticker: token.symbol,
+                image: token.image,
+                decimals: token.decimals || 9,
+                // Market data with provenance
+                priceUsd: parseFloat(token.priceusd) || 0,
+                marketCap: parseFloat(token.marketcap) || 0,
+                mcap: parseFloat(token.marketcap) || 0,
+                liquidity: parseFloat(token.liquidity) || 0,
+                volume24h: token.volume24h || 0,
+                change24h: token.change24h || 0,
+                change1h: token.change1h || 0,
+                holders: token.holders || 0,
+                // Data provenance (ONCHAIN IS TRUTH)
+                priceSource: token.price_source || 'unknown',
+                priceTimestamp: token.price_timestamp || 0,
+                liquiditySource: token.liquidity_source || 'unknown',
+                holdersSource: token.holders_source || 'unknown',
+                ageDays: parseFloat(token.age_days) || 0,
+                // K-Score (verified only)
+                kScore: isVerified ? (token.k_score || 0) : null,
+                kRank: isNative ? getKRank(null, mint) : (isVerified ? getKRank(token.k_score, mint) : null),
+                creditRating: isNative
+                    ? getCreditRating(null, mint)
+                    : (isVerified ? getCreditRating(token.k_score, mint) : null),
+                // Conviction breakdown
+                conviction: isVerified ? {
+                    score: token.conviction_score || 0,
+                    accumulators: token.conviction_accumulators || 0,
+                    holders: token.conviction_holders || 0,
+                    reducers: token.conviction_reducers || 0,
+                    extractors: token.conviction_extractors || 0,
+                    analyzed: token.conviction_analyzed || 0
+                } : null,
+                // Security status
+                security: {
+                    mintAuthorityRevoked: token.mint_authority_revoked || false,
+                    freezeAuthorityRevoked: token.freeze_authority_revoked || false,
+                    isMutableSupply: token.is_mutable_supply || false
+                },
+                // LP status
+                lp: {
+                    burnPct: token.lp_burn_pct || 0,
+                    lockedPct: token.lp_locked_pct || 0,
+                    status: token.lp_status || 'unknown'
+                },
+                // Origin
+                isPumpFun: token.is_pump_fun || false,
+                bondingCurveComplete: token.bonding_curve_complete || false,
+                launchDate: token.timestamp ? new Date(parseInt(token.timestamp)).toISOString() : null,
+                hasCommunityUpdate: isVerified,
+                verified: isVerified
+            };
+
+            // Parse metadata for banner, social links
+            if (token.metadata) {
+                try {
+                    const meta = typeof token.metadata === 'string' ? JSON.parse(token.metadata) : token.metadata;
+                    const comm = meta.community || {};
+                    tokenData.banner = comm.banner || meta.banner;
+                    tokenData.description = comm.description || meta.description;
+                    tokenData.twitter = comm.twitter || meta.twitter;
+                    tokenData.telegram = comm.telegram || meta.telegram;
+                    tokenData.website = comm.website || meta.website;
+                } catch (_e) { /* ignore */ }
+            }
+
+            // Format pairs
+            const formattedPairs = pairs.map(p => ({
+                dexId: p.dex || 'unknown',
+                priceUsd: p.price_usd || 0,
+                liquidity: { usd: p.liquidity_usd || 0 },
+                address: p.address
+            }));
+
+            const response = { success: true, token: { ...tokenData, pairs: formattedPairs, holderHistory } };
+
+            // Cache for 10 seconds
+            if (redis) {
+                try { await redis.setEx(cacheKey, 10, JSON.stringify(response)); } catch(_) {}
+            }
+
+            res.setHeader('X-Cache', 'MISS');
+            res.json(response);
+        } catch(e) {
+            logger.error('[PublicToken]', e.message);
+            res.status(500).json({ success: false, error: 'Server error' });
+        }
+    });
+
     router.get('/tokens', cacheControl(2, 5), unifiedRateLimiter, async (req, res) => {
         let { search = '', sort = 'kscore', page = 1, filter, direction = 'desc', limit = 20 } = req.query;
         try {

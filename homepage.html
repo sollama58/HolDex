@@ -1766,9 +1766,9 @@
         if (loadingDiv) loadingDiv.innerText = 'Fetching Chain Data...';
         
         try {
-            const res = await fetch(`${API_URL}/api/token/${mint}`);
+            const res = await fetch(`${API_URL}/api/token/${mint}/public`);
             const data = await res.json();
-            
+
             if(data.success) {
                 const t = data.token;
                 
@@ -2316,7 +2316,7 @@
         if(!mint || mint.length < 32) return;
         document.getElementById('mint-check-spinner').classList.remove('hidden');
         try {
-            const res = await fetch(`${API_URL}/api/token/${mint}`);
+            const res = await fetch(`${API_URL}/api/token/${mint}/public`);
             const data = await res.json();
             document.getElementById('mint-check-spinner').classList.add('hidden');
             if(data.success && data.token) {
