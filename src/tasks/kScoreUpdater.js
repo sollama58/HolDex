@@ -112,74 +112,22 @@ function recordFailure() {
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // ============================================
-// DEXSCREENER PRICE SERVICE (FREE, RELIABLE)
+// PRICE SERVICE (Unified - from PriceWorker)
 // ============================================
 // K-Score = Helius (our value-add)
-// Price/MCap = DexScreener (free, real-time)
-
-const dexScreenerCache = new Map();
-const DEXSCREENER_CACHE_TTL = 60000; // 1 minute cache
+// Price/MCap = PriceWorker handles DexScreener batch (free, efficient)
+const { getPrice: getPriceFromWorker, getCachedPrice } = require('./priceWorker');
 
 /**
- * Get price/mcap/liquidity from DexScreener (FREE API)
- * No Helius credits wasted on price data!
+ * Get price from unified PriceWorker (uses cache, no duplicate API calls)
  */
 async function getDexScreenerData(mint) {
-    // Check cache first
-    const cached = dexScreenerCache.get(mint);
-    if (cached && Date.now() - cached.timestamp < DEXSCREENER_CACHE_TTL) {
-        return cached.data;
-    }
+    // Try cache first (instant, no API call)
+    const cached = getCachedPrice(mint, 120000); // 2 min cache tolerance
+    if (cached) return cached;
 
-    try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5000);
-
-        const response = await fetch(
-            `https://api.dexscreener.com/latest/dex/tokens/${mint}`,
-            { signal: controller.signal }
-        );
-        clearTimeout(timeout);
-
-        if (!response.ok) {
-            return null;
-        }
-
-        const json = await response.json();
-        const pairs = json.pairs || [];
-
-        if (pairs.length === 0) {
-            return null;
-        }
-
-        // Get best pair (highest liquidity)
-        const bestPair = pairs.reduce((best, p) =>
-            (p.liquidity?.usd || 0) > (best.liquidity?.usd || 0) ? p : best
-        , pairs[0]);
-
-        // Calculate total liquidity across all pairs
-        const totalLiquidity = pairs.reduce((sum, p) => sum + (p.liquidity?.usd || 0), 0);
-
-        const data = {
-            priceUsd: parseFloat(bestPair.priceUsd) || 0,
-            mcap: bestPair.marketCap || bestPair.fdv || 0,
-            liquidity: totalLiquidity,
-            volume24h: parseFloat(bestPair.volume?.h24) || 0,
-            change24h: parseFloat(bestPair.priceChange?.h24) || 0,
-            change1h: parseFloat(bestPair.priceChange?.h1) || 0,
-            source: 'dexscreener',
-            timestamp: Date.now(),
-            pairAddress: bestPair.pairAddress
-        };
-
-        // Cache it
-        dexScreenerCache.set(mint, { data, timestamp: Date.now() });
-
-        return data;
-    } catch (e) {
-        logger.debug(`[DexScreener] Failed for ${mint}: ${e.message}`);
-        return null;
-    }
+    // Fallback to single fetch if not in cache
+    return await getPriceFromWorker(mint);
 }
 
 /**

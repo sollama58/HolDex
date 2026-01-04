@@ -12,6 +12,7 @@ const { connectRedis } = require('./services/redis');
 const { startSnapshotter } = require('./indexer/tasks/snapshotter');
 const kScoreUpdater = require('./tasks/kScoreUpdater');
 const integrityWatchdog = require('./tasks/integrityWatchdog');
+const { startPriceWorker } = require('./tasks/priceWorker');
 // REMOVED: const { startNewTokenListener } = require('./services/new_token_listener'); 
 const { initSocket } = require('./services/socket'); 
 const tokensRoutes = require('./routes/tokens');
@@ -284,7 +285,14 @@ async function startServer() {
 
         // Start Background Tasks
         startSnapshotter();
+
+        // PriceWorker: Unified price service (DexScreener batch, 0 Helius credits)
+        // Must start BEFORE kScoreUpdater so prices are cached
+        startPriceWorker({ db: getDB(), broadcast: null });
+
+        // KScoreUpdater: Conviction analysis (Helius RPC, our value-add)
         kScoreUpdater.start({ db: getDB() });
+
         integrityWatchdog.start({ db: getDB() });
 
         // Initialize Routes
