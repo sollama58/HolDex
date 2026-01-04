@@ -24,7 +24,7 @@ INTEGRATION POINTS:
 - Burn service: call notifyBurn() after successful burns (requires HMAC)
 
 ENVIRONMENT VARIABLES TO ADD:
-- HOLDEX_API_URL=https://holdex.alonisthe.dev
+- HOLDEX_API_URL=https://holdex-api.onrender.com
 - HOLDEX_WEBHOOK_SECRET=<shared secret for HMAC signing>
 ```
 
@@ -64,7 +64,7 @@ ENVIRONMENT VARIABLES TO ADD:
 │  GET  /oracle/leaderboard          → Top E-Score participants   │
 │  GET  /oracle/stats                → Ecosystem statistics       │
 │                                                                  │
-│  Base URL: https://holdex.alonisthe.dev                         │
+│  Base URL: https://holdex-api.onrender.com (beta)               │
 │  Rate Limit: 100 req/min (read), 20 req/min (write)            │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -249,7 +249,7 @@ Copy this file to GASdf. Handles all communication with HolDex Oracle API.
 
 const crypto = require('crypto');
 
-const DEFAULT_BASE_URL = 'https://holdex.alonisthe.dev';
+const DEFAULT_BASE_URL = 'https://holdex-api.onrender.com';
 const DEFAULT_TIMEOUT = 10000;
 
 class HoldexClient {
@@ -581,7 +581,7 @@ Add to GASdf `.env`:
 
 ```bash
 # HolDex Oracle API
-HOLDEX_API_URL=https://holdex.alonisthe.dev
+HOLDEX_API_URL=https://holdex-api.onrender.com
 HOLDEX_TIMEOUT=10000
 
 # SECURITY: HMAC Secret for Burn Webhooks

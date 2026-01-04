@@ -20,7 +20,8 @@
 
 const crypto = require('crypto');
 
-const DEFAULT_BASE_URL = 'https://holdex.alonisthe.dev';
+// Beta: holdex-api.onrender.com | Prod: override via HOLDEX_API_URL env var
+const DEFAULT_BASE_URL = 'https://holdex-api.onrender.com';
 const DEFAULT_TIMEOUT = 10000;
 
 class HoldexClient {
