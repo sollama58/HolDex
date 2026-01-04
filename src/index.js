@@ -51,6 +51,7 @@ app.use(helmet({
                 "https://cdn.socket.io",
                 "https://cdn.tailwindcss.com",
             ],
+            scriptSrcAttr: ["'unsafe-inline'"], // Allow onclick="" handlers
             styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
             imgSrc: ["'self'", "data:", "https:", "blob:"],
             connectSrc: [
