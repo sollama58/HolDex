@@ -53,11 +53,11 @@ async function createKey() {
         };
         const requestsLimit = limits[tier] || 1000;
 
-        // Insert into database
+        // Insert into database (supports both old and new schema)
         await client.query(`
-            INSERT INTO api_keys (key_hash, key_prefix, owner, tier, requests_limit, is_active, created_at)
-            VALUES ($1, $2, $3, $4, $5, TRUE, $6)
-        `, [keyHash, keyPrefix, owner, tier, requestsLimit, Date.now()]);
+            INSERT INTO api_keys (key, key_hash, key_prefix, owner, tier, requests_limit, is_active, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7)
+        `, [key, keyHash, keyPrefix, owner, tier, requestsLimit, Date.now()]);
 
         console.log('\n✅ API Key created successfully!\n');
         console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');

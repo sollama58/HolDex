@@ -228,6 +228,10 @@ async function initDB() {
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_origin TEXT DEFAULT NULL`,     // is_pump|bonding|timestamp|metadata
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_full TEXT DEFAULT NULL`,       // HMAC(all sigs + chaos)
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS chaos_nonce TEXT DEFAULT NULL`,    // Random entropy - 42nd column
+                // K-Score v9: Activity freshness tracking
+                `ALTER TABLE holder_snapshots ADD COLUMN IF NOT EXISTS last_tx_timestamp BIGINT DEFAULT 0`,
+                // Age column for tokens (avoid recalculating from timestamp)
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS age_days DOUBLE PRECISION DEFAULT 0`,
             ];
 
             // PERFORMANCE: Add indexes for frequently queried columns

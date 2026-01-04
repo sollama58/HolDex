@@ -216,6 +216,7 @@ async function saveHolderSnapshots(db, mint, holders) {
         .map(h => ({
             address: h.address,
             lastSig: h.lastSignature || null,
+            lastTxTs: h.lastTxTimestamp || now,  // K-Score v9: Activity timestamp
             buyCount: Math.floor(Number(h.buyCount)) || 0,
             sellCount: Math.floor(Number(h.sellCount)) || 0,
             netFlow: Math.floor(Number(h.netFlow)) || 0,
@@ -231,6 +232,7 @@ async function saveHolderSnapshots(db, mint, holders) {
         // Build batch UPSERT with UNNEST for PostgreSQL
         const addresses = validHolders.map(h => h.address);
         const lastSigs = validHolders.map(h => h.lastSig);
+        const lastTxTimestamps = validHolders.map(h => h.lastTxTs);  // K-Score v9
         const buyCounts = validHolders.map(h => h.buyCount);
         const sellCounts = validHolders.map(h => h.sellCount);
         const netFlows = validHolders.map(h => h.netFlow);
@@ -240,17 +242,18 @@ async function saveHolderSnapshots(db, mint, holders) {
         const timestamps = validHolders.map(() => now);
 
         await db.run(`
-            INSERT INTO holder_snapshots (mint, holder, last_signature, buy_count, sell_count, net_flow, conviction_class, balance, updated_at)
-            SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::int[], $5::int[], $6::bigint[], $7::text[], $8::bigint[], $9::bigint[])
+            INSERT INTO holder_snapshots (mint, holder, last_signature, last_tx_timestamp, buy_count, sell_count, net_flow, conviction_class, balance, updated_at)
+            SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::bigint[], $5::int[], $6::int[], $7::bigint[], $8::text[], $9::bigint[], $10::bigint[])
             ON CONFLICT (mint, holder) DO UPDATE SET
                 last_signature = EXCLUDED.last_signature,
+                last_tx_timestamp = EXCLUDED.last_tx_timestamp,
                 buy_count = EXCLUDED.buy_count,
                 sell_count = EXCLUDED.sell_count,
                 net_flow = EXCLUDED.net_flow,
                 conviction_class = EXCLUDED.conviction_class,
                 balance = EXCLUDED.balance,
                 updated_at = EXCLUDED.updated_at
-        `, [mints, addresses, lastSigs, buyCounts, sellCounts, netFlows, convClasses, balances, timestamps]);
+        `, [mints, addresses, lastSigs, lastTxTimestamps, buyCounts, sellCounts, netFlows, convClasses, balances, timestamps]);
 
         return { saved: validHolders.length, failed: holders.length - validHolders.length };
     } catch (e) {
@@ -262,14 +265,14 @@ async function saveHolderSnapshots(db, mint, holders) {
         for (const h of validHolders) {
             try {
                 await db.run(`
-                    INSERT INTO holder_snapshots (mint, holder, last_signature, buy_count, sell_count, net_flow, conviction_class, balance, updated_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    INSERT INTO holder_snapshots (mint, holder, last_signature, last_tx_timestamp, buy_count, sell_count, net_flow, conviction_class, balance, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                     ON CONFLICT (mint, holder) DO UPDATE SET
-                        last_signature = EXCLUDED.last_signature, buy_count = EXCLUDED.buy_count,
-                        sell_count = EXCLUDED.sell_count, net_flow = EXCLUDED.net_flow,
-                        conviction_class = EXCLUDED.conviction_class, balance = EXCLUDED.balance,
-                        updated_at = EXCLUDED.updated_at
-                `, [mint, h.address, h.lastSig, h.buyCount, h.sellCount, h.netFlow, h.convClass, h.balance, now]);
+                        last_signature = EXCLUDED.last_signature, last_tx_timestamp = EXCLUDED.last_tx_timestamp,
+                        buy_count = EXCLUDED.buy_count, sell_count = EXCLUDED.sell_count,
+                        net_flow = EXCLUDED.net_flow, conviction_class = EXCLUDED.conviction_class,
+                        balance = EXCLUDED.balance, updated_at = EXCLUDED.updated_at
+                `, [mint, h.address, h.lastSig, h.lastTxTs, h.buyCount, h.sellCount, h.netFlow, h.convClass, h.balance, now]);
                 saved++;
             } catch (_e) {
                 failed++;
@@ -844,6 +847,7 @@ async function getHolderRetention(wallet, mint) {
     let sellCount = 0;
     let netFlow = 0;
     let lastSignature = null;
+    let lastTxTimestamp = 0;  // K-Score v9: Track last activity timestamp
 
     // OPTIMIZATION: Get first transaction efficiently using sort-order=asc
     // This finds the holder's earliest activity in one call instead of paginating backwards
@@ -871,9 +875,11 @@ async function getHolderRetention(wallet, mint) {
         const txs = await getEnhancedTransactions(wallet, { limit: 100, before });
         if (!txs || txs.length === 0) break;
 
-        // Capture the most recent signature (first tx on first page)
+        // Capture the most recent signature and timestamp (first tx on first page)
         if (page === 0 && txs.length > 0) {
             lastSignature = txs[0].signature;
+            // K-Score v9: Capture timestamp for Activity freshness factor
+            lastTxTimestamp = txs[0].timestamp ? txs[0].timestamp * 1000 : Date.now();
         }
 
         for (const tx of txs) {
@@ -909,7 +915,8 @@ async function getHolderRetention(wallet, mint) {
         buyCount,
         sellCount,
         netFlow,
-        lastSignature
+        lastSignature,
+        lastTxTimestamp  // K-Score v9: For Activity freshness
     };
 }
 
@@ -1153,6 +1160,7 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
                         sellCount: retentionData.sellCount,
                         netFlow: retentionData.netFlow,
                         lastSignature: retentionData.lastSignature,
+                        lastTxTimestamp: retentionData.lastTxTimestamp,  // K-Score v9
                         convictionClass: classification
                     });
 
@@ -2058,6 +2066,33 @@ function normalizeConviction(score) {
 }
 
 /**
+ * K-Score v9: Activity freshness factor
+ * F(t) = 1/e + (1 - 1/e) × e^(-t/τ)
+ *
+ * Mathematically harmonious with Age normalization:
+ * - Age:      A(t) = 1 - e^(-t/τ)     → 0 to 1 (older = better)
+ * - Activity: F(t) = 1/e + ...        → 1 to 1/e (fresher = better)
+ *
+ * Properties (τ = 21 days):
+ * - t=0   → 1.000 (active now)
+ * - t=7   → 0.890 (1 week ago)
+ * - t=21  → 0.600 (τ = characteristic time)
+ * - t=42  → 0.454 (2τ)
+ * - t=90  → 0.381 (3 months)
+ * - t→∞   → 0.368 (1/e floor)
+ *
+ * @param {number} activityDays - Days since last on-chain activity
+ * @param {number} tau - Characteristic time (default: 21 days, same as Age)
+ * @returns {number} Freshness factor [1/e, 1]
+ */
+const E_INV = 1 / Math.E;  // ≈ 0.3679
+
+function normalizeActivityFreshness(activityDays, tau = 21) {
+    if (activityDays <= 0) return 1.0;  // Active now = 100%
+    return E_INV + (1 - E_INV) * Math.exp(-activityDays / tau);
+}
+
+/**
  * Safe geometric mean of two values
  * Returns √(a × b), with epsilon floor to avoid zero collapse
  */
@@ -2122,7 +2157,8 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         ageDays: 0,
         top10Pct: 50,  // default: assume 50% if unknown
         conviction: 0,
-        accExtRatio: 0
+        accExtRatio: 0,
+        activityDays: 0  // K-Score v9: avg days since holder activity
     };
 
     // Normalized metrics [0-1]
@@ -2130,8 +2166,9 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         H: 0,  // holders
         A: 0,  // age
         T: 0,  // top10 (inverted)
-        C: 0,  // conviction
-        R: 0   // acc/ext ratio
+        C: 0,  // conviction (base)
+        R: 0,  // acc/ext ratio
+        F: 1   // K-Score v9: activity freshness [1/e, 1]
     };
 
     // Pillars
@@ -2318,17 +2355,33 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
             const ext = convictionData.extractors || 0;
             raw.accExtRatio = ext > 0 ? acc / ext : (acc > 0 ? 10 : 0);
 
-            // Top10 concentration
+            // Top10 concentration + Activity freshness (K-Score v9)
             if (convictionData.isWebhookMode && db) {
                 // Webhook mode: calculate from holder_snapshots (0 RPC)
                 const top10Snapshots = await db.all(
-                    'SELECT balance FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 10',
+                    'SELECT balance, last_tx_timestamp, updated_at FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 10',
                     [mint]
                 );
                 if (top10Snapshots.length >= 10 && burnData?.totalSupply > 0) {
                     const top10Balance = top10Snapshots.reduce((s, h) => s + BigInt(h.balance || 0), 0n);
                     const totalSupplyRaw = BigInt(Math.floor(burnData.totalSupply * Math.pow(10, burnData.decimals || 9)));
                     raw.top10Pct = totalSupplyRaw > 0n ? Number((top10Balance * 100n) / totalSupplyRaw) : 50;
+                }
+
+                // K-Score v9: Calculate average activity age
+                const now = Date.now();
+                let totalActivityAge = 0;
+                let validSnapshots = 0;
+                for (const snap of top10Snapshots) {
+                    // Prefer last_tx_timestamp, fallback to updated_at
+                    const lastActivity = parseInt(snap.last_tx_timestamp || snap.updated_at || now);
+                    if (lastActivity > 0) {
+                        totalActivityAge += (now - lastActivity) / 86400000; // Convert to days
+                        validSnapshots++;
+                    }
+                }
+                if (validSnapshots > 0) {
+                    raw.activityDays = totalActivityAge / validSnapshots;
                 }
             } else {
                 // Full analysis mode: use filtered holders from RPC
@@ -2348,14 +2401,22 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         normalized.H = normalizeHolders(raw.holders);
         normalized.A = normalizeAge(raw.ageDays);
         normalized.T = normalizeTop10(raw.top10Pct);
-        normalized.C = normalizeConviction(raw.conviction);
+        normalized.F = normalizeActivityFreshness(raw.activityDays);  // K-Score v9
         normalized.R = normalizeAccExtRatio(raw.accExtRatio);
+
+        // K-Score v9: Apply activity freshness to conviction
+        // C_adjusted = C_base × F(t)
+        // Fresh activity (F=1.0) → full conviction
+        // Dormant (F=0.368) → ~37% conviction (floor = 1/e)
+        const C_base = normalizeConviction(raw.conviction);
+        normalized.C = C_base * normalized.F;
 
         // ============================================
         // CALCULATE 3 PILLARS
         // ============================================
 
         // Diamond Hands = √(Conviction × AccExtRatio)
+        // Note: Conviction now includes activity freshness factor
         pillars.diamondHands = geometricMean2(normalized.C, normalized.R);
 
         // Organic Growth = √(Holders × Top10Distribution)
@@ -2432,10 +2493,10 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
 
         // Log breakdown
         const wasCapped = score < uncappedScore;
-        logger.info(`[K-Score v8] ${mint.slice(0,8)}: ${score}${wasCapped ? ` (capped from ${uncappedScore})` : ''}`);
-        logger.info(`  Diamond Hands: ${(pillars.diamondHands * 100).toFixed(0)}% (C:${(normalized.C * 100).toFixed(0)}% R:${(normalized.R * 100).toFixed(0)}%)`);
+        logger.info(`[K-Score v9] ${mint.slice(0,8)}: ${score}${wasCapped ? ` (capped from ${uncappedScore})` : ''}`);
+        logger.info(`  Diamond Hands: ${(pillars.diamondHands * 100).toFixed(0)}% (C:${(normalized.C * 100).toFixed(0)}% R:${(normalized.R * 100).toFixed(0)}% F:${(normalized.F * 100).toFixed(0)}%)`);
         logger.info(`  Organic Growth: ${(pillars.organicGrowth * 100).toFixed(0)}% (H:${(normalized.H * 100).toFixed(0)}% T:${(normalized.T * 100).toFixed(0)}%)`);
-        logger.info(`  Longevity: ${(pillars.longevity * 100).toFixed(0)}% (${raw.ageDays.toFixed(1)}d)`);
+        logger.info(`  Longevity: ${(pillars.longevity * 100).toFixed(0)}% (${raw.ageDays.toFixed(1)}d) | Activity: ${raw.activityDays.toFixed(1)}d ago`);
         if (securityData) {
             const secStatus = securityData.isSecure ? '✓' : `cap=${authorityCap}`;
             logger.info(`  Security: ${secStatus}`);

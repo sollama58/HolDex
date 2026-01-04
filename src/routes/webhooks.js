@@ -179,46 +179,50 @@ function init(deps) {
                     if (!token) continue; // Not a tracked token
 
                     const now = Date.now();
+                    // K-Score v9: Use actual transaction timestamp for activity freshness
+                    const txTimestamp = event.timestamp ? event.timestamp * 1000 : now;
                     const amount = parseInt(tokenAmount) || 0;
 
                     // Update buyer (if not a pool and valid address)
                     // OPTIMIZED: Single atomic UPSERT with inline conviction calculation
                     if (toUserAccount && !isPoolAddress(toUserAccount) && isValidSolanaAddress(toUserAccount)) {
                         await db.run(`
-                            INSERT INTO holder_snapshots (mint, holder, buy_count, sell_count, net_flow, balance, conviction_class, updated_at)
-                            VALUES ($1, $2, 1, 0, $3, $3, 'accumulator', $4)
+                            INSERT INTO holder_snapshots (mint, holder, buy_count, sell_count, net_flow, balance, conviction_class, updated_at, last_tx_timestamp)
+                            VALUES ($1, $2, 1, 0, $3, $3, 'accumulator', $4, $5)
                             ON CONFLICT (mint, holder) DO UPDATE SET
                                 buy_count = holder_snapshots.buy_count + 1,
                                 net_flow = holder_snapshots.net_flow + $3,
                                 balance = holder_snapshots.balance + $3,
                                 updated_at = $4,
+                                last_tx_timestamp = $5,
                                 conviction_class = CASE
                                     WHEN (holder_snapshots.buy_count + 1)::float / NULLIF(holder_snapshots.buy_count + 1 + holder_snapshots.sell_count, 0) >= 0.8 THEN 'accumulator'
                                     WHEN (holder_snapshots.buy_count + 1)::float / NULLIF(holder_snapshots.buy_count + 1 + holder_snapshots.sell_count, 0) >= 0.5 THEN 'holder'
                                     WHEN (holder_snapshots.buy_count + 1)::float / NULLIF(holder_snapshots.buy_count + 1 + holder_snapshots.sell_count, 0) >= 0.2 THEN 'reducer'
                                     ELSE 'extractor'
                                 END
-                        `, [mint, toUserAccount, amount, now]);
+                        `, [mint, toUserAccount, amount, now, txTimestamp]);
                     }
 
                     // Update seller (if not a pool and valid address)
                     // OPTIMIZED: Single atomic UPSERT with inline conviction calculation
                     if (fromUserAccount && !isPoolAddress(fromUserAccount) && isValidSolanaAddress(fromUserAccount)) {
                         await db.run(`
-                            INSERT INTO holder_snapshots (mint, holder, buy_count, sell_count, net_flow, balance, conviction_class, updated_at)
-                            VALUES ($1, $2, 0, 1, $3, 0, 'extractor', $4)
+                            INSERT INTO holder_snapshots (mint, holder, buy_count, sell_count, net_flow, balance, conviction_class, updated_at, last_tx_timestamp)
+                            VALUES ($1, $2, 0, 1, $3, 0, 'extractor', $4, $5)
                             ON CONFLICT (mint, holder) DO UPDATE SET
                                 sell_count = holder_snapshots.sell_count + 1,
-                                net_flow = holder_snapshots.net_flow - $5,
-                                balance = GREATEST(0, holder_snapshots.balance - $5),
+                                net_flow = holder_snapshots.net_flow - $6,
+                                balance = GREATEST(0, holder_snapshots.balance - $6),
                                 updated_at = $4,
+                                last_tx_timestamp = $5,
                                 conviction_class = CASE
                                     WHEN holder_snapshots.buy_count::float / NULLIF(holder_snapshots.buy_count + holder_snapshots.sell_count + 1, 0) >= 0.8 THEN 'accumulator'
                                     WHEN holder_snapshots.buy_count::float / NULLIF(holder_snapshots.buy_count + holder_snapshots.sell_count + 1, 0) >= 0.5 THEN 'holder'
                                     WHEN holder_snapshots.buy_count::float / NULLIF(holder_snapshots.buy_count + holder_snapshots.sell_count + 1, 0) >= 0.2 THEN 'reducer'
                                     ELSE 'extractor'
                                 END
-                        `, [mint, fromUserAccount, -amount, now, amount]);
+                        `, [mint, fromUserAccount, -amount, now, txTimestamp, amount]);
                     }
 
                     // ============================================
