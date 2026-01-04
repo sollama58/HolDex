@@ -31,7 +31,7 @@ const priceService = require('../services/priceService');
 const bs58 = require('bs58');
 const { getClient: getRedisClient } = require('../services/redis');
 const verification = require('../services/verificationService');
-const { signAllCategories, signHolders } = require('../utils/dataSignature');
+const { signAllCategories, signHolders, signSupply, signSecurity, signLP } = require('../utils/dataSignature');
 const { saveSnapshot } = require('./integrityWatchdog');
 const alerting = require('../services/alerting');
 
@@ -1583,13 +1583,15 @@ async function refreshSupply(db, mint, decimals = 9) {
 
         // 6. Update tokens table with fresh supply
         if (Math.abs(result.changePercent) > 0.01 || !token?.supply_last_check) {
-            await db.run(`
+            // Update supply and immediately re-sign sig_supply ("Don't Trust, Verify")
+            const updatedToken = await db.get(`
                 UPDATE tokens
                 SET supply = $1,
                     supply_last_check = $2,
                     supply_change_24h = $3,
                     is_mutable_supply = $4
                 WHERE mint = $5
+                RETURNING mint, supply, initial_supply, burned_amount, burned_percent
             `, [
                 currentRaw.toString(),
                 Date.now(),
@@ -1597,6 +1599,12 @@ async function refreshSupply(db, mint, decimals = 9) {
                 result.isMutable || Math.abs(result.change24h) > MUTABLE_THRESHOLD,
                 mint
             ]);
+
+            // Re-sign sig_supply to maintain integrity
+            if (updatedToken) {
+                const sig_supply = signSupply(updatedToken);
+                await db.run(`UPDATE tokens SET sig_supply = $1 WHERE mint = $2`, [sig_supply, mint]);
+            }
         }
 
         // 7. Save to supply_history (max 1 entry per hour to avoid spam)
@@ -2303,15 +2311,22 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         } else if (HELIUS_API_KEY) {
             // First time or expired - fetch and cache with timestamp
             securityData = await checkTokenSecurity(mint);
-            // Cache in DB for future cycles with TTL timestamp
+            // Cache in DB for future cycles with TTL timestamp ("Don't Trust, Verify")
             if (db && securityData) {
-                await db.run(`
+                const updatedToken = await db.get(`
                     UPDATE tokens SET
                         mint_authority_revoked = $1,
                         freeze_authority_revoked = $2,
                         security_last_check = $3
                     WHERE mint = $4
+                    RETURNING mint, mint_authority_revoked, freeze_authority_revoked, is_mutable_supply, hasCommunityUpdate
                 `, [securityData.mintAuthorityRevoked, securityData.freezeAuthorityRevoked, now, mint]);
+
+                // Re-sign sig_security to maintain integrity
+                if (updatedToken) {
+                    const sig_security = signSecurity(updatedToken);
+                    await db.run(`UPDATE tokens SET sig_security = $1 WHERE mint = $2`, [sig_security, mint]);
+                }
             }
         }
 
@@ -2339,16 +2354,23 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
             } else {
                 // First time or expired - check on-chain
                 lpData = await checkLPStatus(db, mint);
-                // Cache LP data in DB with TTL timestamp
+                // Cache LP data in DB with TTL timestamp ("Don't Trust, Verify")
                 if (lpData) {
-                    await db.run(`
+                    const updatedToken = await db.get(`
                         UPDATE tokens SET
                             lp_burn_pct = $1,
                             lp_locked_pct = $2,
                             lp_status = $3,
                             lp_last_check = $4
                         WHERE mint = $5
+                        RETURNING mint, lp_burn_pct, lp_locked_pct, lp_status
                     `, [lpData.lpBurnPct || 0, lpData.lpLockedPct || 0, lpData.lpStatus || 'unknown', now, mint]);
+
+                    // Re-sign sig_lp to maintain integrity
+                    if (updatedToken) {
+                        const sig_lp = signLP(updatedToken);
+                        await db.run(`UPDATE tokens SET sig_lp = $1 WHERE mint = $2`, [sig_lp, mint]);
+                    }
                 }
             }
         }

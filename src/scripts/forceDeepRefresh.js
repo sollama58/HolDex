@@ -10,6 +10,7 @@
 
 require('dotenv').config();
 const pg = require('pg');
+const { signKScore } = require('../utils/dataSignature');
 
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -132,16 +133,23 @@ async function main() {
 
             console.log(`[${token.symbol}] On-chain: real=${realHolders} ($1+), total=${totalHolders}`);
 
-            // Update the database with both values
-            await db.run(`
+            // Update the database with both values and re-sign ("Don't Trust, Verify")
+            const updatedToken = await db.get(`
                 UPDATE tokens
                 SET holders = $1,
                     real_holders = $2,
                     total_holders = $3
                 WHERE mint = $4
+                RETURNING mint, k_score, conviction_score, conviction_accumulators, conviction_holders, conviction_reducers, conviction_extractors, conviction_analyzed, holders, last_k_score_update
             `, [realHolders, realHolders, totalHolders, token.mint]);
 
-            console.log(`[${token.symbol}] ✅ UPDATED: real=${realHolders}, total=${totalHolders}`);
+            // Re-sign sig_kscore since holders is part of the signature
+            if (updatedToken) {
+                const sig_kscore = signKScore(updatedToken);
+                await db.run(`UPDATE tokens SET sig_kscore = $1 WHERE mint = $2`, [sig_kscore, token.mint]);
+            }
+
+            console.log(`[${token.symbol}] ✅ UPDATED + SIGNED: real=${realHolders}, total=${totalHolders}`);
 
             // Rate limit between tokens
             await sleep(500);

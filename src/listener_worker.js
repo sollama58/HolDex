@@ -6,7 +6,7 @@ const { initRedis } = require('./services/redis');
 const logger = require('./services/logger');
 
 // --- TASKS ---
-const { calculateDeepScore } = require('./tasks/kScoreUpdater');
+const { updateSingleToken } = require('./tasks/kScoreUpdater');
 const growerScanner = require('./tasks/growerScanner');
 const newTokenListener = require('./tasks/newTokenListener');
 
@@ -58,18 +58,13 @@ async function runKScoreLoop(db) {
 
             if (token) {
                 logger.info(`🧠 LISTENER: Scoring ${token.symbol} ($${token.mint.slice(0,6)})...`);
-                
+
                 const startTime = Date.now();
-                const newScore = await calculateDeepScore(db, token);
+                // Use updateSingleToken for full calculation + signatures ("Don't Trust, Verify")
+                await updateSingleToken({ db, broadcast: () => {} }, token.mint);
                 const duration = Date.now() - startTime;
 
-                await db.run(`
-                    UPDATE tokens 
-                    SET k_score = $1, last_k_score_update = $2 
-                    WHERE mint = $3
-                `, [newScore, Date.now(), token.mint]);
-                
-                logger.info(`✅ SCORED: ${token.symbol} -> ${newScore.toFixed(1)} (took ${duration}ms)`);
+                logger.info(`✅ SCORED: ${token.symbol} (took ${duration}ms)`);
 
                 // Rate Limit: Wait 2s between updates to save RPC credits
                 await new Promise(r => setTimeout(r, 2000));
