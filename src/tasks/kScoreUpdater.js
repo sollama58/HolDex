@@ -840,7 +840,8 @@ async function fetchTokenHolders(mint) {
         if (!cursor) break;
     }
 
-    holders.sort((a, b) => b.balance - a.balance);
+    // BigInt-safe comparison (sort() expects Number, not BigInt)
+    holders.sort((a, b) => (b.balance > a.balance ? 1 : b.balance < a.balance ? -1 : 0));
     return holders;
 }
 

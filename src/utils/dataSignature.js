@@ -158,10 +158,11 @@ function signSecurity(token) {
  * Protects: lp_burn_pct, lp_locked_pct, lp_status
  */
 function signLP(token) {
+    // PostgreSQL returns NUMERIC as strings - must parseFloat before .toFixed()
     const data = [
         token.mint,
-        (token.lp_burn_pct || 0).toFixed(4),
-        (token.lp_locked_pct || 0).toFixed(4),
+        parseFloat(token.lp_burn_pct || 0).toFixed(4),
+        parseFloat(token.lp_locked_pct || 0).toFixed(4),
         token.lp_status || 'unknown'
     ].join('|');
     return hmacSign(data);
@@ -172,12 +173,13 @@ function signLP(token) {
  * Protects: supply, initial_supply, burned_amount, burned_percent
  */
 function signSupply(token) {
+    // PostgreSQL returns NUMERIC as strings - must parseFloat before .toFixed()
     const data = [
         token.mint,
         token.supply || '0',
         token.initial_supply || token.supply || '0',
         (token.burned_amount || 0).toString(),
-        (token.burned_percent || 0).toFixed(4)
+        parseFloat(token.burned_percent || 0).toFixed(4)
     ].join('|');
     return hmacSign(data);
 }
@@ -187,10 +189,11 @@ function signSupply(token) {
  * Protects: k_score, conviction_*, holders
  */
 function signKScore(token) {
+    // PostgreSQL returns NUMERIC as strings - must parseFloat before Math.round()
     const data = [
         token.mint,
-        Math.round(token.k_score || 0),
-        Math.round(token.conviction_score || 0),
+        Math.round(parseFloat(token.k_score) || 0),
+        Math.round(parseFloat(token.conviction_score) || 0),
         token.conviction_accumulators || 0,
         token.conviction_holders || 0,
         token.conviction_reducers || 0,
@@ -208,25 +211,26 @@ function signKScore(token) {
  * Each field has source + timestamp for "Don't Trust, Verify"
  */
 function signMarket(token) {
+    // PostgreSQL returns BIGINT/NUMERIC as strings - must parseFloat before .toFixed()
     const data = [
         token.mint,
         // Price with provenance
-        (token.priceusd || token.priceUsd || 0).toFixed(12),
+        parseFloat(token.priceusd || token.priceUsd || 0).toFixed(12),
         token.price_source || 'unknown',
         token.price_timestamp || 0,
         token.price_pool || '',
         // MCap with provenance
-        (token.marketcap || token.marketCap || 0).toFixed(2),
+        parseFloat(token.marketcap || token.marketCap || 0).toFixed(2),
         token.mcap_calculated ? '1' : '0',
         // Liquidity with provenance
-        (token.liquidity || 0).toFixed(2),
+        parseFloat(token.liquidity || 0).toFixed(2),
         token.liquidity_source || 'unknown',
         token.liquidity_timestamp || 0,
         // Holders with provenance
         token.holders_source || 'unknown',
         token.holders_timestamp || 0,
         // Age
-        (token.age_days || 0).toFixed(2)
+        parseFloat(token.age_days || 0).toFixed(2)
     ].join('|');
     return hmacSign(data);
 }
@@ -256,7 +260,12 @@ function signOrigin(token) {
 function signHolders(mint, snapshots) {
     // Sort by balance desc, take top 20, create deterministic hash
     const sorted = (snapshots || [])
-        .sort((a, b) => BigInt(b.balance || 0) - BigInt(a.balance || 0))
+        // BigInt-safe comparison (sort() expects Number, not BigInt)
+        .sort((a, b) => {
+            const bBal = BigInt(b.balance || 0);
+            const aBal = BigInt(a.balance || 0);
+            return bBal > aBal ? 1 : bBal < aBal ? -1 : 0;
+        })
         .slice(0, 20);
 
     const data = [
@@ -337,24 +346,26 @@ function verifyCategory(token, category, expectedSig) {
                     token.is_mutable_supply ? '1' : '0', (token.hasCommunityUpdate || token.hascommunityupdate) ? '1' : '0'].join('|');
             break;
         case 'lp':
-            data = [token.mint, (token.lp_burn_pct || 0).toFixed(4), (token.lp_locked_pct || 0).toFixed(4), token.lp_status || 'unknown'].join('|');
+            // PostgreSQL returns NUMERIC as strings - must parseFloat before .toFixed()
+            data = [token.mint, parseFloat(token.lp_burn_pct || 0).toFixed(4), parseFloat(token.lp_locked_pct || 0).toFixed(4), token.lp_status || 'unknown'].join('|');
             break;
         case 'supply':
             data = [token.mint, token.supply || '0', token.initial_supply || token.supply || '0',
-                    (token.burned_amount || 0).toString(), (token.burned_percent || 0).toFixed(4)].join('|');
+                    (token.burned_amount || 0).toString(), parseFloat(token.burned_percent || 0).toFixed(4)].join('|');
             break;
         case 'kscore':
-            data = [token.mint, Math.round(token.k_score || 0), Math.round(token.conviction_score || 0),
+            data = [token.mint, Math.round(parseFloat(token.k_score) || 0), Math.round(parseFloat(token.conviction_score) || 0),
                     token.conviction_accumulators || 0, token.conviction_holders || 0, token.conviction_reducers || 0,
                     token.conviction_extractors || 0, token.conviction_analyzed || 0, token.holders || 0,
                     token.last_k_score_update || 0].join('|');
             break;
         case 'market':
-            data = [token.mint, (token.priceusd || token.priceUsd || 0).toFixed(12), token.price_source || 'unknown',
-                    token.price_timestamp || 0, token.price_pool || '', (token.marketcap || token.marketCap || 0).toFixed(2),
-                    token.mcap_calculated ? '1' : '0', (token.liquidity || 0).toFixed(2), token.liquidity_source || 'unknown',
+            // PostgreSQL returns BIGINT/NUMERIC as strings - must parseFloat before .toFixed()
+            data = [token.mint, parseFloat(token.priceusd || token.priceUsd || 0).toFixed(12), token.price_source || 'unknown',
+                    token.price_timestamp || 0, token.price_pool || '', parseFloat(token.marketcap || token.marketCap || 0).toFixed(2),
+                    token.mcap_calculated ? '1' : '0', parseFloat(token.liquidity || 0).toFixed(2), token.liquidity_source || 'unknown',
                     token.liquidity_timestamp || 0, token.holders_source || 'unknown', token.holders_timestamp || 0,
-                    (token.age_days || 0).toFixed(2)].join('|');
+                    parseFloat(token.age_days || 0).toFixed(2)].join('|');
             break;
         case 'origin':
             data = [token.mint, token.is_pump_fun ? '1' : '0', token.bonding_curve_complete ? '1' : '0',
