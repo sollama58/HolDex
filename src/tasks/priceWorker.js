@@ -32,6 +32,75 @@ const BATCH_SIZE = 30;
 // In-memory cache with TTL tracking
 const priceCache = new Map();
 
+// ============================================
+// BOUNDS VALIDATION - Protect against malicious/corrupted external data
+// ============================================
+const PRICE_BOUNDS = {
+    MIN_PRICE: 0,
+    MAX_PRICE: 1e15,           // $1 quadrillion max (absurd but safe)
+    MIN_MCAP: 0,
+    MAX_MCAP: 1e15,            // $1 quadrillion max
+    MIN_LIQUIDITY: 0,
+    MAX_LIQUIDITY: 1e12,       // $1 trillion max
+    MIN_VOLUME: 0,
+    MAX_VOLUME: 1e12,          // $1 trillion max
+    MIN_CHANGE_PCT: -100,      // Can't lose more than 100%
+    MAX_CHANGE_PCT: 100000,    // 100,000% max gain (100x)
+};
+
+/**
+ * Validate and clamp a numeric value within bounds
+ * @param {number} value - Value to validate
+ * @param {number} min - Minimum allowed
+ * @param {number} max - Maximum allowed
+ * @param {number} fallback - Fallback if invalid
+ * @returns {number} Validated value
+ */
+function clampValue(value, min, max, fallback = 0) {
+    const num = parseFloat(value);
+    if (!Number.isFinite(num)) return fallback;
+    if (num < min) return min;
+    if (num > max) return max;
+    return num;
+}
+
+/**
+ * Validate external price data - reject if critically malformed
+ * @param {Object} raw - Raw price data from external API
+ * @returns {Object|null} Validated data or null if rejected
+ */
+function validatePriceData(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+
+    const priceUsd = clampValue(raw.priceUsd, PRICE_BOUNDS.MIN_PRICE, PRICE_BOUNDS.MAX_PRICE);
+    const mcap = clampValue(raw.mcap, PRICE_BOUNDS.MIN_MCAP, PRICE_BOUNDS.MAX_MCAP);
+    const liquidity = clampValue(raw.liquidity, PRICE_BOUNDS.MIN_LIQUIDITY, PRICE_BOUNDS.MAX_LIQUIDITY);
+    const volume24h = clampValue(raw.volume24h, PRICE_BOUNDS.MIN_VOLUME, PRICE_BOUNDS.MAX_VOLUME);
+    const change24h = clampValue(raw.change24h, PRICE_BOUNDS.MIN_CHANGE_PCT, PRICE_BOUNDS.MAX_CHANGE_PCT);
+    const change1h = clampValue(raw.change1h, PRICE_BOUNDS.MIN_CHANGE_PCT, PRICE_BOUNDS.MAX_CHANGE_PCT);
+    const change5m = clampValue(raw.change5m, PRICE_BOUNDS.MIN_CHANGE_PCT, PRICE_BOUNDS.MAX_CHANGE_PCT);
+
+    // Reject if price is 0 but mcap is huge (inconsistent data)
+    if (priceUsd === 0 && mcap > 1e9) {
+        logger.warn(`[PriceWorker] Rejected inconsistent data: price=0 but mcap=${mcap}`);
+        return null;
+    }
+
+    return {
+        priceUsd,
+        mcap,
+        liquidity,
+        volume24h,
+        change24h,
+        change1h,
+        change5m,
+        pairAddress: raw.pairAddress,
+        dex: raw.dex,
+        source: raw.source || 'dexscreener',
+        timestamp: raw.timestamp || Date.now()
+    };
+}
+
 /**
  * Fetch prices for multiple tokens in one API call
  * @param {string[]} mints - Array of token mint addresses (max 30)
@@ -67,7 +136,8 @@ async function fetchBatchPrices(mints) {
 
             // Aggregate all pairs for this token
             if (!results.has(mint)) {
-                results.set(mint, {
+                // Validate external data before storing
+                const rawData = {
                     priceUsd: parseFloat(pair.priceUsd) || 0,
                     mcap: pair.marketCap || pair.fdv || 0,
                     liquidity: pair.liquidity?.usd || 0,
@@ -79,11 +149,16 @@ async function fetchBatchPrices(mints) {
                     dex: pair.dexId,
                     source: 'dexscreener',
                     timestamp: now
-                });
+                };
+                const validated = validatePriceData(rawData);
+                if (validated) {
+                    results.set(mint, validated);
+                }
             } else {
-                // Add liquidity from additional pairs
+                // Add liquidity from additional pairs (with bounds check)
                 const existing = results.get(mint);
-                existing.liquidity += pair.liquidity?.usd || 0;
+                const additionalLiq = clampValue(pair.liquidity?.usd, 0, PRICE_BOUNDS.MAX_LIQUIDITY);
+                existing.liquidity = clampValue(existing.liquidity + additionalLiq, 0, PRICE_BOUNDS.MAX_LIQUIDITY);
             }
         }
 
@@ -293,7 +368,8 @@ async function getPrice(mint) {
         const totalLiquidity = pairs.reduce((sum, p) => sum + (p.liquidity?.usd || 0), 0);
         const now = Date.now();
 
-        const priceData = {
+        // Validate external data before storing
+        const rawData = {
             priceUsd: parseFloat(bestPair.priceUsd) || 0,
             mcap: bestPair.marketCap || bestPair.fdv || 0,
             liquidity: totalLiquidity,
@@ -305,6 +381,12 @@ async function getPrice(mint) {
             source: 'dexscreener',
             timestamp: now
         };
+
+        const priceData = validatePriceData(rawData);
+        if (!priceData) {
+            logger.warn(`[PriceWorker] Rejected invalid price data for ${mint}`);
+            return null;
+        }
 
         // Cache it
         priceCache.set(mint, { data: priceData, timestamp: now });

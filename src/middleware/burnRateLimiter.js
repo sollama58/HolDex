@@ -104,29 +104,29 @@ const burnRateLimiter = async (req, res, next) => {
         // SECURITY: Fail-closed with strict fallback rate limiting (C3)
         // If the burn system fails, apply emergency limits to prevent abuse
         const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
-        if (!failedRequestTracker[ip]) {
-            failedRequestTracker[ip] = { count: 0, resetTime: Date.now() + FALLBACK_WINDOW };
+        const now = Date.now();
+
+        // Atomic-style: get or create, reset if expired, increment - all in one block
+        let tracker = failedRequestTracker.get(ip);
+        if (!tracker || now > tracker.resetTime) {
+            tracker = { count: 1, resetTime: now + FALLBACK_WINDOW };
+        } else {
+            tracker.count++;
         }
+        failedRequestTracker.set(ip, tracker);
 
-        // Reset window if expired
-        if (Date.now() > failedRequestTracker[ip].resetTime) {
-            failedRequestTracker[ip] = { count: 0, resetTime: Date.now() + FALLBACK_WINDOW };
-        }
-
-        failedRequestTracker[ip].count++;
-
-        if (failedRequestTracker[ip].count > FALLBACK_MAX_REQUESTS) {
+        if (tracker.count > FALLBACK_MAX_REQUESTS) {
             logger.warn(`[BurnRateLimiter] Fallback limit exceeded for ${ip}`);
             return res.status(429).json({
                 success: false,
                 error: 'Rate limit exceeded (fallback mode)',
-                retryAfter: Math.ceil((failedRequestTracker[ip].resetTime - Date.now()) / 1000)
+                retryAfter: Math.ceil((tracker.resetTime - now) / 1000)
             });
         }
 
         // Allow with degraded service warning
         res.setHeader('X-RateLimit-Fallback', 'true');
-        res.setHeader('X-RateLimit-Remaining', FALLBACK_MAX_REQUESTS - failedRequestTracker[ip].count);
+        res.setHeader('X-RateLimit-Remaining', FALLBACK_MAX_REQUESTS - tracker.count);
         next();
     }
 };
@@ -134,14 +134,14 @@ const burnRateLimiter = async (req, res, next) => {
 // SECURITY: In-memory fallback rate limiting when burn system fails
 const FALLBACK_MAX_REQUESTS = 20; // Max requests per window when system is degraded
 const FALLBACK_WINDOW = 60 * 1000; // 1 minute window
-const failedRequestTracker = {}; // In-memory tracker
+const failedRequestTracker = new Map(); // Use Map for better cleanup
 
 // Clean up old entries every 5 minutes
 setInterval(() => {
     const now = Date.now();
-    for (const ip in failedRequestTracker) {
-        if (now > failedRequestTracker[ip].resetTime) {
-            delete failedRequestTracker[ip];
+    for (const [ip, data] of failedRequestTracker) {
+        if (now > data.resetTime) {
+            failedRequestTracker.delete(ip);
         }
     }
 }, 5 * 60 * 1000);

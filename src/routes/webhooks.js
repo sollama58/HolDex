@@ -43,6 +43,88 @@ const isPoolAddress = (address) => {
     return false;
 };
 
+// ============================================
+// INPUT VALIDATION - Validate webhook payload BEFORE processing
+// ============================================
+const MAX_EVENTS_PER_BATCH = 100; // Prevent DoS via huge payloads
+const MAX_TRANSFERS_PER_EVENT = 50; // Reasonable limit per transaction
+const MAX_TOKEN_AMOUNT = BigInt('18446744073709551615'); // Max uint64
+const MIN_TIMESTAMP = 1600000000; // Sept 2020 (before Solana mainnet)
+const MAX_TIMESTAMP = Math.floor(Date.now() / 1000) + 86400; // Now + 1 day buffer
+
+/**
+ * Validate a single webhook event structure
+ * @param {Object} event - Raw event from webhook
+ * @returns {{valid: boolean, reason?: string}}
+ */
+function validateEvent(event) {
+    if (!event || typeof event !== 'object') {
+        return { valid: false, reason: 'Invalid event structure' };
+    }
+
+    // Validate type
+    if (event.type && typeof event.type !== 'string') {
+        return { valid: false, reason: 'Invalid event type' };
+    }
+
+    // Validate signature format
+    if (event.signature) {
+        if (typeof event.signature !== 'string' || event.signature.length < 32 || event.signature.length > 100) {
+            return { valid: false, reason: 'Invalid signature format' };
+        }
+    }
+
+    // Validate timestamp (if present)
+    if (event.timestamp !== undefined) {
+        const ts = parseInt(event.timestamp);
+        if (!Number.isFinite(ts) || ts < MIN_TIMESTAMP || ts > MAX_TIMESTAMP) {
+            return { valid: false, reason: 'Invalid timestamp' };
+        }
+    }
+
+    // Validate tokenTransfers array
+    if (event.tokenTransfers) {
+        if (!Array.isArray(event.tokenTransfers)) {
+            return { valid: false, reason: 'tokenTransfers must be array' };
+        }
+        if (event.tokenTransfers.length > MAX_TRANSFERS_PER_EVENT) {
+            return { valid: false, reason: 'Too many transfers per event' };
+        }
+    }
+
+    return { valid: true };
+}
+
+/**
+ * Validate a single transfer within an event
+ * @param {Object} transfer - Transfer object
+ * @returns {{valid: boolean, amount?: bigint, reason?: string}}
+ */
+function validateTransfer(transfer) {
+    if (!transfer || typeof transfer !== 'object') {
+        return { valid: false, reason: 'Invalid transfer structure' };
+    }
+
+    // Validate tokenAmount with BigInt to prevent overflow
+    if (transfer.tokenAmount !== undefined) {
+        try {
+            const amount = BigInt(transfer.tokenAmount);
+            if (amount < 0n || amount > MAX_TOKEN_AMOUNT) {
+                return { valid: false, reason: 'Token amount out of bounds' };
+            }
+            // Convert to safe integer for DB storage (cap at Number.MAX_SAFE_INTEGER)
+            const safeAmount = amount > BigInt(Number.MAX_SAFE_INTEGER)
+                ? Number.MAX_SAFE_INTEGER
+                : Number(amount);
+            return { valid: true, amount: safeAmount };
+        } catch (_e) {
+            return { valid: false, reason: 'Invalid token amount format' };
+        }
+    }
+
+    return { valid: true, amount: 0 };
+}
+
 /**
  * Check if signature was already processed (Redis-backed, cluster-safe)
  * Returns true if duplicate, false if new
@@ -118,7 +200,29 @@ function init(deps) {
             let processed = 0;
             let skipped = 0;
 
+            // ============================================
+            // VALIDATION: Check batch size BEFORE processing
+            // ============================================
+            if (events.length > MAX_EVENTS_PER_BATCH) {
+                logger.warn(`[Webhook] Batch too large: ${events.length} events (max ${MAX_EVENTS_PER_BATCH})`);
+                return res.status(400).json({
+                    error: 'Batch size exceeded',
+                    max: MAX_EVENTS_PER_BATCH,
+                    received: events.length
+                });
+            }
+
             for (const event of events) {
+                // ============================================
+                // VALIDATION: Validate event structure BEFORE processing
+                // ============================================
+                const eventValidation = validateEvent(event);
+                if (!eventValidation.valid) {
+                    logger.debug(`[Webhook] Invalid event: ${eventValidation.reason}`);
+                    skipped++;
+                    continue;
+                }
+
                 // Skip non-transfer events
                 if (event.type !== 'TRANSFER') continue;
 
@@ -158,9 +262,19 @@ function init(deps) {
                 }
 
                 for (const transfer of transfers) {
-                    const { mint, fromUserAccount, toUserAccount, tokenAmount } = transfer;
+                    const { mint, fromUserAccount, toUserAccount } = transfer;
 
                     if (!mint) continue;
+
+                    // ============================================
+                    // VALIDATION: Validate transfer structure and amount
+                    // ============================================
+                    const transferValidation = validateTransfer(transfer);
+                    if (!transferValidation.valid) {
+                        logger.debug(`[Webhook] Invalid transfer: ${transferValidation.reason}`);
+                        continue;
+                    }
+                    const amount = transferValidation.amount;
 
                     // ============================================
                     // SECURITY: Validate all addresses
@@ -181,7 +295,6 @@ function init(deps) {
                     const now = Date.now();
                     // K-Score v9: Use actual transaction timestamp for activity freshness
                     const txTimestamp = event.timestamp ? event.timestamp * 1000 : now;
-                    const amount = parseInt(tokenAmount) || 0;
 
                     // Update buyer (if not a pool and valid address)
                     // OPTIMIZED: Single atomic UPSERT with inline conviction calculation

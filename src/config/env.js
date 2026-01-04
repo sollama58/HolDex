@@ -43,6 +43,10 @@ function validateEnv() {
         warnings.push('HELIUS_API_KEY not set - some features will be limited');
     }
 
+    if (!process.env.REDIS_URL) {
+        warnings.push('REDIS_URL not set - rate limiting will use in-memory fallback');
+    }
+
     if (isProduction && !process.env.CORS_ORIGINS) {
         warnings.push('CORS_ORIGINS not set - using default whitelist');
     }
@@ -110,8 +114,11 @@ if (!rpcUrl) {
 
 module.exports = {
     PORT: process.env.PORT || 3000,
-    DATABASE_URL: process.env.DATABASE_URL || 'postgresql://user:password@localhost:5432/holdex',
-    REDIS_URL: process.env.REDIS_URL || 'redis://redis:6379',
+    // SECURITY: No hardcoded credentials - must be set via environment
+    // Development: use .env file with DATABASE_URL
+    // Production: validateEnv() will fail if not set
+    DATABASE_URL: process.env.DATABASE_URL || null,
+    REDIS_URL: process.env.REDIS_URL || null,
     
     // RPC & WSS CONFIG
     SOLANA_RPC_URL: rpcUrl,

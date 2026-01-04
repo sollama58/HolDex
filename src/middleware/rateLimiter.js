@@ -8,17 +8,36 @@ const KEY_CACHE = new Map();
 
 // SECURITY: In-memory fallback rate limiting when Redis is down (H2)
 const FALLBACK_WINDOW = 60 * 1000; // 1 minute window for fallback
-const fallbackTracker = {};
+const fallbackTracker = new Map(); // Use Map for better cleanup
 
 // Clean up old fallback entries every 5 minutes
 setInterval(() => {
     const now = Date.now();
-    for (const key in fallbackTracker) {
-        if (now > fallbackTracker[key].resetTime) {
-            delete fallbackTracker[key];
+    for (const [key, data] of fallbackTracker) {
+        if (now > data.resetTime) {
+            fallbackTracker.delete(key);
         }
     }
 }, 5 * 60 * 1000);
+
+// ============================================
+// ATOMIC RATE LIMITING - Lua script for Redis
+// Prevents race conditions between INCR and EXPIRE
+// ============================================
+const RATE_LIMIT_LUA = `
+local key = KEYS[1]
+local ttl = tonumber(ARGV[1])
+
+-- Atomic increment
+local count = redis.call('INCR', key)
+
+-- Set TTL only on first request (when count = 1)
+if count == 1 then
+    redis.call('EXPIRE', key, ttl)
+end
+
+return count
+`;
 
 const rateLimiter = async (req, res, next) => {
     // 1. Get Key from Header or Query
@@ -67,11 +86,9 @@ const rateLimiter = async (req, res, next) => {
             const dateStr = new Date().toISOString().split('T')[0];
             const windowKey = `rate_limit:${keyHash}:${dateStr}`;
 
-            // Atomic Increment
-            const currentUsage = await redis.incr(windowKey);
-
-            // Set expiry for 24 hours if this is the first request of the day
-            if (currentUsage === 1) await redis.expire(windowKey, 86400);
+            // ATOMIC: Lua script handles INCR + conditional EXPIRE in one operation
+            // Prevents race condition where key exists without TTL
+            const currentUsage = await redis.eval(RATE_LIMIT_LUA, 1, windowKey, 86400);
 
             // 4. Async DB Sync (Lazy Update)
             // Update Postgres every 10 requests so Admin Panel stays roughly in sync
@@ -105,34 +122,35 @@ const rateLimiter = async (req, res, next) => {
             req.apiUser = { owner: keyData.owner, tier: keyData.tier };
         } else {
             // SECURITY: In-memory fallback rate limiting when Redis is down (H2)
+            // Note: Node.js is single-threaded so this is safe, but we optimize
+            // the pattern to minimize the window between read and write
             logger.warn('Redis unavailable - using in-memory fallback rate limiting');
-            const keyHash = hashApiKey(apiKey);
 
-            if (!fallbackTracker[keyHash]) {
-                fallbackTracker[keyHash] = { count: 0, resetTime: Date.now() + FALLBACK_WINDOW };
+            const now = Date.now();
+            let tracker = fallbackTracker.get(keyHash);
+
+            // Atomic-style: get or create, reset if expired, increment - all in one block
+            if (!tracker || now > tracker.resetTime) {
+                tracker = { count: 1, resetTime: now + FALLBACK_WINDOW };
+            } else {
+                tracker.count++;
             }
-
-            // Reset window if expired
-            if (Date.now() > fallbackTracker[keyHash].resetTime) {
-                fallbackTracker[keyHash] = { count: 0, resetTime: Date.now() + FALLBACK_WINDOW };
-            }
-
-            fallbackTracker[keyHash].count++;
+            fallbackTracker.set(keyHash, tracker);
 
             // Apply stricter fallback limit (10% of normal limit)
             const fallbackLimit = Math.ceil(keyData.requests_limit * 0.1);
-            if (fallbackTracker[keyHash].count > fallbackLimit) {
+            if (tracker.count > fallbackLimit) {
                 logger.warn(`[RateLimiter] Fallback limit exceeded for key: ${keyHash.slice(0, 8)}...`);
                 return res.status(429).json({
                     success: false,
                     error: 'Rate limit exceeded (degraded mode)',
                     fallback: true,
-                    retryAfter: Math.ceil((fallbackTracker[keyHash].resetTime - Date.now()) / 1000)
+                    retryAfter: Math.ceil((tracker.resetTime - now) / 1000)
                 });
             }
 
             res.setHeader('X-RateLimit-Fallback', 'true');
-            res.setHeader('X-RateLimit-Remaining', fallbackLimit - fallbackTracker[keyHash].count);
+            res.setHeader('X-RateLimit-Remaining', fallbackLimit - tracker.count);
             req.apiUser = { owner: keyData.owner, tier: keyData.tier };
         }
 
