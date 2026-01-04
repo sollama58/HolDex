@@ -1753,6 +1753,84 @@ function init(deps) {
         }
     });
 
+    // ============================================
+    // PUBLIC TOP HOLDERS (for frontend detail view)
+    // ============================================
+    router.get('/token/:mint/top-holders/public', cacheControl(30, 60), publicRateLimit, async (req, res) => {
+        const { mint } = req.params;
+
+        if (!isValidPubkey(mint)) {
+            return res.status(400).json({ success: false, error: 'Invalid mint address' });
+        }
+
+        try {
+            // Only return data for verified tokens
+            const token = await db.get('SELECT decimals, hasCommunityUpdate FROM tokens WHERE mint = $1', [mint]);
+
+            if (!token || !(token.hasCommunityUpdate || token.hascommunityupdate)) {
+                return res.json({
+                    success: true,
+                    mint,
+                    verified: false,
+                    message: 'Top holder analysis requires community verification',
+                    count: 0,
+                    holders: []
+                });
+            }
+
+            const decimals = token.decimals || 6;
+
+            const holders = await db.all(`
+                SELECT
+                    holder,
+                    balance,
+                    conviction_class,
+                    buy_count,
+                    sell_count,
+                    net_flow,
+                    updated_at
+                FROM holder_snapshots
+                WHERE mint = $1
+                ORDER BY balance DESC
+                LIMIT 20
+            `, [mint]);
+
+            const ROLE_METALS = {
+                accumulator: { icon: '💎', metal: 'Diamond', impact: 'bullish' },
+                holder: { icon: '🥇', metal: 'Gold', impact: 'bullish' },
+                reducer: { icon: '🥈', metal: 'Silver', impact: 'neutral' },
+                extractor: { icon: '🔩', metal: 'Rust', impact: 'bearish' }
+            };
+
+            res.json({
+                success: true,
+                mint,
+                decimals,
+                count: holders.length,
+                holders: holders.map(h => {
+                    const role = ROLE_METALS[h.conviction_class] || ROLE_METALS.holder;
+                    return {
+                        address: h.holder,
+                        balance: h.balance,
+                        class: h.conviction_class || 'unknown',
+                        role: {
+                            icon: role.icon,
+                            metal: role.metal,
+                            impact: role.impact
+                        },
+                        buys: h.buy_count || 0,
+                        sells: h.sell_count || 0,
+                        netFlow: h.net_flow || 0,
+                        orbUrl: `https://orbmarkets.io/address/${h.holder}`
+                    };
+                })
+            });
+        } catch(e) {
+            logger.error('[PublicTopHolders]', e.message);
+            res.status(500).json({ success: false, error: 'Server error' });
+        }
+    });
+
     router.get('/tokens', cacheControl(2, 5), unifiedRateLimiter, async (req, res) => {
         let { search = '', sort = 'kscore', page = 1, filter, direction = 'desc', limit = 20 } = req.query;
         try {

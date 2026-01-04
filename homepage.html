@@ -2221,7 +2221,7 @@
         contentEl.classList.add('hidden');
 
         try {
-            const res = await fetch(`${API_URL}/api/token/${currentMint}/top-holders`);
+            const res = await fetch(`${API_URL}/api/token/${currentMint}/top-holders/public`);
             const data = await res.json();
 
             if (data.success && data.holders.length > 0) {
