@@ -355,6 +355,10 @@ async function initDB() {
                 // K-Score v10: Real holders tracking
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS real_holders INTEGER DEFAULT 0`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS total_holders INTEGER DEFAULT 0`,
+                // Harmony: Fix operation_costs schema if old version exists
+                `ALTER TABLE operation_costs RENAME COLUMN operation TO operation_type`,
+                `ALTER TABLE operation_costs RENAME COLUMN infrastructure_cost TO actual_cost`,
+                `ALTER TABLE operation_costs ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE`,
             ];
 
             // PERFORMANCE: Add indexes for frequently queried columns
