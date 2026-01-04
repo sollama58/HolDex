@@ -128,14 +128,19 @@ function signKScore(token) {
 
 /**
  * 6. Market Signature
- * Protects: priceusd, marketcap, liquidity
+ * Protects: priceusd, marketcap, liquidity, price_source, price_timestamp, mcap_calculated
+ * Includes proof of on-chain derivation with timestamp
  */
 function signMarket(token) {
     const data = [
         token.mint,
         (token.priceusd || token.priceUsd || 0).toFixed(12),
         (token.marketcap || token.marketCap || 0).toFixed(2),
-        (token.liquidity || 0).toFixed(2)
+        (token.liquidity || 0).toFixed(2),
+        token.price_source || 'unknown',
+        token.price_timestamp || 0,
+        token.price_pool || '',
+        token.mcap_calculated ? '1' : '0'
     ].join('|');
     return hmacSign(data);
 }

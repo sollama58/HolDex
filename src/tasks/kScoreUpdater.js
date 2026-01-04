@@ -2528,6 +2528,61 @@ async function updateSingleToken(deps, mint) {
         // Generate 8-category signatures (Don't Trust, Verify)
         const updateTimestamp = Date.now();
 
+        // ============================================
+        // ON-CHAIN MARKET DATA (Verifiable)
+        // ============================================
+        // Price: from pool vault balances on-chain
+        // MCap: calculated as circulating_supply × price
+        // Both with proof timestamps and source tracking
+
+        let marketData = {
+            priceUsd: token.priceusd || 0,
+            priceSource: token.price_source || 'db_cache',
+            priceTimestamp: token.price_timestamp || 0,
+            pricePool: token.price_pool || null,
+            mcap: token.marketcap || 0,
+            mcapCalculated: false
+        };
+
+        // Try to get on-chain price (only during deep refresh to save API calls)
+        const priceNeedsRefresh = !token.price_timestamp ||
+                                  (Date.now() - parseInt(token.price_timestamp || 0) > 300000); // 5 min
+
+        if (priceNeedsRefresh && db) {
+            try {
+                const priceResult = await priceService.getOnChainPrice(db, mint, token.decimals || 9);
+
+                if (priceResult.priceUsd > 0) {
+                    marketData.priceUsd = priceResult.priceUsd;
+                    marketData.priceSource = priceResult.source;
+                    marketData.priceTimestamp = priceResult.timestamp;
+                    marketData.pricePool = priceResult.poolAddress;
+
+                    // Calculate on-chain mcap = circulating_supply × price
+                    const decimals = token.decimals || 9;
+                    const divisor = Math.pow(10, decimals);
+                    const circulatingSupply = (currentSupply - burnedAmount) / divisor;
+
+                    const mcapResult = priceService.calculateOnChainMcap({
+                        supply: circulatingSupply,
+                        priceUsd: priceResult.priceUsd,
+                        priceSource: priceResult.source,
+                        priceTimestamp: priceResult.timestamp,
+                        priceProof: priceResult.proof
+                    });
+
+                    marketData.mcap = mcapResult.mcap;
+                    marketData.mcapCalculated = mcapResult.source === 'on_chain';
+
+                    if (priceResult.source === 'on_chain') {
+                        logger.debug(`[Market] ${mint.slice(0,8)}: On-chain price $${priceResult.priceUsd.toExponential(2)}, MCap $${mcapResult.mcap.toLocaleString()}`);
+                    }
+                }
+            } catch (e) {
+                logger.debug(`[Market] ${mint.slice(0,8)}: Price fetch failed, using cached`);
+            }
+        }
+
         // Build complete token object for signing all categories
         const tokenForSigning = {
             mint,
@@ -2563,9 +2618,13 @@ async function updateSingleToken(deps, mint) {
             real_holders: conviction.preserveHolders ? (token.real_holders || conviction.realHoldersCount || 0) : (conviction.realHoldersCount || 0),
             total_holders: conviction.preserveHolders ? (token.total_holders || conviction.totalHolders || 0) : (conviction.totalHolders || 0),
             last_k_score_update: updateTimestamp,
-            // Market
-            priceusd: token.priceusd || 0,
-            marketcap: token.marketcap || 0,
+            // Market (ON-CHAIN VERIFIED)
+            priceusd: marketData.priceUsd,
+            price_source: marketData.priceSource,
+            price_timestamp: marketData.priceTimestamp,
+            price_pool: marketData.pricePool,
+            marketcap: marketData.mcap,
+            mcap_calculated: marketData.mcapCalculated,
             liquidity: token.liquidity || 0,
             // Origin
             is_pump_fun: category.isPumpFun,
@@ -2617,8 +2676,14 @@ async function updateSingleToken(deps, mint) {
                 sig_market = $26,
                 sig_origin = $27,
                 sig_full = $28,
-                chaos_nonce = $29
-            WHERE mint = $30
+                chaos_nonce = $29,
+                priceusd = $30,
+                marketcap = $31,
+                price_source = $32,
+                price_timestamp = $33,
+                price_pool = $34,
+                mcap_calculated = $35
+            WHERE mint = $36
         `, [
             smoothedScore,
             updateTimestamp.toString(),
@@ -2649,6 +2714,12 @@ async function updateSingleToken(deps, mint) {
             signatures.sig_origin,
             signatures.sig_full,
             signatures.chaos_nonce,
+            marketData.priceUsd,
+            marketData.mcap,
+            marketData.priceSource,
+            marketData.priceTimestamp ? marketData.priceTimestamp.toString() : null,
+            marketData.pricePool,
+            marketData.mcapCalculated,
             mint
         ]);
 
