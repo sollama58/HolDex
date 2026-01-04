@@ -34,6 +34,20 @@ class HoldexClient {
     }
 
     /**
+     * Create canonical JSON for HMAC signing
+     * CRITICAL: Key order must match exactly on both sides (GASdf + HolDex)
+     * Order: amount, source, txSignature, wallet (alphabetical)
+     */
+    _canonicalBurnPayload(payload) {
+        return JSON.stringify({
+            amount: payload.amount,
+            source: payload.source,
+            txSignature: payload.txSignature,
+            wallet: payload.wallet
+        });
+    }
+
+    /**
      * Sign payload with HMAC-SHA256 for webhook authentication
      */
     _signPayload(payload) {
@@ -42,7 +56,7 @@ class HoldexClient {
         }
         const signature = crypto
             .createHmac('sha256', this.webhookSecret)
-            .update(JSON.stringify(payload))
+            .update(this._canonicalBurnPayload(payload))
             .digest('hex');
         return `sha256=${signature}`;
     }

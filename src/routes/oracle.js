@@ -105,6 +105,19 @@ function isValidAmount(amount) {
 const WEBHOOK_SECRET = config.ORACLE_WEBHOOK_SECRET || null;
 
 /**
+ * Create canonical JSON for HMAC signing
+ * CRITICAL: Key order must match exactly on both sides (GASdf + HolDex)
+ */
+function canonicalBurnPayload(payload) {
+    return JSON.stringify({
+        amount: payload.amount,
+        source: payload.source,
+        txSignature: payload.txSignature,
+        wallet: payload.wallet
+    });
+}
+
+/**
  * Verify HMAC signature for webhook requests
  * Header: x-holdex-signature: sha256=<hex>
  */
@@ -121,7 +134,7 @@ function verifyWebhookSignature(payload, signature) {
     const providedHash = signature.slice(7);
     const expectedHash = crypto
         .createHmac('sha256', WEBHOOK_SECRET)
-        .update(JSON.stringify(payload))
+        .update(canonicalBurnPayload(payload))
         .digest('hex');
 
     // Timing-safe comparison to prevent timing attacks
