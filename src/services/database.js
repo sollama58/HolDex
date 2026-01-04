@@ -276,11 +276,12 @@ async function initDB() {
                 -- Operation Costs: Fee structure with efficiency floor
                 -- minFee = (cost / 0.236) × 1.2 guarantees infrastructure sustainability
                 CREATE TABLE IF NOT EXISTS operation_costs (
-                    operation TEXT PRIMARY KEY,            -- 'gasdf_submit_standard', 'gasdf_submit_priority', etc.
+                    operation_type TEXT PRIMARY KEY,       -- 'gasdf_submit_standard', 'gasdf_submit_priority', etc.
                     base_fee DOUBLE PRECISION NOT NULL,    -- Base fee in $ASDF
-                    infrastructure_cost DOUBLE PRECISION NOT NULL,  -- Actual cost
+                    actual_cost DOUBLE PRECISION NOT NULL, -- Infrastructure cost
                     min_fee DOUBLE PRECISION NOT NULL,     -- Efficiency floor: (cost / 0.236) × 1.2
                     max_discount DOUBLE PRECISION NOT NULL, -- Maximum discount % (e.g., 0.50 = 50%)
+                    is_active BOOLEAN DEFAULT TRUE,        -- Enable/disable operations
 
                     -- Analytics
                     total_calls INTEGER DEFAULT 0,
@@ -405,6 +406,28 @@ async function initDB() {
                 }
             }
             logger.info('💾 Database: Indexes verified');
+
+            // Seed operation costs if empty (GASdf fee structure)
+            // Based on φ-ratio efficiency floor: minFee = (cost / 0.236) × 1.2
+            const existingCosts = await primaryPool.query('SELECT COUNT(*) as count FROM operation_costs');
+            if (parseInt(existingCosts.rows[0].count) === 0) {
+                const seedCosts = [
+                    // operation_type, base_fee, actual_cost, min_fee, max_discount
+                    ['gasdf_submit_standard', 100, 5, 25.42, 0.50],    // Standard submission
+                    ['gasdf_submit_priority', 250, 15, 76.27, 0.40],   // Priority submission
+                    ['gasdf_submit_instant', 500, 30, 152.54, 0.30],   // Instant submission
+                    ['holdex_api_call', 1, 0.01, 0.05, 0.80],          // HolDex API call
+                ];
+                for (const [opType, baseFee, cost, minFee, maxDiscount] of seedCosts) {
+                    await primaryPool.query(`
+                        INSERT INTO operation_costs (operation_type, base_fee, actual_cost, min_fee, max_discount)
+                        VALUES ($1, $2, $3, $4, $5)
+                        ON CONFLICT (operation_type) DO NOTHING
+                    `, [opType, baseFee, cost, minFee, maxDiscount]);
+                }
+                logger.info('⚗️ Harmony: Seeded operation costs (φ-ratio efficiency floor)');
+            }
+
             logger.info('⚗️ Harmony: E-Score tables ready (φ = 1.618)');
 
             dbWrapper = {
