@@ -170,6 +170,7 @@ async function scanForTampering(db) {
 
     try {
         // Get all verified tokens with signatures
+        // CRITICAL: Must select ALL fields used by signMarket/signLP/signKScore etc.
         const tokens = await db.all(`
             SELECT mint, symbol, name, image, decimals,
                    k_score, conviction_score, conviction_accumulators,
@@ -181,7 +182,11 @@ async function scanForTampering(db) {
                    is_pump_fun, bonding_curve_complete, timestamp, metadata,
                    sig_identity, sig_security, sig_lp, sig_supply,
                    sig_kscore, sig_market, sig_origin, sig_full, chaos_nonce,
-                   last_k_score_update
+                   last_k_score_update,
+                   -- Fields required for sig_market verification:
+                   price_source, price_timestamp, price_pool,
+                   mcap_calculated, liquidity_source, liquidity_timestamp,
+                   holders_source, holders_timestamp, age_days
             FROM tokens
             WHERE hasCommunityUpdate = TRUE
               AND sig_full IS NOT NULL
