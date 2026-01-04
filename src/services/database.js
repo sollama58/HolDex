@@ -238,6 +238,18 @@ async function initDB() {
                 // Holder snapshots integrity (same standard as other data)
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_holders TEXT DEFAULT NULL`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS holders_snapshot_check BIGINT DEFAULT 0`,
+                // Price/Market provenance columns (required by signMarket)
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS price_source TEXT DEFAULT 'unknown'`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS price_timestamp BIGINT DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS price_pool TEXT DEFAULT ''`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS mcap_calculated BOOLEAN DEFAULT FALSE`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS liquidity_source TEXT DEFAULT 'unknown'`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS liquidity_timestamp BIGINT DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS holders_source TEXT DEFAULT 'unknown'`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS holders_timestamp BIGINT DEFAULT 0`,
+                // K-Score v10: Real holders tracking
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS real_holders INTEGER DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS total_holders INTEGER DEFAULT 0`,
             ];
 
             // PERFORMANCE: Add indexes for frequently queried columns

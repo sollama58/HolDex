@@ -23,10 +23,11 @@ const IGNORED_MINTS = new Set([
 const processedSigs = new Set();
 let subscriptionIds = [];
 let lastLogTime = Date.now();
-let logCounter = 0; 
+let logCounter = 0;
 let watchdogInterval = null;
 let statusInterval = null;
 let currentConnection = null;
+let isReconnecting = false; // Guard against concurrent reconnection
 
 function isIgnored(mint) {
     if (!mint) return "Null Mint";
@@ -42,7 +43,16 @@ function isIgnored(mint) {
 async function processNewPoolTx(signature, connection, db, source) {
     if (processedSigs.has(signature)) return;
     processedSigs.add(signature);
-    if (processedSigs.size > 10000) processedSigs.clear();
+    // LRU-style eviction: Remove oldest 20% when limit reached (prevents full clear)
+    if (processedSigs.size > 10000) {
+        const toDelete = 2000;
+        let deleted = 0;
+        for (const sig of processedSigs) {
+            if (deleted >= toDelete) break;
+            processedSigs.delete(sig);
+            deleted++;
+        }
+    }
 
     logger.info(`🔍 [${source}] POTENTIAL NEW POOL: ${signature}`);
 
@@ -238,13 +248,20 @@ async function startNewTokenListener() {
         logCounter = 0; 
     }, 30000);
 
-    // WATCHDOG
+    // WATCHDOG - with guard against concurrent reconnection
     if (watchdogInterval) clearInterval(watchdogInterval);
     watchdogInterval = setInterval(async () => {
         const timeSinceLastLog = Date.now() - lastLogTime;
-        if (timeSinceLastLog > 120000) { 
+        if (timeSinceLastLog > 120000 && !isReconnecting) {
+            isReconnecting = true;
             logger.warn(`⚠️ LISTENERS DEAD? Reconnecting...`);
-            try { startNewTokenListener(); } catch (err) { logger.error(`❌ Reconnection Failed: ${err.message}`); }
+            try {
+                await startNewTokenListener();
+            } catch (err) {
+                logger.error(`❌ Reconnection Failed: ${err.message}`);
+            } finally {
+                isReconnecting = false;
+            }
         }
     }, 60000);
 }
