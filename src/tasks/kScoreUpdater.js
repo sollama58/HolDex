@@ -1,32 +1,25 @@
 /**
- * K-Score Updater v10 - Harmonious 3 Pillars Formula
+ * K-Score Updater v10 - Pure Geometric Mean Formula
  *
- * Philosophy $asdfasdfa: Simple, on-chain pure, no arbitrary thresholds
+ * Philosophy $asdfasdfa: Simple, on-chain pure, no arbitrary weights
  *
- * All pillars use mathematically harmonious normalizations:
- * - Exponential decay/growth functions
- * - Geometric means for pillar composition
- * - Consistent TOP 20 analysis across D and O
+ * FORMULA: K = 100 × ∛(D × O × L)
  *
- * DIAMOND HANDS (50%): √(C × R) where C = conviction × F(activity)
- *   - conviction: % accumulators + holders among TOP 20
- *   - accExtRatio: accumulators / extractors ratio
- *   - activityFreshness: F(t) = 1/e + (1-1/e)e^(-t/21) [decays to 1/e floor]
+ * All 3 pillars have EQUAL weight via geometric mean.
+ * A token must excel on ALL dimensions to score high.
  *
- * ORGANIC GROWTH (35%): √(H × T)
- *   - H: ALL holders (no threshold - log normalization handles scale)
- *   - T: 1 - (TOP 20 balance / CIRCULATING supply)
- *   - Circulating = total - burned
+ * DIAMOND HANDS (D): √(C × R × F)
+ *   - C: conviction (% accumulators + holders in TOP 20)
+ *   - R: acc/ext ratio
+ *   - F: activity freshness [1/e floor]
  *
- * LONGEVITY (15%): A × S
- *   - age: A(t) = 1 - e^(-t/21) [asymptotic to 1]
- *   - survival: S(t) = 1/e + (1-1/e)e^(-t/30) [activity-based, τ=30 more lenient]
+ * ORGANIC GROWTH (O): √(H × T)
+ *   - H: ALL holders (no threshold)
+ *   - T: 1 - (TOP 20 / circulating supply)
  *
- * v10 Changes:
- *   - H: No threshold - count ALL holders (simple, on-chain pure)
- *   - T: Uses TOP 20 / CIRCULATING (consistent with D, excludes burned)
- *   - L: Added survival factor S (dead tokens penalized)
- *   - All normalizations use harmonious exponential functions
+ * LONGEVITY (L): A × S
+ *   - A: age [asymptotic to 1]
+ *   - S: survival factor [active = high, dead = low]
  *
  * Eliminates manipulable metrics (volume, mcap, liquidity)
  * Focus on on-chain behavior only
@@ -1975,30 +1968,19 @@ async function _calculateOnChainLiquidity(db, mint, solPrice) {
 }
 
 // ============================================
-// K-SCORE v8 - PURE MATHEMATICAL FORMULA
+// K-SCORE v10 - PURE GEOMETRIC MEAN
 // ============================================
 //
-// DESIGN PRINCIPLES:
-// 1. Asymptotic normalization (scales to infinity, never reaches 1)
-// 2. No arbitrary min/max caps
-// 3. Naturally bounded functions [0,1]
-// 4. Weighted geometric mean (penalizes weaknesses)
-// 5. Sum of weights = 1.00 exactly
+// Philosophy $asdfasdfa: No arbitrary weights
 //
-// MATHEMATICAL PROPERTIES:
-// - H(holders) = 1 - 1/(1 + ln(1 + h/κ))     κ=100 inflection
-// - A(age)     = 1 - e^(-t/τ)                 τ=21 days half-life
-// - T(top10)   = 1 - (concentration/100)      linear inverse
-// - C(conviction) = score/100                 direct mapping
-// - R(ratio)   = tanh(r/2)                    naturally bounded
+// FORMULA: K = 100 × ∛(D × O × L)
 //
-// FORMULA:
-// K = 100 × DiamondHands^0.50 × OrganicGrowth^0.35 × Longevity^0.15
+// All pillars equal. Token must excel on ALL 3.
 //
-// Where:
-//   DiamondHands  = √(C × R)   [conviction × acc/ext ratio]
-//   OrganicGrowth = √(H × T)   [holders × distribution]
-//   Longevity     = A          [age]
+// PILLARS:
+//   D = √(C × R × F)   [diamond hands: conviction × ratio × freshness]
+//   O = √(H × T)       [organic growth: holders × distribution]
+//   L = A × S          [longevity: age × survival]
 //
 // ============================================
 
@@ -2144,18 +2126,10 @@ function geometricMean2(a, b, epsilon = 0.001) {
     return Math.sqrt(Math.max(a, epsilon) * Math.max(b, epsilon));
 }
 
-// Pillar weights (MUST sum to 1.00)
-const WEIGHTS = {
-    DIAMOND_HANDS: 0.50,   // 50% - conviction behavior
-    ORGANIC_GROWTH: 0.35,  // 35% - holder distribution
-    LONGEVITY: 0.15        // 15% - survival/maturity
-};
-
-// Verify weights sum to 1
-const WEIGHT_SUM = Object.values(WEIGHTS).reduce((a, b) => a + b, 0);
-if (Math.abs(WEIGHT_SUM - 1.0) > 0.001) {
-    throw new Error(`K-Score weights must sum to 1.0, got ${WEIGHT_SUM}`);
-}
+// K-Score v10: Equal pillar weights via geometric mean
+// Philosophy $asdfasdfa: No arbitrary weights, all pillars equal
+// Formula: K = 100 × ∛(D × O × L)
+// A token must excel on ALL 3 dimensions to score high
 
 // EMA Smoothing config
 // newScore = α × calculated + (1-α) × previous
@@ -2528,16 +2502,18 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         pillars.longevity = normalized.A * normalized.S;
 
         // ============================================
-        // FINAL SCORE: Weighted Geometric Mean
-        // K = 100 × D^0.50 × O^0.35 × L^0.15
+        // FINAL SCORE: Pure Geometric Mean (equal weights)
+        // K = 100 × ∛(D × O × L)
+        // Philosophy $asdfasdfa: No arbitrary weights
         // ============================================
 
         const epsilon = 0.001;
         let score = Math.round(
-            100 *
-            Math.pow(Math.max(pillars.diamondHands, epsilon), WEIGHTS.DIAMOND_HANDS) *
-            Math.pow(Math.max(pillars.organicGrowth, epsilon), WEIGHTS.ORGANIC_GROWTH) *
-            Math.pow(Math.max(pillars.longevity, epsilon), WEIGHTS.LONGEVITY)
+            100 * Math.cbrt(
+                Math.max(pillars.diamondHands, epsilon) *
+                Math.max(pillars.organicGrowth, epsilon) *
+                Math.max(pillars.longevity, epsilon)
+            )
         );
 
         // ============================================
