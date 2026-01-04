@@ -36,16 +36,33 @@ function escapeHtml(str) {
 const server = http.createServer(app); 
 
 // SECURITY HEADERS
+// CSP allows external CDNs used by frontend (Tailwind, Socket.io, Solana, Charts)
 app.use(helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
     contentSecurityPolicy: {
         directives: {
             defaultSrc: ["'self'"],
-            scriptSrc: ["'self'", "'unsafe-inline'"], // Needed for redirect scripts
-            styleSrc: ["'self'", "'unsafe-inline'"],
-            imgSrc: ["'self'", "data:", "https:", "blob:"], // Token images from external URLs
-            connectSrc: ["'self'", "wss:", "ws:", "https://api.dexscreener.com", "https://api.helius.xyz"],
-            fontSrc: ["'self'", "https:", "data:"],
+            scriptSrc: [
+                "'self'",
+                "'unsafe-inline'",
+                "'unsafe-eval'", // Required for Tailwind JIT
+                "https://bundle.run",
+                "https://unpkg.com",
+                "https://cdn.socket.io",
+                "https://cdn.tailwindcss.com",
+            ],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+            imgSrc: ["'self'", "data:", "https:", "blob:"],
+            connectSrc: [
+                "'self'",
+                "wss:",
+                "ws:",
+                "https://api.dexscreener.com",
+                "https://api.helius.xyz",
+                "https://*.helius-rpc.com",
+                "https://*.solana.com",
+            ],
+            fontSrc: ["'self'", "https://fonts.gstatic.com", "https://fonts.googleapis.com", "data:"],
             objectSrc: ["'none'"],
             mediaSrc: ["'self'"],
             frameSrc: ["'none'"],
