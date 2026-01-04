@@ -18,6 +18,7 @@ const alerting = require('./services/alerting');
 const { initSocket } = require('./services/socket'); 
 const tokensRoutes = require('./routes/tokens');
 const webhooksRoutes = require('./routes/webhooks');
+const oracleRoutes = require('./routes/oracle');
 const { getOrCreateMasterWebhook } = require('./services/heliusWebhook');
 const fs = require('fs');
 const path = require('path');
@@ -342,6 +343,7 @@ async function startServer() {
         // Initialize Routes
         app.use('/api', tokensRoutes.init({ db: getDB() }));
         app.use('/webhook', webhooksRoutes.init({ db: getDB() }));
+        app.use('/oracle', oracleRoutes.init({ db: getDB(), logger }));
 
         app.use((err, req, res, _next) => {
             logger.error(`🔥 Unhandled Server Error: ${err.message}`);

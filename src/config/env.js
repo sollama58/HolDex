@@ -33,6 +33,16 @@ function validateEnv() {
         errors.push('DATA_SIGNING_SECRET is required in production for K-Score integrity verification');
     }
 
+    // SECURITY: Oracle webhook secret required in production for GASdf integration
+    if (isProduction && !process.env.ORACLE_WEBHOOK_SECRET) {
+        warnings.push('ORACLE_WEBHOOK_SECRET not set - Oracle burn webhook will reject all requests');
+    }
+
+    // Validate ORACLE_WEBHOOK_SECRET strength
+    if (process.env.ORACLE_WEBHOOK_SECRET && process.env.ORACLE_WEBHOOK_SECRET.length < 32) {
+        warnings.push('ORACLE_WEBHOOK_SECRET should be at least 32 characters for security');
+    }
+
     // Validate DATA_SIGNING_SECRET strength
     if (process.env.DATA_SIGNING_SECRET && process.env.DATA_SIGNING_SECRET.length < 32) {
         warnings.push('DATA_SIGNING_SECRET should be at least 32 characters for security');
@@ -169,5 +179,17 @@ module.exports = {
 
     // VERIFY_DATA: Enable signature verification on API responses
     // Set to 'strict' to reject tampered data, 'warn' to log only
-    VERIFY_DATA_MODE: process.env.VERIFY_DATA_MODE || 'strict'
+    VERIFY_DATA_MODE: process.env.VERIFY_DATA_MODE || 'strict',
+
+    // --- ORACLE API CONFIGURATION ---
+    // ORACLE_WEBHOOK_SECRET: Shared secret for GASdf → HolDex webhook authentication
+    // GASdf signs requests with HMAC-SHA256, HolDex verifies before processing
+    // CRITICAL: Set this in production to prevent forged burn notifications
+    ORACLE_WEBHOOK_SECRET: process.env.ORACLE_WEBHOOK_SECRET || null,
+
+    // ORACLE_RATE_LIMIT: Requests per minute for Oracle API endpoints
+    ORACLE_RATE_LIMIT: parseInt(process.env.ORACLE_RATE_LIMIT) || 100,
+
+    // NODE_ENV: Environment mode
+    NODE_ENV: process.env.NODE_ENV || 'development'
 };
