@@ -1,16 +1,32 @@
 /**
- * K-Score Updater v8 - 3 Pillars Formula
+ * K-Score Updater v10 - Harmonious 3 Pillars Formula
  *
- * DIAMOND HANDS (50%):
- *   - conviction: % accumulators + holders among top 20
+ * Philosophy $asdfasdfa: Simple, on-chain pure, no arbitrary thresholds
+ *
+ * All pillars use mathematically harmonious normalizations:
+ * - Exponential decay/growth functions
+ * - Geometric means for pillar composition
+ * - Consistent TOP 20 analysis across D and O
+ *
+ * DIAMOND HANDS (50%): √(C × R) where C = conviction × F(activity)
+ *   - conviction: % accumulators + holders among TOP 20
  *   - accExtRatio: accumulators / extractors ratio
+ *   - activityFreshness: F(t) = 1/e + (1-1/e)e^(-t/21) [decays to 1/e floor]
  *
- * ORGANIC GROWTH (35%):
- *   - holders: real holders count ($1+ balance)
- *   - top10: distribution fairness (inverted concentration)
+ * ORGANIC GROWTH (35%): √(H × T)
+ *   - H: ALL holders (no threshold - log normalization handles scale)
+ *   - T: 1 - (TOP 20 balance / CIRCULATING supply)
+ *   - Circulating = total - burned
  *
- * LONGEVITY (15%):
- *   - age: token age in days
+ * LONGEVITY (15%): A × S
+ *   - age: A(t) = 1 - e^(-t/21) [asymptotic to 1]
+ *   - survival: S(t) = 1/e + (1-1/e)e^(-t/30) [activity-based, τ=30 more lenient]
+ *
+ * v10 Changes:
+ *   - H: No threshold - count ALL holders (simple, on-chain pure)
+ *   - T: Uses TOP 20 / CIRCULATING (consistent with D, excludes burned)
+ *   - L: Added survival factor S (dead tokens penalized)
+ *   - All normalizations use harmonious exponential functions
  *
  * Eliminates manipulable metrics (volume, mcap, liquidity)
  * Focus on on-chain behavior only
@@ -944,7 +960,11 @@ function classifyRetention(retentionData) {
 async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, db = null) {
     const TOP_HOLDERS = 20;
     const CANDIDATES = 50;
-    const MIN_USD_VALUE = 1; // $1 minimum to count as "real holder"
+
+    // K-Score v10: No threshold - count ALL holders
+    // Philosophy $asdfasdfa: Simple, on-chain pure, no arbitrary thresholds
+    // The log normalization handles scale, T handles distribution quality
+    // Dust (1-5000 tokens) is negligible in % terms at any supply level
 
     try {
         // ============================================
@@ -997,7 +1017,7 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
                     );
 
                     // WEBHOOK MODE: Preserve on-chain data, don't estimate
-                    // real_holders = holders with $1+ value (from deep refresh)
+                    // K-Score v10: real_holders = holders with ≥0.01% supply (from deep refresh)
                     // total_holders = all token accounts (from deep refresh)
                     // holders = legacy field (kept for compatibility)
                     let storedRealHolders = tokenData?.real_holders || tokenData?.holders || 0;
@@ -1063,11 +1083,11 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
                 const cachedPrice = tokenRow?.priceusd || priceUsd;
 
                 // Estimate real holders from snapshot data (no API call!)
-                // Real holders = holders with $1+ value
+                // K-Score v10: Real holders = holders with ≥0.001% supply (from last deep refresh)
                 let realHoldersCount = cachedHolders;
-                if (cachedPrice > 0 && deltaResult.snapshotCount > 0) {
+                if (deltaResult.snapshotCount > 0) {
                     // Use snapshot data to estimate % of real holders
-                    // This is an approximation based on top holders having value
+                    // This is an approximation - actual count updated on deep refresh
                     realHoldersCount = Math.max(
                         deltaResult.snapshotCount,
                         Math.floor(cachedHolders * 0.8) // Conservative: 80% are real
@@ -1081,7 +1101,8 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
                     realHoldersCount,
                     totalHolders: cachedHolders,
                     allHolders: null,  // Not fetched in delta mode
-                    isDeltaMode: true
+                    isDeltaMode: true,
+                    preserveHolders: true  // Don't overwrite on-chain holder data
                 };
             }
         }
@@ -1092,22 +1113,11 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
             return { score: 0, analyzed: 0, realHoldersCount: 0, totalHolders: 0 };
         }
 
-        // 2. Calculate real holders ($1+ balance)
-        let realHoldersCount = 0;
-        if (priceUsd > 0) {
-            const divisor = Math.pow(10, decimals);
-            for (const h of allHolders) {
-                const usdValue = (h.balance / divisor) * priceUsd;
-                if (usdValue >= MIN_USD_VALUE) {
-                    realHoldersCount++;
-                }
-            }
-        } else {
-            // Fallback: count all holders with balance > 0
-            realHoldersCount = allHolders.length;
-        }
-
-        logger.info(`[Holders] ${mint.slice(0,8)}: ${realHoldersCount} real ($1+) / ${allHolders.length} total`);
+        // 2. Count ALL holders (no threshold)
+        // K-Score v10: Philosophy $asdfasdfa - no arbitrary thresholds
+        // Log normalization handles scale, T handles distribution quality
+        const realHoldersCount = allHolders.length;
+        logger.info(`[Holders] ${mint.slice(0,8)}: ${realHoldersCount} holders (no threshold)`);
 
         // 3. Filter pools from top candidates for conviction analysis
         const candidates = allHolders.slice(0, CANDIDATES);
@@ -2027,8 +2037,13 @@ function normalizeAge(ageDays, tau = 21) {
 }
 
 /**
- * Linear inverse concentration
+ * K-Score v10: Linear inverse concentration (TOP 20)
  * T(c) = max(0, 1 - c/100)
+ *
+ * Uses TOP 20 holders / CIRCULATING supply for consistency:
+ * - D analyzes TOP 20 for conviction
+ * - T uses TOP 20 for distribution
+ * - Circulating = total - burned (excludes dead supply)
  *
  * Properties:
  * - 0%   → 1.00 (perfect distribution)
@@ -2037,7 +2052,7 @@ function normalizeAge(ageDays, tau = 21) {
  * - 80%  → 0.20
  * - 100% → 0.00 (single holder)
  */
-function normalizeTop10(concentrationPct) {
+function normalizeTop20(concentrationPct) {
     return Math.max(0, 1 - concentrationPct / 100);
 }
 
@@ -2089,6 +2104,35 @@ const E_INV = 1 / Math.E;  // ≈ 0.3679
 
 function normalizeActivityFreshness(activityDays, tau = 21) {
     if (activityDays <= 0) return 1.0;  // Active now = 100%
+    return E_INV + (1 - E_INV) * Math.exp(-activityDays / tau);
+}
+
+/**
+ * K-Score v10: Survival factor for Longevity pillar
+ * S(t) = 1/e + (1 - 1/e) × e^(-t/τ)
+ *
+ * Mathematically harmonious with Activity Freshness F(t):
+ * - Same functional form (exponential decay with floor)
+ * - Different τ parameter (30 days - more lenient for longevity)
+ *
+ * Properties:
+ * - t=0   → 1.000 (active now = full survival)
+ * - t=7   → 0.847 (week dormant)
+ * - t=14  → 0.721 (2 weeks dormant)
+ * - t=30  → 0.600 (1τ)
+ * - t=60  → 0.471 (2τ)
+ * - t→∞   → 0.368 (1/e floor)
+ *
+ * Why τ=30 (not 21)?
+ * Longevity should be more forgiving than activity freshness.
+ * A token can survive periods of low activity and still be "alive".
+ *
+ * @param {number} activityDays - Average days since last on-chain activity
+ * @param {number} tau - Characteristic time (default: 30 days)
+ * @returns {number} Survival factor [1/e, 1]
+ */
+function normalizeSurvival(activityDays, tau = 30) {
+    if (activityDays <= 0) return 1.0;  // Active now = full survival
     return E_INV + (1 - E_INV) * Math.exp(-activityDays / tau);
 }
 
@@ -2155,7 +2199,7 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
     let raw = {
         holders: 0,
         ageDays: 0,
-        top10Pct: 50,  // default: assume 50% if unknown
+        top20Pct: 50,  // K-Score v10: TOP 20 / circulating (default: 50%)
         conviction: 0,
         accExtRatio: 0,
         activityDays: 0  // K-Score v9: avg days since holder activity
@@ -2163,9 +2207,9 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
 
     // Normalized metrics [0-1]
     let normalized = {
-        H: 0,  // holders
+        H: 0,  // holders (all, no threshold)
         A: 0,  // age
-        T: 0,  // top10 (inverted)
+        T: 0,  // top20 concentration (inverted, uses circulating)
         C: 0,  // conviction (base)
         R: 0,  // acc/ext ratio
         F: 1   // K-Score v9: activity freshness [1/e, 1]
@@ -2226,11 +2270,18 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         // ============================================
         // OPTIMIZATION: Use cached security data if available
         // Security status rarely changes - only check once per token, then use DB
+        // EXCEPTION: Deep refresh mode always re-checks (catches pump.fun graduation)
+        // Also re-check pump.fun tokens that aren't secure yet (might have graduated)
 
         let lpData = null;
 
-        const hasCachedSecurity = dbData?.mint_authority_revoked !== null ||
-                                   dbData?.freeze_authority_revoked !== null;
+        const isPumpFunToken = mint.endsWith('pump');
+        const cachedNotSecure = !(dbData?.mint_authority_revoked && dbData?.freeze_authority_revoked);
+        const needsSecurityRefresh = forceDeepRefreshMode || (isPumpFunToken && cachedNotSecure);
+
+        const hasCachedSecurity = (dbData?.mint_authority_revoked !== null ||
+                                   dbData?.freeze_authority_revoked !== null) &&
+                                   !needsSecurityRefresh;
 
         if (hasCachedSecurity) {
             // Use cached security data (0 API calls)
@@ -2294,6 +2345,7 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         // ============================================
 
         if (!skipConviction && HELIUS_API_KEY) {
+            // K-Score v10: No threshold for holder count - count all holders
             convictionData = await calculateConvictionAndHolders(mint, priceUsd, decimals, db);
 
             // In webhook/delta mode, skip burn recalculation - use stored values
@@ -2357,22 +2409,26 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
 
             // Top10 concentration + Activity freshness (K-Score v9)
             if (convictionData.isWebhookMode && db) {
-                // Webhook mode: calculate from holder_snapshots (0 RPC)
-                const top10Snapshots = await db.all(
-                    'SELECT balance, last_tx_timestamp, updated_at FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 10',
+                // K-Score v10: Use TOP 20 / CIRCULATING for consistency
+                // D uses top 20 for conviction, T uses top 20 for distribution
+                const top20Snapshots = await db.all(
+                    'SELECT balance, last_tx_timestamp, updated_at FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 20',
                     [mint]
                 );
-                if (top10Snapshots.length >= 10 && burnData?.totalSupply > 0) {
-                    const top10Balance = top10Snapshots.reduce((s, h) => s + BigInt(h.balance || 0), 0n);
+                if (top20Snapshots.length >= 10 && burnData?.totalSupply > 0) {
+                    const top20Balance = top20Snapshots.reduce((s, h) => s + BigInt(h.balance || 0), 0n);
                     const totalSupplyRaw = BigInt(Math.floor(burnData.totalSupply * Math.pow(10, burnData.decimals || 9)));
-                    raw.top10Pct = totalSupplyRaw > 0n ? Number((top10Balance * 100n) / totalSupplyRaw) : 50;
+                    // Circulating = total - burned
+                    const burnedRaw = BigInt(Math.floor((burnData.burnedPercent || 0) / 100 * burnData.totalSupply * Math.pow(10, burnData.decimals || 9)));
+                    const circulatingRaw = totalSupplyRaw - burnedRaw;
+                    raw.top20Pct = circulatingRaw > 0n ? Number((top20Balance * 100n) / circulatingRaw) : 50;
                 }
 
                 // K-Score v9: Calculate average activity age
                 const now = Date.now();
                 let totalActivityAge = 0;
                 let validSnapshots = 0;
-                for (const snap of top10Snapshots) {
+                for (const snap of top20Snapshots) {
                     // Prefer last_tx_timestamp, fallback to updated_at
                     // NOTE: PostgreSQL returns BIGINT as string, so "0" is truthy - must parseInt first
                     const ts = parseInt(snap.last_tx_timestamp);
@@ -2387,25 +2443,29 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
                 }
             } else {
                 // Full analysis mode: use filtered holders from RPC
+                // K-Score v10: Use TOP 20 / CIRCULATING for consistency
                 const filteredHolders = convictionData.filteredTop50 || convictionData.allHolders || [];
                 if (filteredHolders.length >= 10 && burnData?.totalSupply > 0) {
-                    const top10Balance = filteredHolders.slice(0, 10).reduce((s, h) => s + h.balance, 0);
+                    const top20Balance = filteredHolders.slice(0, 20).reduce((s, h) => s + h.balance, 0);
                     const totalSupplyRaw = burnData.totalSupply * Math.pow(10, burnData.decimals || 9);
-                    raw.top10Pct = (top10Balance / totalSupplyRaw) * 100;
+                    // Circulating = total - burned
+                    const burnedRaw = (burnData.burnedPercent || 0) / 100 * totalSupplyRaw;
+                    const circulatingRaw = totalSupplyRaw - burnedRaw;
+                    raw.top20Pct = circulatingRaw > 0 ? (top20Balance / circulatingRaw) * 100 : 50;
                 }
 
                 // K-Score v9: Get activity timestamps from freshly saved snapshots
                 // (We just saved them during conviction analysis, now read them back)
                 if (db) {
-                    const top10Snapshots = await db.all(
-                        'SELECT last_tx_timestamp, updated_at FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 10',
+                    const top20Snapshots = await db.all(
+                        'SELECT last_tx_timestamp, updated_at FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 20',
                         [mint]
                     );
-                    if (top10Snapshots.length > 0) {
+                    if (top20Snapshots.length > 0) {
                         const now = Date.now();
                         let totalActivityAge = 0;
                         let validSnapshots = 0;
-                        for (const snap of top10Snapshots) {
+                        for (const snap of top20Snapshots) {
                             // NOTE: PostgreSQL returns BIGINT as string, so "0" is truthy - must parseInt first
                             const ts = parseInt(snap.last_tx_timestamp);
                             const lastActivity = ts > 0 ? ts : (parseInt(snap.updated_at) || now);
@@ -2428,7 +2488,7 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
 
         normalized.H = normalizeHolders(raw.holders);
         normalized.A = normalizeAge(raw.ageDays);
-        normalized.T = normalizeTop10(raw.top10Pct);
+        normalized.T = normalizeTop20(raw.top20Pct);
         normalized.F = normalizeActivityFreshness(raw.activityDays);  // K-Score v9
         normalized.R = normalizeAccExtRatio(raw.accExtRatio);
 
@@ -2439,19 +2499,33 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         const C_base = normalizeConviction(raw.conviction);
         normalized.C = C_base * normalized.F;
 
+        // K-Score v10: Survival factor for Longevity
+        // S(t) uses same formula as F(t) but with τ=30 (more lenient)
+        // This makes L = Age × Survival (not just Age)
+        normalized.S = normalizeSurvival(raw.activityDays);
+
         // ============================================
         // CALCULATE 3 PILLARS
         // ============================================
 
         // Diamond Hands = √(Conviction × AccExtRatio)
-        // Note: Conviction now includes activity freshness factor
+        // Note: Conviction now includes activity freshness factor F(t)
         pillars.diamondHands = geometricMean2(normalized.C, normalized.R);
 
         // Organic Growth = √(Holders × Top10Distribution)
+        // Note: Holders now uses supply-relative threshold (0.001% of supply)
         pillars.organicGrowth = geometricMean2(normalized.H, normalized.T);
 
-        // Longevity = Age (direct)
-        pillars.longevity = normalized.A;
+        // K-Score v10: Longevity = Age × Survival
+        // L = A × S where:
+        //   A = 1 - e^(-t/21)     → older = better (asymptotic to 1)
+        //   S = 1/e + (1-1/e)e^(-t/30) → active = better (decays to 1/e)
+        //
+        // This ensures:
+        //   - Old + active token → high L (deserved)
+        //   - Old + dead token → L capped by S (fair)
+        //   - Young + active → medium L (growing)
+        pillars.longevity = normalized.A * normalized.S;
 
         // ============================================
         // FINAL SCORE: Weighted Geometric Mean
@@ -2521,10 +2595,10 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
 
         // Log breakdown
         const wasCapped = score < uncappedScore;
-        logger.info(`[K-Score v9] ${mint.slice(0,8)}: ${score}${wasCapped ? ` (capped from ${uncappedScore})` : ''}`);
+        logger.info(`[K-Score v10] ${mint.slice(0,8)}: ${score}${wasCapped ? ` (capped from ${uncappedScore})` : ''}`);
         logger.info(`  Diamond Hands: ${(pillars.diamondHands * 100).toFixed(0)}% (C:${(normalized.C * 100).toFixed(0)}% R:${(normalized.R * 100).toFixed(0)}% F:${(normalized.F * 100).toFixed(0)}%)`);
         logger.info(`  Organic Growth: ${(pillars.organicGrowth * 100).toFixed(0)}% (H:${(normalized.H * 100).toFixed(0)}% T:${(normalized.T * 100).toFixed(0)}%)`);
-        logger.info(`  Longevity: ${(pillars.longevity * 100).toFixed(0)}% (${raw.ageDays.toFixed(1)}d) | Activity: ${raw.activityDays.toFixed(1)}d ago`);
+        logger.info(`  Longevity: ${(pillars.longevity * 100).toFixed(0)}% (A:${(normalized.A * 100).toFixed(0)}% S:${(normalized.S * 100).toFixed(0)}%) | Age:${raw.ageDays.toFixed(1)}d Activity:${raw.activityDays.toFixed(1)}d`);
         if (securityData) {
             const secStatus = securityData.isSecure ? '✓' : `cap=${authorityCap}`;
             logger.info(`  Security: ${secStatus}`);
