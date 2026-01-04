@@ -5,7 +5,7 @@ const { getClient } = require('./redis');
 // We require this dynamically inside functions if needed to avoid circular deps,
 // or pass it in. For aggregateAndSaveToken, we need it.
 const { getHolderCountFromRPC } = require('./solana');
-const { signMarket } = require('../utils/dataSignature'); 
+const { signMarket, signKScore } = require('../utils/dataSignature'); 
 
 let primaryPool = null;
 let readPool = null; 
@@ -185,6 +185,110 @@ async function initDB() {
                     last_call BIGINT,
                     created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000
                 );
+
+                -- ═══════════════════════════════════════════════════════════
+                -- HARMONY SYSTEM: φ-Powered E-Score Infrastructure
+                -- "Hold to enter. Burn to use. φ guides all ratios."
+                -- ═══════════════════════════════════════════════════════════
+
+                -- Participants: Unified E-Score tracking across ecosystem
+                -- E-Score = geometric mean of 7 dimensions (hold, burn, use, build, run, refer, time)
+                CREATE TABLE IF NOT EXISTS participants (
+                    wallet TEXT PRIMARY KEY,
+                    type TEXT DEFAULT 'user',              -- 'user' | 'builder' | 'validator' | 'treasury'
+
+                    -- Raw contribution metrics (source of truth)
+                    total_burned DOUBLE PRECISION DEFAULT 0,
+                    total_referred DOUBLE PRECISION DEFAULT 0,
+                    total_built DOUBLE PRECISION DEFAULT 0,
+                    total_run DOUBLE PRECISION DEFAULT 0,
+                    api_calls INTEGER DEFAULT 0,
+
+                    -- Cached E-Score (recalculated periodically)
+                    e_score DOUBLE PRECISION DEFAULT 0,
+                    e_score_updated_at BIGINT DEFAULT 0,
+
+                    -- Dimension scores (0-100 each, φ-weighted)
+                    dim_hold DOUBLE PRECISION DEFAULT 0,
+                    dim_burn DOUBLE PRECISION DEFAULT 0,
+                    dim_use DOUBLE PRECISION DEFAULT 0,
+                    dim_build DOUBLE PRECISION DEFAULT 0,
+                    dim_run DOUBLE PRECISION DEFAULT 0,
+                    dim_refer DOUBLE PRECISION DEFAULT 0,
+                    dim_time DOUBLE PRECISION DEFAULT 0,
+
+                    -- Tier caching
+                    tier_name TEXT DEFAULT 'Newcomer',
+                    tier_icon TEXT DEFAULT '🌱',
+
+                    -- Timestamps
+                    first_seen BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
+                    last_active BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
+
+                    -- Data integrity
+                    sig_escore TEXT DEFAULT NULL
+                );
+
+                -- Contributions: Immutable audit trail for E-Score changes
+                -- Every contribution is recorded for transparency
+                CREATE TABLE IF NOT EXISTS contributions (
+                    id SERIAL PRIMARY KEY,
+                    wallet TEXT NOT NULL,
+                    type TEXT NOT NULL,                    -- 'burn' | 'refer' | 'build' | 'run' | 'api_call'
+                    amount DOUBLE PRECISION NOT NULL,
+                    source TEXT NOT NULL,                  -- 'gasdf' | 'holdex' | 'direct'
+
+                    -- Verification
+                    tx_signature TEXT,                     -- Solana tx for burns
+                    verified BOOLEAN DEFAULT FALSE,
+                    verified_at BIGINT,
+
+                    -- φ-Impact calculation
+                    e_score_delta DOUBLE PRECISION DEFAULT 0,
+
+                    -- Timestamps
+                    created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
+
+                    -- Prevent duplicates
+                    UNIQUE(tx_signature)
+                );
+
+                -- Reward Distributions: φ-ratio fee distribution tracking
+                -- 38.2% burn, 38.2% rewards, 23.6% treasury (based on φ²/φ³)
+                CREATE TABLE IF NOT EXISTS reward_distributions (
+                    id SERIAL PRIMARY KEY,
+                    source_tx TEXT NOT NULL,               -- Original fee transaction
+                    total_amount DOUBLE PRECISION NOT NULL,
+
+                    -- φ-ratio splits
+                    burn_amount DOUBLE PRECISION NOT NULL,      -- 38.2%
+                    rewards_amount DOUBLE PRECISION NOT NULL,   -- 38.2%
+                    treasury_amount DOUBLE PRECISION NOT NULL,  -- 23.6%
+
+                    -- Distribution status
+                    status TEXT DEFAULT 'pending',         -- 'pending' | 'distributed' | 'failed'
+                    distributed_at BIGINT,
+
+                    -- Timestamps
+                    created_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000
+                );
+
+                -- Operation Costs: Fee structure with efficiency floor
+                -- minFee = (cost / 0.236) × 1.2 guarantees infrastructure sustainability
+                CREATE TABLE IF NOT EXISTS operation_costs (
+                    operation TEXT PRIMARY KEY,            -- 'gasdf_submit_standard', 'gasdf_submit_priority', etc.
+                    base_fee DOUBLE PRECISION NOT NULL,    -- Base fee in $ASDF
+                    infrastructure_cost DOUBLE PRECISION NOT NULL,  -- Actual cost
+                    min_fee DOUBLE PRECISION NOT NULL,     -- Efficiency floor: (cost / 0.236) × 1.2
+                    max_discount DOUBLE PRECISION NOT NULL, -- Maximum discount % (e.g., 0.50 = 50%)
+
+                    -- Analytics
+                    total_calls INTEGER DEFAULT 0,
+                    total_revenue DOUBLE PRECISION DEFAULT 0,
+
+                    -- Timestamps
+                    updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000
+                );
             `);
 
             // Add new columns if they don't exist (migration-safe)
@@ -270,6 +374,17 @@ async function initDB() {
                 `CREATE INDEX IF NOT EXISTS idx_holder_snapshots_mint_balance ON holder_snapshots (mint, balance DESC)`,
                 // Index for k_score_history date range queries
                 `CREATE INDEX IF NOT EXISTS idx_kscore_history_mint_date ON k_score_history (mint, date DESC)`,
+                // ═══════════════════════════════════════════════════════════
+                // HARMONY SYSTEM INDEXES
+                // ═══════════════════════════════════════════════════════════
+                // E-Score leaderboard queries (most common)
+                `CREATE INDEX IF NOT EXISTS idx_participants_escore ON participants (e_score DESC NULLS LAST)`,
+                // Contributions by wallet (for E-Score calculation)
+                `CREATE INDEX IF NOT EXISTS idx_contributions_wallet ON contributions (wallet, created_at DESC)`,
+                // Contributions by type (analytics)
+                `CREATE INDEX IF NOT EXISTS idx_contributions_type ON contributions (type, created_at DESC)`,
+                // Pending reward distributions
+                `CREATE INDEX IF NOT EXISTS idx_reward_distributions_status ON reward_distributions (status) WHERE status = 'pending'`,
             ];
 
             for (const sql of migrations) {
@@ -290,6 +405,7 @@ async function initDB() {
                 }
             }
             logger.info('💾 Database: Indexes verified');
+            logger.info('⚗️ Harmony: E-Score tables ready (φ = 1.618)');
 
             dbWrapper = {
                 query: (text, params) => (text.trim().toUpperCase().startsWith('SELECT') ? readPool : primaryPool).query(text, params),
@@ -418,13 +534,21 @@ async function aggregateAndSaveToken(db, mint) {
         if (change5m !== null) { query += `, change5m = $${idx++}`; params.push(change5m); }
         if (holderCount !== null) { query += `, holders = $${idx++}, last_holder_check = $${idx++}`; params.push(holderCount); params.push(now); }
 
-        query += ` WHERE mint = $4 RETURNING mint, priceusd, marketcap, liquidity, price_source, price_timestamp, price_pool, liquidity_source, liquidity_timestamp, mcap_calculated, holders_source, holders_timestamp, age_days`;
+        // Include kscore fields in RETURNING if holders were updated (needed for sig_kscore)
+        query += ` WHERE mint = $4 RETURNING mint, priceusd, marketcap, liquidity, price_source, price_timestamp, price_pool, liquidity_source, liquidity_timestamp, mcap_calculated, holders_source, holders_timestamp, age_days, k_score, conviction_score, conviction_accumulators, conviction_holders, conviction_reducers, conviction_extractors, conviction_analyzed, holders, last_k_score_update`;
         const result = await db.get(query, params);
 
         // Re-sign market data to maintain integrity
         if (result) {
             const sig_market = signMarket(result);
-            await db.run(`UPDATE tokens SET sig_market = $1 WHERE mint = $2`, [sig_market, mint]);
+
+            // FIX: If holders were updated, also re-sign sig_kscore (holders is part of the kscore signature)
+            if (holderCount !== null) {
+                const sig_kscore = signKScore(result);
+                await db.run(`UPDATE tokens SET sig_market = $1, sig_kscore = $2 WHERE mint = $3`, [sig_market, sig_kscore, mint]);
+            } else {
+                await db.run(`UPDATE tokens SET sig_market = $1 WHERE mint = $2`, [sig_market, mint]);
+            }
         }
 
     } catch (err) { logger.error(`Aggregation Error ${mint}: ${err.message}`); }
