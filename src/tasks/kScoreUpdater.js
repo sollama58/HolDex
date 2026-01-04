@@ -2824,6 +2824,57 @@ async function updateKScores(deps) {
                 // Generate 8-category signatures (Don't Trust, Verify)
                 const batchUpdateTimestamp = Date.now();
 
+                // ============================================
+                // ON-CHAIN MARKET DATA (Verifiable)
+                // ============================================
+                let batchMarketData = {
+                    priceUsd: t.priceusd || 0,
+                    priceSource: t.price_source || 'db_cache',
+                    priceTimestamp: t.price_timestamp || 0,
+                    pricePool: t.price_pool || null,
+                    mcap: t.marketcap || 0,
+                    mcapCalculated: false
+                };
+
+                // Fetch on-chain price if stale (> 5 min)
+                const batchPriceNeedsRefresh = !t.price_timestamp ||
+                                              (Date.now() - parseInt(t.price_timestamp || 0) > 300000);
+
+                if (batchPriceNeedsRefresh && db) {
+                    try {
+                        const priceResult = await priceService.getOnChainPrice(db, t.mint, t.decimals || 9);
+
+                        if (priceResult.priceUsd > 0) {
+                            batchMarketData.priceUsd = priceResult.priceUsd;
+                            batchMarketData.priceSource = priceResult.source;
+                            batchMarketData.priceTimestamp = priceResult.timestamp;
+                            batchMarketData.pricePool = priceResult.poolAddress;
+
+                            // Calculate on-chain mcap = circulating_supply × price
+                            const decimals = t.decimals || 9;
+                            const divisor = Math.pow(10, decimals);
+                            const circulatingSupply = (currentSupply - burnedAmount) / divisor;
+
+                            const mcapResult = priceService.calculateOnChainMcap({
+                                supply: circulatingSupply,
+                                priceUsd: priceResult.priceUsd,
+                                priceSource: priceResult.source,
+                                priceTimestamp: priceResult.timestamp,
+                                priceProof: priceResult.proof
+                            });
+
+                            batchMarketData.mcap = mcapResult.mcap;
+                            batchMarketData.mcapCalculated = mcapResult.source === 'on_chain';
+
+                            if (priceResult.source === 'on_chain') {
+                                logger.debug(`[Market] ${t.mint.slice(0,8)}: On-chain price $${priceResult.priceUsd.toExponential(2)}, MCap $${mcapResult.mcap.toLocaleString()}`);
+                            }
+                        }
+                    } catch (e) {
+                        logger.debug(`[Market] ${t.mint.slice(0,8)}: Price fetch failed, using cached`);
+                    }
+                }
+
                 // Build complete token object for signing all categories
                 const batchTokenForSigning = {
                     mint: t.mint,
@@ -2856,9 +2907,13 @@ async function updateKScores(deps) {
                     conviction_analyzed: validatedConviction.analyzed,
                     holders: validatedConviction.realHoldersCount,
                     last_k_score_update: batchUpdateTimestamp,
-                    // Market
-                    priceusd: t.priceusd || 0,
-                    marketcap: t.marketcap || 0,
+                    // Market (ON-CHAIN VERIFIED)
+                    priceusd: batchMarketData.priceUsd,
+                    price_source: batchMarketData.priceSource,
+                    price_timestamp: batchMarketData.priceTimestamp,
+                    price_pool: batchMarketData.pricePool,
+                    marketcap: batchMarketData.mcap,
+                    mcap_calculated: batchMarketData.mcapCalculated,
                     liquidity: t.liquidity || 0,
                     // Origin
                     is_pump_fun: safeBool(category.isPumpFun),
@@ -2897,8 +2952,14 @@ async function updateKScores(deps) {
                         sig_market = $24,
                         sig_origin = $25,
                         sig_full = $26,
-                        chaos_nonce = $27
-                    WHERE mint = $28
+                        chaos_nonce = $27,
+                        priceusd = $28,
+                        marketcap = $29,
+                        price_source = $30,
+                        price_timestamp = $31,
+                        price_pool = $32,
+                        mcap_calculated = $33
+                    WHERE mint = $34
                 `, [
                     smoothedScore,
                     batchUpdateTimestamp.toString(),
@@ -2927,6 +2988,12 @@ async function updateKScores(deps) {
                     batchSignatures.sig_origin,
                     batchSignatures.sig_full,
                     batchSignatures.chaos_nonce,
+                    batchMarketData.priceUsd,
+                    batchMarketData.mcap,
+                    batchMarketData.priceSource,
+                    batchMarketData.priceTimestamp ? batchMarketData.priceTimestamp.toString() : null,
+                    batchMarketData.pricePool,
+                    batchMarketData.mcapCalculated,
                     t.mint
                 ]);
 
