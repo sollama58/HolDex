@@ -128,19 +128,29 @@ function signKScore(token) {
 
 /**
  * 6. Market Signature
- * Protects: priceusd, marketcap, liquidity, price_source, price_timestamp, mcap_calculated
- * Includes proof of on-chain derivation with timestamp
+ * Protects: price, mcap, liquidity with full provenance chain
+ * Each field has source + timestamp for "Don't Trust, Verify"
  */
 function signMarket(token) {
     const data = [
         token.mint,
+        // Price with provenance
         (token.priceusd || token.priceUsd || 0).toFixed(12),
-        (token.marketcap || token.marketCap || 0).toFixed(2),
-        (token.liquidity || 0).toFixed(2),
         token.price_source || 'unknown',
         token.price_timestamp || 0,
         token.price_pool || '',
-        token.mcap_calculated ? '1' : '0'
+        // MCap with provenance
+        (token.marketcap || token.marketCap || 0).toFixed(2),
+        token.mcap_calculated ? '1' : '0',
+        // Liquidity with provenance
+        (token.liquidity || 0).toFixed(2),
+        token.liquidity_source || 'unknown',
+        token.liquidity_timestamp || 0,
+        // Holders with provenance
+        token.holders_source || 'unknown',
+        token.holders_timestamp || 0,
+        // Age
+        (token.age_days || 0).toFixed(2)
     ].join('|');
     return hmacSign(data);
 }

@@ -2541,7 +2541,10 @@ async function updateSingleToken(deps, mint) {
             priceTimestamp: token.price_timestamp || 0,
             pricePool: token.price_pool || null,
             mcap: token.marketcap || 0,
-            mcapCalculated: false
+            mcapCalculated: false,
+            liquidity: token.liquidity || 0,
+            liquiditySource: token.liquidity_source || 'unknown',
+            liquidityTimestamp: token.liquidity_timestamp || 0
         };
 
         // Try to get on-chain price (only during deep refresh to save API calls)
@@ -2552,10 +2555,12 @@ async function updateSingleToken(deps, mint) {
             try {
                 const priceResult = await priceService.getOnChainPrice(db, mint, token.decimals || 9);
 
+                // Always update timestamp to show we checked (provenance tracking)
+                marketData.priceTimestamp = priceResult.timestamp || Date.now();
+                marketData.priceSource = priceResult.source || 'checked';
+
                 if (priceResult.priceUsd > 0) {
                     marketData.priceUsd = priceResult.priceUsd;
-                    marketData.priceSource = priceResult.source;
-                    marketData.priceTimestamp = priceResult.timestamp;
                     marketData.pricePool = priceResult.poolAddress;
 
                     // Calculate on-chain mcap = circulating_supply × price
@@ -2576,6 +2581,17 @@ async function updateSingleToken(deps, mint) {
 
                     if (priceResult.source === 'on_chain') {
                         logger.debug(`[Market] ${mint.slice(0,8)}: On-chain price $${priceResult.priceUsd.toExponential(2)}, MCap $${mcapResult.mcap.toLocaleString()}`);
+                    }
+                }
+
+                // Calculate on-chain liquidity with source tracking
+                const solPrice = await priceService.getSolPrice();
+                if (solPrice > 0) {
+                    const liquidityResult = await _calculateOnChainLiquidity(db, mint, solPrice);
+                    if (liquidityResult.liquidity > 0) {
+                        marketData.liquidity = liquidityResult.liquidity;
+                        marketData.liquiditySource = liquidityResult.source;
+                        marketData.liquidityTimestamp = Date.now();
                     }
                 }
             } catch (e) {
@@ -2625,7 +2641,14 @@ async function updateSingleToken(deps, mint) {
             price_pool: marketData.pricePool,
             marketcap: marketData.mcap,
             mcap_calculated: marketData.mcapCalculated,
-            liquidity: token.liquidity || 0,
+            liquidity: marketData.liquidity,
+            liquidity_source: marketData.liquiditySource,
+            liquidity_timestamp: marketData.liquidityTimestamp,
+            // Holders source tracking
+            holders_source: conviction.isDeltaMode ? 'webhook_cache' : 'helius_rpc',
+            holders_timestamp: updateTimestamp,
+            // Age in days (calculated from creation timestamp)
+            age_days: token.timestamp > 0 ? (Date.now() - parseInt(token.timestamp)) / 86400000 : 0,
             // Origin
             is_pump_fun: category.isPumpFun,
             bonding_curve_complete: category.bondingCurveComplete,
@@ -2682,8 +2705,15 @@ async function updateSingleToken(deps, mint) {
                 price_source = $32,
                 price_timestamp = $33,
                 price_pool = $34,
-                mcap_calculated = $35
-            WHERE mint = $36
+                mcap_calculated = $35,
+                liquidity = $36,
+                liquidity_source = $37,
+                liquidity_timestamp = $38,
+                holders_source = $39,
+                holders_timestamp = $40,
+                age_days = $41,
+                supply_last_check = $42
+            WHERE mint = $43
         `, [
             smoothedScore,
             updateTimestamp.toString(),
@@ -2720,6 +2750,13 @@ async function updateSingleToken(deps, mint) {
             marketData.priceTimestamp ? marketData.priceTimestamp.toString() : null,
             marketData.pricePool,
             marketData.mcapCalculated,
+            marketData.liquidity,
+            marketData.liquiditySource,
+            marketData.liquidityTimestamp ? marketData.liquidityTimestamp.toString() : null,
+            conviction.isDeltaMode ? 'webhook_cache' : 'helius_rpc',
+            updateTimestamp.toString(),
+            token.timestamp > 0 ? (Date.now() - parseInt(token.timestamp)) / 86400000 : 0,
+            updateTimestamp.toString(),  // supply_last_check = now
             mint
         ]);
 
@@ -2833,7 +2870,10 @@ async function updateKScores(deps) {
                     priceTimestamp: t.price_timestamp || 0,
                     pricePool: t.price_pool || null,
                     mcap: t.marketcap || 0,
-                    mcapCalculated: false
+                    mcapCalculated: false,
+                    liquidity: t.liquidity || 0,
+                    liquiditySource: t.liquidity_source || 'unknown',
+                    liquidityTimestamp: t.liquidity_timestamp || 0
                 };
 
                 // Fetch on-chain price if stale (> 5 min)
@@ -2844,10 +2884,12 @@ async function updateKScores(deps) {
                     try {
                         const priceResult = await priceService.getOnChainPrice(db, t.mint, t.decimals || 9);
 
+                        // Always update timestamp to show we checked (provenance tracking)
+                        batchMarketData.priceTimestamp = priceResult.timestamp || Date.now();
+                        batchMarketData.priceSource = priceResult.source || 'checked';
+
                         if (priceResult.priceUsd > 0) {
                             batchMarketData.priceUsd = priceResult.priceUsd;
-                            batchMarketData.priceSource = priceResult.source;
-                            batchMarketData.priceTimestamp = priceResult.timestamp;
                             batchMarketData.pricePool = priceResult.poolAddress;
 
                             // Calculate on-chain mcap = circulating_supply × price
@@ -2868,6 +2910,17 @@ async function updateKScores(deps) {
 
                             if (priceResult.source === 'on_chain') {
                                 logger.debug(`[Market] ${t.mint.slice(0,8)}: On-chain price $${priceResult.priceUsd.toExponential(2)}, MCap $${mcapResult.mcap.toLocaleString()}`);
+                            }
+                        }
+
+                        // Calculate on-chain liquidity with source tracking
+                        const solPrice = await priceService.getSolPrice();
+                        if (solPrice > 0) {
+                            const liquidityResult = await _calculateOnChainLiquidity(db, t.mint, solPrice);
+                            if (liquidityResult.liquidity > 0) {
+                                batchMarketData.liquidity = liquidityResult.liquidity;
+                                batchMarketData.liquiditySource = liquidityResult.source;
+                                batchMarketData.liquidityTimestamp = Date.now();
                             }
                         }
                     } catch (e) {
@@ -2914,7 +2967,14 @@ async function updateKScores(deps) {
                     price_pool: batchMarketData.pricePool,
                     marketcap: batchMarketData.mcap,
                     mcap_calculated: batchMarketData.mcapCalculated,
-                    liquidity: t.liquidity || 0,
+                    liquidity: batchMarketData.liquidity,
+                    liquidity_source: batchMarketData.liquiditySource,
+                    liquidity_timestamp: batchMarketData.liquidityTimestamp,
+                    // Holders source tracking
+                    holders_source: conviction.isDeltaMode ? 'webhook_cache' : 'helius_rpc',
+                    holders_timestamp: batchUpdateTimestamp,
+                    // Age in days (calculated from creation timestamp)
+                    age_days: t.timestamp > 0 ? (Date.now() - parseInt(t.timestamp)) / 86400000 : 0,
                     // Origin
                     is_pump_fun: safeBool(category.isPumpFun),
                     bonding_curve_complete: safeBool(category.bondingCurveComplete),
@@ -2958,8 +3018,15 @@ async function updateKScores(deps) {
                         price_source = $30,
                         price_timestamp = $31,
                         price_pool = $32,
-                        mcap_calculated = $33
-                    WHERE mint = $34
+                        mcap_calculated = $33,
+                        liquidity = $34,
+                        liquidity_source = $35,
+                        liquidity_timestamp = $36,
+                        holders_source = $37,
+                        holders_timestamp = $38,
+                        age_days = $39,
+                        supply_last_check = $40
+                    WHERE mint = $41
                 `, [
                     smoothedScore,
                     batchUpdateTimestamp.toString(),
@@ -2994,6 +3061,13 @@ async function updateKScores(deps) {
                     batchMarketData.priceTimestamp ? batchMarketData.priceTimestamp.toString() : null,
                     batchMarketData.pricePool,
                     batchMarketData.mcapCalculated,
+                    batchMarketData.liquidity,
+                    batchMarketData.liquiditySource,
+                    batchMarketData.liquidityTimestamp ? batchMarketData.liquidityTimestamp.toString() : null,
+                    conviction.isDeltaMode ? 'webhook_cache' : 'helius_rpc',
+                    batchUpdateTimestamp.toString(),
+                    t.timestamp > 0 ? (Date.now() - parseInt(t.timestamp)) / 86400000 : 0,
+                    batchUpdateTimestamp.toString(),  // supply_last_check = now
                     t.mint
                 ]);
 
