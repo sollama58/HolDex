@@ -20,20 +20,96 @@ const crypto = require('crypto');
 const config = require('../config/env');
 const logger = require('../services/logger');
 
+// ============================================
+// KEY ROTATION SUPPORT
+// ============================================
+// To rotate keys with zero downtime:
+// 1. Set DATA_SIGNING_SECRET_PREVIOUS = current key
+// 2. Set DATA_SIGNING_SECRET = new key
+// 3. After 24h (all signatures refreshed), remove PREVIOUS
+//
 const SIGNING_SECRET = config.DATA_SIGNING_SECRET || process.env.DATA_SIGNING_SECRET;
+const SIGNING_SECRET_PREVIOUS = process.env.DATA_SIGNING_SECRET_PREVIOUS || null;
+
+// Signature version prefix (allows future algorithm changes)
+const SIG_VERSION = 'v1:';
 
 if (!SIGNING_SECRET && process.env.NODE_ENV === 'production') {
     logger.error('CRITICAL: DATA_SIGNING_SECRET not set in production!');
 }
 
+if (SIGNING_SECRET_PREVIOUS) {
+    logger.info('[Signature] Key rotation mode active - verifying with current + previous keys');
+}
+
 /**
- * Generate HMAC-SHA256 signature
+ * Generate HMAC-SHA256 signature with version prefix
+ * @param {string} data - Data to sign
+ * @returns {string} Versioned signature (v1:base64...)
  */
 function hmacSign(data) {
     if (!SIGNING_SECRET) return 'dev_unsigned';
     const hmac = crypto.createHmac('sha256', SIGNING_SECRET);
     hmac.update(data);
+    return SIG_VERSION + hmac.digest('base64');
+}
+
+/**
+ * Generate HMAC with a specific key (for verification)
+ * @param {string} data - Data to sign
+ * @param {string} key - Signing key
+ * @returns {string} Raw base64 signature (no version prefix)
+ */
+function hmacSignWithKey(data, key) {
+    const hmac = crypto.createHmac('sha256', key);
+    hmac.update(data);
     return hmac.digest('base64');
+}
+
+/**
+ * Verify signature with key rotation support
+ * @param {string} data - Original data
+ * @param {string} expectedSig - Expected signature (may have version prefix)
+ * @returns {{valid: boolean, keyUsed: string}} Verification result
+ */
+function verifyWithRotation(data, expectedSig) {
+    if (!SIGNING_SECRET) return { valid: true, keyUsed: 'dev_mode' };
+    if (!expectedSig) return { valid: false, keyUsed: 'none' };
+    if (expectedSig === 'dev_unsigned') return { valid: false, keyUsed: 'dev' };
+
+    // Strip version prefix if present
+    const sig = expectedSig.startsWith(SIG_VERSION)
+        ? expectedSig.slice(SIG_VERSION.length)
+        : expectedSig;
+
+    // Try current key first
+    const currentSig = hmacSignWithKey(data, SIGNING_SECRET);
+    try {
+        const sigBuffer = Buffer.from(sig, 'base64');
+        const currentBuffer = Buffer.from(currentSig, 'base64');
+
+        if (sigBuffer.length === currentBuffer.length &&
+            crypto.timingSafeEqual(sigBuffer, currentBuffer)) {
+            return { valid: true, keyUsed: 'current' };
+        }
+    } catch (_e) { /* Invalid base64, continue */ }
+
+    // Try previous key if available (rotation in progress)
+    if (SIGNING_SECRET_PREVIOUS) {
+        const previousSig = hmacSignWithKey(data, SIGNING_SECRET_PREVIOUS);
+        try {
+            const sigBuffer = Buffer.from(sig, 'base64');
+            const previousBuffer = Buffer.from(previousSig, 'base64');
+
+            if (sigBuffer.length === previousBuffer.length &&
+                crypto.timingSafeEqual(sigBuffer, previousBuffer)) {
+                logger.debug('[Signature] Verified with previous key (rotation in progress)');
+                return { valid: true, keyUsed: 'previous' };
+            }
+        } catch (_e) { /* Invalid base64, continue */ }
+    }
+
+    return { valid: false, keyUsed: 'none' };
 }
 
 /**
@@ -243,35 +319,57 @@ function signAllCategories(token) {
 // ============================================
 
 /**
- * Verify a single category signature
+ * Verify a single category signature (with key rotation support)
  */
 function verifyCategory(token, category, expectedSig) {
     if (!SIGNING_SECRET) return { valid: true, reason: 'dev_mode' };
     if (!expectedSig) return { valid: false, reason: 'missing_signature' };
     if (expectedSig === 'dev_unsigned') return { valid: false, reason: 'dev_signature_in_prod' };
 
-    let actualSig;
+    // Build the data string for this category
+    let data;
     switch (category) {
-        case 'identity': actualSig = signIdentity(token); break;
-        case 'security': actualSig = signSecurity(token); break;
-        case 'lp': actualSig = signLP(token); break;
-        case 'supply': actualSig = signSupply(token); break;
-        case 'kscore': actualSig = signKScore(token); break;
-        case 'market': actualSig = signMarket(token); break;
-        case 'origin': actualSig = signOrigin(token); break;
-        default: return { valid: false, reason: 'unknown_category' };
+        case 'identity':
+            data = [token.mint, token.name || '', token.symbol || '', token.image || '', token.decimals || 9].join('|');
+            break;
+        case 'security':
+            data = [token.mint, token.mint_authority_revoked ? '1' : '0', token.freeze_authority_revoked ? '1' : '0',
+                    token.is_mutable_supply ? '1' : '0', (token.hasCommunityUpdate || token.hascommunityupdate) ? '1' : '0'].join('|');
+            break;
+        case 'lp':
+            data = [token.mint, (token.lp_burn_pct || 0).toFixed(4), (token.lp_locked_pct || 0).toFixed(4), token.lp_status || 'unknown'].join('|');
+            break;
+        case 'supply':
+            data = [token.mint, token.supply || '0', token.initial_supply || token.supply || '0',
+                    (token.burned_amount || 0).toString(), (token.burned_percent || 0).toFixed(4)].join('|');
+            break;
+        case 'kscore':
+            data = [token.mint, Math.round(token.k_score || 0), Math.round(token.conviction_score || 0),
+                    token.conviction_accumulators || 0, token.conviction_holders || 0, token.conviction_reducers || 0,
+                    token.conviction_extractors || 0, token.conviction_analyzed || 0, token.holders || 0,
+                    token.last_k_score_update || 0].join('|');
+            break;
+        case 'market':
+            data = [token.mint, (token.priceusd || token.priceUsd || 0).toFixed(12), token.price_source || 'unknown',
+                    token.price_timestamp || 0, token.price_pool || '', (token.marketcap || token.marketCap || 0).toFixed(2),
+                    token.mcap_calculated ? '1' : '0', (token.liquidity || 0).toFixed(2), token.liquidity_source || 'unknown',
+                    token.liquidity_timestamp || 0, token.holders_source || 'unknown', token.holders_timestamp || 0,
+                    (token.age_days || 0).toFixed(2)].join('|');
+            break;
+        case 'origin':
+            data = [token.mint, token.is_pump_fun ? '1' : '0', token.bonding_curve_complete ? '1' : '0',
+                    token.timestamp || 0, token.metadata || ''].join('|');
+            break;
+        default:
+            return { valid: false, reason: 'unknown_category' };
     }
 
-    // Constant-time comparison
-    const sigBuffer = Buffer.from(expectedSig, 'base64');
-    const actualBuffer = Buffer.from(actualSig, 'base64');
-
-    if (sigBuffer.length !== actualBuffer.length) {
-        return { valid: false, reason: 'length_mismatch' };
+    // Use key rotation verification
+    const result = verifyWithRotation(data, expectedSig);
+    if (result.valid) {
+        return { valid: true, reason: 'verified', keyUsed: result.keyUsed };
     }
-
-    const isValid = crypto.timingSafeEqual(sigBuffer, actualBuffer);
-    return { valid: isValid, reason: isValid ? 'verified' : 'signature_mismatch' };
+    return { valid: false, reason: 'signature_mismatch' };
 }
 
 /**
@@ -374,10 +472,14 @@ module.exports = {
     signHolders,
     signFull,
 
-    // Verification
+    // Verification (with key rotation support)
     verifyCategory,
+    verifyWithRotation,
 
     // Legacy compatibility
     signData,
-    verifySignature
+    verifySignature,
+
+    // Constants (for external use)
+    SIG_VERSION
 };
