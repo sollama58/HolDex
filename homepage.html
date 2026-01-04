@@ -1854,7 +1854,9 @@
 
         const isVerified = token.verified || token.hasCommunityUpdate || token.has_community_update;
         const score = token.kScore || token.k_score || 0;
-        const img = token.image || `https://placehold.co/40x40/0a0a0a/ea580c?text=${token.ticker?.[0]||'?'}`;
+        // SECURITY: Sanitize image URL
+        const safeTickerChar = escapeHtml(token.ticker?.[0] || '?');
+        const img = sanitizeUrl(token.image) || `https://placehold.co/40x40/0a0a0a/ea580c?text=${safeTickerChar}`;
 
         // Populate popover
         document.getElementById('popover-img').src = img;
@@ -2282,7 +2284,8 @@
 
                 const media = document.getElementById('detail-media-container');
                 if (media) {
-                    const imgUrl = t.image || 'https://placehold.co/80';
+                    // SECURITY: Sanitize image URL to prevent XSS
+                    const imgUrl = sanitizeUrl(t.image) || 'https://placehold.co/80';
                     media.innerHTML = `<img src="${imgUrl}" class="w-16 h-16 rounded-lg border-2 border-[#ea580c] bg-black object-cover">`;
                 }
 
@@ -2292,7 +2295,9 @@
                 }
                 
                 if (t.banner && bannerContainer && bannerImg) {
-                    bannerImg.src = t.banner;
+                    // SECURITY: Sanitize banner URL
+                    const safeBanner = sanitizeUrl(t.banner);
+                    bannerImg.src = safeBanner || FALLBACK_BANNER;
                     bannerImg.onerror = function() { this.src = FALLBACK_BANNER; };
                     bannerContainer.classList.remove('hidden');
                 } else if (bannerContainer) { bannerContainer.classList.add('hidden'); }
@@ -2738,7 +2743,8 @@
                 const t = data.token;
                 currentUpdateTokenData = t;
                 document.getElementById('token-preview-info').classList.remove('hidden');
-                document.getElementById('update-token-img').src = t.image || 'https://placehold.co/40';
+                // SECURITY: Sanitize image URL
+                document.getElementById('update-token-img').src = sanitizeUrl(t.image) || 'https://placehold.co/40';
                 document.getElementById('update-token-name').innerText = t.name || 'Unknown';
                 // FIX: Use 'symbol' from API (was 'ticker')
                 document.getElementById('update-token-ticker').innerText = t.symbol || t.ticker || 'UNK';
