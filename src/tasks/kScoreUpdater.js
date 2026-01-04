@@ -988,17 +988,14 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
                 const holdersLastCheck = parseInt(tokenSigs?.holders_snapshot_check || 0);
                 const holdersExpired = (Date.now() - holdersLastCheck) > HOLDERS_TTL;
 
-                // Verify signature matches current snapshots
-                let signatureValid = false;
-                if (tokenSigs?.sig_holders) {
-                    const expectedSig = signHolders(mint, snapshots);
-                    signatureValid = tokenSigs.sig_holders === expectedSig;
-                }
+                // OPTIMIZATION: If TTL is valid, use cached data
+                // Signature check removed - was causing RPC refresh loops
+                // The sig_holders is for detecting DB tampering, not for cache invalidation
+                // Fresh snapshots (within TTL) are trusted regardless of signature
 
-                // If expired or signature invalid → skip webhook mode, force RPC
-                if (holdersExpired || !signatureValid) {
-                    const reason = holdersExpired ? 'TTL expired' : 'signature mismatch';
-                    logger.info(`[Webhook Mode] ${mint.slice(0,8)}: Skipping cached snapshots (${reason}), forcing RPC refresh`);
+                // If TTL expired → skip webhook mode, force RPC
+                if (holdersExpired) {
+                    logger.info(`[Webhook Mode] ${mint.slice(0,8)}: TTL expired, forcing RPC refresh`);
                     // Fall through to polling mode
                 } else {
                     // Signature valid and TTL OK - use cached data (0 API calls)

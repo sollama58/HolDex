@@ -202,23 +202,34 @@ async function scanForTampering(db) {
         let healed = 0;
         let failed = 0;
 
+        // Categories to IGNORE for tampering (volatile data that changes frequently)
+        // "market" = price, mcap, liquidity - these change every 30s via PriceWorker
+        // Healing these causes infinite loops and wastes resources
+        const IGNORED_CATEGORIES = new Set(['market']);
+
         for (const token of tokens) {
             scanned++;
 
             // Verify all 8 signatures
             const result = verifyAllSignatures(token);
 
-            if (result.tampered.length > 0) {
+            // Filter out ignored categories (volatile data)
+            const criticalTampered = result.tampered.filter(cat => !IGNORED_CATEGORIES.has(cat));
+
+            if (criticalTampered.length > 0) {
                 tampered++;
-                logger.warn(`[Watchdog] TAMPERED: ${token.symbol} (${token.mint.slice(0, 8)}...) - categories: ${result.tampered.join(',')}`);
+                logger.warn(`[Watchdog] TAMPERED: ${token.symbol} (${token.mint.slice(0, 8)}...) - categories: ${criticalTampered.join(',')}`);
 
                 // Attempt restoration from snapshot
-                const restored = await restoreFromSnapshot(db, token.mint, result.tampered);
+                const restored = await restoreFromSnapshot(db, token.mint, criticalTampered);
                 if (restored) {
                     healed++;
                 } else {
                     failed++;
                 }
+            } else if (result.tampered.length > 0) {
+                // Only volatile categories tampered - log but don't heal
+                logger.debug(`[Watchdog] Volatile change: ${token.symbol} (${token.mint.slice(0, 8)}...) - ${result.tampered.join(',')}`);
             }
         }
 
