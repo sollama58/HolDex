@@ -26,18 +26,30 @@ const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
 
-// Cache SOL price for 60 seconds
-let solPriceCache = { price: 0, timestamp: 0 };
-const SOL_CACHE_DURATION = 60000;
+// Cache SOL price for 5 minutes (SOL doesn't move that fast)
+let solPriceCache = { price: 0, timestamp: 0, lastAttempt: 0 };
+const SOL_CACHE_DURATION = 300000; // 5 minutes
+const SOL_RETRY_COOLDOWN = 60000;  // 1 minute cooldown after error
 
 /**
  * Get SOL/USD price from CoinGecko
+ * Single source of truth - cached globally to prevent rate limits
  */
 async function getSolPrice() {
     const now = Date.now();
+
+    // Return cached price if fresh
     if (solPriceCache.price > 0 && (now - solPriceCache.timestamp) < SOL_CACHE_DURATION) {
         return solPriceCache.price;
     }
+
+    // If we recently failed, don't retry yet (prevents rate limit cascade)
+    if (solPriceCache.lastAttempt > 0 && (now - solPriceCache.lastAttempt) < SOL_RETRY_COOLDOWN) {
+        return solPriceCache.price || 190; // Use cached or fallback
+    }
+
+    // Mark attempt time BEFORE request to prevent parallel requests
+    solPriceCache.lastAttempt = now;
 
     try {
         const response = await axios.get(
@@ -46,11 +58,16 @@ async function getSolPrice() {
         );
         const price = response.data?.solana?.usd || 0;
         if (price > 0) {
-            solPriceCache = { price, timestamp: now };
+            solPriceCache = { price, timestamp: now, lastAttempt: now };
+            console.log(`[PriceService] SOL price: $${price} (cached for 5m)`);
         }
-        return price;
+        return price || solPriceCache.price || 190;
     } catch (e) {
-        console.error('[PriceService] CoinGecko error:', e.message);
+        // On error, keep lastAttempt to prevent cascade
+        // Don't spam logs - only log if it's been a while
+        if (!solPriceCache.price) {
+            console.error('[PriceService] CoinGecko error:', e.message);
+        }
         return solPriceCache.price || 190; // Fallback to cached or default
     }
 }
