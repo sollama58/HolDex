@@ -33,6 +33,7 @@ const { getClient: getRedisClient } = require('../services/redis');
 const verification = require('../services/verificationService');
 const { signAllCategories, signHolders } = require('../utils/dataSignature');
 const { saveSnapshot } = require('./integrityWatchdog');
+const alerting = require('../services/alerting');
 
 // ============================================
 // HELIUS CONFIG
@@ -160,6 +161,8 @@ function parseRateLimitHeaders(response) {
         if (rateLimitRemaining < 10) {
             requestInterval = 200; // 5 req/s when almost exhausted
             logger.warn(`[RateLimit] Low credits: ${rateLimitRemaining} remaining, throttling to 5 req/s`);
+            // ALERT: Credits critically low
+            alerting.alertHeliusCreditsLow(rateLimitRemaining, 10).catch(() => {});
         } else if (rateLimitRemaining < 25) {
             requestInterval = 100; // 10 req/s when getting low
         } else {
@@ -636,6 +639,8 @@ async function rateLimitedFetch(url, options = {}) {
     if (rateLimitRemaining <= 0 && rateLimitResetTime > now) {
         const waitTime = rateLimitResetTime - now + 100; // +100ms buffer
         logger.warn(`[RateLimit] Exhausted, waiting ${Math.round(waitTime / 1000)}s until reset`);
+        // ALERT: Credits depleted
+        alerting.alertHeliusCreditsDepleted().catch(() => {});
         await sleep(waitTime);
     }
 

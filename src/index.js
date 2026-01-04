@@ -13,6 +13,7 @@ const { startSnapshotter } = require('./indexer/tasks/snapshotter');
 const kScoreUpdater = require('./tasks/kScoreUpdater');
 const integrityWatchdog = require('./tasks/integrityWatchdog');
 const { startPriceWorker } = require('./tasks/priceWorker');
+const alerting = require('./services/alerting');
 // REMOVED: const { startNewTokenListener } = require('./services/new_token_listener'); 
 const { initSocket } = require('./services/socket'); 
 const tokensRoutes = require('./routes/tokens');
@@ -353,6 +354,14 @@ async function startServer() {
         const PORT = process.env.PORT || 3000;
         server.listen(PORT, () => {
             logger.info(`✅ API & Socket: Listening on port ${PORT}`);
+            // Send startup alert (fire-and-forget)
+            alerting.sendAlert({
+                title: 'HolDex API Started',
+                message: `Server listening on port ${PORT}`,
+                severity: 'INFO',
+                type: 'info',
+                key: 'startup'
+            }).catch(() => {});
         });
 
     } catch (error) {

@@ -17,6 +17,7 @@ const logger = require('../services/logger');
 const { getClient: getRedisClient } = require('../services/redis');
 const { verifyAllSignatures, signAllCategories } = require('../utils/dataSignature');
 const config = require('../config/env');
+const alerting = require('../services/alerting');
 
 // Watchdog config
 const SCAN_INTERVAL = 5 * 60 * 1000; // 5 minutes
@@ -220,10 +221,15 @@ async function scanForTampering(db) {
                 tampered++;
                 logger.warn(`[Watchdog] TAMPERED: ${token.symbol} (${token.mint.slice(0, 8)}...) - categories: ${criticalTampered.join(',')}`);
 
+                // ALERT: Tampering detected (fire-and-forget)
+                alerting.alertTamperingDetected(token.mint, token.symbol, criticalTampered).catch(() => {});
+
                 // Attempt restoration from snapshot
                 const restored = await restoreFromSnapshot(db, token.mint, criticalTampered);
                 if (restored) {
                     healed++;
+                    // ALERT: Tampering healed
+                    alerting.alertTamperingHealed(token.mint, token.symbol, criticalTampered).catch(() => {});
                 } else {
                     failed++;
                 }
