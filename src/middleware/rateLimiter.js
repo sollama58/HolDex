@@ -5,20 +5,50 @@ const { hashApiKey } = require('../utils/apiKeyHash');
 
 // Cache key details in memory for 60 seconds to avoid hitting Postgres on every request
 const KEY_CACHE = new Map();
+const KEY_CACHE_MAX_SIZE = 1000; // Max cached API keys (prevents memory leak)
+const KEY_CACHE_TTL = 60000; // 60 seconds
 
 // SECURITY: In-memory fallback rate limiting when Redis is down (H2)
 const FALLBACK_WINDOW = 60 * 1000; // 1 minute window for fallback
+const FALLBACK_MAX_SIZE = 500; // Max tracked IPs
 const fallbackTracker = new Map(); // Use Map for better cleanup
 
-// Clean up old fallback entries every 5 minutes
+// Clean up expired entries every 5 minutes (prevents memory leak)
 setInterval(() => {
     const now = Date.now();
+
+    // Clean fallback tracker
     for (const [key, data] of fallbackTracker) {
         if (now > data.resetTime) {
             fallbackTracker.delete(key);
         }
     }
+
+    // Clean KEY_CACHE expired entries
+    for (const [key, data] of KEY_CACHE) {
+        if (now > data.expiry) {
+            KEY_CACHE.delete(key);
+        }
+    }
+
+    logger.debug(`[RateLimiter] Cache cleanup: KEY_CACHE=${KEY_CACHE.size}, fallback=${fallbackTracker.size}`);
 }, 5 * 60 * 1000);
+
+/**
+ * LRU-style eviction: remove oldest entries when cache is full
+ */
+function evictOldestEntries(cache, maxSize) {
+    if (cache.size <= maxSize) return;
+
+    // Maps maintain insertion order - delete from the beginning
+    const toDelete = cache.size - maxSize;
+    let deleted = 0;
+    for (const key of cache.keys()) {
+        if (deleted >= toDelete) break;
+        cache.delete(key);
+        deleted++;
+    }
+}
 
 // ============================================
 // ATOMIC RATE LIMITING - Lua script for Redis
@@ -75,8 +105,10 @@ const rateLimiter = async (req, res, next) => {
                 ...record,
                 keyHash,
                 // Cache for 60 seconds
-                expiry: now + 60000
+                expiry: now + KEY_CACHE_TTL
             };
+            // Evict oldest if cache is full (LRU-style)
+            evictOldestEntries(KEY_CACHE, KEY_CACHE_MAX_SIZE);
             KEY_CACHE.set(keyHash, keyData);
         }
 
@@ -135,6 +167,8 @@ const rateLimiter = async (req, res, next) => {
             } else {
                 tracker.count++;
             }
+            // Evict oldest if tracker is full (LRU-style)
+            evictOldestEntries(fallbackTracker, FALLBACK_MAX_SIZE);
             fallbackTracker.set(keyHash, tracker);
 
             // Apply stricter fallback limit (10% of normal limit)

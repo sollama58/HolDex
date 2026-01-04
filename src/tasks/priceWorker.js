@@ -31,6 +31,37 @@ const BATCH_SIZE = 30;
 
 // In-memory cache with TTL tracking
 const priceCache = new Map();
+const PRICE_CACHE_MAX_SIZE = 2000; // Max cached tokens (prevents memory leak)
+
+/**
+ * LRU-style eviction: remove oldest entries when cache is full
+ */
+function evictOldestPriceEntries() {
+    if (priceCache.size <= PRICE_CACHE_MAX_SIZE) return;
+
+    // Maps maintain insertion order - delete from the beginning
+    const toDelete = priceCache.size - PRICE_CACHE_MAX_SIZE;
+    let deleted = 0;
+    for (const key of priceCache.keys()) {
+        if (deleted >= toDelete) break;
+        priceCache.delete(key);
+        deleted++;
+    }
+}
+
+// Periodic cleanup of stale entries (every 10 minutes)
+setInterval(() => {
+    const now = Date.now();
+    const staleThreshold = 30 * 60 * 1000; // 30 minutes
+
+    for (const [mint, cached] of priceCache) {
+        if (now - cached.timestamp > staleThreshold) {
+            priceCache.delete(mint);
+        }
+    }
+
+    logger.debug(`[PriceWorker] Cache cleanup: ${priceCache.size} entries`);
+}, 10 * 60 * 1000);
 
 // ============================================
 // BOUNDS VALIDATION - Protect against malicious/corrupted external data
@@ -162,7 +193,8 @@ async function fetchBatchPrices(mints) {
             }
         }
 
-        // Update cache
+        // Update cache (with LRU eviction)
+        evictOldestPriceEntries();
         for (const [mint, data] of results) {
             priceCache.set(mint, { data, timestamp: now });
         }
@@ -388,7 +420,8 @@ async function getPrice(mint) {
             return null;
         }
 
-        // Cache it
+        // Cache it (with LRU eviction)
+        evictOldestPriceEntries();
         priceCache.set(mint, { data: priceData, timestamp: now });
 
         return priceData;

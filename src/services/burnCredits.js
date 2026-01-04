@@ -37,6 +37,33 @@ const BURNS_RECHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24h (only recheck burns d
 
 // In-memory fallback cache (when Redis unavailable)
 const memoryCache = new Map();
+const MEMORY_CACHE_MAX_SIZE = 500; // Max cached wallets
+
+/**
+ * LRU-style eviction for memory cache
+ */
+function evictOldestMemoryEntries() {
+    if (memoryCache.size <= MEMORY_CACHE_MAX_SIZE) return;
+    const toDelete = memoryCache.size - MEMORY_CACHE_MAX_SIZE;
+    let deleted = 0;
+    for (const key of memoryCache.keys()) {
+        if (deleted >= toDelete) break;
+        memoryCache.delete(key);
+        deleted++;
+    }
+}
+
+// Periodic cleanup of stale entries (every 15 minutes)
+setInterval(() => {
+    const now = Date.now();
+    const staleThreshold = HOLDINGS_CACHE_TTL * 1000;
+
+    for (const [key, data] of memoryCache) {
+        if (now - data.ts > staleThreshold) {
+            memoryCache.delete(key);
+        }
+    }
+}, 15 * 60 * 1000);
 
 /**
  * Get wallet's $ASDFASDFA balance (cached)
@@ -78,10 +105,11 @@ async function getWalletBalance(connection, walletAddress) {
             ? (accounts.value[0].account.data.parsed.info.tokenAmount.uiAmount || 0)
             : 0;
 
-        // Cache result
+        // Cache result (with LRU eviction for memory cache)
         if (redis) {
             redis.set(cacheKey, balance.toString(), { EX: HOLDINGS_CACHE_TTL }).catch(() => {});
         }
+        evictOldestMemoryEntries();
         memoryCache.set(cacheKey, { balance, ts: Date.now() });
 
         return balance;
