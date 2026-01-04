@@ -185,20 +185,20 @@
         .holdex-table tr:hover td:first-child { background: rgba(20, 20, 35, 0.98); }
         .holdex-table tr:active td { background: rgba(249, 115, 22, 0.12); }
 
-        /* Row entrance animation */
+        /* Row entrance animation - only on initial load */
         @keyframes row-fade-in {
             from { opacity: 0; transform: translateY(4px); }
             to { opacity: 1; transform: translateY(0); }
         }
-        .holdex-table tbody tr:not(.skeleton-row) {
+        .holdex-table tbody.animate-rows tr:not(.skeleton-row) {
             animation: row-fade-in 0.3s ease-out forwards;
         }
-        .holdex-table tbody tr:nth-child(1) { animation-delay: 0.02s; }
-        .holdex-table tbody tr:nth-child(2) { animation-delay: 0.04s; }
-        .holdex-table tbody tr:nth-child(3) { animation-delay: 0.06s; }
-        .holdex-table tbody tr:nth-child(4) { animation-delay: 0.08s; }
-        .holdex-table tbody tr:nth-child(5) { animation-delay: 0.1s; }
-        .holdex-table tbody tr:nth-child(n+6) { animation-delay: 0.12s; }
+        .holdex-table tbody.animate-rows tr:nth-child(1) { animation-delay: 0.02s; }
+        .holdex-table tbody.animate-rows tr:nth-child(2) { animation-delay: 0.04s; }
+        .holdex-table tbody.animate-rows tr:nth-child(3) { animation-delay: 0.06s; }
+        .holdex-table tbody.animate-rows tr:nth-child(4) { animation-delay: 0.08s; }
+        .holdex-table tbody.animate-rows tr:nth-child(5) { animation-delay: 0.1s; }
+        .holdex-table tbody.animate-rows tr:nth-child(n+6) { animation-delay: 0.12s; }
 
         /* Token image with glow on hover */
         .img-token {
@@ -2219,6 +2219,13 @@
             </tr>`;
         }).join('');
         lucide.createIcons();
+
+        // Animate rows only on initial load (not on every 5s refresh)
+        if (isInitialLoad) {
+            tbody.classList.add('animate-rows');
+            // Remove animation class after it completes to prevent re-triggering
+            setTimeout(() => tbody.classList.remove('animate-rows'), 500);
+        }
 
         // Attach popover events (desktop only)
         if (window.innerWidth >= 768) {
