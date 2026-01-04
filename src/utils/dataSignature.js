@@ -171,7 +171,29 @@ function signOrigin(token) {
 }
 
 /**
- * 8. Full Signature (Chaos Mode)
+ * 8. Holders Signature
+ * Protects: holder_snapshots integrity (top 20 balances hash)
+ * @param {string} mint - Token mint address
+ * @param {Array} snapshots - Array of {holder, balance} from holder_snapshots
+ * @returns {string} HMAC signature
+ */
+function signHolders(mint, snapshots) {
+    // Sort by balance desc, take top 20, create deterministic hash
+    const sorted = (snapshots || [])
+        .sort((a, b) => BigInt(b.balance || 0) - BigInt(a.balance || 0))
+        .slice(0, 20);
+
+    const data = [
+        mint,
+        sorted.length,
+        // Hash of top 20: holder|balance pairs
+        ...sorted.map(s => `${s.holder}:${s.balance}`)
+    ].join('|');
+    return hmacSign(data);
+}
+
+/**
+ * 9. Full Signature (Chaos Mode)
  * Signs all category signatures + chaos_nonce
  */
 function signFull(signatures, chaosNonce) {
@@ -349,6 +371,7 @@ module.exports = {
     signKScore,
     signMarket,
     signOrigin,
+    signHolders,
     signFull,
 
     // Verification

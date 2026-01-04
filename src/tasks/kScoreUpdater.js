@@ -31,7 +31,7 @@ const priceService = require('../services/priceService');
 const bs58 = require('bs58');
 const { getClient: getRedisClient } = require('../services/redis');
 const verification = require('../services/verificationService');
-const { signAllCategories } = require('../utils/dataSignature');
+const { signAllCategories, signHolders } = require('../utils/dataSignature');
 const { saveSnapshot } = require('./integrityWatchdog');
 
 // ============================================
@@ -966,6 +966,9 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
         // When webhooks are active, holder_snapshots is constantly updated
         // by POST /webhook/transfers, so we just read from cache
         // Skip this mode during daily deep refresh (forceDeepRefreshMode)
+        // INTEGRITY: Verify sig_holders and TTL before using cached data
+
+        const HOLDERS_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
         if (config.USE_WEBHOOKS && db && !forceDeepRefreshMode) {
             const snapshots = await db.all(
@@ -973,17 +976,34 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
                 [mint]
             );
 
-            // If we have cached data, use it (webhook mode)
-            // OPTIMIZATION: In webhook mode, snapshots ARE the source of truth
-            // Webhooks update them in real-time, so no staleness check needed
-            // Even "stale" snapshots are valid - they just mean no activity
+            // If we have cached data, verify integrity before using
+            // Same standard as security/LP: signature + TTL
             if (snapshots && snapshots.length > 0) {
-                const newestSnapshot = Math.max(...snapshots.map(s => s.updated_at || 0));
-                const ageMinutes = (Date.now() - newestSnapshot) / 60000;
+                // Check TTL and signature
+                const tokenSigs = await db.get(
+                    'SELECT sig_holders, holders_snapshot_check FROM tokens WHERE mint = $1',
+                    [mint]
+                );
+                const holdersLastCheck = parseInt(tokenSigs?.holders_snapshot_check || 0);
+                const holdersExpired = (Date.now() - holdersLastCheck) > HOLDERS_TTL;
 
-                // Always use cached data in webhook mode (0 API calls)
-                // Staleness just means no new transfers happened - that's valid data
-                {
+                // Verify signature matches current snapshots
+                let signatureValid = false;
+                if (tokenSigs?.sig_holders) {
+                    const expectedSig = signHolders(mint, snapshots);
+                    signatureValid = tokenSigs.sig_holders === expectedSig;
+                }
+
+                // If expired or signature invalid → skip webhook mode, force RPC
+                if (holdersExpired || !signatureValid) {
+                    const reason = holdersExpired ? 'TTL expired' : 'signature mismatch';
+                    logger.info(`[Webhook Mode] ${mint.slice(0,8)}: Skipping cached snapshots (${reason}), forcing RPC refresh`);
+                    // Fall through to polling mode
+                } else {
+                    // Signature valid and TTL OK - use cached data (0 API calls)
+                    const newestSnapshot = Math.max(...snapshots.map(s => s.updated_at || 0));
+                    const ageMinutes = (Date.now() - newestSnapshot) / 60000;
+
                     let accumulators = 0, holders = 0, reducers = 0, extractors = 0;
 
                     // Only count TOP 20 for breakdown (sorted by balance DESC)
@@ -1050,8 +1070,7 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
                         preserveHolders: true  // Signal: don't overwrite on-chain data
                     };
                 }
-                // No snapshots in DB yet - will fall through to delta/polling mode
-                logger.info(`[Webhook Mode] ${mint.slice(0,8)}: No snapshots in DB, need initial analysis`);
+                // If we get here: TTL expired or signature invalid - fall through to polling
             }
         }
 
@@ -1189,6 +1208,13 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
 
             // 6. Prune stale holders (keep only top 20 by balance)
             await pruneStaleHolders(db, mint);
+
+            // 7. Sign holders (same standard as other data - sig_holders + TTL)
+            const sig_holders = signHolders(mint, snapshotData);
+            await db.run(
+                `UPDATE tokens SET sig_holders = $1, holders_snapshot_check = $2 WHERE mint = $3`,
+                [sig_holders, Date.now(), mint]
+            );
         }
 
         const score = Math.round(((accumulators + holders) / analyzed) * 100);
@@ -2243,15 +2269,19 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
         // SECURITY CHECK (ELIMINATORY)
         // ============================================
         // OPTIMIZATION: Use cached security data if available
-        // Security status rarely changes - only check once per token, then use DB
+        // Security status rarely changes - check every 24h for integrity
         // EXCEPTION: Deep refresh mode always re-checks (catches pump.fun graduation)
         // Also re-check pump.fun tokens that aren't secure yet (might have graduated)
 
         let lpData = null;
+        const now = Date.now();
+        const SECURITY_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
         const isPumpFunToken = mint.endsWith('pump');
         const cachedNotSecure = !(dbData?.mint_authority_revoked && dbData?.freeze_authority_revoked);
-        const needsSecurityRefresh = forceDeepRefreshMode || (isPumpFunToken && cachedNotSecure);
+        const securityLastCheck = parseInt(dbData?.security_last_check || 0);
+        const securityExpired = (now - securityLastCheck) > SECURITY_TTL;
+        const needsSecurityRefresh = forceDeepRefreshMode || (isPumpFunToken && cachedNotSecure) || securityExpired;
 
         const hasCachedSecurity = (dbData?.mint_authority_revoked !== null ||
                                    dbData?.freeze_authority_revoked !== null) &&
@@ -2268,28 +2298,33 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
             };
             logger.debug(`[Security] ${mint.slice(0,8)}: Using cached (mint=${securityData.mintAuthorityRevoked}, freeze=${securityData.freezeAuthorityRevoked})`);
         } else if (HELIUS_API_KEY) {
-            // First time - fetch and cache
+            // First time or expired - fetch and cache with timestamp
             securityData = await checkTokenSecurity(mint);
-            // Cache in DB for future cycles
+            // Cache in DB for future cycles with TTL timestamp
             if (db && securityData) {
                 await db.run(`
                     UPDATE tokens SET
                         mint_authority_revoked = $1,
-                        freeze_authority_revoked = $2
-                    WHERE mint = $3
-                `, [securityData.mintAuthorityRevoked, securityData.freezeAuthorityRevoked, mint]);
+                        freeze_authority_revoked = $2,
+                        security_last_check = $3
+                    WHERE mint = $4
+                `, [securityData.mintAuthorityRevoked, securityData.freezeAuthorityRevoked, now, mint]);
             }
         }
 
         // Check LP burn/lock status
-        // OPTIMIZATION: LP status is cached - only check on deep refresh or first time
-        // LP burn/lock is effectively permanent once done
+        // OPTIMIZATION: LP status is cached - check every 24h for integrity
+        // LP burn/lock is effectively permanent once done, but verify periodically
+        const LP_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
         if (db) {
             // Check if we have cached LP data (stored in tokens table)
-            // LP status rarely changes - only refresh during deep mode
             const hasCachedLP = dbData?.lp_burn_pct !== undefined && dbData?.lp_burn_pct !== null;
+            const lpLastCheck = parseInt(dbData?.lp_last_check || 0);
+            const lpExpired = (now - lpLastCheck) > LP_TTL;
+            const needsLPRefresh = forceDeepRefreshMode || lpExpired;
 
-            if (hasCachedLP && !forceDeepRefreshMode) {
+            if (hasCachedLP && !needsLPRefresh) {
                 // Use cached LP data (0 API calls)
                 lpData = {
                     lpBurnPct: dbData.lp_burn_pct || 0,
@@ -2299,17 +2334,18 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
                 };
                 logger.debug(`[LP] ${mint.slice(0,8)}: Using cached (${lpData.lpBurnPct}% burn)`);
             } else {
-                // First time or deep refresh - check on-chain
+                // First time or expired - check on-chain
                 lpData = await checkLPStatus(db, mint);
-                // Cache LP data in DB
+                // Cache LP data in DB with TTL timestamp
                 if (lpData) {
                     await db.run(`
                         UPDATE tokens SET
                             lp_burn_pct = $1,
                             lp_locked_pct = $2,
-                            lp_status = $3
-                        WHERE mint = $4
-                    `, [lpData.lpBurnPct || 0, lpData.lpLockedPct || 0, lpData.lpStatus || 'unknown', mint]);
+                            lp_status = $3,
+                            lp_last_check = $4
+                        WHERE mint = $5
+                    `, [lpData.lpBurnPct || 0, lpData.lpLockedPct || 0, lpData.lpStatus || 'unknown', now, mint]);
                 }
             }
         }

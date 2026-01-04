@@ -2,9 +2,10 @@ const { Pool } = require('pg');
 const config = require('../config/env');
 const logger = require('./logger');
 const { getClient } = require('./redis');
-// We require this dynamically inside functions if needed to avoid circular deps, 
+// We require this dynamically inside functions if needed to avoid circular deps,
 // or pass it in. For aggregateAndSaveToken, we need it.
-const { getHolderCountFromRPC } = require('./solana'); 
+const { getHolderCountFromRPC } = require('./solana');
+const { signMarket } = require('../utils/dataSignature'); 
 
 let primaryPool = null;
 let readPool = null; 
@@ -212,7 +213,9 @@ async function initDB() {
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS is_mutable_supply BOOLEAN DEFAULT FALSE`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS mint_authority_revoked BOOLEAN DEFAULT FALSE`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS freeze_authority_revoked BOOLEAN DEFAULT FALSE`,
-                // LP Status caching (LP checks are expensive - cache forever)
+                // Security/LP Status caching (with 24h TTL for integrity)
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS security_last_check BIGINT DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS lp_last_check BIGINT DEFAULT 0`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS lp_burn_pct DOUBLE PRECISION DEFAULT NULL`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS lp_locked_pct DOUBLE PRECISION DEFAULT NULL`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS lp_status TEXT DEFAULT NULL`,
@@ -232,6 +235,9 @@ async function initDB() {
                 `ALTER TABLE holder_snapshots ADD COLUMN IF NOT EXISTS last_tx_timestamp BIGINT DEFAULT 0`,
                 // Age column for tokens (avoid recalculating from timestamp)
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS age_days DOUBLE PRECISION DEFAULT 0`,
+                // Holder snapshots integrity (same standard as other data)
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_holders TEXT DEFAULT NULL`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS holders_snapshot_check BIGINT DEFAULT 0`,
             ];
 
             // PERFORMANCE: Add indexes for frequently queried columns
@@ -400,9 +406,15 @@ async function aggregateAndSaveToken(db, mint) {
         if (change5m !== null) { query += `, change5m = $${idx++}`; params.push(change5m); }
         if (holderCount !== null) { query += `, holders = $${idx++}, last_holder_check = $${idx++}`; params.push(holderCount); params.push(now); }
 
-        query += ` WHERE mint = $4`;
-        await db.run(query, params);
-        
+        query += ` WHERE mint = $4 RETURNING mint, priceusd, marketcap, liquidity, price_source, price_timestamp, price_pool, liquidity_source, liquidity_timestamp, mcap_calculated, holders_source, holders_timestamp, age_days`;
+        const result = await db.get(query, params);
+
+        // Re-sign market data to maintain integrity
+        if (result) {
+            const sig_market = signMarket(result);
+            await db.run(`UPDATE tokens SET sig_market = $1 WHERE mint = $2`, [sig_market, mint]);
+        }
+
     } catch (err) { logger.error(`Aggregation Error ${mint}: ${err.message}`); }
 }
 

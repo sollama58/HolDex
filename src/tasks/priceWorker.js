@@ -12,6 +12,7 @@
 
 const { logger } = require('../services');
 const { getClient: getRedisClient } = require('../services/redis');
+const { signMarket } = require('../utils/dataSignature');
 
 // DexScreener batch endpoint: up to 30 tokens
 const DEXSCREENER_BATCH_URL = 'https://api.dexscreener.com/tokens/v1/solana';
@@ -196,7 +197,8 @@ async function runPriceUpdateCycle(db, broadcast) {
             // Update database
             for (const [mint, priceData] of prices) {
                 try {
-                    await db.run(`
+                    // Update prices and return fields needed for sig_market
+                    const result = await db.get(`
                         UPDATE tokens SET
                             priceusd = $1,
                             marketcap = $2,
@@ -211,6 +213,10 @@ async function runPriceUpdateCycle(db, broadcast) {
                             liquidity_source = $8,
                             liquidity_timestamp = $9
                         WHERE mint = $11
+                        RETURNING mint, priceusd, marketcap, liquidity,
+                                  price_source, price_timestamp, price_pool,
+                                  liquidity_source, liquidity_timestamp,
+                                  mcap_calculated, holders_source, holders_timestamp, age_days
                     `, [
                         priceData.priceUsd,
                         priceData.mcap,
@@ -224,6 +230,15 @@ async function runPriceUpdateCycle(db, broadcast) {
                         priceData.pairAddress,
                         mint
                     ]);
+
+                    // Re-sign market data to maintain integrity
+                    if (result) {
+                        const sig_market = signMarket(result);
+                        await db.run(
+                            `UPDATE tokens SET sig_market = $1 WHERE mint = $2`,
+                            [sig_market, mint]
+                        );
+                    }
 
                     totalUpdated++;
 
