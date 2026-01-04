@@ -173,7 +173,13 @@ async function getWalletBurns(walletAddress, db = null, forceRefresh = false) {
         while (pageCount < MAX_PAGES) {
             const url = `https://api.helius.xyz/v0/addresses/${walletAddress}/transactions?api-key=${config.HELIUS_API_KEY}&type=TRANSFER${beforeSignature ? `&before=${beforeSignature}` : ''}`;
 
-            const response = await fetch(url);
+            // SECURITY: Add timeout to prevent hanging requests
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 10000);
+
+            const response = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeout);
+
             if (!response.ok) {
                 throw new Error(`Helius API error: ${response.status}`);
             }

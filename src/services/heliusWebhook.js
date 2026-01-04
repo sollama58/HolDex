@@ -25,6 +25,19 @@ function getWebhookApiUrl(path = '') {
     return `${HELIUS_API_URL}/webhooks${path}?api-key=${config.HELIUS_API_KEY}`;
 }
 
+// SECURITY: Fetch with timeout to prevent hanging requests
+const WEBHOOK_TIMEOUT = 15000; // 15 seconds
+async function fetchWithTimeout(url, options = {}) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT);
+    try {
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        return response;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
 /**
  * Create a webhook for monitoring token transfers
  * @param {string[]} mints - Array of token mint addresses (atomic creation)
@@ -41,7 +54,7 @@ async function createTokenWebhook(mints, callbackUrl) {
 
     logger.info(`[Webhook] Creating webhook for ${mintArray.length} tokens (key: ${maskApiKey(config.HELIUS_API_KEY)})`);
 
-    const response = await fetch(getWebhookApiUrl(), {
+    const response = await fetchWithTimeout(getWebhookApiUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -74,7 +87,7 @@ async function addToWebhook(webhookId, mints) {
 
     logger.info(`[Webhook] Updating ${webhookId} with ${mintArray.length} addresses`);
 
-    const response = await fetch(getWebhookApiUrl(`/${webhookId}`), {
+    const response = await fetchWithTimeout(getWebhookApiUrl(`/${webhookId}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -98,7 +111,7 @@ async function addToWebhook(webhookId, mints) {
 async function deleteWebhook(webhookId) {
     logger.info(`[Webhook] Deleting: ${webhookId}`);
 
-    const response = await fetch(getWebhookApiUrl(`/${webhookId}`), {
+    const response = await fetchWithTimeout(getWebhookApiUrl(`/${webhookId}`), {
         method: 'DELETE'
     });
 
@@ -117,7 +130,7 @@ async function deleteWebhook(webhookId) {
  * @returns {Promise<Array>}
  */
 async function listWebhooks() {
-    const response = await fetch(getWebhookApiUrl());
+    const response = await fetchWithTimeout(getWebhookApiUrl());
 
     if (!response.ok) {
         const error = await response.text();
