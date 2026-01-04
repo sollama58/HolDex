@@ -1831,6 +1831,50 @@ function init(deps) {
         }
     });
 
+    // ============================================
+    // PUBLIC CANDLES (GeckoTerminal - 0 RPC cost)
+    // Philosophy: Charts are commodity data. K-Score is the signal.
+    // ============================================
+    router.get('/token/:mint/candles/public', cacheControl(30, 60), publicRateLimit, async (req, res) => {
+        const { mint } = req.params;
+        const { resolution = '5' } = req.query;
+
+        if (!isValidPubkey(mint)) {
+            return res.status(400).json({ success: false, error: 'Invalid mint address' });
+        }
+
+        try {
+            // Get best pool for this token
+            const bestPool = await db.get(
+                'SELECT address FROM pools WHERE mint = $1 ORDER BY liquidity_usd DESC LIMIT 1',
+                [mint]
+            );
+
+            if (!bestPool) {
+                return res.json({
+                    success: false,
+                    error: 'Token not indexed',
+                    hint: 'Charts are noise. K-Score is signal.'
+                });
+            }
+
+            // Fetch from GeckoTerminal (free, no RPC)
+            const candles = await fetchExternalCandles(bestPool.address, resolution);
+
+            res.json({
+                success: true,
+                candles,
+                source: 'geckoterminal',
+                disclaimer: 'Chart data via GeckoTerminal. For on-chain verified data, hold $ASDFASDFA.',
+                philosophy: 'Charts are painted. K-Score is computed from on-chain behavior.'
+            });
+
+        } catch (e) {
+            logger.error('[PublicCandles]', e.message);
+            res.status(500).json({ success: false, error: 'Server error' });
+        }
+    });
+
     router.get('/tokens', cacheControl(2, 5), unifiedRateLimiter, async (req, res) => {
         let { search = '', sort = 'kscore', page = 1, filter, direction = 'desc', limit = 20 } = req.query;
         try {

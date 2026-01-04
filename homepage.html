@@ -1915,7 +1915,7 @@
                         lpBody.innerHTML = t.pairs.map(p => `<tr><td class="px-2 py-2 text-[#fb923c] font-bold text-xs">${escapeHtml(p.dexId)}</td><td class="px-2 py-2 text-right text-xs font-mono">$${(parseFloat(p.priceUsd)||0).toFixed(6)}</td><td class="px-2 py-2 text-right text-[#22c55e] text-xs font-mono">$${(parseFloat(p.liquidity?.usd)||0).toLocaleString()}</td></tr>`).join('');
                         const dexName = escapeHtml(String(t.pairs[0].dex || t.pairs[0].dexId || "Unknown").toUpperCase());
                         const poolNameEl = document.getElementById('chart-pool-name');
-                        if (poolNameEl) poolNameEl.textContent = `— ${dexName} (Largest Pool)`;
+                        if (poolNameEl) poolNameEl.innerHTML = `— ${dexName} <span class="text-[#666] italic">via GeckoTerminal</span>`;
                     } else {
                         lpBody.innerHTML = '<tr><td colspan="3" class="text-center p-2 text-xs">No pools</td></tr>';
                         currentPoolAddress = null;
@@ -2080,7 +2080,9 @@
             if (currentResolution === '60') lookback = 30 * 24 * 60 * 60;
             if (currentResolution === 'D') lookback = 365 * 24 * 60 * 60;
             const from = now - lookback;
-            let endpoint = `${API_URL}/api/token/${mint}/candles?resolution=${currentResolution}&from=${from}&to=${now}&poolAddress=${poolAddress || ''}`;
+            // Use public endpoint (GeckoTerminal, 0 RPC cost)
+            // Charts are commodity data. K-Score is the signal.
+            let endpoint = `${API_URL}/api/token/${mint}/candles/public?resolution=${currentResolution}`;
             const res = await fetch(endpoint);
             const data = await res.json();
             if(data.success && data.candles) {
