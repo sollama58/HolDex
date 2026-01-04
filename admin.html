@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Space | HolDex</title>
+
+    <script src="https://bundle.run/buffer@6.0.3"></script>
+    <script>
+        if (typeof window.buffer !== 'undefined') {
+            window.Buffer = window.buffer.Buffer;
+        }
+    </script>
+    <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/tweetnacl@1.0.3/nacl-fast.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        fire: {
+                            bg: '#0c0c14',
+                            panel: 'rgba(20, 20, 35, 0.6)',
+                            solid: '#14141f',
+                            border: 'rgba(255, 255, 255, 0.08)',
+                            accent: '#f97316',
+                            text: '#f8fafc',
+                            muted: '#94a3b8',
+                            glow: 'rgba(249, 115, 22, 0.4)'
+                        },
+                        neon: { cyan: '#22d3ee', purple: '#a855f7', pink: '#ec4899', green: '#10b981' }
+                    },
+                    fontFamily: {
+                        mono: ['JetBrains Mono', 'monospace'],
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background: #0c0c14;
+            color: #f8fafc;
+            font-family: 'Inter', system-ui, sans-serif;
+            min-height: 100vh;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            top: -20%;
+            left: -10%;
+            width: 40%;
+            height: 50%;
+            background: radial-gradient(circle, rgba(249, 115, 22, 0.15) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+        body::after {
+            content: '';
+            position: fixed;
+            bottom: -30%;
+            right: -15%;
+            width: 50%;
+            height: 60%;
+            background: radial-gradient(circle, rgba(168, 85, 247, 0.12) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+        body > * { position: relative; z-index: 1; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+
+        .glass-panel {
+            background: rgba(20, 20, 35, 0.6);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px;
+        }
+        .glass-input {
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: #f8fafc;
+            width: 100%;
+        }
+        .glass-input:focus {
+            outline: none;
+            border-color: #f97316;
+            box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.2);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #f97316, #ea580c);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(249, 115, 22, 0.4); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+        .btn-danger:hover { background: rgba(239, 68, 68, 0.3); }
+        .btn-success {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+        .btn-success:hover { background: rgba(16, 185, 129, 0.3); }
+        .stat-card {
+            background: rgba(20, 20, 35, 0.4);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+        }
+        .stat-value { font-size: 2rem; font-weight: 700; color: #f97316; }
+        .stat-label { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .badge-active { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+        .badge-pending { background: rgba(249, 115, 22, 0.2); color: #f97316; }
+        .badge-revoked { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        .table-row {
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            transition: background 0.2s;
+        }
+        .table-row:hover { background: rgba(249, 115, 22, 0.05); }
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+        }
+        .toast-success { background: rgba(16, 185, 129, 0.9); color: white; }
+        .toast-error { background: rgba(239, 68, 68, 0.9); color: white; }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .tab-btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.2s;
+            color: #94a3b8;
+        }
+        .tab-btn:hover { color: #f8fafc; background: rgba(255,255,255,0.05); }
+        .tab-btn.active { color: #f97316; background: rgba(249, 115, 22, 0.1); }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <!-- Header -->
+    <header class="flex items-center justify-between mb-8">
+        <div class="flex items-center gap-4">
+            <span class="text-2xl font-bold" style="color: #f97316; text-shadow: 0 0 30px rgba(249, 115, 22, 0.5);">
+                ADMIN SPACE
+            </span>
+            <span class="text-fire-muted text-sm">HolDex Control Panel</span>
+        </div>
+        <div id="auth-status" class="flex items-center gap-3">
+            <span id="wallet-display" class="text-fire-muted text-sm font-mono hidden"></span>
+            <button id="btn-logout" class="btn-danger hidden" onclick="logout()">Logout</button>
+        </div>
+    </header>
+
+    <!-- Login Screen -->
+    <div id="login-screen" class="max-w-md mx-auto mt-20">
+        <div class="glass-panel p-8 text-center">
+            <div class="text-4xl mb-4">🔐</div>
+            <h2 class="text-xl font-bold mb-2">Admin Access Required</h2>
+            <p class="text-fire-muted text-sm mb-6">Connect wallet with grants_admin permission or enter admin password</p>
+
+            <div class="space-y-4">
+                <button id="btn-connect-wallet" class="btn-primary w-full" onclick="connectWallet()">
+                    Connect Wallet
+                </button>
+
+                <div class="flex items-center gap-4 text-fire-muted text-sm">
+                    <div class="flex-1 h-px bg-white/10"></div>
+                    <span>or</span>
+                    <div class="flex-1 h-px bg-white/10"></div>
+                </div>
+
+                <div>
+                    <input type="password" id="admin-password" class="glass-input mb-3" placeholder="Admin Password">
+                    <button class="btn-primary w-full" onclick="loginWithPassword()">Login with Password</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Dashboard (hidden until auth) -->
+    <main id="dashboard" class="hidden max-w-7xl mx-auto">
+        <!-- Stats Row -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <div class="stat-card">
+                <div class="stat-value" id="stat-grants">-</div>
+                <div class="stat-label">Active Grants</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-pending">-</div>
+                <div class="stat-label">Pending Updates</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-tokens">-</div>
+                <div class="stat-label">Verified Tokens</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-participants">-</div>
+                <div class="stat-label">Participants</div>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="flex gap-2 mb-6 overflow-x-auto pb-2">
+            <button class="tab-btn active" onclick="showTab('grants')">Grants Manager</button>
+            <button class="tab-btn" onclick="showTab('updates')">Token Updates</button>
+            <button class="tab-btn" onclick="showTab('actions')">Action Log</button>
+        </div>
+
+        <!-- Tab: Grants Manager -->
+        <div id="tab-grants" class="tab-content">
+            <div class="glass-panel p-6 mb-6">
+                <h3 class="text-lg font-bold mb-4">Add New Grant</h3>
+                <div class="grid md:grid-cols-4 gap-4">
+                    <input type="text" id="new-grant-wallet" class="glass-input" placeholder="Wallet Address">
+                    <select id="new-grant-type" class="glass-input">
+                        <option value="space_access,card_generator,gasdf_analytics">Cult Member (full)</option>
+                        <option value="space_access,card_generator">Cult Member (basic)</option>
+                        <option value="space_access,card_generator,gasdf_analytics,direct_submit">Ambassador</option>
+                        <option value="space_access,card_generator,gasdf_analytics,direct_submit,grants_admin">Admin</option>
+                    </select>
+                    <input type="text" id="new-grant-reason" class="glass-input" placeholder="Reason (optional)">
+                    <button class="btn-primary" onclick="addGrant()">+ Add Grant</button>
+                </div>
+            </div>
+
+            <div class="glass-panel p-6">
+                <h3 class="text-lg font-bold mb-4">Active Grants</h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-fire-muted text-xs uppercase">
+                                <th class="pb-3">Wallet</th>
+                                <th class="pb-3">Grants</th>
+                                <th class="pb-3">Granted By</th>
+                                <th class="pb-3">Status</th>
+                                <th class="pb-3">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="grants-table">
+                            <tr><td colspan="5" class="py-8 text-center text-fire-muted">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: Token Updates -->
+        <div id="tab-updates" class="tab-content hidden">
+            <div class="glass-panel p-6">
+                <h3 class="text-lg font-bold mb-4">Pending Token Updates</h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-fire-muted text-xs uppercase">
+                                <th class="pb-3">Token</th>
+                                <th class="pb-3">Changes</th>
+                                <th class="pb-3">Submitted</th>
+                                <th class="pb-3">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="updates-table">
+                            <tr><td colspan="4" class="py-8 text-center text-fire-muted">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: Action Log -->
+        <div id="tab-actions" class="tab-content hidden">
+            <div class="glass-panel p-6">
+                <h3 class="text-lg font-bold mb-4">Recent Actions</h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-fire-muted text-xs uppercase">
+                                <th class="pb-3">Time</th>
+                                <th class="pb-3">Wallet</th>
+                                <th class="pb-3">Action</th>
+                                <th class="pb-3">Details</th>
+                                <th class="pb-3">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="actions-table">
+                            <tr><td colspan="5" class="py-8 text-center text-fire-muted">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="text-center text-fire-muted text-sm mt-12 mb-8">
+            this is fine. 🐕‍🦺🔥
+        </div>
+    </main>
+
+    <script>
+        const API_URL = window.location.origin;
+        let authMode = null; // 'wallet' or 'password'
+        let sessionToken = null;
+        let adminPassword = null;
+        let connectedWallet = null;
+
+        // ═══════════════════════════════════════════════════════════════
+        // AUTH
+        // ═══════════════════════════════════════════════════════════════
+
+        async function connectWallet() {
+            try {
+                if (!window.solana?.isPhantom) {
+                    toast('Please install Phantom wallet', 'error');
+                    return;
+                }
+
+                const resp = await window.solana.connect();
+                connectedWallet = resp.publicKey.toString();
+
+                // Sign message for session
+                const timestamp = Date.now();
+                const message = `Access HolDex Space: ${timestamp}`;
+                const encodedMessage = new TextEncoder().encode(message);
+                const signedMessage = await window.solana.signMessage(encodedMessage, 'utf8');
+                const signature = btoa(String.fromCharCode(...signedMessage.signature));
+
+                // Login to space
+                const loginResp = await fetch(`${API_URL}/space/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ wallet: connectedWallet, message, signature })
+                });
+
+                const data = await loginResp.json();
+                if (!data.success) {
+                    toast(data.error || 'Login failed', 'error');
+                    return;
+                }
+
+                // Check for grants_admin
+                if (!data.data.grants.includes('grants_admin')) {
+                    toast('You need grants_admin permission', 'error');
+                    return;
+                }
+
+                sessionToken = data.data.sessionToken;
+                authMode = 'wallet';
+                showDashboard();
+                toast('Connected as ' + shortWallet(connectedWallet), 'success');
+
+            } catch (e) {
+                console.error(e);
+                toast('Wallet connection failed', 'error');
+            }
+        }
+
+        async function loginWithPassword() {
+            const password = document.getElementById('admin-password').value;
+            if (!password) {
+                toast('Enter password', 'error');
+                return;
+            }
+
+            // Test password with a simple admin endpoint
+            try {
+                const resp = await fetch(`${API_URL}/api/admin/updates?type=pending`, {
+                    headers: { 'x-admin-auth': password }
+                });
+
+                if (resp.status === 403) {
+                    toast('Invalid password', 'error');
+                    return;
+                }
+
+                adminPassword = password;
+                authMode = 'password';
+                showDashboard();
+                toast('Logged in with password', 'success');
+
+            } catch (e) {
+                toast('Login failed', 'error');
+            }
+        }
+
+        function logout() {
+            sessionToken = null;
+            adminPassword = null;
+            authMode = null;
+            connectedWallet = null;
+            document.getElementById('login-screen').classList.remove('hidden');
+            document.getElementById('dashboard').classList.add('hidden');
+            document.getElementById('wallet-display').classList.add('hidden');
+            document.getElementById('btn-logout').classList.add('hidden');
+        }
+
+        function showDashboard() {
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('dashboard').classList.remove('hidden');
+            document.getElementById('btn-logout').classList.remove('hidden');
+
+            if (connectedWallet) {
+                document.getElementById('wallet-display').textContent = shortWallet(connectedWallet);
+                document.getElementById('wallet-display').classList.remove('hidden');
+            }
+
+            loadStats();
+            loadGrants();
+            loadUpdates();
+            loadActions();
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // API HELPERS
+        // ═══════════════════════════════════════════════════════════════
+
+        function getHeaders() {
+            const headers = { 'Content-Type': 'application/json' };
+            if (authMode === 'password') {
+                headers['x-admin-auth'] = adminPassword;
+            } else if (authMode === 'wallet') {
+                headers['x-session-token'] = sessionToken;
+            }
+            return headers;
+        }
+
+        async function apiGet(endpoint) {
+            const resp = await fetch(`${API_URL}${endpoint}`, { headers: getHeaders() });
+            return resp.json();
+        }
+
+        async function apiPost(endpoint, body) {
+            const resp = await fetch(`${API_URL}${endpoint}`, {
+                method: 'POST',
+                headers: getHeaders(),
+                body: JSON.stringify(body)
+            });
+            return resp.json();
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // LOAD DATA
+        // ═══════════════════════════════════════════════════════════════
+
+        async function loadStats() {
+            try {
+                // Grants count (via direct query or space endpoint)
+                const grantsData = await apiGet('/space/admin/grants');
+                const activeGrants = grantsData.data?.filter(g => g.is_active).length || 0;
+                document.getElementById('stat-grants').textContent = activeGrants;
+
+                // Pending updates
+                const updatesData = await apiGet('/api/admin/updates?type=pending');
+                document.getElementById('stat-pending').textContent = updatesData.length || 0;
+
+                // Verified tokens
+                const tokensData = await apiGet('/api/tokens/public?filter=verified&limit=1');
+                document.getElementById('stat-tokens').textContent = tokensData.pagination?.total || '-';
+
+                // Participants
+                const leaderData = await apiGet('/oracle/leaderboard?limit=1');
+                document.getElementById('stat-participants').textContent = leaderData.data?.total || '-';
+
+            } catch (e) {
+                console.error('Stats load error:', e);
+            }
+        }
+
+        async function loadGrants() {
+            try {
+                const data = await apiGet('/space/admin/grants');
+                const tbody = document.getElementById('grants-table');
+
+                if (!data.success || !data.data?.length) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-fire-muted">No grants found</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.data.map(g => `
+                    <tr class="table-row">
+                        <td class="py-3 font-mono text-xs">${shortWallet(g.wallet)}</td>
+                        <td class="py-3">
+                            ${(g.grants || []).map(gr => `<span class="badge badge-active mr-1">${gr}</span>`).join('')}
+                        </td>
+                        <td class="py-3 font-mono text-xs text-fire-muted">${shortWallet(g.granted_by)}</td>
+                        <td class="py-3">
+                            ${g.is_active
+                                ? '<span class="badge badge-active">Active</span>'
+                                : '<span class="badge badge-revoked">Revoked</span>'}
+                        </td>
+                        <td class="py-3">
+                            ${g.is_active
+                                ? `<button class="btn-danger" onclick="revokeGrant('${g.wallet}')">Revoke</button>`
+                                : '-'}
+                        </td>
+                    </tr>
+                `).join('');
+
+            } catch (e) {
+                console.error('Grants load error:', e);
+            }
+        }
+
+        async function loadUpdates() {
+            try {
+                const data = await apiGet('/api/admin/updates?type=pending');
+                const tbody = document.getElementById('updates-table');
+
+                if (!data?.length) {
+                    tbody.innerHTML = '<tr><td colspan="4" class="py-8 text-center text-fire-muted">No pending updates</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.map(u => `
+                    <tr class="table-row">
+                        <td class="py-3">
+                            <div class="flex items-center gap-2">
+                                ${u.image ? `<img src="${u.image}" class="w-6 h-6 rounded-full">` : ''}
+                                <span class="font-bold">${u.ticker || u.mint?.slice(0,8)}</span>
+                            </div>
+                        </td>
+                        <td class="py-3 text-xs text-fire-muted">
+                            ${u.twitter ? `Twitter: ${u.twitter}<br>` : ''}
+                            ${u.website ? `Website: ${u.website}<br>` : ''}
+                            ${u.telegram ? `Telegram: ${u.telegram}` : ''}
+                        </td>
+                        <td class="py-3 text-xs text-fire-muted">${new Date(parseInt(u.submittedat)).toLocaleDateString()}</td>
+                        <td class="py-3 flex gap-2">
+                            <button class="btn-success" onclick="approveUpdate(${u.id})">Approve</button>
+                            <button class="btn-danger" onclick="rejectUpdate(${u.id})">Reject</button>
+                        </td>
+                    </tr>
+                `).join('');
+
+            } catch (e) {
+                console.error('Updates load error:', e);
+            }
+        }
+
+        async function loadActions() {
+            try {
+                const data = await apiGet('/space/admin/actions?limit=50');
+                const tbody = document.getElementById('actions-table');
+
+                if (!data.success || !data.data?.length) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-fire-muted">No actions logged yet</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.data.map(a => `
+                    <tr class="table-row">
+                        <td class="py-3 text-xs text-fire-muted">${new Date(a.createdAt).toLocaleString()}</td>
+                        <td class="py-3 font-mono text-xs">${shortWallet(a.wallet)}</td>
+                        <td class="py-3">
+                            <span class="badge ${a.action.includes('denied') || a.action.includes('failed') ? 'badge-revoked' : 'badge-active'}">
+                                ${a.action}
+                            </span>
+                        </td>
+                        <td class="py-3 text-xs text-fire-muted">${JSON.stringify(a.metadata || {}).slice(0, 50)}...</td>
+                        <td class="py-3">
+                            ${a.success
+                                ? '<span class="text-neon-green">✓</span>'
+                                : '<span class="text-red-500">✗</span>'}
+                        </td>
+                    </tr>
+                `).join('');
+
+            } catch (e) {
+                console.error('Actions load error:', e);
+                document.getElementById('actions-table').innerHTML =
+                    '<tr><td colspan="5" class="py-8 text-center text-fire-muted">Failed to load actions (wallet auth required)</td></tr>';
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // ACTIONS
+        // ═══════════════════════════════════════════════════════════════
+
+        async function addGrant() {
+            const wallet = document.getElementById('new-grant-wallet').value.trim();
+            const grantsStr = document.getElementById('new-grant-type').value;
+            const reason = document.getElementById('new-grant-reason').value.trim();
+
+            if (!wallet || wallet.length < 32) {
+                toast('Enter valid wallet address', 'error');
+                return;
+            }
+
+            const grants = grantsStr.split(',');
+
+            try {
+                if (authMode === 'wallet') {
+                    // Need signature for wallet-based auth
+                    const timestamp = Date.now();
+                    const message = `Grant access to ${wallet}: ${timestamp}`;
+                    const encodedMessage = new TextEncoder().encode(message);
+                    const signedMessage = await window.solana.signMessage(encodedMessage, 'utf8');
+                    const signature = btoa(String.fromCharCode(...signedMessage.signature));
+
+                    const data = await apiPost('/space/admin/grants', {
+                        wallet: connectedWallet,
+                        signature,
+                        timestamp,
+                        params: { targetWallet: wallet, grants, reason }
+                    });
+
+                    if (!data.success) {
+                        toast(data.error || 'Failed to add grant', 'error');
+                        return;
+                    }
+                } else {
+                    // Password mode - direct DB insert via custom endpoint needed
+                    // For now, show message
+                    toast('Password mode: Use wallet auth for grants', 'error');
+                    return;
+                }
+
+                toast('Grant added successfully', 'success');
+                document.getElementById('new-grant-wallet').value = '';
+                document.getElementById('new-grant-reason').value = '';
+                loadGrants();
+                loadStats();
+
+            } catch (e) {
+                console.error(e);
+                toast('Failed to add grant', 'error');
+            }
+        }
+
+        async function revokeGrant(targetWallet) {
+            if (!confirm(`Revoke access for ${shortWallet(targetWallet)}?`)) return;
+
+            try {
+                if (authMode === 'wallet') {
+                    const timestamp = Date.now();
+                    const message = `Revoke access for ${targetWallet}: ${timestamp}`;
+                    const encodedMessage = new TextEncoder().encode(message);
+                    const signedMessage = await window.solana.signMessage(encodedMessage, 'utf8');
+                    const signature = btoa(String.fromCharCode(...signedMessage.signature));
+
+                    const resp = await fetch(`${API_URL}/space/admin/grants/${targetWallet}`, {
+                        method: 'DELETE',
+                        headers: getHeaders(),
+                        body: JSON.stringify({
+                            wallet: connectedWallet,
+                            signature,
+                            timestamp,
+                            params: { targetWallet }
+                        })
+                    });
+
+                    const data = await resp.json();
+                    if (!data.success) {
+                        toast(data.error || 'Failed to revoke', 'error');
+                        return;
+                    }
+                }
+
+                toast('Grant revoked', 'success');
+                loadGrants();
+                loadStats();
+
+            } catch (e) {
+                toast('Failed to revoke grant', 'error');
+            }
+        }
+
+        async function approveUpdate(id) {
+            try {
+                const data = await apiPost('/api/admin/approve-update', { id });
+                if (data.success) {
+                    toast('Update approved', 'success');
+                    loadUpdates();
+                    loadStats();
+                } else {
+                    toast(data.error || 'Failed', 'error');
+                }
+            } catch (e) {
+                toast('Failed to approve', 'error');
+            }
+        }
+
+        async function rejectUpdate(id) {
+            if (!confirm('Reject this update?')) return;
+            try {
+                const data = await apiPost('/api/admin/reject-update', { id });
+                if (data.success) {
+                    toast('Update rejected', 'success');
+                    loadUpdates();
+                    loadStats();
+                } else {
+                    toast(data.error || 'Failed', 'error');
+                }
+            } catch (e) {
+                toast('Failed to reject', 'error');
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // UI HELPERS
+        // ═══════════════════════════════════════════════════════════════
+
+        function showTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            document.getElementById(`tab-${tabName}`).classList.remove('hidden');
+            event.target.classList.add('active');
+        }
+
+        function shortWallet(wallet) {
+            if (!wallet) return '-';
+            return wallet.slice(0, 4) + '...' + wallet.slice(-4);
+        }
+
+        function toast(message, type = 'success') {
+            const el = document.createElement('div');
+            el.className = `toast toast-${type}`;
+            el.textContent = message;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 3000);
+        }
+
+        // Initialize Lucide icons
+        document.addEventListener('DOMContentLoaded', () => {
+            if (window.lucide) lucide.createIcons();
+        });
+    </script>
+</body>
+</html>

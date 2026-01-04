@@ -19,6 +19,7 @@ const { initSocket } = require('./services/socket');
 const tokensRoutes = require('./routes/tokens');
 const webhooksRoutes = require('./routes/webhooks');
 const oracleRoutes = require('./routes/oracle');
+const spaceRoutes = require('./routes/space');
 const { getOrCreateMasterWebhook } = require('./services/heliusWebhook');
 const fs = require('fs');
 const path = require('path');
@@ -93,9 +94,11 @@ app.use(compression());
 const HOMEPAGE_PATH = path.join(__dirname, '../homepage.html');
 const TRACKRECORD_PATH = path.join(__dirname, '../track-record.html');
 const THEMEPREVIEW_PATH = path.join(__dirname, '../theme-preview.html');
+const ADMIN_PATH = path.join(__dirname, '../admin.html');
 let HOMEPAGE_TEMPLATE = '';
 let TRACKRECORD_TEMPLATE = '';
 let THEMEPREVIEW_TEMPLATE = '';
+let ADMIN_TEMPLATE = '';
 
 try {
     HOMEPAGE_TEMPLATE = fs.readFileSync(HOMEPAGE_PATH, 'utf8');
@@ -119,6 +122,14 @@ try {
 } catch (e) {
     logger.warn(`⚠️ Theme preview template not found: ${e.message}`);
     THEMEPREVIEW_TEMPLATE = ''; // Optional page, don't fail
+}
+
+try {
+    ADMIN_TEMPLATE = fs.readFileSync(ADMIN_PATH, 'utf8');
+    logger.info('✅ Template: admin.html loaded into memory');
+} catch (e) {
+    logger.warn(`⚠️ Admin template not found: ${e.message}`);
+    ADMIN_TEMPLATE = ''; // Optional page, don't fail
 }
 
 // CORS CONFIGURATION
@@ -265,6 +276,102 @@ app.get('/token/:mint', async (req, res, next) => {
     }
 });
 
+// --- SHORT URL FOR K-SCORE SHARING ---
+// /k/:mint - Optimized for Twitter/social sharing with K-Score card image
+// Supports: ?mode=simple (compact) or ?mode=full (default, with conviction breakdown)
+app.get('/k/:mint', async (req, res) => {
+    const { mint } = req.params;
+    const mode = req.query.mode || 'full';
+    const db = getDB();
+
+    // Validate mint format
+    if (!mint || mint.length < 32 || mint.length > 44) {
+        return res.status(400).send('Invalid token address');
+    }
+
+    try {
+        const token = await db.get(`
+            SELECT name, symbol, image, k_score, hasCommunityUpdate,
+                   conviction_accumulators, conviction_holders, conviction_reducers, conviction_extractors,
+                   holders, marketcap
+            FROM tokens WHERE mint = $1
+        `, [mint]);
+
+        const isVerified = token && (token.hasCommunityUpdate || token.hascommunityupdate);
+
+        // Build OG metadata
+        let title, desc, cardUrl;
+        const baseUrl = config.API_URL || 'https://holdex-api.onrender.com';
+
+        if (!token) {
+            title = 'Token Not Found | HolDex K-Score';
+            desc = 'This token has not been indexed yet. Submit it for community review at holdex.io';
+            cardUrl = `${baseUrl}/api/token/${mint}/card.png?mode=${mode}`;
+        } else if (!isVerified) {
+            title = `${token.name} ($${token.symbol}) | Pending Verification`;
+            desc = `K-Score not yet calculated. Submit ${token.symbol} for community review to unlock conviction analysis.`;
+            cardUrl = `${baseUrl}/api/token/${mint}/card.png?mode=${mode}`;
+        } else {
+            const score = Math.round(token.k_score || 0);
+            const tier = score >= 90 ? 'Diamond 💎' : score >= 80 ? 'Platinum 💠' : score >= 70 ? 'Gold 🥇' :
+                        score >= 60 ? 'Silver 🥈' : score >= 50 ? 'Bronze 🥉' : score >= 40 ? 'Copper 🟤' :
+                        score >= 20 ? 'Iron ⚫' : 'Rust 🔩';
+
+            title = `${token.name} ($${token.symbol}) K-Score: ${score} ${tier}`;
+
+            const total = (token.conviction_accumulators || 0) + (token.conviction_holders || 0) +
+                         (token.conviction_reducers || 0) + (token.conviction_extractors || 0);
+            const diamondHands = total > 0 ? Math.round(((token.conviction_accumulators || 0) + (token.conviction_holders || 0)) / total * 100) : 0;
+
+            desc = `${tier} tier with ${diamondHands}% diamond hands. On-chain conviction analysis powered by HolDex.`;
+            cardUrl = `${baseUrl}/api/token/${mint}/card.png?mode=${mode}`;
+        }
+
+        // SECURITY: Escape all values
+        const safeTitle = escapeHtml(title);
+        const safeDesc = escapeHtml(desc);
+        const safeCardUrl = escapeHtml(cardUrl);
+        const safeMint = escapeHtml(mint);
+
+        let html = HOMEPAGE_TEMPLATE;
+
+        const metaTags = `
+            <meta property="og:title" content="${safeTitle}" />
+            <meta property="og:description" content="${safeDesc}" />
+            <meta property="og:image" content="${safeCardUrl}" />
+            <meta property="og:image:width" content="1200" />
+            <meta property="og:image:height" content="628" />
+            <meta property="og:url" content="${baseUrl}/k/${safeMint}" />
+            <meta property="og:type" content="website" />
+            <meta property="og:site_name" content="HolDex K-Score" />
+            <meta name="twitter:card" content="summary_large_image" />
+            <meta name="twitter:title" content="${safeTitle}" />
+            <meta name="twitter:description" content="${safeDesc}" />
+            <meta name="twitter:image" content="${safeCardUrl}" />
+            <meta name="twitter:image:alt" content="K-Score card for ${escapeHtml(token?.symbol || 'token')}" />
+        `;
+
+        html = html.replace('<head>', `<head>${metaTags}`);
+
+        // Redirect to token page in SPA
+        const jsSafeMint = JSON.stringify(mint).slice(1, -1);
+        const redirectScript = `
+            <script>
+                if (!window.location.hash) {
+                    history.replaceState(null, null, '/#token/${jsSafeMint}');
+                }
+            </script>
+        `;
+        html = html.replace('</body>', `${redirectScript}</body>`);
+
+        res.send(html);
+
+    } catch (e) {
+        logger.error(`K-Score Share Error: ${e.message}`);
+        res.send(HOMEPAGE_TEMPLATE);
+    }
+});
+
 // Serve Root - Crucial for handling /#token/... links
 app.get('/', (req, res) => {
     res.send(HOMEPAGE_TEMPLATE);
@@ -285,6 +392,15 @@ app.get('/theme-preview.html', (req, res) => {
         res.send(THEMEPREVIEW_TEMPLATE);
     } else {
         res.status(404).send('Theme preview page not available');
+    }
+});
+
+// Serve Admin Dashboard - "this is fine" style 🐕‍🦺🔥
+app.get('/admin', (req, res) => {
+    if (ADMIN_TEMPLATE) {
+        res.send(ADMIN_TEMPLATE);
+    } else {
+        res.status(404).send('Admin page not available');
     }
 });
 
@@ -344,6 +460,7 @@ async function startServer() {
         app.use('/api', tokensRoutes.init({ db: getDB() }));
         app.use('/webhook', webhooksRoutes.init({ db: getDB() }));
         app.use('/oracle', oracleRoutes.init({ db: getDB(), logger }));
+        app.use('/space', spaceRoutes.init({ db: getDB(), logger }));
 
         app.use((err, req, res, _next) => {
             logger.error(`🔥 Unhandled Server Error: ${err.message}`);

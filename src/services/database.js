@@ -281,6 +281,79 @@ async function initDB() {
                     -- Timestamps
                     updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000
                 );
+
+                -- ═══════════════════════════════════════════════════════════
+                -- SPACE ACCESS SYSTEM: φ-Aligned Wallet-Based Permissions
+                -- "Hold to enter. Grants unlock features. E-Score = benefits."
+                -- ═══════════════════════════════════════════════════════════
+
+                -- Access Grants: Feature-based permissions (not hierarchical roles)
+                -- Philosophy: Tiers are cosmetic, grants unlock tools
+                CREATE TABLE IF NOT EXISTS access_grants (
+                    wallet TEXT PRIMARY KEY,
+                    grants TEXT[] DEFAULT '{}',             -- ['space_access', 'card_generator', 'gasdf_analytics']
+
+                    -- E-Score boost for special contributions (ambassadors, etc.)
+                    e_score_boost DOUBLE PRECISION DEFAULT 0,
+
+                    -- Audit trail
+                    granted_by TEXT NOT NULL,               -- Admin wallet who granted
+                    grant_reason TEXT,                      -- Why granted
+
+                    -- Security: HMAC signature for integrity
+                    signature TEXT NOT NULL,                -- HMAC(wallet + grants + granted_by + created_at)
+
+                    -- Lifecycle
+                    is_active BOOLEAN DEFAULT TRUE,
+                    expires_at TIMESTAMP,                   -- NULL = permanent
+                    revoked_at TIMESTAMP,
+                    revoked_by TEXT,
+
+                    -- Timestamps
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                -- Space Actions: Audit log for all space interactions
+                -- Every action is logged for transparency and analytics
+                CREATE TABLE IF NOT EXISTS space_actions (
+                    id SERIAL PRIMARY KEY,
+                    wallet TEXT NOT NULL,
+                    action TEXT NOT NULL,                   -- 'generate_card', 'view_analytics', 'submit_token'
+                    grant_used TEXT,                        -- Which grant authorized this action
+
+                    -- For write actions: signature verification
+                    signature TEXT,                         -- Wallet signature (for write actions)
+                    signed_message TEXT,                    -- Original message that was signed
+
+                    -- Action metadata
+                    metadata JSONB DEFAULT '{}',            -- { mint: '...', mode: 'full', etc. }
+
+                    -- Result
+                    success BOOLEAN DEFAULT TRUE,
+                    error TEXT,
+
+                    -- Timestamps
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                -- Wallet Sessions: Optional session tokens for read-only access
+                -- Write actions still require fresh signatures
+                CREATE TABLE IF NOT EXISTS wallet_sessions (
+                    wallet TEXT PRIMARY KEY,
+                    session_token TEXT NOT NULL UNIQUE,
+
+                    -- Verification
+                    signed_message TEXT NOT NULL,           -- "Access HolDex Space: [timestamp]"
+                    signature TEXT NOT NULL,                -- Wallet signature
+
+                    -- Lifecycle
+                    expires_at TIMESTAMP NOT NULL,          -- Default: 7 days
+                    last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+                    -- Timestamps
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
             `);
 
             // Add new columns if they don't exist (migration-safe)
@@ -393,6 +466,19 @@ async function initDB() {
                 `CREATE INDEX IF NOT EXISTS idx_contributions_type ON contributions (type, created_at DESC)`,
                 // Pending reward distributions
                 `CREATE INDEX IF NOT EXISTS idx_reward_distributions_status ON reward_distributions (status) WHERE status = 'pending'`,
+                // ═══════════════════════════════════════════════════════════
+                // SPACE ACCESS SYSTEM INDEXES
+                // ═══════════════════════════════════════════════════════════
+                // Active grants lookup (most common)
+                `CREATE INDEX IF NOT EXISTS idx_access_grants_active ON access_grants (is_active) WHERE is_active = TRUE`,
+                // Session token lookup (for auth)
+                `CREATE INDEX IF NOT EXISTS idx_wallet_sessions_token ON wallet_sessions (session_token)`,
+                // Session expiry cleanup
+                `CREATE INDEX IF NOT EXISTS idx_wallet_sessions_expires ON wallet_sessions (expires_at)`,
+                // Space actions by wallet (for user history)
+                `CREATE INDEX IF NOT EXISTS idx_space_actions_wallet ON space_actions (wallet, created_at DESC)`,
+                // Space actions by action type (for analytics)
+                `CREATE INDEX IF NOT EXISTS idx_space_actions_action ON space_actions (action, created_at DESC)`,
             ];
 
             for (const sql of migrations) {

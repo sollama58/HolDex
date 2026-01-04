@@ -1,0 +1,661 @@
+/**
+ * SPACE ROUTES
+ *
+ * Authenticated dashboard endpoints for the $ASDFASDFA cult members.
+ * "Hold to enter. Grants unlock features. E-Score = benefits."
+ *
+ * Features by grant:
+ * - space_access: Basic dashboard access
+ * - card_generator: Generate K-Score cards for sharing
+ * - gasdf_analytics: View burn/rewards analytics
+ * - direct_submit: Submit tokens without review
+ * - grants_admin: Manage other users' grants
+ */
+
+'use strict';
+
+const express = require('express');
+const rateLimit = require('express-rate-limit');
+const router = express.Router();
+const {
+    requireSession,
+    requireGrant,
+    requireSignature,
+    optionalSession,
+    createSession,
+    destroySession,
+    getGrants,
+    hasGrant,
+    createGrant,
+    revokeGrant,
+    logAction,
+    isValidWallet,
+    VALID_GRANTS,
+} = require('../middleware/spaceAuth');
+const { getHarmonyEngine, harmony } = require('../services/harmonyEngine');
+const { getClient: getRedis } = require('../services/redis');
+const config = require('../config/env');
+
+let db = null;
+let logger = null;
+
+// ═══════════════════════════════════════════════════════════════
+// RATE LIMITING
+// ═══════════════════════════════════════════════════════════════
+
+const spaceRateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60, // 60 requests per minute
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, error: 'Too many requests', code: 'RATE_LIMITED' },
+    keyGenerator: (req) => req.wallet || req.ip
+});
+
+const writeRateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10, // 10 writes per minute
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, error: 'Too many write requests', code: 'WRITE_RATE_LIMITED' },
+    keyGenerator: (req) => req.wallet || req.ip
+});
+
+// ═══════════════════════════════════════════════════════════════
+// AUTHENTICATION ENDPOINTS
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * POST /space/auth/login
+ * Authenticate with wallet signature and get session token
+ *
+ * Body: { wallet, message, signature }
+ * Message format: "Access HolDex Space: [timestamp]"
+ */
+router.post('/auth/login', writeRateLimiter, async (req, res) => {
+    const { wallet, message, signature } = req.body;
+
+    if (!wallet || !message || !signature) {
+        return res.status(400).json({
+            success: false,
+            error: 'Wallet, message, and signature required',
+            code: 'MISSING_PARAMS'
+        });
+    }
+
+    if (!isValidWallet(wallet)) {
+        return res.status(400).json({
+            success: false,
+            error: 'Invalid wallet address',
+            code: 'INVALID_WALLET'
+        });
+    }
+
+    try {
+        // Check if wallet has any grants
+        const grants = await getGrants(wallet);
+        if (!grants || !grants.grants.includes('space_access')) {
+            await logAction(wallet, 'login_denied', null, {}, null, false, 'No space_access grant');
+            return res.status(403).json({
+                success: false,
+                error: 'Access not granted. Contact an ambassador.',
+                code: 'NO_ACCESS'
+            });
+        }
+
+        // Create session
+        const session = await createSession(wallet, message, signature);
+
+        await logAction(wallet, 'login', 'space_access', { grants: grants.grants });
+
+        res.json({
+            success: true,
+            data: {
+                sessionToken: session.sessionToken,
+                expiresAt: session.expiresAt,
+                wallet,
+                grants: grants.grants,
+                eScoreBoost: grants.e_score_boost || 0
+            }
+        });
+
+    } catch (e) {
+        logger?.error(`[Space] Login error: ${e.message}`);
+        return res.status(401).json({
+            success: false,
+            error: e.message,
+            code: 'AUTH_FAILED'
+        });
+    }
+});
+
+/**
+ * POST /space/auth/logout
+ * Destroy session
+ */
+router.post('/auth/logout', requireSession(), async (req, res) => {
+    const sessionToken = req.headers['x-session-token'] || req.cookies?.session;
+
+    try {
+        await destroySession(sessionToken);
+        await logAction(req.wallet, 'logout', null, {});
+
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: 'Logout failed' });
+    }
+});
+
+/**
+ * GET /space/auth/me
+ * Get current session info and grants
+ */
+router.get('/auth/me', requireSession(), spaceRateLimiter, async (req, res) => {
+    try {
+        const grants = await getGrants(req.wallet);
+        const harmonyEngine = getHarmonyEngine();
+
+        // Get E-Score for benefits calculation
+        let eScore = null;
+        let tier = null;
+        if (harmonyEngine) {
+            const participant = await harmonyEngine.getParticipant(req.wallet);
+            if (participant) {
+                eScore = participant.cached_escore || 0;
+                tier = { name: participant.cached_tier, icon: participant.cached_tier_icon };
+
+                // Apply E-Score boost from grants
+                if (grants?.e_score_boost) {
+                    eScore += grants.e_score_boost;
+                    tier = harmony.getTier(eScore);
+                }
+            }
+        }
+
+        res.json({
+            success: true,
+            data: {
+                wallet: req.wallet,
+                grants: grants?.grants || [],
+                eScore,
+                tier,
+                benefits: eScore ? harmony.calculateBenefits(eScore) : null
+            }
+        });
+    } catch (e) {
+        logger?.error(`[Space] /me error: ${e.message}`);
+        res.status(500).json({ success: false, error: 'Failed to fetch profile' });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// DASHBOARD ENDPOINTS
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * GET /space/dashboard
+ * Main dashboard data
+ */
+router.get('/dashboard', requireSession(), requireGrant('space_access'), spaceRateLimiter, async (req, res) => {
+    try {
+        const harmonyEngine = getHarmonyEngine();
+        const grants = await getGrants(req.wallet);
+
+        // Get participant data
+        let participant = null;
+        let leaderboardPosition = null;
+
+        if (harmonyEngine) {
+            participant = await harmonyEngine.getParticipant(req.wallet);
+
+            // Get leaderboard position
+            const leaderboard = await db.all(`
+                SELECT wallet, cached_escore
+                FROM participants
+                WHERE cached_escore > 0
+                ORDER BY cached_escore DESC
+                LIMIT 100
+            `);
+            const position = leaderboard.findIndex(p => p.wallet === req.wallet);
+            if (position >= 0) {
+                leaderboardPosition = {
+                    rank: position + 1,
+                    total: leaderboard.length,
+                    percentile: Math.round((1 - position / leaderboard.length) * 100)
+                };
+            }
+        }
+
+        // Get recent actions
+        const recentActions = await db.all(`
+            SELECT action, metadata, created_at, success
+            FROM space_actions
+            WHERE wallet = $1
+            ORDER BY created_at DESC
+            LIMIT 10
+        `, [req.wallet]);
+
+        await logAction(req.wallet, 'view_dashboard', 'space_access', {});
+
+        res.json({
+            success: true,
+            data: {
+                wallet: req.wallet,
+                grants: grants?.grants || [],
+                participant: participant ? {
+                    eScore: participant.cached_escore || 0,
+                    tier: { name: participant.cached_tier, icon: participant.cached_tier_icon },
+                    totalBurned: participant.total_burned || 0,
+                    holdings: participant.holdings || 0,
+                    apiCalls30d: participant.api_calls_30d || 0
+                } : null,
+                leaderboardPosition,
+                recentActions: recentActions.map(a => ({
+                    action: a.action,
+                    metadata: typeof a.metadata === 'string' ? JSON.parse(a.metadata) : a.metadata,
+                    createdAt: a.created_at,
+                    success: a.success
+                }))
+            }
+        });
+    } catch (e) {
+        logger?.error(`[Space] Dashboard error: ${e.message}`);
+        res.status(500).json({ success: false, error: 'Failed to load dashboard' });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// K-SCORE CARD GENERATION
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * POST /space/card/generate
+ * Generate K-Score card for a token (requires signature for write action)
+ *
+ * Body: { wallet, signature, timestamp, params: { mint, mode } }
+ */
+router.post('/card/generate',
+    requireSignature((params, ts) => `Generate K-Score card for ${params.mint}: ${ts}`),
+    requireGrant('card_generator'),
+    writeRateLimiter,
+    async (req, res) => {
+        const { params } = req.body;
+        const { mint, mode = 'full' } = params || {};
+
+        if (!mint || typeof mint !== 'string' || mint.length < 32) {
+            return res.status(400).json({
+                success: false,
+                error: 'Valid mint address required',
+                code: 'INVALID_MINT'
+            });
+        }
+
+        try {
+            // Check token exists and has K-Score
+            const token = await db.get(`
+                SELECT name, symbol, k_score, hasCommunityUpdate,
+                       conviction_accumulators, conviction_holders, conviction_reducers, conviction_extractors
+                FROM tokens WHERE mint = $1
+            `, [mint]);
+
+            if (!token) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Token not found',
+                    code: 'TOKEN_NOT_FOUND'
+                });
+            }
+
+            const isVerified = token.hascommunityupdate || token.hasCommunityUpdate;
+
+            // Generate card URL
+            const baseUrl = config.API_URL || 'https://holdex-api.onrender.com';
+            const cardUrl = `${baseUrl}/api/token/${mint}/card.png?mode=${mode}`;
+            const shareUrl = `${baseUrl}/k/${mint}?mode=${mode}`;
+
+            await logAction(req.wallet, 'generate_card', 'card_generator', {
+                mint,
+                mode,
+                symbol: token.symbol,
+                kScore: token.k_score
+            }, req.walletSignature);
+
+            res.json({
+                success: true,
+                data: {
+                    mint,
+                    symbol: token.symbol,
+                    name: token.name,
+                    kScore: isVerified ? token.k_score : null,
+                    isVerified,
+                    cardUrl,
+                    shareUrl,
+                    twitterShareUrl: `https://twitter.com/intent/tweet?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(`Check out $${token.symbol} K-Score on HolDex!`)}`,
+                    generatedBy: req.wallet
+                }
+            });
+        } catch (e) {
+            logger?.error(`[Space] Card generation error: ${e.message}`);
+            res.status(500).json({ success: false, error: 'Card generation failed' });
+        }
+    }
+);
+
+/**
+ * GET /space/card/history
+ * Get card generation history for current user
+ */
+router.get('/card/history', requireSession(), requireGrant('card_generator'), spaceRateLimiter, async (req, res) => {
+    try {
+        const history = await db.all(`
+            SELECT metadata, created_at
+            FROM space_actions
+            WHERE wallet = $1 AND action = 'generate_card' AND success = TRUE
+            ORDER BY created_at DESC
+            LIMIT 50
+        `, [req.wallet]);
+
+        res.json({
+            success: true,
+            data: history.map(h => ({
+                ...JSON.parse(h.metadata),
+                createdAt: h.created_at
+            }))
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: 'Failed to fetch history' });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// GASDF ANALYTICS
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * GET /space/analytics/burns
+ * Get burn analytics for current user
+ */
+router.get('/analytics/burns', requireSession(), requireGrant('gasdf_analytics'), spaceRateLimiter, async (req, res) => {
+    try {
+        const harmonyEngine = getHarmonyEngine();
+
+        // Get participant burn data
+        const participant = await harmonyEngine?.getParticipant(req.wallet);
+
+        // Get burn history from contributions
+        const burnHistory = await db.all(`
+            SELECT amount, source, tx_signature, created_at, verified
+            FROM contributions
+            WHERE wallet = $1 AND type = 'burn'
+            ORDER BY created_at DESC
+            LIMIT 100
+        `, [req.wallet]);
+
+        // Get ecosystem totals
+        const ecosystemStats = await db.get(`
+            SELECT
+                SUM(total_burned) as total_ecosystem_burns,
+                COUNT(*) as total_burners
+            FROM participants
+            WHERE total_burned > 0
+        `);
+
+        // Calculate user's % of ecosystem burns
+        const userBurns = participant?.total_burned || 0;
+        const ecosystemBurns = ecosystemStats?.total_ecosystem_burns || 1;
+        const burnShare = (userBurns / ecosystemBurns) * 100;
+
+        await logAction(req.wallet, 'view_burn_analytics', 'gasdf_analytics', {});
+
+        res.json({
+            success: true,
+            data: {
+                user: {
+                    totalBurned: userBurns,
+                    burnCount: burnHistory.length,
+                    burnShare: Math.round(burnShare * 1000) / 1000, // 3 decimals
+                    eScoreFromBurns: Math.log(1 + userBurns) * harmony.MULTIPLIERS.BURN
+                },
+                history: burnHistory.map(b => ({
+                    amount: b.amount,
+                    source: b.source,
+                    txSignature: b.tx_signature,
+                    createdAt: new Date(parseInt(b.created_at)).toISOString(),
+                    verified: b.verified
+                })),
+                ecosystem: {
+                    totalBurned: ecosystemBurns,
+                    totalBurners: ecosystemStats?.total_burners || 0
+                }
+            }
+        });
+    } catch (e) {
+        logger?.error(`[Space] Burns analytics error: ${e.message}`);
+        res.status(500).json({ success: false, error: 'Failed to fetch burn analytics' });
+    }
+});
+
+/**
+ * GET /space/analytics/leaderboard
+ * Get E-Score leaderboard
+ */
+router.get('/analytics/leaderboard', requireSession(), requireGrant('gasdf_analytics'), spaceRateLimiter, async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+
+        const leaderboard = await db.all(`
+            SELECT
+                wallet,
+                cached_escore as e_score,
+                cached_tier as tier,
+                cached_tier_icon as tier_icon,
+                total_burned,
+                holdings
+            FROM participants
+            WHERE cached_escore > 0
+            ORDER BY cached_escore DESC
+            LIMIT $1
+        `, [limit]);
+
+        // Find current user position
+        const userPosition = leaderboard.findIndex(p => p.wallet === req.wallet);
+
+        res.json({
+            success: true,
+            data: {
+                leaderboard: leaderboard.map((p, i) => ({
+                    rank: i + 1,
+                    wallet: p.wallet,
+                    eScore: Math.round(p.e_score * 100) / 100,
+                    tier: { name: p.tier, icon: p.tier_icon },
+                    totalBurned: p.total_burned,
+                    isYou: p.wallet === req.wallet
+                })),
+                yourPosition: userPosition >= 0 ? userPosition + 1 : null
+            }
+        });
+    } catch (e) {
+        logger?.error(`[Space] Leaderboard error: ${e.message}`);
+        res.status(500).json({ success: false, error: 'Failed to fetch leaderboard' });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// ADMIN: GRANTS MANAGEMENT
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * GET /space/admin/grants
+ * List all grants (admin only)
+ */
+router.get('/admin/grants', requireSession(), requireGrant('grants_admin'), spaceRateLimiter, async (req, res) => {
+    try {
+        const grants = await db.all(`
+            SELECT wallet, grants, e_score_boost, granted_by, grant_reason, is_active, created_at, revoked_at
+            FROM access_grants
+            ORDER BY created_at DESC
+            LIMIT 100
+        `);
+
+        await logAction(req.wallet, 'view_grants', 'grants_admin', {});
+
+        res.json({
+            success: true,
+            data: grants
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: 'Failed to fetch grants' });
+    }
+});
+
+/**
+ * POST /space/admin/grants
+ * Create or update grant (admin only, requires signature)
+ *
+ * Body: { wallet, signature, timestamp, params: { targetWallet, grants, reason, eScoreBoost } }
+ */
+router.post('/admin/grants',
+    requireSignature((params, ts) => `Grant access to ${params.targetWallet}: ${ts}`),
+    requireGrant('grants_admin'),
+    writeRateLimiter,
+    async (req, res) => {
+        const { params } = req.body;
+        const { targetWallet, grants, reason, eScoreBoost = 0 } = params || {};
+
+        if (!targetWallet || !isValidWallet(targetWallet)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Valid target wallet required',
+                code: 'INVALID_TARGET'
+            });
+        }
+
+        if (!grants || !Array.isArray(grants) || grants.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'At least one grant required',
+                code: 'NO_GRANTS'
+            });
+        }
+
+        // Validate grants
+        for (const g of grants) {
+            if (!VALID_GRANTS.includes(g)) {
+                return res.status(400).json({
+                    success: false,
+                    error: `Invalid grant: ${g}`,
+                    code: 'INVALID_GRANT'
+                });
+            }
+        }
+
+        try {
+            const result = await createGrant(targetWallet, grants, req.wallet, reason);
+
+            // Update e_score_boost if provided
+            if (eScoreBoost > 0) {
+                await db.run(
+                    'UPDATE access_grants SET e_score_boost = $1 WHERE wallet = $2',
+                    [eScoreBoost, targetWallet]
+                );
+            }
+
+            await logAction(req.wallet, 'create_grant', 'grants_admin', {
+                targetWallet,
+                grants,
+                reason,
+                eScoreBoost
+            }, req.walletSignature);
+
+            res.json({
+                success: true,
+                data: {
+                    ...result,
+                    eScoreBoost
+                }
+            });
+        } catch (e) {
+            logger?.error(`[Space] Create grant error: ${e.message}`);
+            res.status(500).json({ success: false, error: e.message });
+        }
+    }
+);
+
+/**
+ * DELETE /space/admin/grants/:wallet
+ * Revoke grant (admin only, requires signature)
+ */
+router.delete('/admin/grants/:targetWallet',
+    requireSignature((params, ts) => `Revoke access for ${params.targetWallet}: ${ts}`),
+    requireGrant('grants_admin'),
+    writeRateLimiter,
+    async (req, res) => {
+        const { targetWallet } = req.params;
+
+        if (!isValidWallet(targetWallet)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid wallet address',
+                code: 'INVALID_WALLET'
+            });
+        }
+
+        try {
+            await revokeGrant(targetWallet, req.wallet);
+
+            await logAction(req.wallet, 'revoke_grant', 'grants_admin', {
+                targetWallet
+            }, req.walletSignature);
+
+            res.json({ success: true });
+        } catch (e) {
+            res.status(500).json({ success: false, error: 'Failed to revoke grant' });
+        }
+    }
+);
+
+/**
+ * GET /space/admin/actions
+ * Get recent space actions (admin only)
+ */
+router.get('/admin/actions', requireSession(), requireGrant('grants_admin'), spaceRateLimiter, async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+
+        const actions = await db.all(`
+            SELECT id, wallet, action, grant_used, metadata, success, error, created_at
+            FROM space_actions
+            ORDER BY created_at DESC
+            LIMIT $1
+        `, [limit]);
+
+        res.json({
+            success: true,
+            data: actions.map(a => ({
+                id: a.id,
+                wallet: a.wallet,
+                action: a.action,
+                grantUsed: a.grant_used,
+                metadata: typeof a.metadata === 'string' ? JSON.parse(a.metadata) : a.metadata,
+                success: a.success,
+                error: a.error,
+                createdAt: a.created_at
+            }))
+        });
+    } catch (e) {
+        logger?.error(`[Space] Actions fetch error: ${e.message}`);
+        res.status(500).json({ success: false, error: 'Failed to fetch actions' });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// INITIALIZATION
+// ═══════════════════════════════════════════════════════════════
+
+function init({ db: database, logger: log }) {
+    db = database;
+    logger = log;
+    return router;
+}
+
+module.exports = { init, router };
