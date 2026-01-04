@@ -195,35 +195,26 @@ async function initDB() {
                 -- E-Score = geometric mean of 7 dimensions (hold, burn, use, build, run, refer, time)
                 CREATE TABLE IF NOT EXISTS participants (
                     wallet TEXT PRIMARY KEY,
-                    type TEXT DEFAULT 'user',              -- 'user' | 'builder' | 'validator' | 'treasury'
+                    type TEXT DEFAULT 'user',              -- 'user' | 'holder' | 'burner' | 'dev' | 'infra'
 
                     -- Raw contribution metrics (source of truth)
-                    total_burned DOUBLE PRECISION DEFAULT 0,
-                    total_referred DOUBLE PRECISION DEFAULT 0,
-                    total_built DOUBLE PRECISION DEFAULT 0,
-                    total_run DOUBLE PRECISION DEFAULT 0,
-                    api_calls INTEGER DEFAULT 0,
+                    -- Column names MUST match harmonyEngine.js expectations
+                    holdings DOUBLE PRECISION DEFAULT 0,           -- Current $ASDF holdings
+                    total_burned DOUBLE PRECISION DEFAULT 0,       -- Lifetime burned
+                    api_calls_30d INTEGER DEFAULT 0,               -- Rolling 30-day API usage
+                    apps_live INTEGER DEFAULT 0,                   -- Active applications built
+                    nodes_active INTEGER DEFAULT 0,                -- Infrastructure nodes running
+                    referrals_active INTEGER DEFAULT 0,            -- Active referrals
 
-                    -- Cached E-Score (recalculated periodically)
-                    e_score DOUBLE PRECISION DEFAULT 0,
-                    e_score_updated_at BIGINT DEFAULT 0,
-
-                    -- Dimension scores (0-100 each, φ-weighted)
-                    dim_hold DOUBLE PRECISION DEFAULT 0,
-                    dim_burn DOUBLE PRECISION DEFAULT 0,
-                    dim_use DOUBLE PRECISION DEFAULT 0,
-                    dim_build DOUBLE PRECISION DEFAULT 0,
-                    dim_run DOUBLE PRECISION DEFAULT 0,
-                    dim_refer DOUBLE PRECISION DEFAULT 0,
-                    dim_time DOUBLE PRECISION DEFAULT 0,
-
-                    -- Tier caching
-                    tier_name TEXT DEFAULT 'Newcomer',
-                    tier_icon TEXT DEFAULT '🌱',
+                    -- Cached E-Score (recalculated on demand)
+                    cached_escore DOUBLE PRECISION DEFAULT 0,
+                    cached_tier TEXT DEFAULT 'Newcomer',
+                    cached_tier_icon TEXT DEFAULT '🌱',
+                    escore_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
                     -- Timestamps
-                    first_seen BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
-                    last_active BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
+                    first_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
                     -- Data integrity
                     sig_escore TEXT DEFAULT NULL
@@ -359,6 +350,18 @@ async function initDB() {
                 `ALTER TABLE operation_costs RENAME COLUMN operation TO operation_type`,
                 `ALTER TABLE operation_costs RENAME COLUMN infrastructure_cost TO actual_cost`,
                 `ALTER TABLE operation_costs ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE`,
+                // Harmony: Fix participants schema if old version exists (add missing columns)
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS holdings DOUBLE PRECISION DEFAULT 0`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS api_calls_30d INTEGER DEFAULT 0`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS apps_live INTEGER DEFAULT 0`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS nodes_active INTEGER DEFAULT 0`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS referrals_active INTEGER DEFAULT 0`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS cached_escore DOUBLE PRECISION DEFAULT 0`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS cached_tier TEXT DEFAULT 'Newcomer'`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS cached_tier_icon TEXT DEFAULT '🌱'`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS escore_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS first_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
             ];
 
             // PERFORMANCE: Add indexes for frequently queried columns
