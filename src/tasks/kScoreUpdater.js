@@ -111,6 +111,77 @@ function recordFailure() {
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// ============================================
+// DEXSCREENER PRICE SERVICE (FREE, RELIABLE)
+// ============================================
+// K-Score = Helius (our value-add)
+// Price/MCap = DexScreener (free, real-time)
+
+const dexScreenerCache = new Map();
+const DEXSCREENER_CACHE_TTL = 60000; // 1 minute cache
+
+/**
+ * Get price/mcap/liquidity from DexScreener (FREE API)
+ * No Helius credits wasted on price data!
+ */
+async function getDexScreenerData(mint) {
+    // Check cache first
+    const cached = dexScreenerCache.get(mint);
+    if (cached && Date.now() - cached.timestamp < DEXSCREENER_CACHE_TTL) {
+        return cached.data;
+    }
+
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+
+        const response = await fetch(
+            `https://api.dexscreener.com/latest/dex/tokens/${mint}`,
+            { signal: controller.signal }
+        );
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+            return null;
+        }
+
+        const json = await response.json();
+        const pairs = json.pairs || [];
+
+        if (pairs.length === 0) {
+            return null;
+        }
+
+        // Get best pair (highest liquidity)
+        const bestPair = pairs.reduce((best, p) =>
+            (p.liquidity?.usd || 0) > (best.liquidity?.usd || 0) ? p : best
+        , pairs[0]);
+
+        // Calculate total liquidity across all pairs
+        const totalLiquidity = pairs.reduce((sum, p) => sum + (p.liquidity?.usd || 0), 0);
+
+        const data = {
+            priceUsd: parseFloat(bestPair.priceUsd) || 0,
+            mcap: bestPair.marketCap || bestPair.fdv || 0,
+            liquidity: totalLiquidity,
+            volume24h: parseFloat(bestPair.volume?.h24) || 0,
+            change24h: parseFloat(bestPair.priceChange?.h24) || 0,
+            change1h: parseFloat(bestPair.priceChange?.h1) || 0,
+            source: 'dexscreener',
+            timestamp: Date.now(),
+            pairAddress: bestPair.pairAddress
+        };
+
+        // Cache it
+        dexScreenerCache.set(mint, { data, timestamp: Date.now() });
+
+        return data;
+    } catch (e) {
+        logger.debug(`[DexScreener] Failed for ${mint}: ${e.message}`);
+        return null;
+    }
+}
+
 /**
  * Parse rate limit headers from Helius response
  * Headers: X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset
@@ -2129,13 +2200,11 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
     try {
         const decimals = dbData?.decimals || 9;
 
-        // Get price for $1+ holder filtering
-        let priceUsd = 0;
-        if (db) {
-            const priceData = await priceService.getPrice(db, mint, decimals);
-            priceUsd = priceData.priceUsd;
-        } else {
-            priceUsd = dbData?.priceusd || dbData?.priceUsd || 0;
+        // Get price for $1+ holder filtering (use cached or fetch from DexScreener)
+        let priceUsd = dbData?.priceusd || dbData?.priceUsd || 0;
+        if (priceUsd === 0) {
+            const dexData = await getDexScreenerData(mint);
+            if (dexData) priceUsd = dexData.priceUsd;
         }
 
         // ============================================
@@ -2544,58 +2613,39 @@ async function updateSingleToken(deps, mint) {
             mcapCalculated: false,
             liquidity: token.liquidity || 0,
             liquiditySource: token.liquidity_source || 'unknown',
-            liquidityTimestamp: token.liquidity_timestamp || 0
+            liquidityTimestamp: token.liquidity_timestamp || 0,
+            volume24h: token.volume24h || 0,
+            change24h: token.change24h || 0,
+            change1h: token.change1h || 0
         };
 
-        // Try to get on-chain price (only during deep refresh to save API calls)
+        // Get price/mcap/liquidity from DexScreener (FREE, RELIABLE)
+        // K-Score = Helius (our value-add), Price = DexScreener (free)
         const priceNeedsRefresh = !token.price_timestamp ||
-                                  (Date.now() - parseInt(token.price_timestamp || 0) > 300000); // 5 min
+                                  (Date.now() - parseInt(token.price_timestamp || 0) > 60000); // 1 min
 
-        if (priceNeedsRefresh && db) {
+        if (priceNeedsRefresh) {
             try {
-                const priceResult = await priceService.getOnChainPrice(db, mint, token.decimals || 9);
+                const dexData = await getDexScreenerData(mint);
 
-                // Always update timestamp to show we checked (provenance tracking)
-                marketData.priceTimestamp = priceResult.timestamp || Date.now();
-                marketData.priceSource = priceResult.source || 'checked';
+                if (dexData && dexData.priceUsd > 0) {
+                    marketData.priceUsd = dexData.priceUsd;
+                    marketData.priceSource = 'dexscreener';
+                    marketData.priceTimestamp = dexData.timestamp;
+                    marketData.pricePool = dexData.pairAddress;
+                    marketData.mcap = dexData.mcap;
+                    marketData.mcapCalculated = true;
+                    marketData.liquidity = dexData.liquidity;
+                    marketData.liquiditySource = 'dexscreener';
+                    marketData.liquidityTimestamp = dexData.timestamp;
+                    marketData.volume24h = dexData.volume24h || 0;
+                    marketData.change24h = dexData.change24h || 0;
+                    marketData.change1h = dexData.change1h || 0;
 
-                if (priceResult.priceUsd > 0) {
-                    marketData.priceUsd = priceResult.priceUsd;
-                    marketData.pricePool = priceResult.poolAddress;
-
-                    // Calculate on-chain mcap = circulating_supply × price
-                    const decimals = token.decimals || 9;
-                    const divisor = Math.pow(10, decimals);
-                    const circulatingSupply = (currentSupply - burnedAmount) / divisor;
-
-                    const mcapResult = priceService.calculateOnChainMcap({
-                        supply: circulatingSupply,
-                        priceUsd: priceResult.priceUsd,
-                        priceSource: priceResult.source,
-                        priceTimestamp: priceResult.timestamp,
-                        priceProof: priceResult.proof
-                    });
-
-                    marketData.mcap = mcapResult.mcap;
-                    marketData.mcapCalculated = mcapResult.source === 'on_chain';
-
-                    if (priceResult.source === 'on_chain') {
-                        logger.debug(`[Market] ${mint.slice(0,8)}: On-chain price $${priceResult.priceUsd.toExponential(2)}, MCap $${mcapResult.mcap.toLocaleString()}`);
-                    }
-                }
-
-                // Calculate on-chain liquidity with source tracking
-                const solPrice = await priceService.getSolPrice();
-                if (solPrice > 0) {
-                    const liquidityResult = await _calculateOnChainLiquidity(db, mint, solPrice);
-                    if (liquidityResult.liquidity > 0) {
-                        marketData.liquidity = liquidityResult.liquidity;
-                        marketData.liquiditySource = liquidityResult.source;
-                        marketData.liquidityTimestamp = Date.now();
-                    }
+                    logger.debug(`[DexScreener] ${token.symbol}: $${dexData.priceUsd.toExponential(2)}, MCap $${dexData.mcap.toLocaleString()}`);
                 }
             } catch (e) {
-                logger.debug(`[Market] ${mint.slice(0,8)}: Price fetch failed, using cached`);
+                logger.debug(`[Market] ${mint.slice(0,8)}: DexScreener failed, using cached`);
             }
         }
 
@@ -2712,8 +2762,11 @@ async function updateSingleToken(deps, mint) {
                 holders_source = $39,
                 holders_timestamp = $40,
                 age_days = $41,
-                supply_last_check = $42
-            WHERE mint = $43
+                supply_last_check = $42,
+                volume24h = $43,
+                change24h = $44,
+                change1h = $45
+            WHERE mint = $46
         `, [
             smoothedScore,
             updateTimestamp.toString(),
@@ -2757,6 +2810,9 @@ async function updateSingleToken(deps, mint) {
             updateTimestamp.toString(),
             token.timestamp > 0 ? (Date.now() - parseInt(token.timestamp)) / 86400000 : 0,
             updateTimestamp.toString(),  // supply_last_check = now
+            marketData.volume24h || 0,
+            marketData.change24h || 0,
+            marketData.change1h || 0,
             mint
         ]);
 
@@ -2873,58 +2929,38 @@ async function updateKScores(deps) {
                     mcapCalculated: false,
                     liquidity: t.liquidity || 0,
                     liquiditySource: t.liquidity_source || 'unknown',
-                    liquidityTimestamp: t.liquidity_timestamp || 0
+                    liquidityTimestamp: t.liquidity_timestamp || 0,
+                    volume24h: t.volume24h || 0,
+                    change24h: t.change24h || 0,
+                    change1h: t.change1h || 0
                 };
 
-                // Fetch on-chain price if stale (> 5 min)
+                // Get price/mcap/liquidity from DexScreener (FREE, RELIABLE)
                 const batchPriceNeedsRefresh = !t.price_timestamp ||
-                                              (Date.now() - parseInt(t.price_timestamp || 0) > 300000);
+                                              (Date.now() - parseInt(t.price_timestamp || 0) > 60000); // 1 min
 
-                if (batchPriceNeedsRefresh && db) {
+                if (batchPriceNeedsRefresh) {
                     try {
-                        const priceResult = await priceService.getOnChainPrice(db, t.mint, t.decimals || 9);
+                        const dexData = await getDexScreenerData(t.mint);
 
-                        // Always update timestamp to show we checked (provenance tracking)
-                        batchMarketData.priceTimestamp = priceResult.timestamp || Date.now();
-                        batchMarketData.priceSource = priceResult.source || 'checked';
+                        if (dexData && dexData.priceUsd > 0) {
+                            batchMarketData.priceUsd = dexData.priceUsd;
+                            batchMarketData.priceSource = 'dexscreener';
+                            batchMarketData.priceTimestamp = dexData.timestamp;
+                            batchMarketData.pricePool = dexData.pairAddress;
+                            batchMarketData.mcap = dexData.mcap;
+                            batchMarketData.mcapCalculated = true;
+                            batchMarketData.liquidity = dexData.liquidity;
+                            batchMarketData.liquiditySource = 'dexscreener';
+                            batchMarketData.liquidityTimestamp = dexData.timestamp;
+                            batchMarketData.volume24h = dexData.volume24h || 0;
+                            batchMarketData.change24h = dexData.change24h || 0;
+                            batchMarketData.change1h = dexData.change1h || 0;
 
-                        if (priceResult.priceUsd > 0) {
-                            batchMarketData.priceUsd = priceResult.priceUsd;
-                            batchMarketData.pricePool = priceResult.poolAddress;
-
-                            // Calculate on-chain mcap = circulating_supply × price
-                            const decimals = t.decimals || 9;
-                            const divisor = Math.pow(10, decimals);
-                            const circulatingSupply = (currentSupply - burnedAmount) / divisor;
-
-                            const mcapResult = priceService.calculateOnChainMcap({
-                                supply: circulatingSupply,
-                                priceUsd: priceResult.priceUsd,
-                                priceSource: priceResult.source,
-                                priceTimestamp: priceResult.timestamp,
-                                priceProof: priceResult.proof
-                            });
-
-                            batchMarketData.mcap = mcapResult.mcap;
-                            batchMarketData.mcapCalculated = mcapResult.source === 'on_chain';
-
-                            if (priceResult.source === 'on_chain') {
-                                logger.debug(`[Market] ${t.mint.slice(0,8)}: On-chain price $${priceResult.priceUsd.toExponential(2)}, MCap $${mcapResult.mcap.toLocaleString()}`);
-                            }
-                        }
-
-                        // Calculate on-chain liquidity with source tracking
-                        const solPrice = await priceService.getSolPrice();
-                        if (solPrice > 0) {
-                            const liquidityResult = await _calculateOnChainLiquidity(db, t.mint, solPrice);
-                            if (liquidityResult.liquidity > 0) {
-                                batchMarketData.liquidity = liquidityResult.liquidity;
-                                batchMarketData.liquiditySource = liquidityResult.source;
-                                batchMarketData.liquidityTimestamp = Date.now();
-                            }
+                            logger.debug(`[DexScreener] ${t.symbol}: $${dexData.priceUsd.toExponential(2)}, MCap $${dexData.mcap.toLocaleString()}`);
                         }
                     } catch (e) {
-                        logger.debug(`[Market] ${t.mint.slice(0,8)}: Price fetch failed, using cached`);
+                        logger.debug(`[Market] ${t.mint.slice(0,8)}: DexScreener failed, using cached`);
                     }
                 }
 
@@ -3025,8 +3061,11 @@ async function updateKScores(deps) {
                         holders_source = $37,
                         holders_timestamp = $38,
                         age_days = $39,
-                        supply_last_check = $40
-                    WHERE mint = $41
+                        supply_last_check = $40,
+                        volume24h = $41,
+                        change24h = $42,
+                        change1h = $43
+                    WHERE mint = $44
                 `, [
                     smoothedScore,
                     batchUpdateTimestamp.toString(),
@@ -3068,6 +3107,9 @@ async function updateKScores(deps) {
                     batchUpdateTimestamp.toString(),
                     t.timestamp > 0 ? (Date.now() - parseInt(t.timestamp)) / 86400000 : 0,
                     batchUpdateTimestamp.toString(),  // supply_last_check = now
+                    batchMarketData.volume24h || 0,
+                    batchMarketData.change24h || 0,
+                    batchMarketData.change1h || 0,
                     t.mint
                 ]);
 
