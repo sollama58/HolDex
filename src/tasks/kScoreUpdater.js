@@ -2374,7 +2374,9 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
                 let validSnapshots = 0;
                 for (const snap of top10Snapshots) {
                     // Prefer last_tx_timestamp, fallback to updated_at
-                    const lastActivity = parseInt(snap.last_tx_timestamp || snap.updated_at || now);
+                    // NOTE: PostgreSQL returns BIGINT as string, so "0" is truthy - must parseInt first
+                    const ts = parseInt(snap.last_tx_timestamp);
+                    const lastActivity = ts > 0 ? ts : (parseInt(snap.updated_at) || now);
                     if (lastActivity > 0) {
                         totalActivityAge += (now - lastActivity) / 86400000; // Convert to days
                         validSnapshots++;
@@ -2390,6 +2392,32 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
                     const top10Balance = filteredHolders.slice(0, 10).reduce((s, h) => s + h.balance, 0);
                     const totalSupplyRaw = burnData.totalSupply * Math.pow(10, burnData.decimals || 9);
                     raw.top10Pct = (top10Balance / totalSupplyRaw) * 100;
+                }
+
+                // K-Score v9: Get activity timestamps from freshly saved snapshots
+                // (We just saved them during conviction analysis, now read them back)
+                if (db) {
+                    const top10Snapshots = await db.all(
+                        'SELECT last_tx_timestamp, updated_at FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 10',
+                        [mint]
+                    );
+                    if (top10Snapshots.length > 0) {
+                        const now = Date.now();
+                        let totalActivityAge = 0;
+                        let validSnapshots = 0;
+                        for (const snap of top10Snapshots) {
+                            // NOTE: PostgreSQL returns BIGINT as string, so "0" is truthy - must parseInt first
+                            const ts = parseInt(snap.last_tx_timestamp);
+                            const lastActivity = ts > 0 ? ts : (parseInt(snap.updated_at) || now);
+                            if (lastActivity > 0) {
+                                totalActivityAge += (now - lastActivity) / 86400000;
+                                validSnapshots++;
+                            }
+                        }
+                        if (validSnapshots > 0) {
+                            raw.activityDays = totalActivityAge / validSnapshots;
+                        }
+                    }
                 }
             }
         }
