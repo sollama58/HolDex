@@ -1024,30 +1024,30 @@ async function drawMinimalCard(ctx, token, theme) {
     ctx.fillText(`${dhPct}%`, rightX + dhBoxW - s(12), dhY + dhBoxH/2);
 
     // ═══════════════════════════════════════════════════════════════
-    // FOOTER
+    // FOOTER (subtle)
     // ═══════════════════════════════════════════════════════════════
-    const footerY = panelY + panelH - s(32);
+    const footerY = panelY + panelH - s(20);
 
     // Separator line
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
     ctx.lineWidth = s(1);
     ctx.beginPath();
-    ctx.moveTo(panelX + s(44), footerY - s(18));
-    ctx.lineTo(panelX + panelW - s(44), footerY - s(18));
+    ctx.moveTo(panelX + s(40), footerY - s(12));
+    ctx.lineTo(panelX + panelW - s(40), footerY - s(12));
     ctx.stroke();
 
-    // Footer text
+    // Footer text (small, unobtrusive)
     ctx.fillStyle = theme.text.muted;
-    ctx.font = `bold ${s(36)}px Arial, Helvetica, sans-serif`;
+    ctx.font = `500 ${s(14)}px Arial, Helvetica, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(BRAND_URL, panelX + s(44), footerY);
+    ctx.fillText(BRAND_URL, panelX + s(40), footerY);
 
     ctx.textAlign = 'center';
     ctx.fillText(theme.tagline, RENDER_WIDTH / 2, footerY);
 
     ctx.textAlign = 'right';
-    ctx.fillText(new Date().toISOString().split('T')[0], panelX + panelW - s(44), footerY);
+    ctx.fillText(new Date().toISOString().split('T')[0], panelX + panelW - s(40), footerY);
 }
 
 // ═══════════════════════════════════════════════════════════════
