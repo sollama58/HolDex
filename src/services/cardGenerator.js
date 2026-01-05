@@ -813,23 +813,24 @@ async function drawMinimalCard(ctx, token, theme) {
     ctx.restore();
 
     // ═══════════════════════════════════════════════════════════════
-    // LEFT COLUMN: Token Identity (1/φ² of width ≈ 38%)
+    // LEFT COLUMN: Token Identity
+    // Mobile-first: all text readable at 50% scale
     // ═══════════════════════════════════════════════════════════════
-    void PHI; // Used for layout philosophy documentation
-    const leftX = panelX + s(44);
-    const topY = panelY + s(50);
+    void PHI; // Layout philosophy
+    const leftX = panelX + s(48);
+    const topY = panelY + s(52);
 
-    // Token image with grade ring
+    // Token image with grade ring (larger)
     const tokenImg = await fetchTokenImage(token.image);
-    const imgSize = s(72);
+    const imgSize = s(88);
 
     // Grade-colored ring glow
     ctx.shadowColor = gradeStyle.glow;
-    ctx.shadowBlur = s(20);
+    ctx.shadowBlur = s(25);
     ctx.beginPath();
-    ctx.arc(leftX + imgSize/2, topY + imgSize/2, imgSize/2 + s(3), 0, Math.PI * 2);
+    ctx.arc(leftX + imgSize/2, topY + imgSize/2, imgSize/2 + s(4), 0, Math.PI * 2);
     ctx.strokeStyle = gradeStyle.color;
-    ctx.lineWidth = s(2);
+    ctx.lineWidth = s(3);
     ctx.stroke();
     ctx.shadowColor = 'transparent';
 
@@ -844,73 +845,73 @@ async function drawMinimalCard(ctx, token, theme) {
         ctx.fillStyle = theme.bg.tertiary;
         ctx.fillRect(leftX, topY, imgSize, imgSize);
         ctx.fillStyle = theme.text.secondary;
-        ctx.font = `600 ${s(28)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.font = `600 ${s(36)}px -apple-system, BlinkMacSystemFont, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(token.symbol?.[0] || '?', leftX + imgSize/2, topY + imgSize/2);
     }
     ctx.restore();
 
-    // Token name (prominent)
-    const nameX = leftX + imgSize + s(20);
+    // Token name (LARGE - hero text)
+    const nameX = leftX + imgSize + s(24);
     ctx.fillStyle = theme.text.primary;
-    ctx.font = `600 ${s(28)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `700 ${s(38)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText((token.name || 'Unknown').slice(0, 14), nameX, topY + s(8));
+    ctx.fillText((token.name || 'Unknown').slice(0, 12), nameX, topY + s(10));
 
-    // Symbol (clear ticker)
+    // Symbol (prominent ticker)
     ctx.fillStyle = theme.text.secondary;
-    ctx.font = `500 ${s(16)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.fillText(`$${(token.symbol || '???').toUpperCase()}`, nameX, topY + s(44));
+    ctx.font = `600 ${s(22)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.fillText(`$${(token.symbol || '???').toUpperCase()}`, nameX, topY + s(54));
 
     // Stats below token (MCAP / HOLDERS)
-    const statsY = topY + imgSize + s(36);
+    const statsY = topY + imgSize + s(32);
     const stats = [
         { label: 'MCAP', value: token.marketCap ? `$${formatNumber(token.marketCap)}` : '—' },
         { label: 'HOLDERS', value: token.holders ? formatNumber(token.holders) : '—' }
     ];
 
     stats.forEach((stat, i) => {
-        const statX = leftX + i * s(120);
+        const statX = leftX + i * s(140);
         ctx.fillStyle = theme.text.muted;
-        ctx.font = `600 ${s(11)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.font = `600 ${s(14)}px -apple-system, BlinkMacSystemFont, sans-serif`;
         ctx.textBaseline = 'top';
         ctx.fillText(stat.label, statX, statsY);
 
         ctx.fillStyle = theme.text.primary;
-        ctx.font = `600 ${s(18)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-        ctx.fillText(stat.value, statX, statsY + s(18));
+        ctx.font = `700 ${s(26)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.fillText(stat.value, statX, statsY + s(20));
     });
 
     // ═══════════════════════════════════════════════════════════════
-    // CENTER: K-Score (focal point, rule of thirds)
+    // CENTER: K-Score (focal point - THE HERO)
     // ═══════════════════════════════════════════════════════════════
-    const centerX = RENDER_WIDTH / 2 + s(20);  // Slight right offset for balance
-    const centerY = panelY + panelH / 2 - s(10);
+    const centerX = RENDER_WIDTH / 2 + s(20);
+    const centerY = panelY + panelH / 2 - s(5);
 
     // K-SCORE label above
     ctx.fillStyle = theme.text.muted;
-    ctx.font = `500 ${s(13)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `600 ${s(16)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
-    ctx.fillText('K-SCORE', centerX, centerY - s(75));
+    ctx.fillText('K-SCORE', centerX, centerY - s(80));
 
-    // Score number (the hero)
+    // Score number (THE HERO - big and bold)
     ctx.shadowColor = gradeStyle.glow;
-    ctx.shadowBlur = s(50);
+    ctx.shadowBlur = s(60);
     ctx.fillStyle = theme.text.primary;
-    ctx.font = `300 ${s(130)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `400 ${s(140)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textBaseline = 'middle';
     ctx.fillText(score.toString(), centerX, centerY);
     ctx.shadowColor = 'transparent';
 
-    // Grade badge below score
-    const badgeY = centerY + s(70);
+    // Grade badge below score (larger)
+    const badgeY = centerY + s(78);
     const badgeText = `${grade.label}  ·  ${grade.credit}`;
-    ctx.font = `600 ${s(14)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    const badgeW = ctx.measureText(badgeText).width + s(32);
-    const badgeH = s(30);
+    ctx.font = `600 ${s(18)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    const badgeW = ctx.measureText(badgeText).width + s(40);
+    const badgeH = s(38);
 
     // Badge background
     ctx.fillStyle = gradeStyle.glow;
@@ -919,7 +920,7 @@ async function drawMinimalCard(ctx, token, theme) {
 
     // Badge border
     ctx.strokeStyle = gradeStyle.color;
-    ctx.lineWidth = s(1);
+    ctx.lineWidth = s(1.5);
     roundRect(ctx, centerX - badgeW/2, badgeY, badgeW, badgeH, badgeH/2);
     ctx.stroke();
 
@@ -929,14 +930,14 @@ async function drawMinimalCard(ctx, token, theme) {
     ctx.fillText(badgeText, centerX, badgeY + badgeH/2);
 
     // ═══════════════════════════════════════════════════════════════
-    // RIGHT COLUMN: Conviction Analysis
+    // RIGHT COLUMN: Conviction Analysis (mobile-readable)
     // ═══════════════════════════════════════════════════════════════
-    const rightX = RENDER_WIDTH - s(280);
+    const rightX = RENDER_WIDTH - s(300);
     const convY = topY;
 
     // Section header
     ctx.fillStyle = theme.text.secondary;
-    ctx.font = `600 ${s(12)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `600 ${s(15)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText('TOP 20 CONVICTION', rightX, convY);
@@ -950,16 +951,16 @@ async function drawMinimalCard(ctx, token, theme) {
     const total = conviction.diamond + conviction.gold + conviction.silver + conviction.rust || 1;
     const dhPct = Math.round(((conviction.diamond + conviction.gold) / total) * 100);
 
-    // Conviction bar (thicker for visibility)
-    const barY = convY + s(26);
-    const barW = s(200), barH = s(10);
+    // Conviction bar (thick and visible)
+    const barY = convY + s(30);
+    const barW = s(220), barH = s(14);
 
     ctx.fillStyle = theme.bg.tertiary;
-    roundRect(ctx, rightX, barY, barW, barH, s(4));
+    roundRect(ctx, rightX, barY, barW, barH, s(6));
     ctx.fill();
 
     ctx.save();
-    roundRect(ctx, rightX, barY, barW, barH, s(4));
+    roundRect(ctx, rightX, barY, barW, barH, s(6));
     ctx.clip();
     let currentX = rightX;
     [
@@ -976,8 +977,8 @@ async function drawMinimalCard(ctx, token, theme) {
     });
     ctx.restore();
 
-    // Legend (compact, readable)
-    const legendY = barY + s(24);
+    // Legend (larger, readable)
+    const legendY = barY + s(30);
     const legendItems = [
         { label: 'Diamond', val: conviction.diamond, color: theme.conviction.diamond },
         { label: 'Gold', val: conviction.gold, color: theme.conviction.gold },
@@ -986,79 +987,79 @@ async function drawMinimalCard(ctx, token, theme) {
     ];
 
     legendItems.forEach((item, i) => {
-        const itemY = legendY + i * s(22);
+        const itemY = legendY + i * s(26);
 
-        // Color dot
+        // Color dot (larger)
         ctx.beginPath();
-        ctx.arc(rightX + s(5), itemY + s(6), s(4), 0, Math.PI * 2);
+        ctx.arc(rightX + s(6), itemY + s(7), s(5), 0, Math.PI * 2);
         ctx.fillStyle = item.color;
         ctx.fill();
 
         // Label
         ctx.fillStyle = theme.text.secondary;
-        ctx.font = `500 ${s(12)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.font = `500 ${s(15)}px -apple-system, BlinkMacSystemFont, sans-serif`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(item.label, rightX + s(16), itemY + s(6));
+        ctx.fillText(item.label, rightX + s(20), itemY + s(7));
 
         // Value (right aligned)
         ctx.fillStyle = theme.text.primary;
-        ctx.font = `600 ${s(12)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.font = `600 ${s(15)}px -apple-system, BlinkMacSystemFont, sans-serif`;
         ctx.textAlign = 'right';
-        ctx.fillText(item.val.toString(), rightX + barW, itemY + s(6));
+        ctx.fillText(item.val.toString(), rightX + barW, itemY + s(7));
     });
 
-    // Diamond Hands box (key metric, prominent)
-    const dhY = legendY + s(105);
-    const dhBoxW = barW, dhBoxH = s(44);
+    // Diamond Hands box (KEY METRIC - prominent)
+    const dhY = legendY + s(120);
+    const dhBoxW = barW, dhBoxH = s(52);
 
     ctx.fillStyle = theme.bg.tertiary;
-    roundRect(ctx, rightX, dhY, dhBoxW, dhBoxH, s(8));
+    roundRect(ctx, rightX, dhY, dhBoxW, dhBoxH, s(10));
     ctx.fill();
 
     // DH label
     ctx.fillStyle = theme.text.secondary;
-    ctx.font = `500 ${s(12)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `500 ${s(15)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText('Diamond Hands', rightX + s(14), dhY + dhBoxH/2);
+    ctx.fillText('Diamond Hands', rightX + s(16), dhY + dhBoxH/2);
 
-    // DH percentage (precious metal colors)
+    // DH percentage (precious metal colors - LARGE)
     // ≥60% Diamond, ≥40% Gold, ≥20% Silver, <20% Rust
     const dhColor = dhPct >= 60 ? theme.conviction.diamond
                   : dhPct >= 40 ? theme.conviction.gold
                   : dhPct >= 20 ? theme.conviction.silver
                   : theme.conviction.rust;
     ctx.fillStyle = dhColor;
-    ctx.font = `700 ${s(22)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `700 ${s(28)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'right';
-    ctx.fillText(`${dhPct}%`, rightX + dhBoxW - s(14), dhY + dhBoxH/2);
+    ctx.fillText(`${dhPct}%`, rightX + dhBoxW - s(16), dhY + dhBoxH/2);
 
     // ═══════════════════════════════════════════════════════════════
     // FOOTER
     // ═══════════════════════════════════════════════════════════════
-    const footerY = panelY + panelH - s(28);
+    const footerY = panelY + panelH - s(30);
 
     // Separator line
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
     ctx.lineWidth = s(1);
     ctx.beginPath();
-    ctx.moveTo(panelX + s(44), footerY - s(14));
-    ctx.lineTo(panelX + panelW - s(44), footerY - s(14));
+    ctx.moveTo(panelX + s(48), footerY - s(16));
+    ctx.lineTo(panelX + panelW - s(48), footerY - s(16));
     ctx.stroke();
 
-    // Footer text
+    // Footer text (slightly larger)
     ctx.fillStyle = theme.text.muted;
-    ctx.font = `500 ${s(12)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `500 ${s(14)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(BRAND_URL, panelX + s(44), footerY);
+    ctx.fillText(BRAND_URL, panelX + s(48), footerY);
 
     ctx.textAlign = 'center';
     ctx.fillText(theme.tagline, RENDER_WIDTH / 2, footerY);
 
     ctx.textAlign = 'right';
-    ctx.fillText(new Date().toISOString().split('T')[0], panelX + panelW - s(44), footerY);
+    ctx.fillText(new Date().toISOString().split('T')[0], panelX + panelW - s(48), footerY);
 }
 
 // ═══════════════════════════════════════════════════════════════
