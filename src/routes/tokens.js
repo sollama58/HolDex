@@ -43,17 +43,20 @@ const verification = require('../services/verificationService');
 const dataVerification = require('../services/dataVerification');
 
 // Lazy load canvas-based card generator (avoid build failures on workers without native deps)
-let generateKScoreCard = null;
+let cardGeneratorModule = null;
 function getCardGenerator() {
-    if (!generateKScoreCard) {
+    if (!cardGeneratorModule) {
         try {
-            generateKScoreCard = require('../services/cardGenerator').generateKScoreCard;
+            cardGeneratorModule = require('../services/cardGenerator');
         } catch (err) {
             console.warn('[CardGenerator] Canvas not available:', err.message);
-            generateKScoreCard = () => { throw new Error('Card generator not available'); };
+            cardGeneratorModule = {
+                generateKScoreCard: () => { throw new Error('Card generator not available'); },
+                styleFromMode: () => 'holdex'
+            };
         }
     }
-    return generateKScoreCard;
+    return cardGeneratorModule;
 }
 
 const router = express.Router();
@@ -1353,8 +1356,11 @@ function init(deps) {
     });
 
     // --- K-SCORE CARD IMAGE (for Twitter/social sharing) ---
+    // Styles: holdex (default), asdf, minimal
+    // Legacy modes: full=holdex, simple/minimal=minimal, fire=asdf
     router.get('/token/:mint/card.png', async (req, res) => {
         const { mint } = req.params;
+        const { style, mode } = req.query;
 
         // Validate mint address
         if (!isValidPubkey(mint)) {
@@ -1377,8 +1383,13 @@ function init(deps) {
                 return res.status(404).json({ success: false, error: 'Token not found' });
             }
 
-            // Generate the card image (lazy load canvas)
-            const imageBuffer = await getCardGenerator()({
+            // Determine style (new param) or convert from legacy mode
+            const cardGen = getCardGenerator();
+            const cardStyle = style || cardGen.styleFromMode(mode) || 'holdex';
+
+            // Generate the card image
+            const imageBuffer = await cardGen.generateKScoreCard({
+                mint: token.mint,
                 name: token.name,
                 symbol: token.symbol,
                 image: token.image,
@@ -1389,7 +1400,7 @@ function init(deps) {
                 conviction_holders: token.conviction_holders || 0,
                 conviction_reducers: token.conviction_reducers || 0,
                 conviction_extractors: token.conviction_extractors || 0
-            });
+            }, cardStyle);
 
             // Set caching headers (cache for 5 minutes)
             res.set({

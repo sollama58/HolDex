@@ -310,10 +310,10 @@
 
                     <div>
                         <label class="text-sm text-fire-muted block mb-1">Card Style</label>
-                        <select id="card-mode" class="glass-input">
-                            <option value="full">Full Breakdown</option>
-                            <option value="simple">Simple K-Score</option>
-                            <option value="minimal">Minimal</option>
+                        <select id="card-style" class="glass-input">
+                            <option value="holdex">HolDex - Glassmorphism 🐕‍🦺🔥</option>
+                            <option value="asdf">ASDF - Fire Terminal 🔥</option>
+                            <option value="minimal">Minimal - Clean & Simple</option>
                         </select>
                     </div>
 
@@ -360,6 +360,7 @@
         let connectedWallet = null;
         let userGrants = [];
         let currentCardMint = null;
+        let currentCardStyle = 'holdex';
 
         // ═══════════════════════════════════════════════════════════════
         // AUTH
@@ -520,7 +521,7 @@
 
         async function generateCard() {
             const mint = document.getElementById('card-mint').value.trim();
-            const mode = document.getElementById('card-mode').value;
+            const style = document.getElementById('card-style').value;
 
             if (!mint || mint.length < 32) {
                 toast('Enter a valid mint address', 'error');
@@ -528,7 +529,8 @@
             }
 
             currentCardMint = mint;
-            const cardUrl = `${API_URL}/api/token/${mint}/card.png?mode=${mode}`;
+            currentCardStyle = style;
+            const cardUrl = `${API_URL}/api/token/${mint}/card.png?style=${style}`;
 
             document.getElementById('card-preview-img').src = cardUrl;
             document.getElementById('card-result').classList.remove('hidden');
