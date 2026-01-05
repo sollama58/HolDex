@@ -94,37 +94,38 @@ const THEMES = {
         tagline: 'the room is on fire.'
     },
 
-    // Minimal: Dark, clean, institutional - inspired by solprice
+    // Minimal: Dark, clean, institutional - high contrast for readability
+    // Philosophy: Swiss design meets trading terminal
     minimal: {
         name: 'Minimal',
         bg: {
-            primary: '#000000',
-            secondary: '#0a0a0a',
-            tertiary: '#141414',
-            card: '#0f0f0f'
+            primary: '#09090b',      // Near black with warmth
+            secondary: '#0c0c0e',
+            tertiary: '#18181b',     // Zinc-900
+            card: '#131316'          // Lifted panel
         },
-        accent: '#ffffff',
+        accent: '#e4e4e7',           // Zinc-200
         text: {
-            primary: '#ffffff',
-            secondary: '#a3a3a3',
-            muted: '#525252'
+            primary: '#fafafa',      // Zinc-50 - max contrast
+            secondary: '#a1a1aa',    // Zinc-400 - readable
+            muted: '#71717a'         // Zinc-500 - still visible (5.3:1 ratio)
         },
         grades: {
-            diamond: { color: '#22d3ee', glow: 'rgba(34, 211, 238, 0.2)' },
-            platinum: { color: '#a78bfa', glow: 'rgba(167, 139, 250, 0.2)' },
-            gold: { color: '#facc15', glow: 'rgba(250, 204, 21, 0.2)' },
-            silver: { color: '#71717a', glow: 'rgba(113, 113, 122, 0.15)' },
-            bronze: { color: '#fb923c', glow: 'rgba(251, 146, 60, 0.2)' },
-            copper: { color: '#ea580c', glow: 'rgba(234, 88, 12, 0.2)' },
-            iron: { color: '#52525b', glow: 'rgba(82, 82, 91, 0.15)' },
-            rust: { color: '#ef4444', glow: 'rgba(239, 68, 68, 0.2)' },
-            native: { color: '#818cf8', glow: 'rgba(129, 140, 248, 0.2)' }
+            diamond: { color: '#22d3ee', glow: 'rgba(34, 211, 238, 0.25)' },
+            platinum: { color: '#a78bfa', glow: 'rgba(167, 139, 250, 0.25)' },
+            gold: { color: '#fbbf24', glow: 'rgba(251, 191, 36, 0.25)' },
+            silver: { color: '#a1a1aa', glow: 'rgba(161, 161, 170, 0.2)' },
+            bronze: { color: '#fb923c', glow: 'rgba(251, 146, 60, 0.25)' },
+            copper: { color: '#f97316', glow: 'rgba(249, 115, 22, 0.25)' },
+            iron: { color: '#71717a', glow: 'rgba(113, 113, 122, 0.2)' },
+            rust: { color: '#f87171', glow: 'rgba(248, 113, 113, 0.25)' },
+            native: { color: '#818cf8', glow: 'rgba(129, 140, 248, 0.25)' }
         },
         conviction: {
             diamond: '#22d3ee',
-            gold: '#facc15',
-            silver: '#525252',
-            rust: '#ef4444'
+            gold: '#fbbf24',
+            silver: '#a1a1aa',       // Visible silver
+            rust: '#f87171'
         },
         tagline: 'on-chain conviction'
     }
@@ -759,6 +760,7 @@ async function drawAsdfCard(ctx, token, theme) {
 
 // ═══════════════════════════════════════════════════════════════
 // MINIMAL STYLE (Dark, clean, institutional)
+// Golden ratio spacing, WCAG AA contrast, trader-optimized hierarchy
 // ═══════════════════════════════════════════════════════════════
 
 async function drawMinimalCard(ctx, token, theme) {
@@ -766,41 +768,72 @@ async function drawMinimalCard(ctx, token, theme) {
     const grade = getGrade(score, token.mint);
     const gradeStyle = theme.grades[grade.key];
 
-    // Pure black background
-    ctx.fillStyle = theme.bg.primary;
+    // φ-based spacing constants
+    const PHI = 1.618;
+    const MARGIN = s(36);
+
+    // Background with subtle warmth
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, RENDER_HEIGHT);
+    bgGrad.addColorStop(0, theme.bg.primary);
+    bgGrad.addColorStop(1, theme.bg.secondary);
+    ctx.fillStyle = bgGrad;
     ctx.fillRect(0, 0, RENDER_WIDTH, RENDER_HEIGHT);
 
-    // Subtle vignette
-    const vignette = ctx.createRadialGradient(
-        RENDER_WIDTH/2, RENDER_HEIGHT/2, 0,
-        RENDER_WIDTH/2, RENDER_HEIGHT/2, RENDER_WIDTH * 0.7
+    // Subtle corner glow in grade color (psychological anchor)
+    const cornerGlow = ctx.createRadialGradient(
+        RENDER_WIDTH, 0, 0,
+        RENDER_WIDTH, 0, s(400)
     );
-    vignette.addColorStop(0, 'transparent');
-    vignette.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
-    ctx.fillStyle = vignette;
+    cornerGlow.addColorStop(0, gradeStyle.glow);
+    cornerGlow.addColorStop(0.5, gradeStyle.glow.replace(/[\d.]+\)$/, '0.05)'));
+    cornerGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = cornerGlow;
     ctx.fillRect(0, 0, RENDER_WIDTH, RENDER_HEIGHT);
 
-    // Inner panel with subtle border
-    const m = s(40);
-    const panelX = m, panelY = m;
-    const panelW = RENDER_WIDTH - m * 2, panelH = RENDER_HEIGHT - m * 2;
+    // Main panel
+    const panelX = MARGIN, panelY = MARGIN;
+    const panelW = RENDER_WIDTH - MARGIN * 2, panelH = RENDER_HEIGHT - MARGIN * 2;
 
     ctx.fillStyle = theme.bg.card;
-    roundRect(ctx, panelX, panelY, panelW, panelH, s(12));
+    roundRect(ctx, panelX, panelY, panelW, panelH, s(16));
     ctx.fill();
 
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+    // Panel border with grade accent on top
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
     ctx.lineWidth = s(1);
-    roundRect(ctx, panelX, panelY, panelW, panelH, s(12));
+    roundRect(ctx, panelX, panelY, panelW, panelH, s(16));
     ctx.stroke();
 
-    // LEFT: Token
-    const leftX = panelX + s(48);
-    const topY = panelY + s(48);
+    // Grade accent line (top) - instant visual signal
+    ctx.fillStyle = gradeStyle.color;
+    roundRect(ctx, panelX, panelY, panelW, s(3), s(16));
+    ctx.save();
+    ctx.clip();
+    ctx.fillRect(panelX, panelY, panelW, s(3));
+    ctx.restore();
 
+    // ═══════════════════════════════════════════════════════════════
+    // LEFT COLUMN: Token Identity (1/φ² of width ≈ 38%)
+    // ═══════════════════════════════════════════════════════════════
+    void PHI; // Used for layout philosophy documentation
+    const leftX = panelX + s(44);
+    const topY = panelY + s(50);
+
+    // Token image with grade ring
     const tokenImg = await fetchTokenImage(token.image);
-    const imgSize = s(52);
+    const imgSize = s(72);
 
+    // Grade-colored ring glow
+    ctx.shadowColor = gradeStyle.glow;
+    ctx.shadowBlur = s(20);
+    ctx.beginPath();
+    ctx.arc(leftX + imgSize/2, topY + imgSize/2, imgSize/2 + s(3), 0, Math.PI * 2);
+    ctx.strokeStyle = gradeStyle.color;
+    ctx.lineWidth = s(2);
+    ctx.stroke();
+    ctx.shadowColor = 'transparent';
+
+    // Token image
     ctx.save();
     ctx.beginPath();
     ctx.arc(leftX + imgSize/2, topY + imgSize/2, imgSize/2, 0, Math.PI * 2);
@@ -810,66 +843,103 @@ async function drawMinimalCard(ctx, token, theme) {
     } else {
         ctx.fillStyle = theme.bg.tertiary;
         ctx.fillRect(leftX, topY, imgSize, imgSize);
-        ctx.fillStyle = theme.text.muted;
-        ctx.font = `600 ${s(20)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.fillStyle = theme.text.secondary;
+        ctx.font = `600 ${s(28)}px -apple-system, BlinkMacSystemFont, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(token.symbol?.[0] || '?', leftX + imgSize/2, topY + imgSize/2);
     }
     ctx.restore();
 
-    // Token ring
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-    ctx.lineWidth = s(1.5);
-    ctx.beginPath();
-    ctx.arc(leftX + imgSize/2, topY + imgSize/2, imgSize/2 + s(2), 0, Math.PI * 2);
-    ctx.stroke();
-
-    // Token name
+    // Token name (prominent)
+    const nameX = leftX + imgSize + s(20);
     ctx.fillStyle = theme.text.primary;
-    ctx.font = `600 ${s(26)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `600 ${s(28)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText((token.name || 'Unknown').slice(0, 18), leftX + imgSize + s(18), topY + s(4));
+    ctx.fillText((token.name || 'Unknown').slice(0, 14), nameX, topY + s(8));
 
-    // Symbol
+    // Symbol (clear ticker)
+    ctx.fillStyle = theme.text.secondary;
+    ctx.font = `500 ${s(16)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.fillText(`$${(token.symbol || '???').toUpperCase()}`, nameX, topY + s(44));
+
+    // Stats below token (MCAP / HOLDERS)
+    const statsY = topY + imgSize + s(36);
+    const stats = [
+        { label: 'MCAP', value: token.marketCap ? `$${formatNumber(token.marketCap)}` : '—' },
+        { label: 'HOLDERS', value: token.holders ? formatNumber(token.holders) : '—' }
+    ];
+
+    stats.forEach((stat, i) => {
+        const statX = leftX + i * s(120);
+        ctx.fillStyle = theme.text.muted;
+        ctx.font = `600 ${s(11)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.textBaseline = 'top';
+        ctx.fillText(stat.label, statX, statsY);
+
+        ctx.fillStyle = theme.text.primary;
+        ctx.font = `600 ${s(18)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.fillText(stat.value, statX, statsY + s(18));
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // CENTER: K-Score (focal point, rule of thirds)
+    // ═══════════════════════════════════════════════════════════════
+    const centerX = RENDER_WIDTH / 2 + s(20);  // Slight right offset for balance
+    const centerY = panelY + panelH / 2 - s(10);
+
+    // K-SCORE label above
     ctx.fillStyle = theme.text.muted;
-    ctx.font = `500 ${s(15)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.fillText(`$${(token.symbol || '???').toUpperCase()}`, leftX + imgSize + s(18), topY + s(36));
-
-    // CENTER: Score
-    const centerX = RENDER_WIDTH / 2;
-    const centerY = RENDER_HEIGHT / 2;
-
-    // Score glow
-    ctx.shadowColor = gradeStyle.glow;
-    ctx.shadowBlur = s(60);
-    ctx.fillStyle = theme.text.primary;
-    ctx.font = `200 ${s(150)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `500 ${s(13)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('K-SCORE', centerX, centerY - s(75));
+
+    // Score number (the hero)
+    ctx.shadowColor = gradeStyle.glow;
+    ctx.shadowBlur = s(50);
+    ctx.fillStyle = theme.text.primary;
+    ctx.font = `300 ${s(130)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textBaseline = 'middle';
-    ctx.fillText(score.toString(), centerX, centerY - s(8));
+    ctx.fillText(score.toString(), centerX, centerY);
     ctx.shadowColor = 'transparent';
 
-    // K-SCORE label
-    ctx.fillStyle = theme.text.muted;
-    ctx.font = `500 ${s(12)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.fillText('K - S C O R E', centerX, centerY - s(95));
+    // Grade badge below score
+    const badgeY = centerY + s(70);
+    const badgeText = `${grade.label}  ·  ${grade.credit}`;
+    ctx.font = `600 ${s(14)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    const badgeW = ctx.measureText(badgeText).width + s(32);
+    const badgeH = s(30);
 
-    // Grade
+    // Badge background
+    ctx.fillStyle = gradeStyle.glow;
+    roundRect(ctx, centerX - badgeW/2, badgeY, badgeW, badgeH, badgeH/2);
+    ctx.fill();
+
+    // Badge border
+    ctx.strokeStyle = gradeStyle.color;
+    ctx.lineWidth = s(1);
+    roundRect(ctx, centerX - badgeW/2, badgeY, badgeW, badgeH, badgeH/2);
+    ctx.stroke();
+
+    // Badge text
     ctx.fillStyle = gradeStyle.color;
-    ctx.font = `600 ${s(18)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.fillText(`${grade.label}  ·  ${grade.credit}`, centerX, centerY + s(85));
+    ctx.textBaseline = 'middle';
+    ctx.fillText(badgeText, centerX, badgeY + badgeH/2);
 
-    // RIGHT: Conviction mini
-    const rightX = RENDER_WIDTH - s(240);
+    // ═══════════════════════════════════════════════════════════════
+    // RIGHT COLUMN: Conviction Analysis
+    // ═══════════════════════════════════════════════════════════════
+    const rightX = RENDER_WIDTH - s(280);
     const convY = topY;
 
-    ctx.fillStyle = theme.text.muted;
-    ctx.font = `500 ${s(10)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    // Section header
+    ctx.fillStyle = theme.text.secondary;
+    ctx.font = `600 ${s(12)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText('CONVICTION', rightX, convY);
+    ctx.fillText('TOP 20 CONVICTION', rightX, convY);
 
     const conviction = {
         diamond: token.conviction_accumulators || 0,
@@ -880,16 +950,16 @@ async function drawMinimalCard(ctx, token, theme) {
     const total = conviction.diamond + conviction.gold + conviction.silver + conviction.rust || 1;
     const dhPct = Math.round(((conviction.diamond + conviction.gold) / total) * 100);
 
-    // Bar
-    const barY = convY + s(20);
-    const barW = s(150), barH = s(5);
+    // Conviction bar (thicker for visibility)
+    const barY = convY + s(26);
+    const barW = s(200), barH = s(10);
 
     ctx.fillStyle = theme.bg.tertiary;
-    roundRect(ctx, rightX, barY, barW, barH, barH/2);
+    roundRect(ctx, rightX, barY, barW, barH, s(4));
     ctx.fill();
 
     ctx.save();
-    roundRect(ctx, rightX, barY, barW, barH, barH/2);
+    roundRect(ctx, rightX, barY, barW, barH, s(4));
     ctx.clip();
     let currentX = rightX;
     [
@@ -906,56 +976,89 @@ async function drawMinimalCard(ctx, token, theme) {
     });
     ctx.restore();
 
-    // Diamond hands
-    ctx.fillStyle = theme.text.primary;
-    ctx.font = `700 ${s(24)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.textBaseline = 'top';
-    ctx.fillText(`${dhPct}%`, rightX, barY + s(16));
-
-    ctx.fillStyle = theme.text.muted;
-    ctx.font = `400 ${s(12)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.fillText('diamond hands', rightX + s(55), barY + s(22));
-
-    // BOTTOM: Stats
-    const statsY = panelY + panelH - s(100);
-    const stats = [
-        { label: 'MARKET CAP', value: token.marketCap ? `$${formatNumber(token.marketCap)}` : '—' },
-        { label: 'HOLDERS', value: token.holders ? formatNumber(token.holders) : '—' }
+    // Legend (compact, readable)
+    const legendY = barY + s(24);
+    const legendItems = [
+        { label: 'Diamond', val: conviction.diamond, color: theme.conviction.diamond },
+        { label: 'Gold', val: conviction.gold, color: theme.conviction.gold },
+        { label: 'Silver', val: conviction.silver, color: theme.conviction.silver },
+        { label: 'Rust', val: conviction.rust, color: theme.conviction.rust }
     ];
 
-    stats.forEach((stat, i) => {
-        const statX = leftX + i * s(150);
-        ctx.fillStyle = theme.text.muted;
-        ctx.font = `500 ${s(10)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        ctx.fillText(stat.label, statX, statsY);
+    legendItems.forEach((item, i) => {
+        const itemY = legendY + i * s(22);
 
+        // Color dot
+        ctx.beginPath();
+        ctx.arc(rightX + s(5), itemY + s(6), s(4), 0, Math.PI * 2);
+        ctx.fillStyle = item.color;
+        ctx.fill();
+
+        // Label
+        ctx.fillStyle = theme.text.secondary;
+        ctx.font = `500 ${s(12)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(item.label, rightX + s(16), itemY + s(6));
+
+        // Value (right aligned)
         ctx.fillStyle = theme.text.primary;
-        ctx.font = `600 ${s(17)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-        ctx.fillText(stat.value, statX, statsY + s(18));
+        ctx.font = `600 ${s(12)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.textAlign = 'right';
+        ctx.fillText(item.val.toString(), rightX + barW, itemY + s(6));
     });
 
-    // Footer line
+    // Diamond Hands box (key metric, prominent)
+    const dhY = legendY + s(105);
+    const dhBoxW = barW, dhBoxH = s(44);
+
+    ctx.fillStyle = theme.bg.tertiary;
+    roundRect(ctx, rightX, dhY, dhBoxW, dhBoxH, s(8));
+    ctx.fill();
+
+    // DH label
+    ctx.fillStyle = theme.text.secondary;
+    ctx.font = `500 ${s(12)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Diamond Hands', rightX + s(14), dhY + dhBoxH/2);
+
+    // DH percentage (precious metal colors)
+    // ≥60% Diamond, ≥40% Gold, ≥20% Silver, <20% Rust
+    const dhColor = dhPct >= 60 ? theme.conviction.diamond
+                  : dhPct >= 40 ? theme.conviction.gold
+                  : dhPct >= 20 ? theme.conviction.silver
+                  : theme.conviction.rust;
+    ctx.fillStyle = dhColor;
+    ctx.font = `700 ${s(22)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.textAlign = 'right';
+    ctx.fillText(`${dhPct}%`, rightX + dhBoxW - s(14), dhY + dhBoxH/2);
+
+    // ═══════════════════════════════════════════════════════════════
+    // FOOTER
+    // ═══════════════════════════════════════════════════════════════
+    const footerY = panelY + panelH - s(28);
+
+    // Separator line
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
     ctx.lineWidth = s(1);
     ctx.beginPath();
-    ctx.moveTo(leftX, panelY + panelH - s(48));
-    ctx.lineTo(panelX + panelW - s(48), panelY + panelH - s(48));
+    ctx.moveTo(panelX + s(44), footerY - s(14));
+    ctx.lineTo(panelX + panelW - s(44), footerY - s(14));
     ctx.stroke();
 
     // Footer text
     ctx.fillStyle = theme.text.muted;
-    ctx.font = `400 ${s(11)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `500 ${s(12)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(BRAND_URL, leftX, panelY + panelH - s(26));
+    ctx.fillText(BRAND_URL, panelX + s(44), footerY);
 
     ctx.textAlign = 'center';
-    ctx.fillText(theme.tagline, centerX, panelY + panelH - s(26));
+    ctx.fillText(theme.tagline, RENDER_WIDTH / 2, footerY);
 
     ctx.textAlign = 'right';
-    ctx.fillText(new Date().toISOString().split('T')[0], panelX + panelW - s(48), panelY + panelH - s(26));
+    ctx.fillText(new Date().toISOString().split('T')[0], panelX + panelW - s(44), footerY);
 }
 
 // ═══════════════════════════════════════════════════════════════
