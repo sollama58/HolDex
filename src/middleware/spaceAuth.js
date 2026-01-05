@@ -61,12 +61,29 @@ function signGrant(wallet, grants, grantedBy, createdAt) {
 }
 
 /**
+ * Normalize PostgreSQL array to JavaScript array
+ * PostgreSQL TEXT[] may come as: '{a,b,c}' string or ['a','b','c'] array
+ */
+function normalizeGrantsArray(grants) {
+    if (Array.isArray(grants)) return grants;
+    if (typeof grants === 'string') {
+        // Parse PostgreSQL array format: {a,b,c}
+        if (grants.startsWith('{') && grants.endsWith('}')) {
+            return grants.slice(1, -1).split(',').filter(g => g.length > 0);
+        }
+        return [grants];
+    }
+    return [];
+}
+
+/**
  * Verify grant signature integrity
  */
 function verifyGrantSignature(grant) {
+    const grantsArray = normalizeGrantsArray(grant.grants);
     const expected = signGrant(
         grant.wallet,
-        grant.grants,
+        grantsArray,
         grant.granted_by,
         grant.created_at
     );
@@ -139,6 +156,14 @@ async function getGrants(wallet) {
     if (!grant) {
         GRANTS_CACHE.set(cacheKey, { data: null, expiry: Date.now() + GRANTS_CACHE_TTL });
         return null;
+    }
+
+    // Normalize grants array from PostgreSQL format
+    grant.grants = normalizeGrantsArray(grant.grants);
+
+    // Normalize timestamp for signature verification
+    if (grant.created_at instanceof Date) {
+        grant.created_at = grant.created_at.toISOString();
     }
 
     // Verify signature integrity
