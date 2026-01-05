@@ -1007,20 +1007,20 @@ async function drawMinimalCard(ctx, token, theme) {
     roundRect(ctx, rightX, dhY, dhBoxW, dhBoxH, s(12));
     ctx.fill();
 
-    // DH label (no emoji - doesn't render in canvas)
+    // DH label
     ctx.fillStyle = theme.text.secondary;
-    ctx.font = `bold ${s(28)}px Arial, Helvetica, sans-serif`;
+    ctx.font = `bold ${s(24)}px Arial, Helvetica, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText('DIAMOND HANDS', rightX + s(16), dhY + dhBoxH/2);
+    ctx.fillText('DH%', rightX + s(16), dhY + dhBoxH/2);
 
-    // DH percentage
+    // DH percentage (HERO of this box)
     const dhColor = dhPct >= 60 ? theme.conviction.diamond
                   : dhPct >= 40 ? theme.conviction.gold
                   : dhPct >= 20 ? theme.conviction.silver
                   : theme.conviction.rust;
     ctx.fillStyle = dhColor;
-    ctx.font = `bold ${s(64)}px Arial, Helvetica, sans-serif`;
+    ctx.font = `bold ${s(56)}px Arial, Helvetica, sans-serif`;
     ctx.textAlign = 'right';
     ctx.fillText(`${dhPct}%`, rightX + dhBoxW - s(16), dhY + dhBoxH/2);
 
