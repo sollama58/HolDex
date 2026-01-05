@@ -95,10 +95,12 @@ const HOMEPAGE_PATH = path.join(__dirname, '../homepage.html');
 const TRACKRECORD_PATH = path.join(__dirname, '../track-record.html');
 const THEMEPREVIEW_PATH = path.join(__dirname, '../theme-preview.html');
 const ADMIN_PATH = path.join(__dirname, '../admin.html');
+const SPACE_PATH = path.join(__dirname, '../space.html');
 let HOMEPAGE_TEMPLATE = '';
 let TRACKRECORD_TEMPLATE = '';
 let THEMEPREVIEW_TEMPLATE = '';
 let ADMIN_TEMPLATE = '';
+let SPACE_TEMPLATE = '';
 
 try {
     HOMEPAGE_TEMPLATE = fs.readFileSync(HOMEPAGE_PATH, 'utf8');
@@ -130,6 +132,14 @@ try {
 } catch (e) {
     logger.warn(`⚠️ Admin template not found: ${e.message}`);
     ADMIN_TEMPLATE = ''; // Optional page, don't fail
+}
+
+try {
+    SPACE_TEMPLATE = fs.readFileSync(SPACE_PATH, 'utf8');
+    logger.info('✅ Template: space.html loaded into memory');
+} catch (e) {
+    logger.warn(`⚠️ Space template not found: ${e.message}`);
+    SPACE_TEMPLATE = ''; // Optional page, don't fail
 }
 
 // CORS CONFIGURATION
@@ -402,6 +412,15 @@ app.get('/admin', (req, res) => {
         res.send(ADMIN_TEMPLATE);
     } else {
         res.status(404).send('Admin page not available');
+    }
+});
+
+// Serve Cult Member Space - "Hold to enter. Grants unlock features."
+app.get('/cult-space', (req, res) => {
+    if (SPACE_TEMPLATE) {
+        res.send(SPACE_TEMPLATE);
+    } else {
+        res.status(404).send('Space page not available');
     }
 });
 
