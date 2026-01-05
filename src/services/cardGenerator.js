@@ -852,18 +852,18 @@ async function drawMinimalCard(ctx, token, theme) {
     }
     ctx.restore();
 
-    // Token name (MASSIVE - readable at 3am)
+    // Token name (MASSIVE - readable at 3am on phone)
     const nameX = leftX + imgSize + s(28);
     ctx.fillStyle = theme.text.primary;
-    ctx.font = `700 ${s(88)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `800 ${s(120)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText((token.name || 'Unknown').slice(0, 8), nameX, topY - s(8));
+    ctx.fillText((token.name || 'Unknown').slice(0, 6), nameX, topY - s(20));
 
-    // Symbol (LARGE ticker)
+    // Symbol (HUGE ticker)
     ctx.fillStyle = theme.text.secondary;
-    ctx.font = `600 ${s(52)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    ctx.fillText(`$${(token.symbol || '???').toUpperCase()}`, nameX, topY + s(78));
+    ctx.font = `700 ${s(72)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.fillText(`$${(token.symbol || '???').toUpperCase().slice(0, 6)}`, nameX, topY + s(95));
 
     // Stats below token (MCAP / HOLDERS)
     const statsY = topY + imgSize + s(24);
@@ -873,15 +873,15 @@ async function drawMinimalCard(ctx, token, theme) {
     ];
 
     stats.forEach((stat, i) => {
-        const statX = leftX + i * s(200);
+        const statX = leftX + i * s(220);
         ctx.fillStyle = theme.text.muted;
-        ctx.font = `700 ${s(32)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.font = `700 ${s(40)}px -apple-system, BlinkMacSystemFont, sans-serif`;
         ctx.textBaseline = 'top';
         ctx.fillText(stat.label, statX, statsY);
 
         ctx.fillStyle = theme.text.primary;
-        ctx.font = `700 ${s(56)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-        ctx.fillText(stat.value, statX, statsY + s(38));
+        ctx.font = `800 ${s(72)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.fillText(stat.value, statX, statsY + s(48));
     });
 
     // ═══════════════════════════════════════════════════════════════
@@ -892,24 +892,24 @@ async function drawMinimalCard(ctx, token, theme) {
 
     // K-SCORE label above
     ctx.fillStyle = theme.text.muted;
-    ctx.font = `600 ${s(40)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `700 ${s(52)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
-    ctx.fillText('K-SCORE', centerX, centerY - s(115));
+    ctx.fillText('K-SCORE', centerX, centerY - s(130));
 
-    // Score number (HERO - the thing you see first)
+    // Score number (HERO - THE ONLY THING THAT MATTERS)
     ctx.shadowColor = gradeStyle.glow;
-    ctx.shadowBlur = s(100);
+    ctx.shadowBlur = s(120);
     ctx.fillStyle = theme.text.primary;
-    ctx.font = `300 ${s(280)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `200 ${s(360)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textBaseline = 'middle';
-    ctx.fillText(score.toString(), centerX, centerY);
+    ctx.fillText(score.toString(), centerX, centerY + s(10));
     ctx.shadowColor = 'transparent';
 
     // Grade badge below score (BIG)
-    const badgeY = centerY + s(140);
+    const badgeY = centerY + s(175);
     const badgeText = `${grade.label}  ·  ${grade.credit}`;
-    ctx.font = `600 ${s(38)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `700 ${s(48)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     const badgeW = ctx.measureText(badgeText).width + s(52);
     const badgeH = s(50);
 
@@ -935,9 +935,9 @@ async function drawMinimalCard(ctx, token, theme) {
     const rightX = RENDER_WIDTH - s(320);
     const convY = topY;
 
-    // Section header (BIG)
+    // Section header (READABLE)
     ctx.fillStyle = theme.text.secondary;
-    ctx.font = `700 ${s(36)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `700 ${s(44)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText('TOP 20 CONVICTION', rightX, convY);
@@ -987,50 +987,50 @@ async function drawMinimalCard(ctx, token, theme) {
     ];
 
     legendItems.forEach((item, i) => {
-        const itemY = legendY + i * s(44);
+        const itemY = legendY + i * s(52);
 
-        // Color dot (BIG)
+        // Color dot (HUGE)
         ctx.beginPath();
-        ctx.arc(rightX + s(12), itemY + s(16), s(12), 0, Math.PI * 2);
+        ctx.arc(rightX + s(16), itemY + s(20), s(16), 0, Math.PI * 2);
         ctx.fillStyle = item.color;
         ctx.fill();
 
-        // Label (BIG)
+        // Label (READABLE)
         ctx.fillStyle = theme.text.secondary;
-        ctx.font = `500 ${s(34)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.font = `600 ${s(42)}px -apple-system, BlinkMacSystemFont, sans-serif`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(item.label, rightX + s(36), itemY + s(16));
+        ctx.fillText(item.label, rightX + s(44), itemY + s(20));
 
-        // Value (right aligned, BIG)
+        // Value (right aligned, BOLD)
         ctx.fillStyle = theme.text.primary;
-        ctx.font = `600 ${s(34)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.font = `700 ${s(42)}px -apple-system, BlinkMacSystemFont, sans-serif`;
         ctx.textAlign = 'right';
-        ctx.fillText(item.val.toString(), rightX + barW, itemY + s(16));
+        ctx.fillText(item.val.toString(), rightX + barW, itemY + s(20));
     });
 
-    // Diamond Hands box (KEY METRIC - instant read)
-    const dhY = legendY + s(190);
-    const dhBoxW = barW, dhBoxH = s(88);
+    // Diamond Hands box (KEY METRIC - MUST READ INSTANTLY)
+    const dhY = legendY + s(220);
+    const dhBoxW = barW, dhBoxH = s(100);
 
     ctx.fillStyle = theme.bg.tertiary;
-    roundRect(ctx, rightX, dhY, dhBoxW, dhBoxH, s(14));
+    roundRect(ctx, rightX, dhY, dhBoxW, dhBoxH, s(16));
     ctx.fill();
 
-    // DH label (BIG)
+    // DH label (READABLE)
     ctx.fillStyle = theme.text.secondary;
-    ctx.font = `600 ${s(32)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `700 ${s(40)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText('Diamond Hands', rightX + s(20), dhY + dhBoxH/2);
+    ctx.fillText('💎 Hands', rightX + s(20), dhY + dhBoxH/2);
 
-    // DH percentage (precious metal colors - HERO element)
+    // DH percentage (precious metal colors - SECOND HERO)
     const dhColor = dhPct >= 60 ? theme.conviction.diamond
                   : dhPct >= 40 ? theme.conviction.gold
                   : dhPct >= 20 ? theme.conviction.silver
                   : theme.conviction.rust;
     ctx.fillStyle = dhColor;
-    ctx.font = `700 ${s(72)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `800 ${s(88)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'right';
     ctx.fillText(`${dhPct}%`, rightX + dhBoxW - s(16), dhY + dhBoxH/2);
 
@@ -1047,9 +1047,9 @@ async function drawMinimalCard(ctx, token, theme) {
     ctx.lineTo(panelX + panelW - s(44), footerY - s(18));
     ctx.stroke();
 
-    // Footer text (readable even tired)
+    // Footer text (visible)
     ctx.fillStyle = theme.text.muted;
-    ctx.font = `500 ${s(28)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `600 ${s(34)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(BRAND_URL, panelX + s(44), footerY);
