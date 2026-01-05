@@ -899,11 +899,11 @@ async function drawMinimalCard(ctx, token, theme) {
 
     // Score number (HERO - THE ONLY THING THAT MATTERS)
     ctx.shadowColor = gradeStyle.glow;
-    ctx.shadowBlur = s(120);
+    ctx.shadowBlur = s(150);
     ctx.fillStyle = theme.text.primary;
-    ctx.font = `200 ${s(360)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.font = `600 ${s(420)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textBaseline = 'middle';
-    ctx.fillText(score.toString(), centerX, centerY + s(10));
+    ctx.fillText(score.toString(), centerX, centerY);
     ctx.shadowColor = 'transparent';
 
     // Grade badge below score (BIG)
