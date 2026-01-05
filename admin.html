@@ -505,7 +505,8 @@
 
         async function loadGrants() {
             try {
-                const data = await apiGet('/space/admin/grants');
+                const endpoint = authMode === 'password' ? '/space/admin/grants/password' : '/space/admin/grants';
+                const data = await apiGet(endpoint);
                 const tbody = document.getElementById('grants-table');
 
                 if (!data.success || !data.data?.length) {
@@ -646,10 +647,17 @@
                         return;
                     }
                 } else {
-                    // Password mode - direct DB insert via custom endpoint needed
-                    // For now, show message
-                    toast('Password mode: Use wallet auth for grants', 'error');
-                    return;
+                    // Password mode - use password endpoint
+                    const data = await apiPost('/space/admin/grants/password', {
+                        targetWallet: wallet,
+                        grants,
+                        reason
+                    });
+
+                    if (!data.success) {
+                        toast(data.error || 'Failed to add grant', 'error');
+                        return;
+                    }
                 }
 
                 toast('Grant added successfully', 'success');
@@ -684,6 +692,18 @@
                             timestamp,
                             params: { targetWallet }
                         })
+                    });
+
+                    const data = await resp.json();
+                    if (!data.success) {
+                        toast(data.error || 'Failed to revoke', 'error');
+                        return;
+                    }
+                } else {
+                    // Password mode
+                    const resp = await fetch(`${API_URL}/space/admin/grants/password/${targetWallet}`, {
+                        method: 'DELETE',
+                        headers: getHeaders()
                     });
 
                     const data = await resp.json();

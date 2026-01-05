@@ -509,6 +509,41 @@ router.get('/admin/grants', requireSession(), requireGrant('grants_admin'), spac
 });
 
 /**
+ * GET /space/admin/grants/password
+ * List all grants using password auth
+ */
+router.get('/admin/grants/password', spaceRateLimiter, async (req, res) => {
+    // Check admin password
+    const authHeader = req.headers['x-admin-auth'];
+    if (!config.ADMIN_PASSWORD || !authHeader) {
+        return res.status(401).json({ success: false, error: 'Admin password required' });
+    }
+
+    const passwordBuffer = Buffer.from(config.ADMIN_PASSWORD);
+    const authBuffer = Buffer.from(authHeader);
+    if (passwordBuffer.length !== authBuffer.length ||
+        !require('crypto').timingSafeEqual(passwordBuffer, authBuffer)) {
+        return res.status(403).json({ success: false, error: 'Invalid admin password' });
+    }
+
+    try {
+        const grants = await db.all(`
+            SELECT wallet, grants, e_score_boost, granted_by, grant_reason, is_active, created_at, revoked_at
+            FROM access_grants
+            ORDER BY created_at DESC
+            LIMIT 100
+        `);
+
+        res.json({
+            success: true,
+            data: grants
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: 'Failed to fetch grants' });
+    }
+});
+
+/**
  * POST /space/admin/grants
  * Create or update grant (admin only, requires signature)
  *
@@ -577,6 +612,143 @@ router.post('/admin/grants',
         } catch (e) {
             logger?.error(`[Space] Create grant error: ${e.message}`);
             res.status(500).json({ success: false, error: e.message });
+        }
+    }
+);
+
+/**
+ * Middleware: Check admin password
+ */
+function requireAdminPassword(req, res, next) {
+    const authHeader = req.headers['x-admin-auth'];
+
+    if (!config.ADMIN_PASSWORD) {
+        return res.status(503).json({
+            success: false,
+            error: 'Admin password not configured',
+            code: 'NO_ADMIN_PASSWORD'
+        });
+    }
+
+    if (!authHeader) {
+        return res.status(401).json({
+            success: false,
+            error: 'Admin password required',
+            code: 'NO_AUTH'
+        });
+    }
+
+    // Timing-safe comparison
+    const passwordBuffer = Buffer.from(config.ADMIN_PASSWORD);
+    const authBuffer = Buffer.from(authHeader);
+
+    if (passwordBuffer.length !== authBuffer.length ||
+        !require('crypto').timingSafeEqual(passwordBuffer, authBuffer)) {
+        return res.status(403).json({
+            success: false,
+            error: 'Invalid admin password',
+            code: 'INVALID_PASSWORD'
+        });
+    }
+
+    req.wallet = 'ADMIN_PASSWORD';
+    next();
+}
+
+/**
+ * POST /space/admin/grants/password
+ * Create or update grant using admin password auth
+ *
+ * Body: { targetWallet, grants, reason, eScoreBoost }
+ */
+router.post('/admin/grants/password',
+    requireAdminPassword,
+    writeRateLimiter,
+    async (req, res) => {
+        const { targetWallet, grants, reason, eScoreBoost = 0 } = req.body;
+
+        if (!targetWallet || !isValidWallet(targetWallet)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Valid target wallet required',
+                code: 'INVALID_TARGET'
+            });
+        }
+
+        if (!grants || !Array.isArray(grants) || grants.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'At least one grant required',
+                code: 'NO_GRANTS'
+            });
+        }
+
+        // Validate grants
+        for (const g of grants) {
+            if (!VALID_GRANTS.includes(g)) {
+                return res.status(400).json({
+                    success: false,
+                    error: `Invalid grant: ${g}`,
+                    code: 'INVALID_GRANT'
+                });
+            }
+        }
+
+        try {
+            const result = await createGrant(targetWallet, grants, 'ADMIN_PASSWORD', reason);
+
+            if (eScoreBoost > 0) {
+                await db.run(
+                    'UPDATE access_grants SET e_score_boost = $1 WHERE wallet = $2',
+                    [eScoreBoost, targetWallet]
+                );
+            }
+
+            await logAction('ADMIN_PASSWORD', 'create_grant', 'grants_admin', {
+                targetWallet,
+                grants,
+                reason,
+                eScoreBoost
+            }, null);
+
+            res.json({
+                success: true,
+                data: {
+                    ...result,
+                    eScoreBoost
+                }
+            });
+        } catch (e) {
+            logger?.error(`[Space] Create grant (password) error: ${e.message}`);
+            res.status(500).json({ success: false, error: e.message });
+        }
+    }
+);
+
+/**
+ * DELETE /space/admin/grants/password/:wallet
+ * Revoke grant using admin password auth
+ */
+router.delete('/admin/grants/password/:targetWallet',
+    requireAdminPassword,
+    writeRateLimiter,
+    async (req, res) => {
+        const { targetWallet } = req.params;
+
+        if (!isValidWallet(targetWallet)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid wallet address',
+                code: 'INVALID_WALLET'
+            });
+        }
+
+        try {
+            await revokeGrant(targetWallet, 'ADMIN_PASSWORD');
+            await logAction('ADMIN_PASSWORD', 'revoke_grant', 'grants_admin', { targetWallet }, null);
+            res.json({ success: true });
+        } catch (e) {
+            res.status(500).json({ success: false, error: 'Failed to revoke grant' });
         }
     }
 );
