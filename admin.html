@@ -176,13 +176,22 @@
     </style>
 </head>
 <body class="p-4 md:p-8">
+    <!-- Navigation -->
+    <nav class="flex items-center gap-4 mb-6 text-sm">
+        <a href="/" class="text-fire-muted hover:text-fire-accent transition">← Home</a>
+        <span class="text-fire-muted/30">|</span>
+        <a href="/cult-space" class="text-fire-muted hover:text-fire-accent transition">The Space</a>
+        <span class="text-fire-muted/30">|</span>
+        <span class="text-fire-accent">Admin</span>
+    </nav>
+
     <!-- Header -->
     <header class="flex items-center justify-between mb-8">
         <div class="flex items-center gap-4">
             <span class="text-2xl font-bold" style="color: #f97316; text-shadow: 0 0 30px rgba(249, 115, 22, 0.5);">
                 ADMIN SPACE
             </span>
-            <span class="text-fire-muted text-sm">HolDex Control Panel</span>
+            <span class="text-fire-muted text-sm hidden md:inline">HolDex Control Panel</span>
         </div>
         <div id="auth-status" class="flex items-center gap-3">
             <span id="wallet-display" class="text-fire-muted text-sm font-mono hidden"></span>
