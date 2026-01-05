@@ -1,16 +1,20 @@
 /**
- * K-Score Card Image Generator v3
+ * K-Score Card Image Generator v4
  * Premium card designs for social sharing
  *
- * 3 Styles: HolDex, ASDF, Minimal
+ * 3 Styles: HolDex, ASDF, Minimal (dark)
+ * Rendered at 2x for crisp output
  */
 
 const { createCanvas, loadImage } = require('canvas');
 const axios = require('axios');
 
-// Card dimensions (Twitter card optimal)
+// Card dimensions (Twitter optimal) - render at 2x for sharpness
+const SCALE = 2;
 const CARD_WIDTH = 1200;
 const CARD_HEIGHT = 628;
+const RENDER_WIDTH = CARD_WIDTH * SCALE;
+const RENDER_HEIGHT = CARD_HEIGHT * SCALE;
 
 // Branding
 const BRAND_URL = 'alonisthe.dev/holdex';
@@ -20,129 +24,123 @@ const BRAND_URL = 'alonisthe.dev/holdex';
 // ═══════════════════════════════════════════════════════════════
 
 const THEMES = {
+    // HolDex: Premium glassmorphism, dark blue-black
     holdex: {
         name: 'HolDex',
         bg: {
-            primary: '#0a0a0f',
-            secondary: '#12121a',
-            tertiary: '#1a1a24'
+            primary: '#08080c',
+            secondary: '#0e0e14',
+            tertiary: '#16161e',
+            card: 'rgba(14, 14, 20, 0.9)'
         },
-        accent: {
-            primary: '#f97316',
-            secondary: '#fb923c',
-            glow: 'rgba(249, 115, 22, 0.15)'
-        },
+        accent: '#f97316',
         text: {
             primary: '#fafafa',
             secondary: '#a1a1aa',
-            muted: '#71717a'
+            muted: '#52525b'
         },
         grades: {
-            diamond: { color: '#22d3ee', glow: 'rgba(34, 211, 238, 0.3)' },
-            platinum: { color: '#a78bfa', glow: 'rgba(167, 139, 250, 0.3)' },
-            gold: { color: '#fbbf24', glow: 'rgba(251, 191, 36, 0.3)' },
-            silver: { color: '#94a3b8', glow: 'rgba(148, 163, 184, 0.2)' },
-            bronze: { color: '#f97316', glow: 'rgba(249, 115, 22, 0.3)' },
-            copper: { color: '#ea580c', glow: 'rgba(234, 88, 12, 0.3)' },
-            iron: { color: '#6b7280', glow: 'rgba(107, 114, 128, 0.2)' },
-            rust: { color: '#ef4444', glow: 'rgba(239, 68, 68, 0.3)' },
-            native: { color: '#818cf8', glow: 'rgba(129, 140, 248, 0.3)' }
+            diamond: { color: '#22d3ee', glow: 'rgba(34, 211, 238, 0.35)' },
+            platinum: { color: '#a78bfa', glow: 'rgba(167, 139, 250, 0.35)' },
+            gold: { color: '#fbbf24', glow: 'rgba(251, 191, 36, 0.35)' },
+            silver: { color: '#94a3b8', glow: 'rgba(148, 163, 184, 0.25)' },
+            bronze: { color: '#fb923c', glow: 'rgba(251, 146, 60, 0.35)' },
+            copper: { color: '#ea580c', glow: 'rgba(234, 88, 12, 0.35)' },
+            iron: { color: '#6b7280', glow: 'rgba(107, 114, 128, 0.25)' },
+            rust: { color: '#ef4444', glow: 'rgba(239, 68, 68, 0.35)' },
+            native: { color: '#818cf8', glow: 'rgba(129, 140, 248, 0.35)' }
         },
         conviction: {
             diamond: '#22d3ee',
             gold: '#fbbf24',
-            silver: '#94a3b8',
+            silver: '#71717a',
             rust: '#ef4444'
         },
         tagline: 'this is fine.'
     },
 
+    // ASDF: Fire terminal, burnt tones
     asdf: {
         name: 'ASDF',
         bg: {
-            primary: '#1c0a00',
-            secondary: '#2d1106',
-            tertiary: '#451a03'
+            primary: '#0c0402',
+            secondary: '#1a0a04',
+            tertiary: '#2d1408',
+            card: '#1f0d05'
         },
-        accent: {
-            primary: '#fb923c',
-            secondary: '#fdba74',
-            glow: 'rgba(251, 146, 60, 0.2)'
-        },
+        accent: '#fb923c',
         text: {
             primary: '#fef3c7',
             secondary: '#fcd34d',
-            muted: '#d97706'
+            muted: '#b45309'
         },
         grades: {
-            diamond: { color: '#67e8f9', glow: 'rgba(103, 232, 249, 0.4)' },
-            platinum: { color: '#c4b5fd', glow: 'rgba(196, 181, 253, 0.4)' },
-            gold: { color: '#fde047', glow: 'rgba(253, 224, 71, 0.4)' },
-            silver: { color: '#e5e7eb', glow: 'rgba(229, 231, 235, 0.3)' },
-            bronze: { color: '#fb923c', glow: 'rgba(251, 146, 60, 0.4)' },
-            copper: { color: '#ea580c', glow: 'rgba(234, 88, 12, 0.4)' },
-            iron: { color: '#9ca3af', glow: 'rgba(156, 163, 175, 0.3)' },
-            rust: { color: '#f87171', glow: 'rgba(248, 113, 113, 0.4)' },
-            native: { color: '#a5b4fc', glow: 'rgba(165, 180, 252, 0.4)' }
+            diamond: { color: '#67e8f9', glow: 'rgba(103, 232, 249, 0.45)' },
+            platinum: { color: '#c4b5fd', glow: 'rgba(196, 181, 253, 0.45)' },
+            gold: { color: '#fde047', glow: 'rgba(253, 224, 71, 0.45)' },
+            silver: { color: '#e5e7eb', glow: 'rgba(229, 231, 235, 0.35)' },
+            bronze: { color: '#fb923c', glow: 'rgba(251, 146, 60, 0.45)' },
+            copper: { color: '#ea580c', glow: 'rgba(234, 88, 12, 0.45)' },
+            iron: { color: '#9ca3af', glow: 'rgba(156, 163, 175, 0.35)' },
+            rust: { color: '#f87171', glow: 'rgba(248, 113, 113, 0.45)' },
+            native: { color: '#a5b4fc', glow: 'rgba(165, 180, 252, 0.45)' }
         },
         conviction: {
             diamond: '#67e8f9',
             gold: '#fde047',
-            silver: '#e5e7eb',
+            silver: '#d6d3d1',
             rust: '#f87171'
         },
         tagline: 'the room is on fire.'
     },
 
+    // Minimal: Dark, clean, institutional - inspired by solprice
     minimal: {
         name: 'Minimal',
         bg: {
-            primary: '#ffffff',
-            secondary: '#fafafa',
-            tertiary: '#f4f4f5'
+            primary: '#000000',
+            secondary: '#0a0a0a',
+            tertiary: '#141414',
+            card: '#0f0f0f'
         },
-        accent: {
-            primary: '#18181b',
-            secondary: '#3f3f46',
-            glow: 'rgba(24, 24, 27, 0.05)'
-        },
+        accent: '#ffffff',
         text: {
-            primary: '#09090b',
-            secondary: '#52525b',
-            muted: '#a1a1aa'
+            primary: '#ffffff',
+            secondary: '#a3a3a3',
+            muted: '#525252'
         },
         grades: {
-            diamond: { color: '#0891b2', glow: 'rgba(8, 145, 178, 0.1)' },
-            platinum: { color: '#7c3aed', glow: 'rgba(124, 58, 237, 0.1)' },
-            gold: { color: '#ca8a04', glow: 'rgba(202, 138, 4, 0.1)' },
-            silver: { color: '#52525b', glow: 'rgba(82, 82, 91, 0.1)' },
-            bronze: { color: '#ea580c', glow: 'rgba(234, 88, 12, 0.1)' },
-            copper: { color: '#c2410c', glow: 'rgba(194, 65, 12, 0.1)' },
-            iron: { color: '#71717a', glow: 'rgba(113, 113, 122, 0.1)' },
-            rust: { color: '#dc2626', glow: 'rgba(220, 38, 38, 0.1)' },
-            native: { color: '#4f46e5', glow: 'rgba(79, 70, 229, 0.1)' }
+            diamond: { color: '#22d3ee', glow: 'rgba(34, 211, 238, 0.2)' },
+            platinum: { color: '#a78bfa', glow: 'rgba(167, 139, 250, 0.2)' },
+            gold: { color: '#facc15', glow: 'rgba(250, 204, 21, 0.2)' },
+            silver: { color: '#71717a', glow: 'rgba(113, 113, 122, 0.15)' },
+            bronze: { color: '#fb923c', glow: 'rgba(251, 146, 60, 0.2)' },
+            copper: { color: '#ea580c', glow: 'rgba(234, 88, 12, 0.2)' },
+            iron: { color: '#52525b', glow: 'rgba(82, 82, 91, 0.15)' },
+            rust: { color: '#ef4444', glow: 'rgba(239, 68, 68, 0.2)' },
+            native: { color: '#818cf8', glow: 'rgba(129, 140, 248, 0.2)' }
         },
         conviction: {
-            diamond: '#0891b2',
-            gold: '#ca8a04',
-            silver: '#71717a',
-            rust: '#dc2626'
+            diamond: '#22d3ee',
+            gold: '#facc15',
+            silver: '#525252',
+            rust: '#ef4444'
         },
-        tagline: 'on-chain conviction data'
+        tagline: 'on-chain conviction'
     }
 };
 
 // Grade thresholds
 const GRADES = {
-    native: { min: null, label: 'Native', credit: 'Infrastructure' },
-    diamond: { min: 90, label: 'Diamond', credit: 'A1 Prime' },
-    platinum: { min: 80, label: 'Platinum', credit: 'A2 Excellent' },
-    gold: { min: 70, label: 'Gold', credit: 'A3 Good' },
-    silver: { min: 60, label: 'Silver', credit: 'B1 Fair' },
-    bronze: { min: 50, label: 'Bronze', credit: 'B2 Speculative' },
-    copper: { min: 40, label: 'Copper', credit: 'B3 Risky' },
-    iron: { min: 20, label: 'Iron', credit: 'C High Risk' },
-    rust: { min: 0, label: 'Rust', credit: 'D Junk' }
+    native: { label: 'Native', credit: 'Infrastructure' },
+    diamond: { label: 'Diamond', credit: 'A1 Prime' },
+    platinum: { label: 'Platinum', credit: 'A2 Excellent' },
+    gold: { label: 'Gold', credit: 'A3 Good' },
+    silver: { label: 'Silver', credit: 'B1 Fair' },
+    bronze: { label: 'Bronze', credit: 'B2 Speculative' },
+    copper: { label: 'Copper', credit: 'B3 Risky' },
+    iron: { label: 'Iron', credit: 'C High Risk' },
+    rust: { label: 'Rust', credit: 'D Junk' }
 };
 
 const NATIVE_TOKENS = new Set([
@@ -180,9 +178,10 @@ function formatNumber(num) {
     return Math.round(num).toString();
 }
 
+function s(val) { return val * SCALE; } // Scale helper
+
 function roundRect(ctx, x, y, w, h, r) {
-    if (r > h / 2) r = h / 2;
-    if (r > w / 2) r = w / 2;
+    r = Math.min(r, h / 2, w / 2);
     ctx.beginPath();
     ctx.moveTo(x + r, y);
     ctx.lineTo(x + w - r, y);
@@ -202,7 +201,7 @@ async function fetchTokenImage(imageUrl) {
         const response = await axios.get(imageUrl, {
             responseType: 'arraybuffer',
             timeout: 5000,
-            headers: { 'User-Agent': 'HolDex-CardGen/3.0' }
+            headers: { 'User-Agent': 'HolDex-CardGen/4.0' }
         });
         return await loadImage(Buffer.from(response.data));
     } catch {
@@ -211,7 +210,7 @@ async function fetchTokenImage(imageUrl) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// HOLDEX STYLE - Premium glassmorphism
+// HOLDEX STYLE
 // ═══════════════════════════════════════════════════════════════
 
 async function drawHoldexCard(ctx, token, theme) {
@@ -219,87 +218,81 @@ async function drawHoldexCard(ctx, token, theme) {
     const grade = getGrade(score, token.mint);
     const gradeStyle = theme.grades[grade.key];
 
-    // === BACKGROUND ===
-    // Deep dark gradient
-    const bgGrad = ctx.createLinearGradient(0, 0, CARD_WIDTH, CARD_HEIGHT);
+    // Background gradient
+    const bgGrad = ctx.createLinearGradient(0, 0, RENDER_WIDTH, RENDER_HEIGHT);
     bgGrad.addColorStop(0, theme.bg.primary);
     bgGrad.addColorStop(0.5, theme.bg.secondary);
     bgGrad.addColorStop(1, theme.bg.primary);
     ctx.fillStyle = bgGrad;
-    ctx.fillRect(0, 0, CARD_WIDTH, CARD_HEIGHT);
+    ctx.fillRect(0, 0, RENDER_WIDTH, RENDER_HEIGHT);
 
-    // Ambient glow - top left (orange)
-    const glow1 = ctx.createRadialGradient(0, 0, 0, 0, 0, 500);
-    glow1.addColorStop(0, 'rgba(249, 115, 22, 0.12)');
-    glow1.addColorStop(0.5, 'rgba(249, 115, 22, 0.04)');
+    // Ambient glow - top left orange
+    const glow1 = ctx.createRadialGradient(0, 0, 0, 0, 0, s(450));
+    glow1.addColorStop(0, 'rgba(249, 115, 22, 0.15)');
+    glow1.addColorStop(0.6, 'rgba(249, 115, 22, 0.03)');
     glow1.addColorStop(1, 'transparent');
     ctx.fillStyle = glow1;
-    ctx.fillRect(0, 0, CARD_WIDTH, CARD_HEIGHT);
+    ctx.fillRect(0, 0, RENDER_WIDTH, RENDER_HEIGHT);
 
-    // Ambient glow - bottom right (grade color)
-    const glow2 = ctx.createRadialGradient(CARD_WIDTH, CARD_HEIGHT, 0, CARD_WIDTH, CARD_HEIGHT, 600);
+    // Ambient glow - bottom right grade color
+    const glow2 = ctx.createRadialGradient(RENDER_WIDTH, RENDER_HEIGHT, 0, RENDER_WIDTH, RENDER_HEIGHT, s(500));
     glow2.addColorStop(0, gradeStyle.glow);
-    glow2.addColorStop(0.4, gradeStyle.glow.replace('0.3', '0.1'));
+    glow2.addColorStop(0.5, gradeStyle.glow.replace(/[\d.]+\)$/, '0.08)'));
     glow2.addColorStop(1, 'transparent');
     ctx.fillStyle = glow2;
-    ctx.fillRect(0, 0, CARD_WIDTH, CARD_HEIGHT);
+    ctx.fillRect(0, 0, RENDER_WIDTH, RENDER_HEIGHT);
 
-    // Subtle noise texture effect (grid pattern)
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.015)';
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= CARD_WIDTH; i += 60) {
+    // Subtle grid
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.02)';
+    ctx.lineWidth = s(1);
+    for (let i = 0; i <= RENDER_WIDTH; i += s(50)) {
         ctx.beginPath();
         ctx.moveTo(i, 0);
-        ctx.lineTo(i, CARD_HEIGHT);
+        ctx.lineTo(i, RENDER_HEIGHT);
         ctx.stroke();
     }
-    for (let i = 0; i <= CARD_HEIGHT; i += 60) {
+    for (let i = 0; i <= RENDER_HEIGHT; i += s(50)) {
         ctx.beginPath();
         ctx.moveTo(0, i);
-        ctx.lineTo(CARD_WIDTH, i);
+        ctx.lineTo(RENDER_WIDTH, i);
         ctx.stroke();
     }
 
-    // === MAIN GLASS PANEL ===
-    const panelMargin = 32;
-    const panelX = panelMargin;
-    const panelY = panelMargin;
-    const panelW = CARD_WIDTH - panelMargin * 2;
-    const panelH = CARD_HEIGHT - panelMargin * 2;
+    // Main panel
+    const m = s(28);
+    const panelX = m, panelY = m;
+    const panelW = RENDER_WIDTH - m * 2, panelH = RENDER_HEIGHT - m * 2;
 
-    // Panel shadow
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
-    ctx.shadowBlur = 40;
-    ctx.shadowOffsetY = 10;
-    ctx.fillStyle = 'rgba(18, 18, 26, 0.85)';
-    roundRect(ctx, panelX, panelY, panelW, panelH, 24);
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+    ctx.shadowBlur = s(40);
+    ctx.shadowOffsetY = s(8);
+    ctx.fillStyle = theme.bg.card;
+    roundRect(ctx, panelX, panelY, panelW, panelH, s(20));
     ctx.fill();
     ctx.shadowColor = 'transparent';
 
-    // Panel border (subtle gradient)
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-    ctx.lineWidth = 1;
-    roundRect(ctx, panelX, panelY, panelW, panelH, 24);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+    ctx.lineWidth = s(1);
+    roundRect(ctx, panelX, panelY, panelW, panelH, s(20));
     ctx.stroke();
 
-    // === LEFT SECTION: Token Info ===
-    const leftX = panelX + 48;
-    const topY = panelY + 48;
+    // LEFT: Token
+    const leftX = panelX + s(44);
+    const topY = panelY + s(44);
 
-    // Token image with glow
     const tokenImg = await fetchTokenImage(token.image);
-    const imgSize = 88;
+    const imgSize = s(80);
 
-    // Image glow
+    // Token glow
     ctx.shadowColor = gradeStyle.glow;
-    ctx.shadowBlur = 30;
+    ctx.shadowBlur = s(25);
     ctx.beginPath();
-    ctx.arc(leftX + imgSize/2, topY + imgSize/2, imgSize/2 + 4, 0, Math.PI * 2);
+    ctx.arc(leftX + imgSize/2, topY + imgSize/2, imgSize/2 + s(3), 0, Math.PI * 2);
     ctx.fillStyle = gradeStyle.color;
     ctx.fill();
     ctx.shadowColor = 'transparent';
 
-    // Image circle
+    // Token image
     ctx.save();
     ctx.beginPath();
     ctx.arc(leftX + imgSize/2, topY + imgSize/2, imgSize/2, 0, Math.PI * 2);
@@ -310,136 +303,124 @@ async function drawHoldexCard(ctx, token, theme) {
         ctx.fillStyle = theme.bg.tertiary;
         ctx.fillRect(leftX, topY, imgSize, imgSize);
         ctx.fillStyle = theme.text.muted;
-        ctx.font = 'bold 36px Arial, sans-serif';
+        ctx.font = `bold ${s(32)}px Arial, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(token.symbol?.[0] || '?', leftX + imgSize/2, topY + imgSize/2);
     }
     ctx.restore();
 
-    // Image border
+    // Token border
     ctx.strokeStyle = gradeStyle.color;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = s(2.5);
     ctx.beginPath();
-    ctx.arc(leftX + imgSize/2, topY + imgSize/2, imgSize/2 + 1.5, 0, Math.PI * 2);
+    ctx.arc(leftX + imgSize/2, topY + imgSize/2, imgSize/2 + s(1), 0, Math.PI * 2);
     ctx.stroke();
 
     // Token name
-    const nameX = leftX + imgSize + 24;
     ctx.fillStyle = theme.text.primary;
-    ctx.font = 'bold 32px Arial, sans-serif';
+    ctx.font = `bold ${s(30)}px Arial, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    const displayName = (token.name || 'Unknown').slice(0, 16);
-    ctx.fillText(displayName, nameX, topY + 12);
+    ctx.fillText((token.name || 'Unknown').slice(0, 16), leftX + imgSize + s(20), topY + s(10));
 
-    // Token symbol
+    // Symbol
     ctx.fillStyle = theme.text.secondary;
-    ctx.font = '500 20px Arial, sans-serif';
-    ctx.fillText(`$${(token.symbol || '???').toUpperCase()}`, nameX, topY + 52);
+    ctx.font = `500 ${s(18)}px Arial, sans-serif`;
+    ctx.fillText(`$${(token.symbol || '???').toUpperCase()}`, leftX + imgSize + s(20), topY + s(48));
 
-    // Stats row
-    const statsY = topY + imgSize + 32;
+    // Stats
+    const statsY = topY + imgSize + s(28);
     const stats = [
-        { label: 'MCap', value: token.marketCap ? `$${formatNumber(token.marketCap)}` : '—' },
-        { label: 'Holders', value: token.holders ? formatNumber(token.holders) : '—' }
+        { label: 'MCAP', value: token.marketCap ? `$${formatNumber(token.marketCap)}` : '—' },
+        { label: 'HOLDERS', value: token.holders ? formatNumber(token.holders) : '—' }
     ];
-
     stats.forEach((stat, i) => {
-        const statX = leftX + i * 140;
+        const statX = leftX + i * s(130);
         ctx.fillStyle = theme.text.muted;
-        ctx.font = '500 13px Arial, sans-serif';
-        ctx.textBaseline = 'top';
-        ctx.fillText(stat.label.toUpperCase(), statX, statsY);
+        ctx.font = `500 ${s(11)}px Arial, sans-serif`;
+        ctx.fillText(stat.label, statX, statsY);
         ctx.fillStyle = theme.text.primary;
-        ctx.font = 'bold 18px Arial, sans-serif';
-        ctx.fillText(stat.value, statX, statsY + 20);
+        ctx.font = `600 ${s(16)}px Arial, sans-serif`;
+        ctx.fillText(stat.value, statX, statsY + s(18));
     });
 
-    // === CENTER: K-Score Circle ===
-    const centerX = CARD_WIDTH / 2;
+    // CENTER: K-Score
+    const centerX = RENDER_WIDTH / 2;
     const centerY = panelY + panelH / 2;
-    const radius = 100;
+    const radius = s(90);
 
-    // Outer glow
+    // Circle glow
     ctx.shadowColor = gradeStyle.glow;
-    ctx.shadowBlur = 50;
+    ctx.shadowBlur = s(45);
     ctx.beginPath();
-    ctx.arc(centerX, centerY, radius + 8, 0, Math.PI * 2);
+    ctx.arc(centerX, centerY, radius + s(6), 0, Math.PI * 2);
     ctx.fillStyle = theme.bg.tertiary;
     ctx.fill();
     ctx.shadowColor = 'transparent';
 
-    // Circle background
+    // Circle bg
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
     ctx.fillStyle = theme.bg.primary;
     ctx.fill();
 
-    // Progress arc background
+    // Progress track
     ctx.beginPath();
-    ctx.arc(centerX, centerY, radius - 12, 0, Math.PI * 2);
+    ctx.arc(centerX, centerY, radius - s(10), 0, Math.PI * 2);
     ctx.strokeStyle = theme.bg.tertiary;
-    ctx.lineWidth = 10;
+    ctx.lineWidth = s(8);
     ctx.stroke();
 
     // Progress arc
     const progress = (score / 100) * Math.PI * 2;
     ctx.beginPath();
-    ctx.arc(centerX, centerY, radius - 12, -Math.PI/2, -Math.PI/2 + progress);
+    ctx.arc(centerX, centerY, radius - s(10), -Math.PI/2, -Math.PI/2 + progress);
     ctx.strokeStyle = gradeStyle.color;
-    ctx.lineWidth = 10;
+    ctx.lineWidth = s(8);
     ctx.lineCap = 'round';
     ctx.stroke();
     ctx.lineCap = 'butt';
 
-    // Score number
+    // Score
     ctx.fillStyle = theme.text.primary;
-    ctx.font = 'bold 72px Arial, sans-serif';
+    ctx.font = `bold ${s(64)}px Arial, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(score.toString(), centerX, centerY - 5);
+    ctx.fillText(score.toString(), centerX, centerY - s(2));
 
     // K-SCORE label
     ctx.fillStyle = theme.text.muted;
-    ctx.font = '600 12px Arial, sans-serif';
-    ctx.letterSpacing = '2px';
-    ctx.fillText('K-SCORE', centerX, centerY - 50);
+    ctx.font = `600 ${s(11)}px Arial, sans-serif`;
+    ctx.fillText('K-SCORE', centerX, centerY - s(44));
 
     // Grade badge
-    const badgeY = centerY + radius + 24;
-    const badgeW = 180;
-    const badgeH = 36;
+    const badgeY = centerY + radius + s(20);
+    const badgeW = s(170), badgeH = s(32);
 
-    // Badge background with glow
     ctx.fillStyle = gradeStyle.glow;
     roundRect(ctx, centerX - badgeW/2, badgeY, badgeW, badgeH, badgeH/2);
     ctx.fill();
-
-    // Badge border
     ctx.strokeStyle = gradeStyle.color;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = s(1.5);
     roundRect(ctx, centerX - badgeW/2, badgeY, badgeW, badgeH, badgeH/2);
     ctx.stroke();
 
-    // Badge text
     ctx.fillStyle = gradeStyle.color;
-    ctx.font = 'bold 14px Arial, sans-serif';
+    ctx.font = `bold ${s(12)}px Arial, sans-serif`;
     ctx.textBaseline = 'middle';
     ctx.fillText(`${grade.label} · ${grade.credit}`, centerX, badgeY + badgeH/2);
 
-    // === RIGHT: Conviction ===
-    const rightX = CARD_WIDTH - 340;
+    // RIGHT: Conviction
+    const rightX = RENDER_WIDTH - s(320);
     const convY = topY;
 
-    // Section title
     ctx.fillStyle = theme.text.primary;
-    ctx.font = '600 16px Arial, sans-serif';
+    ctx.font = `600 ${s(14)}px Arial, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText('Top 20 Conviction', rightX, convY);
 
-    // Conviction data
     const conviction = {
         diamond: token.conviction_accumulators || 0,
         gold: token.conviction_holders || 0,
@@ -448,29 +429,24 @@ async function drawHoldexCard(ctx, token, theme) {
     };
     const total = conviction.diamond + conviction.gold + conviction.silver + conviction.rust || 1;
 
-    // Conviction bar
-    const barY = convY + 30;
-    const barW = 260;
-    const barH = 14;
+    // Bar
+    const barY = convY + s(26);
+    const barW = s(240), barH = s(12);
 
-    // Bar background
     ctx.fillStyle = theme.bg.tertiary;
     roundRect(ctx, rightX, barY, barW, barH, barH/2);
     ctx.fill();
 
-    // Bar segments
+    ctx.save();
+    roundRect(ctx, rightX, barY, barW, barH, barH/2);
+    ctx.clip();
     let currentX = rightX;
-    const segments = [
+    [
         { val: conviction.diamond, color: theme.conviction.diamond },
         { val: conviction.gold, color: theme.conviction.gold },
         { val: conviction.silver, color: theme.conviction.silver },
         { val: conviction.rust, color: theme.conviction.rust }
-    ];
-
-    ctx.save();
-    roundRect(ctx, rightX, barY, barW, barH, barH/2);
-    ctx.clip();
-    segments.forEach(seg => {
+    ].forEach(seg => {
         if (seg.val === 0) return;
         const segW = (seg.val / total) * barW;
         ctx.fillStyle = seg.color;
@@ -480,7 +456,7 @@ async function drawHoldexCard(ctx, token, theme) {
     ctx.restore();
 
     // Legend
-    const legendY = barY + 30;
+    const legendY = barY + s(28);
     const legendItems = [
         { label: 'Diamond', val: conviction.diamond, color: theme.conviction.diamond },
         { label: 'Gold', val: conviction.gold, color: theme.conviction.gold },
@@ -489,52 +465,47 @@ async function drawHoldexCard(ctx, token, theme) {
     ];
 
     legendItems.forEach((item, i) => {
-        const itemY = legendY + i * 30;
-
-        // Dot
+        const itemY = legendY + i * s(26);
         ctx.beginPath();
-        ctx.arc(rightX + 6, itemY + 8, 5, 0, Math.PI * 2);
+        ctx.arc(rightX + s(5), itemY + s(6), s(4), 0, Math.PI * 2);
         ctx.fillStyle = item.color;
         ctx.fill();
 
-        // Label
         ctx.fillStyle = theme.text.secondary;
-        ctx.font = '500 14px Arial, sans-serif';
+        ctx.font = `500 ${s(12)}px Arial, sans-serif`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(item.label, rightX + 20, itemY + 8);
+        ctx.fillText(item.label, rightX + s(16), itemY + s(6));
 
-        // Value
         ctx.fillStyle = theme.text.primary;
-        ctx.font = '600 14px Arial, sans-serif';
+        ctx.font = `600 ${s(12)}px Arial, sans-serif`;
         ctx.textAlign = 'right';
-        ctx.fillText(item.val.toString(), rightX + barW, itemY + 8);
+        ctx.fillText(item.val.toString(), rightX + barW, itemY + s(6));
     });
 
-    // Diamond Hands box
+    // Diamond Hands
     const dhPct = Math.round(((conviction.diamond + conviction.gold) / total) * 100);
-    const dhY = legendY + 140;
+    const dhY = legendY + s(120);
 
     ctx.fillStyle = theme.bg.tertiary;
-    roundRect(ctx, rightX, dhY, barW, 44, 10);
+    roundRect(ctx, rightX, dhY, barW, s(40), s(8));
     ctx.fill();
 
     ctx.fillStyle = theme.text.secondary;
-    ctx.font = '500 13px Arial, sans-serif';
+    ctx.font = `500 ${s(12)}px Arial, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText('Diamond Hands', rightX + 14, dhY + 22);
+    ctx.fillText('Diamond Hands', rightX + s(12), dhY + s(20));
 
     ctx.fillStyle = dhPct >= 50 ? theme.conviction.diamond : theme.conviction.rust;
-    ctx.font = 'bold 22px Arial, sans-serif';
+    ctx.font = `bold ${s(20)}px Arial, sans-serif`;
     ctx.textAlign = 'right';
-    ctx.fillText(`${dhPct}%`, rightX + barW - 14, dhY + 22);
+    ctx.fillText(`${dhPct}%`, rightX + barW - s(12), dhY + s(20));
 
-    // === FOOTER ===
-    const footerY = panelY + panelH - 28;
-
+    // Footer
+    const footerY = panelY + panelH - s(24);
     ctx.fillStyle = theme.text.muted;
-    ctx.font = '500 13px Arial, sans-serif';
+    ctx.font = `500 ${s(12)}px Arial, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(BRAND_URL, leftX, footerY);
@@ -543,11 +514,11 @@ async function drawHoldexCard(ctx, token, theme) {
     ctx.fillText(`${theme.tagline} 🐕‍🦺🔥`, centerX, footerY);
 
     ctx.textAlign = 'right';
-    ctx.fillText(new Date().toISOString().split('T')[0], CARD_WIDTH - panelMargin - 48, footerY);
+    ctx.fillText(new Date().toISOString().split('T')[0], RENDER_WIDTH - m - s(44), footerY);
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ASDF STYLE - Fire terminal
+// ASDF STYLE
 // ═══════════════════════════════════════════════════════════════
 
 async function drawAsdfCard(ctx, token, theme) {
@@ -555,198 +526,177 @@ async function drawAsdfCard(ctx, token, theme) {
     const grade = getGrade(score, token.mint);
     const gradeStyle = theme.grades[grade.key];
 
-    // === BACKGROUND ===
-    // Deep burnt gradient
-    const bgGrad = ctx.createLinearGradient(0, 0, 0, CARD_HEIGHT);
+    // Background
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, RENDER_HEIGHT);
     bgGrad.addColorStop(0, theme.bg.secondary);
-    bgGrad.addColorStop(0.5, theme.bg.primary);
-    bgGrad.addColorStop(1, '#0f0503');
+    bgGrad.addColorStop(0.6, theme.bg.primary);
+    bgGrad.addColorStop(1, '#050201');
     ctx.fillStyle = bgGrad;
-    ctx.fillRect(0, 0, CARD_WIDTH, CARD_HEIGHT);
+    ctx.fillRect(0, 0, RENDER_WIDTH, RENDER_HEIGHT);
 
-    // Fire glow from bottom
-    const fireGlow = ctx.createRadialGradient(CARD_WIDTH/2, CARD_HEIGHT + 100, 0, CARD_WIDTH/2, CARD_HEIGHT, 400);
-    fireGlow.addColorStop(0, 'rgba(251, 146, 60, 0.25)');
-    fireGlow.addColorStop(0.5, 'rgba(234, 88, 12, 0.1)');
+    // Fire glow bottom
+    const fireGlow = ctx.createRadialGradient(RENDER_WIDTH/2, RENDER_HEIGHT + s(80), 0, RENDER_WIDTH/2, RENDER_HEIGHT, s(350));
+    fireGlow.addColorStop(0, 'rgba(251, 146, 60, 0.3)');
+    fireGlow.addColorStop(0.4, 'rgba(234, 88, 12, 0.12)');
     fireGlow.addColorStop(1, 'transparent');
     ctx.fillStyle = fireGlow;
-    ctx.fillRect(0, 0, CARD_WIDTH, CARD_HEIGHT);
+    ctx.fillRect(0, 0, RENDER_WIDTH, RENDER_HEIGHT);
 
-    // Scanlines effect
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
-    for (let i = 0; i < CARD_HEIGHT; i += 4) {
-        ctx.fillRect(0, i, CARD_WIDTH, 2);
+    // Scanlines
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
+    for (let i = 0; i < RENDER_HEIGHT; i += s(3)) {
+        ctx.fillRect(0, i, RENDER_WIDTH, s(1.5));
     }
 
-    // === MAIN PANEL ===
-    const margin = 28;
-    const panelX = margin;
-    const panelY = margin;
-    const panelW = CARD_WIDTH - margin * 2;
-    const panelH = CARD_HEIGHT - margin * 2;
+    // Panel
+    const m = s(24);
+    const panelX = m, panelY = m;
+    const panelW = RENDER_WIDTH - m * 2, panelH = RENDER_HEIGHT - m * 2;
 
-    // Panel shadow (offset)
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.fillRect(panelX + 6, panelY + 6, panelW, panelH);
+    // Shadow offset
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.fillRect(panelX + s(5), panelY + s(5), panelW, panelH);
 
-    // Panel background
     ctx.fillStyle = theme.bg.tertiary;
     ctx.fillRect(panelX, panelY, panelW, panelH);
-
-    // Panel border
-    ctx.strokeStyle = theme.accent.primary;
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = theme.accent;
+    ctx.lineWidth = s(2.5);
     ctx.strokeRect(panelX, panelY, panelW, panelH);
 
-    // === HEADER BAR ===
-    const headerH = 48;
+    // Header
+    const headerH = s(44);
     ctx.fillStyle = theme.bg.secondary;
     ctx.fillRect(panelX, panelY, panelW, headerH);
-
-    // Header line
-    ctx.strokeStyle = theme.accent.primary;
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = theme.accent;
+    ctx.lineWidth = s(1.5);
     ctx.beginPath();
     ctx.moveTo(panelX, panelY + headerH);
     ctx.lineTo(panelX + panelW, panelY + headerH);
     ctx.stroke();
 
-    // Header text
     ctx.fillStyle = theme.text.primary;
-    ctx.font = 'bold 20px Courier, monospace';
+    ctx.font = `bold ${s(18)}px Courier, monospace`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText('> K-SCORE_TERMINAL v3.0', panelX + 20, panelY + headerH/2);
+    ctx.fillText('> K-SCORE_TERMINAL', panelX + s(16), panelY + headerH/2);
 
     ctx.textAlign = 'right';
-    ctx.fillStyle = theme.accent.primary;
-    ctx.font = '16px Courier, monospace';
-    ctx.fillText(`🔥 ${theme.tagline}`, panelX + panelW - 20, panelY + headerH/2);
+    ctx.fillStyle = theme.accent;
+    ctx.font = `${s(14)}px Courier, monospace`;
+    ctx.fillText(`🔥 ${theme.tagline}`, panelX + panelW - s(16), panelY + headerH/2);
 
-    // === LEFT: Token Info ===
-    const leftX = panelX + 32;
-    const contentY = panelY + headerH + 28;
+    // LEFT: Token
+    const leftX = panelX + s(28);
+    const contentY = panelY + headerH + s(24);
 
-    // Token box
-    const tokenBoxW = 280;
-    const tokenBoxH = 100;
-
+    const tokenBoxW = s(260), tokenBoxH = s(90);
     ctx.fillStyle = theme.bg.secondary;
     ctx.fillRect(leftX, contentY, tokenBoxW, tokenBoxH);
-    ctx.strokeStyle = theme.accent.primary;
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = theme.accent;
+    ctx.lineWidth = s(1.5);
     ctx.strokeRect(leftX, contentY, tokenBoxW, tokenBoxH);
 
-    // Token image
     const tokenImg = await fetchTokenImage(token.image);
-    const imgSize = 64;
-    const imgX = leftX + 16;
-    const imgY = contentY + 18;
+    const imgSize = s(58);
+    const imgX = leftX + s(14);
+    const imgY = contentY + s(16);
 
     if (tokenImg) {
         ctx.drawImage(tokenImg, imgX, imgY, imgSize, imgSize);
     } else {
         ctx.fillStyle = theme.bg.primary;
         ctx.fillRect(imgX, imgY, imgSize, imgSize);
-        ctx.fillStyle = theme.accent.primary;
-        ctx.font = 'bold 28px Courier, monospace';
+        ctx.fillStyle = theme.accent;
+        ctx.font = `bold ${s(24)}px Courier, monospace`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(token.symbol?.[0] || '?', imgX + imgSize/2, imgY + imgSize/2);
     }
 
     ctx.strokeStyle = gradeStyle.color;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(imgX - 2, imgY - 2, imgSize + 4, imgSize + 4);
+    ctx.lineWidth = s(2);
+    ctx.strokeRect(imgX - s(2), imgY - s(2), imgSize + s(4), imgSize + s(4));
 
-    // Token info
     ctx.fillStyle = theme.text.primary;
-    ctx.font = 'bold 22px Courier, monospace';
+    ctx.font = `bold ${s(20)}px Courier, monospace`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText((token.name || 'Unknown').slice(0, 10), imgX + imgSize + 16, imgY + 8);
+    ctx.fillText((token.name || 'Unknown').slice(0, 10), imgX + imgSize + s(14), imgY + s(6));
 
-    ctx.fillStyle = theme.accent.secondary;
-    ctx.font = '18px Courier, monospace';
-    ctx.fillText(`$${(token.symbol || '???').toUpperCase()}`, imgX + imgSize + 16, imgY + 38);
+    ctx.fillStyle = theme.text.secondary;
+    ctx.font = `${s(16)}px Courier, monospace`;
+    ctx.fillText(`$${(token.symbol || '???').toUpperCase()}`, imgX + imgSize + s(14), imgY + s(32));
 
     // Stats
-    const statsY = contentY + tokenBoxH + 20;
+    const statsY = contentY + tokenBoxH + s(18);
     ctx.fillStyle = theme.text.muted;
-    ctx.font = '14px Courier, monospace';
+    ctx.font = `${s(12)}px Courier, monospace`;
     ctx.fillText('MCAP:', leftX, statsY);
     ctx.fillStyle = theme.text.primary;
-    ctx.font = 'bold 14px Courier, monospace';
-    ctx.fillText(token.marketCap ? `$${formatNumber(token.marketCap)}` : 'N/A', leftX + 60, statsY);
+    ctx.font = `bold ${s(12)}px Courier, monospace`;
+    ctx.fillText(token.marketCap ? `$${formatNumber(token.marketCap)}` : 'N/A', leftX + s(55), statsY);
 
     ctx.fillStyle = theme.text.muted;
-    ctx.font = '14px Courier, monospace';
-    ctx.fillText('HOLDERS:', leftX, statsY + 22);
+    ctx.font = `${s(12)}px Courier, monospace`;
+    ctx.fillText('HOLDERS:', leftX, statsY + s(20));
     ctx.fillStyle = theme.text.primary;
-    ctx.font = 'bold 14px Courier, monospace';
-    ctx.fillText(token.holders ? formatNumber(token.holders) : 'N/A', leftX + 90, statsY + 22);
+    ctx.font = `bold ${s(12)}px Courier, monospace`;
+    ctx.fillText(token.holders ? formatNumber(token.holders) : 'N/A', leftX + s(80), statsY + s(20));
 
-    // === CENTER: Score Display ===
-    const centerX = CARD_WIDTH / 2;
+    // CENTER: Score
+    const centerX = RENDER_WIDTH / 2;
     const scoreBoxY = contentY;
-    const scoreBoxW = 220;
-    const scoreBoxH = 260;
+    const scoreBoxW = s(200), scoreBoxH = s(240);
 
-    // Score box shadow
     ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-    ctx.fillRect(centerX - scoreBoxW/2 + 5, scoreBoxY + 5, scoreBoxW, scoreBoxH);
+    ctx.fillRect(centerX - scoreBoxW/2 + s(4), scoreBoxY + s(4), scoreBoxW, scoreBoxH);
 
-    // Score box
     ctx.fillStyle = theme.bg.secondary;
     ctx.fillRect(centerX - scoreBoxW/2, scoreBoxY, scoreBoxW, scoreBoxH);
-    ctx.strokeStyle = theme.accent.primary;
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = theme.accent;
+    ctx.lineWidth = s(2.5);
     ctx.strokeRect(centerX - scoreBoxW/2, scoreBoxY, scoreBoxW, scoreBoxH);
 
-    // K-SCORE label
     ctx.fillStyle = theme.text.muted;
-    ctx.font = 'bold 14px Courier, monospace';
+    ctx.font = `bold ${s(12)}px Courier, monospace`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    ctx.fillText('[ K-SCORE ]', centerX, scoreBoxY + 16);
+    ctx.fillText('[ K-SCORE ]', centerX, scoreBoxY + s(14));
 
-    // Big score with glow
     ctx.shadowColor = gradeStyle.glow;
-    ctx.shadowBlur = 30;
+    ctx.shadowBlur = s(25);
     ctx.fillStyle = gradeStyle.color;
-    ctx.font = 'bold 100px Courier, monospace';
+    ctx.font = `bold ${s(88)}px Courier, monospace`;
     ctx.textBaseline = 'middle';
-    ctx.fillText(score.toString(), centerX, scoreBoxY + 110);
+    ctx.fillText(score.toString(), centerX, scoreBoxY + s(100));
     ctx.shadowColor = 'transparent';
 
-    // Grade
     ctx.fillStyle = theme.text.primary;
-    ctx.font = 'bold 20px Courier, monospace';
-    ctx.fillText(`[${grade.label.toUpperCase()}]`, centerX, scoreBoxY + 175);
+    ctx.font = `bold ${s(18)}px Courier, monospace`;
+    ctx.fillText(`[${grade.label.toUpperCase()}]`, centerX, scoreBoxY + s(160));
 
     ctx.fillStyle = theme.text.muted;
-    ctx.font = '14px Courier, monospace';
-    ctx.fillText(grade.credit, centerX, scoreBoxY + 200);
+    ctx.font = `${s(12)}px Courier, monospace`;
+    ctx.fillText(grade.credit, centerX, scoreBoxY + s(185));
 
     // Progress bar
-    const progY = scoreBoxY + scoreBoxH - 28;
-    const progW = scoreBoxW - 32;
-    const progH = 10;
+    const progY = scoreBoxY + scoreBoxH - s(24);
+    const progW = scoreBoxW - s(28), progH = s(8);
 
     ctx.fillStyle = theme.bg.primary;
     ctx.fillRect(centerX - progW/2, progY, progW, progH);
     ctx.fillStyle = gradeStyle.color;
     ctx.fillRect(centerX - progW/2, progY, (score / 100) * progW, progH);
-    ctx.strokeStyle = theme.accent.primary;
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = theme.accent;
+    ctx.lineWidth = s(1);
     ctx.strokeRect(centerX - progW/2, progY, progW, progH);
 
-    // === RIGHT: Conviction ===
-    const rightX = CARD_WIDTH - 340;
+    // RIGHT: Conviction
+    const rightX = RENDER_WIDTH - s(320);
     const convY = contentY;
 
     ctx.fillStyle = theme.text.primary;
-    ctx.font = 'bold 16px Courier, monospace';
+    ctx.font = `bold ${s(14)}px Courier, monospace`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText('> CONVICTION_SCAN:', rightX, convY);
@@ -767,53 +717,48 @@ async function drawAsdfCard(ctx, token, theme) {
     ];
 
     items.forEach((item, i) => {
-        const itemY = convY + 30 + i * 50;
+        const itemY = convY + s(26) + i * s(44);
 
-        // Bar background
         ctx.fillStyle = theme.bg.primary;
-        ctx.fillRect(rightX, itemY, 240, 18);
-
-        // Bar fill
+        ctx.fillRect(rightX, itemY, s(220), s(16));
         ctx.fillStyle = item.color;
-        ctx.fillRect(rightX, itemY, (item.pct / 100) * 240, 18);
+        ctx.fillRect(rightX, itemY, (item.pct / 100) * s(220), s(16));
+        ctx.strokeStyle = theme.accent;
+        ctx.lineWidth = s(1);
+        ctx.strokeRect(rightX, itemY, s(220), s(16));
 
-        ctx.strokeStyle = theme.accent.primary;
-        ctx.lineWidth = 1;
-        ctx.strokeRect(rightX, itemY, 240, 18);
-
-        // Label
         ctx.fillStyle = theme.text.primary;
-        ctx.font = '13px Courier, monospace';
+        ctx.font = `${s(11)}px Courier, monospace`;
         ctx.textBaseline = 'top';
-        ctx.fillText(`${item.label}: ${item.val} (${item.pct}%)`, rightX, itemY + 22);
+        ctx.fillText(`${item.label}: ${item.val} (${item.pct}%)`, rightX, itemY + s(20));
     });
 
     // Diamond hands
     const dhPct = Math.round(((conviction.diamond + conviction.gold) / total) * 100);
-    const dhY = convY + 240;
+    const dhY = convY + s(210);
 
     ctx.fillStyle = theme.text.primary;
-    ctx.font = 'bold 14px Courier, monospace';
+    ctx.font = `bold ${s(12)}px Courier, monospace`;
     ctx.fillText('> DIAMOND_HANDS:', rightX, dhY);
 
     ctx.fillStyle = dhPct >= 50 ? '#22c55e' : '#ef4444';
-    ctx.font = 'bold 22px Courier, monospace';
-    ctx.fillText(`${dhPct}%`, rightX + 180, dhY);
+    ctx.font = `bold ${s(20)}px Courier, monospace`;
+    ctx.fillText(`${dhPct}%`, rightX + s(165), dhY);
 
-    // === FOOTER ===
-    const footerY = panelY + panelH - 22;
+    // Footer
+    const footerY = panelY + panelH - s(18);
     ctx.fillStyle = theme.text.muted;
-    ctx.font = '13px Courier, monospace';
+    ctx.font = `${s(11)}px Courier, monospace`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(`[${BRAND_URL}]`, panelX + 20, footerY);
+    ctx.fillText(`[${BRAND_URL}]`, panelX + s(16), footerY);
 
     ctx.textAlign = 'right';
-    ctx.fillText(`[${new Date().toISOString().split('T')[0]}]`, panelX + panelW - 20, footerY);
+    ctx.fillText(`[${new Date().toISOString().split('T')[0]}]`, panelX + panelW - s(16), footerY);
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MINIMAL STYLE - Clean elegance
+// MINIMAL STYLE (Dark, clean, institutional)
 // ═══════════════════════════════════════════════════════════════
 
 async function drawMinimalCard(ctx, token, theme) {
@@ -821,24 +766,40 @@ async function drawMinimalCard(ctx, token, theme) {
     const grade = getGrade(score, token.mint);
     const gradeStyle = theme.grades[grade.key];
 
-    // === BACKGROUND ===
+    // Pure black background
     ctx.fillStyle = theme.bg.primary;
-    ctx.fillRect(0, 0, CARD_WIDTH, CARD_HEIGHT);
+    ctx.fillRect(0, 0, RENDER_WIDTH, RENDER_HEIGHT);
 
-    // Subtle gradient overlay
-    const subtleGrad = ctx.createLinearGradient(0, 0, 0, CARD_HEIGHT);
-    subtleGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
-    subtleGrad.addColorStop(1, 'rgba(0, 0, 0, 0.02)');
-    ctx.fillStyle = subtleGrad;
-    ctx.fillRect(0, 0, CARD_WIDTH, CARD_HEIGHT);
+    // Subtle vignette
+    const vignette = ctx.createRadialGradient(
+        RENDER_WIDTH/2, RENDER_HEIGHT/2, 0,
+        RENDER_WIDTH/2, RENDER_HEIGHT/2, RENDER_WIDTH * 0.7
+    );
+    vignette.addColorStop(0, 'transparent');
+    vignette.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, RENDER_WIDTH, RENDER_HEIGHT);
 
-    // === LEFT: Token ===
-    const leftX = 72;
-    const topY = 72;
+    // Inner panel with subtle border
+    const m = s(40);
+    const panelX = m, panelY = m;
+    const panelW = RENDER_WIDTH - m * 2, panelH = RENDER_HEIGHT - m * 2;
 
-    // Token image
+    ctx.fillStyle = theme.bg.card;
+    roundRect(ctx, panelX, panelY, panelW, panelH, s(12));
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+    ctx.lineWidth = s(1);
+    roundRect(ctx, panelX, panelY, panelW, panelH, s(12));
+    ctx.stroke();
+
+    // LEFT: Token
+    const leftX = panelX + s(48);
+    const topY = panelY + s(48);
+
     const tokenImg = await fetchTokenImage(token.image);
-    const imgSize = 56;
+    const imgSize = s(52);
 
     ctx.save();
     ctx.beginPath();
@@ -850,59 +811,66 @@ async function drawMinimalCard(ctx, token, theme) {
         ctx.fillStyle = theme.bg.tertiary;
         ctx.fillRect(leftX, topY, imgSize, imgSize);
         ctx.fillStyle = theme.text.muted;
-        ctx.font = '600 22px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.font = `600 ${s(20)}px -apple-system, BlinkMacSystemFont, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(token.symbol?.[0] || '?', leftX + imgSize/2, topY + imgSize/2);
     }
     ctx.restore();
 
+    // Token ring
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = s(1.5);
+    ctx.beginPath();
+    ctx.arc(leftX + imgSize/2, topY + imgSize/2, imgSize/2 + s(2), 0, Math.PI * 2);
+    ctx.stroke();
+
     // Token name
     ctx.fillStyle = theme.text.primary;
-    ctx.font = '600 28px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.font = `600 ${s(26)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText((token.name || 'Unknown').slice(0, 18), leftX + imgSize + 20, topY + 6);
+    ctx.fillText((token.name || 'Unknown').slice(0, 18), leftX + imgSize + s(18), topY + s(4));
 
     // Symbol
     ctx.fillStyle = theme.text.muted;
-    ctx.font = '500 16px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.fillText(`$${(token.symbol || '???').toUpperCase()}`, leftX + imgSize + 20, topY + 38);
+    ctx.font = `500 ${s(15)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.fillText(`$${(token.symbol || '???').toUpperCase()}`, leftX + imgSize + s(18), topY + s(36));
 
-    // === CENTER: Score ===
-    const centerX = CARD_WIDTH / 2;
-    const centerY = CARD_HEIGHT / 2;
+    // CENTER: Score
+    const centerX = RENDER_WIDTH / 2;
+    const centerY = RENDER_HEIGHT / 2;
 
-    // Big score
+    // Score glow
+    ctx.shadowColor = gradeStyle.glow;
+    ctx.shadowBlur = s(60);
     ctx.fillStyle = theme.text.primary;
-    ctx.font = '100 160px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.font = `200 ${s(150)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(score.toString(), centerX, centerY - 10);
+    ctx.fillText(score.toString(), centerX, centerY - s(8));
+    ctx.shadowColor = 'transparent';
 
     // K-SCORE label
     ctx.fillStyle = theme.text.muted;
-    ctx.font = '500 13px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.letterSpacing = '3px';
-    ctx.fillText('K - S C O R E', centerX, centerY - 100);
+    ctx.font = `500 ${s(12)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.fillText('K - S C O R E', centerX, centerY - s(95));
 
     // Grade
     ctx.fillStyle = gradeStyle.color;
-    ctx.font = '600 20px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.fillText(`${grade.label} · ${grade.credit}`, centerX, centerY + 90);
+    ctx.font = `600 ${s(18)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.fillText(`${grade.label}  ·  ${grade.credit}`, centerX, centerY + s(85));
 
-    // === RIGHT: Conviction ===
-    const rightX = CARD_WIDTH - 260;
-    const convY = 72;
+    // RIGHT: Conviction mini
+    const rightX = RENDER_WIDTH - s(240);
+    const convY = topY;
 
-    // Label
     ctx.fillStyle = theme.text.muted;
-    ctx.font = '500 11px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.font = `500 ${s(10)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText('CONVICTION', rightX, convY);
 
-    // Simple bar
     const conviction = {
         diamond: token.conviction_accumulators || 0,
         gold: token.conviction_holders || 0,
@@ -912,18 +880,16 @@ async function drawMinimalCard(ctx, token, theme) {
     const total = conviction.diamond + conviction.gold + conviction.silver + conviction.rust || 1;
     const dhPct = Math.round(((conviction.diamond + conviction.gold) / total) * 100);
 
-    const barY = convY + 20;
-    const barW = 160;
-    const barH = 6;
+    // Bar
+    const barY = convY + s(20);
+    const barW = s(150), barH = s(5);
 
-    // Bar background
     ctx.fillStyle = theme.bg.tertiary;
-    roundRect(ctx, rightX, barY, barW, barH, 3);
+    roundRect(ctx, rightX, barY, barW, barH, barH/2);
     ctx.fill();
 
-    // Segments
     ctx.save();
-    roundRect(ctx, rightX, barY, barW, barH, 3);
+    roundRect(ctx, rightX, barY, barW, barH, barH/2);
     ctx.clip();
     let currentX = rightX;
     [
@@ -942,54 +908,54 @@ async function drawMinimalCard(ctx, token, theme) {
 
     // Diamond hands
     ctx.fillStyle = theme.text.primary;
-    ctx.font = '700 26px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.font = `700 ${s(24)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textBaseline = 'top';
-    ctx.fillText(`${dhPct}%`, rightX, barY + 18);
+    ctx.fillText(`${dhPct}%`, rightX, barY + s(16));
 
     ctx.fillStyle = theme.text.muted;
-    ctx.font = '400 13px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.fillText('diamond hands', rightX + 60, barY + 24);
+    ctx.font = `400 ${s(12)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    ctx.fillText('diamond hands', rightX + s(55), barY + s(22));
 
-    // === BOTTOM STATS ===
-    const statsY = CARD_HEIGHT - 130;
+    // BOTTOM: Stats
+    const statsY = panelY + panelH - s(100);
     const stats = [
         { label: 'MARKET CAP', value: token.marketCap ? `$${formatNumber(token.marketCap)}` : '—' },
         { label: 'HOLDERS', value: token.holders ? formatNumber(token.holders) : '—' }
     ];
 
     stats.forEach((stat, i) => {
-        const statX = leftX + i * 160;
+        const statX = leftX + i * s(150);
         ctx.fillStyle = theme.text.muted;
-        ctx.font = '500 11px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.font = `500 ${s(10)}px -apple-system, BlinkMacSystemFont, sans-serif`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
         ctx.fillText(stat.label, statX, statsY);
 
         ctx.fillStyle = theme.text.primary;
-        ctx.font = '600 18px -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillText(stat.value, statX, statsY + 20);
+        ctx.font = `600 ${s(17)}px -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.fillText(stat.value, statX, statsY + s(18));
     });
 
-    // === FOOTER ===
-    // Thin line
-    ctx.strokeStyle = theme.bg.tertiary;
-    ctx.lineWidth = 1;
+    // Footer line
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+    ctx.lineWidth = s(1);
     ctx.beginPath();
-    ctx.moveTo(leftX, CARD_HEIGHT - 52);
-    ctx.lineTo(CARD_WIDTH - leftX, CARD_HEIGHT - 52);
+    ctx.moveTo(leftX, panelY + panelH - s(48));
+    ctx.lineTo(panelX + panelW - s(48), panelY + panelH - s(48));
     ctx.stroke();
 
+    // Footer text
     ctx.fillStyle = theme.text.muted;
-    ctx.font = '400 12px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.font = `400 ${s(11)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(BRAND_URL, leftX, CARD_HEIGHT - 32);
+    ctx.fillText(BRAND_URL, leftX, panelY + panelH - s(26));
 
     ctx.textAlign = 'center';
-    ctx.fillText(theme.tagline, centerX, CARD_HEIGHT - 32);
+    ctx.fillText(theme.tagline, centerX, panelY + panelH - s(26));
 
     ctx.textAlign = 'right';
-    ctx.fillText(new Date().toISOString().split('T')[0], CARD_WIDTH - leftX, CARD_HEIGHT - 32);
+    ctx.fillText(new Date().toISOString().split('T')[0], panelX + panelW - s(48), panelY + panelH - s(26));
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -997,8 +963,13 @@ async function drawMinimalCard(ctx, token, theme) {
 // ═══════════════════════════════════════════════════════════════
 
 async function generateKScoreCard(token, style = 'holdex') {
-    const canvas = createCanvas(CARD_WIDTH, CARD_HEIGHT);
+    // Create high-res canvas
+    const canvas = createCanvas(RENDER_WIDTH, RENDER_HEIGHT);
     const ctx = canvas.getContext('2d');
+
+    // Enable high quality rendering
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
 
     const theme = THEMES[style] || THEMES.holdex;
 
@@ -1015,7 +986,14 @@ async function generateKScoreCard(token, style = 'holdex') {
             break;
     }
 
-    return canvas.toBuffer('image/png');
+    // Downscale to target size for sharper result
+    const outputCanvas = createCanvas(CARD_WIDTH, CARD_HEIGHT);
+    const outputCtx = outputCanvas.getContext('2d');
+    outputCtx.imageSmoothingEnabled = true;
+    outputCtx.imageSmoothingQuality = 'high';
+    outputCtx.drawImage(canvas, 0, 0, CARD_WIDTH, CARD_HEIGHT);
+
+    return outputCanvas.toBuffer('image/png');
 }
 
 function styleFromMode(mode) {
