@@ -813,34 +813,30 @@ async function drawMinimalCard(ctx, token, theme) {
     ctx.restore();
 
     // ═══════════════════════════════════════════════════════════════
-    // THREE-ZONE LAYOUT (no overlap)
-    // LEFT (0-28%): Token identity + stats
-    // CENTER (28-62%): Grade HERO
-    // RIGHT (62-100%): Conviction data
+    // MINIMAL LAYOUT - Clean, institutional, readable
+    // Refined sizing for harmony
     // ═══════════════════════════════════════════════════════════════
     void PHI;
-    const leftX = panelX + s(36);
-    const topY = panelY + s(44);
+    const leftX = panelX + s(40);
+    const topY = panelY + s(40);
     const centerY = panelY + panelH / 2;
 
-    // Zone boundaries (at 2x: 2400 total)
-    const LEFT_ZONE_END = s(340);      // ~28% - left content max width
-    const CENTER_ZONE_X = s(520);      // Center zone starts here
-    const RIGHT_ZONE_X = RENDER_WIDTH - s(420); // Right zone starts here
+    // Zone boundaries
+    const RIGHT_ZONE_X = RENDER_WIDTH - s(340);
 
     // ═══════════════════════════════════════════════════════════════
-    // LEFT ZONE: Token Identity (compact, stacked)
+    // LEFT ZONE: Token Identity
     // ═══════════════════════════════════════════════════════════════
     const tokenImg = await fetchTokenImage(token.image);
-    const imgSize = s(90);
+    const imgSize = s(72);
 
     // Token image with grade ring
     ctx.shadowColor = gradeStyle.glow;
-    ctx.shadowBlur = s(25);
+    ctx.shadowBlur = s(20);
     ctx.beginPath();
-    ctx.arc(leftX + imgSize/2, topY + imgSize/2, imgSize/2 + s(4), 0, Math.PI * 2);
+    ctx.arc(leftX + imgSize/2, topY + imgSize/2, imgSize/2 + s(3), 0, Math.PI * 2);
     ctx.strokeStyle = gradeStyle.color;
-    ctx.lineWidth = s(3);
+    ctx.lineWidth = s(2.5);
     ctx.stroke();
     ctx.shadowColor = 'transparent';
 
@@ -854,83 +850,80 @@ async function drawMinimalCard(ctx, token, theme) {
         ctx.fillStyle = theme.bg.tertiary;
         ctx.fillRect(leftX, topY, imgSize, imgSize);
         ctx.fillStyle = theme.text.secondary;
-        ctx.font = `bold ${s(40)}px Arial, Helvetica, sans-serif`;
+        ctx.font = `600 ${s(32)}px Arial, Helvetica, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(token.symbol?.[0] || '?', leftX + imgSize/2, topY + imgSize/2);
     }
     ctx.restore();
 
-    // Token name (below image - stacked layout)
-    const nameY = topY + imgSize + s(16);
+    // Token name + symbol (next to image)
+    const nameX = leftX + imgSize + s(16);
     ctx.fillStyle = theme.text.primary;
-    ctx.font = `bold ${s(56)}px Arial, Helvetica, sans-serif`;
+    ctx.font = `bold ${s(36)}px Arial, Helvetica, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    const displayName = (token.name || 'Unknown').slice(0, 10);
-    ctx.fillText(displayName, leftX, nameY);
+    ctx.fillText((token.name || 'Unknown').slice(0, 12), nameX, topY + s(12));
 
-    // Symbol
     ctx.fillStyle = theme.text.secondary;
-    ctx.font = `bold ${s(36)}px Arial, Helvetica, sans-serif`;
-    ctx.fillText(`$${(token.symbol || '???').toUpperCase().slice(0, 6)}`, leftX, nameY + s(56));
+    ctx.font = `600 ${s(22)}px Arial, Helvetica, sans-serif`;
+    ctx.fillText(`$${(token.symbol || '???').toUpperCase().slice(0, 8)}`, nameX, topY + s(48));
 
-    // Stats (MCAP / HOLDERS) - side by side below symbol
-    const statsY = nameY + s(110);
+    // Stats below token
+    const statsY = topY + imgSize + s(24);
 
     // MCAP
     ctx.fillStyle = theme.text.muted;
-    ctx.font = `bold ${s(24)}px Arial, Helvetica, sans-serif`;
+    ctx.font = `600 ${s(14)}px Arial, Helvetica, sans-serif`;
     ctx.textBaseline = 'top';
     ctx.fillText('MCAP', leftX, statsY);
     ctx.fillStyle = theme.text.primary;
-    ctx.font = `bold ${s(40)}px Arial, Helvetica, sans-serif`;
-    ctx.fillText(token.marketCap ? `$${formatNumber(token.marketCap)}` : '—', leftX, statsY + s(28));
+    ctx.font = `bold ${s(28)}px Arial, Helvetica, sans-serif`;
+    ctx.fillText(token.marketCap ? `$${formatNumber(token.marketCap)}` : '—', leftX, statsY + s(18));
 
     // HOLDERS
     ctx.fillStyle = theme.text.muted;
-    ctx.font = `bold ${s(24)}px Arial, Helvetica, sans-serif`;
-    ctx.fillText('HOLDERS', leftX, statsY + s(80));
+    ctx.font = `600 ${s(14)}px Arial, Helvetica, sans-serif`;
+    ctx.fillText('HOLDERS', leftX, statsY + s(56));
     ctx.fillStyle = theme.text.primary;
-    ctx.font = `bold ${s(40)}px Arial, Helvetica, sans-serif`;
-    ctx.fillText(token.holders ? formatNumber(token.holders) : '—', leftX, statsY + s(108));
+    ctx.font = `bold ${s(28)}px Arial, Helvetica, sans-serif`;
+    ctx.fillText(token.holders ? formatNumber(token.holders) : '—', leftX, statsY + s(74));
 
     // ═══════════════════════════════════════════════════════════════
-    // CENTER ZONE: Grade HERO (the star of the show)
-    // Positioned to NOT overlap with right column
+    // CENTER: Grade (hero but refined)
     // ═══════════════════════════════════════════════════════════════
-    const gradeX = CENTER_ZONE_X + (RIGHT_ZONE_X - CENTER_ZONE_X) * 0.30; // More left
+    const gradeX = RENDER_WIDTH / 2;
 
-    // GRADE = THE HERO
+    // GRADE
     ctx.shadowColor = gradeStyle.glow;
-    ctx.shadowBlur = s(35);
+    ctx.shadowBlur = s(25);
     ctx.fillStyle = gradeStyle.color;
-    ctx.font = `bold ${s(110)}px Arial, Helvetica, sans-serif`;
+    ctx.font = `bold ${s(88)}px Arial, Helvetica, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(grade.label.toUpperCase(), gradeX, centerY - s(20));
+    ctx.fillText(grade.label.toUpperCase(), gradeX, centerY - s(16));
     ctx.shadowColor = 'transparent';
 
-    // Credit rating below grade
+    // Credit rating
     ctx.fillStyle = theme.text.secondary;
-    ctx.font = `bold ${s(34)}px Arial, Helvetica, sans-serif`;
-    ctx.fillText(grade.credit, gradeX, centerY + s(45));
+    ctx.font = `600 ${s(24)}px Arial, Helvetica, sans-serif`;
+    ctx.fillText(grade.credit, gradeX, centerY + s(36));
 
-    // K-Score number
+    // K-Score
     ctx.fillStyle = theme.text.muted;
-    ctx.font = `bold ${s(26)}px Arial, Helvetica, sans-serif`;
-    ctx.fillText(`K-Score: ${score}`, gradeX, centerY + s(82));
+    ctx.font = `600 ${s(18)}px Arial, Helvetica, sans-serif`;
+    ctx.fillText(`K-Score: ${score}`, gradeX, centerY + s(64));
 
     // ═══════════════════════════════════════════════════════════════
-    // RIGHT ZONE: Conviction Analysis
+    // RIGHT ZONE: Conviction
     // ═══════════════════════════════════════════════════════════════
     const rightX = RIGHT_ZONE_X;
     const convY = topY;
-    const barW = s(340);
+    const barW = s(280);
 
-    // Section header
+    // Header
     ctx.fillStyle = theme.text.secondary;
-    ctx.font = `bold ${s(36)}px Arial, Helvetica, sans-serif`;
+    ctx.font = `600 ${s(16)}px Arial, Helvetica, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText('TOP 20 CONVICTION', rightX, convY);
@@ -945,15 +938,15 @@ async function drawMinimalCard(ctx, token, theme) {
     const dhPct = Math.round(((conviction.diamond + conviction.gold) / total) * 100);
 
     // Conviction bar
-    const barY = convY + s(50);
-    const barH = s(16);
+    const barY = convY + s(28);
+    const barH = s(12);
 
     ctx.fillStyle = theme.bg.tertiary;
-    roundRect(ctx, rightX, barY, barW, barH, s(8));
+    roundRect(ctx, rightX, barY, barW, barH, s(6));
     ctx.fill();
 
     ctx.save();
-    roundRect(ctx, rightX, barY, barW, barH, s(8));
+    roundRect(ctx, rightX, barY, barW, barH, s(6));
     ctx.clip();
     let currentX = rightX;
     [
@@ -970,59 +963,65 @@ async function drawMinimalCard(ctx, token, theme) {
     });
     ctx.restore();
 
-    // Legend - 2x2 grid for compact display
-    const legendY = barY + s(32);
+    // Legend - 2x2 grid
+    const legendY = barY + s(24);
     const legendItems = [
-        { label: '◆ Dia', val: conviction.diamond, color: theme.conviction.diamond },
-        { label: '◆ Gold', val: conviction.gold, color: theme.conviction.gold },
-        { label: '◆ Silv', val: conviction.silver, color: theme.conviction.silver },
-        { label: '◆ Rust', val: conviction.rust, color: theme.conviction.rust }
+        { label: 'Diamond', val: conviction.diamond, color: theme.conviction.diamond },
+        { label: 'Gold', val: conviction.gold, color: theme.conviction.gold },
+        { label: 'Silver', val: conviction.silver, color: theme.conviction.silver },
+        { label: 'Rust', val: conviction.rust, color: theme.conviction.rust }
     ];
 
     legendItems.forEach((item, i) => {
         const col = i % 2;
         const row = Math.floor(i / 2);
-        const itemX = rightX + col * s(175);
-        const itemY = legendY + row * s(50);
+        const itemX = rightX + col * s(145);
+        const itemY = legendY + row * s(36);
 
-        // Colored label
+        // Dot
+        ctx.beginPath();
+        ctx.arc(itemX + s(6), itemY + s(10), s(5), 0, Math.PI * 2);
         ctx.fillStyle = item.color;
-        ctx.font = `bold ${s(32)}px Arial, Helvetica, sans-serif`;
+        ctx.fill();
+
+        // Label
+        ctx.fillStyle = theme.text.secondary;
+        ctx.font = `500 ${s(16)}px Arial, Helvetica, sans-serif`;
         ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        ctx.fillText(item.label, itemX, itemY);
+        ctx.textBaseline = 'middle';
+        ctx.fillText(item.label, itemX + s(16), itemY + s(10));
 
         // Value
         ctx.fillStyle = theme.text.primary;
-        ctx.font = `bold ${s(32)}px Arial, Helvetica, sans-serif`;
+        ctx.font = `600 ${s(16)}px Arial, Helvetica, sans-serif`;
         ctx.textAlign = 'right';
-        ctx.fillText(item.val.toString(), itemX + s(160), itemY);
+        ctx.fillText(item.val.toString(), itemX + s(135), itemY + s(10));
     });
 
-    // Diamond Hands box (positioned at bottom of right zone)
-    const dhY = legendY + s(140);
-    const dhBoxW = barW, dhBoxH = s(70);
+    // Diamond Hands box
+    const dhY = legendY + s(90);
+    const dhBoxW = barW, dhBoxH = s(52);
 
     ctx.fillStyle = theme.bg.tertiary;
-    roundRect(ctx, rightX, dhY, dhBoxW, dhBoxH, s(12));
+    roundRect(ctx, rightX, dhY, dhBoxW, dhBoxH, s(10));
     ctx.fill();
 
     // DH label
     ctx.fillStyle = theme.text.secondary;
-    ctx.font = `bold ${s(24)}px Arial, Helvetica, sans-serif`;
+    ctx.font = `600 ${s(14)}px Arial, Helvetica, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText('DH%', rightX + s(16), dhY + dhBoxH/2);
+    ctx.fillText('Diamond Hands', rightX + s(12), dhY + dhBoxH/2);
 
-    // DH percentage (HERO of this box)
+    // DH percentage
     const dhColor = dhPct >= 60 ? theme.conviction.diamond
                   : dhPct >= 40 ? theme.conviction.gold
                   : dhPct >= 20 ? theme.conviction.silver
                   : theme.conviction.rust;
     ctx.fillStyle = dhColor;
-    ctx.font = `bold ${s(56)}px Arial, Helvetica, sans-serif`;
+    ctx.font = `bold ${s(32)}px Arial, Helvetica, sans-serif`;
     ctx.textAlign = 'right';
-    ctx.fillText(`${dhPct}%`, rightX + dhBoxW - s(16), dhY + dhBoxH/2);
+    ctx.fillText(`${dhPct}%`, rightX + dhBoxW - s(12), dhY + dhBoxH/2);
 
     // ═══════════════════════════════════════════════════════════════
     // FOOTER
