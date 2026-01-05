@@ -897,29 +897,29 @@ async function drawMinimalCard(ctx, token, theme) {
 
     // ═══════════════════════════════════════════════════════════════
     // CENTER ZONE: Grade HERO (the star of the show)
-    // Position weighted left (40%) to avoid overlap with right zone
+    // Positioned to NOT overlap with right column
     // ═══════════════════════════════════════════════════════════════
-    const gradeX = CENTER_ZONE_X + (RIGHT_ZONE_X - CENTER_ZONE_X) * 0.40;
+    const gradeX = CENTER_ZONE_X + (RIGHT_ZONE_X - CENTER_ZONE_X) * 0.30; // More left
 
     // GRADE = THE HERO
     ctx.shadowColor = gradeStyle.glow;
     ctx.shadowBlur = s(35);
     ctx.fillStyle = gradeStyle.color;
-    ctx.font = `bold ${s(120)}px Arial, Helvetica, sans-serif`;
+    ctx.font = `bold ${s(110)}px Arial, Helvetica, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(grade.label.toUpperCase(), gradeX, centerY - s(25));
+    ctx.fillText(grade.label.toUpperCase(), gradeX, centerY - s(20));
     ctx.shadowColor = 'transparent';
 
     // Credit rating below grade
     ctx.fillStyle = theme.text.secondary;
-    ctx.font = `bold ${s(36)}px Arial, Helvetica, sans-serif`;
-    ctx.fillText(grade.credit, gradeX, centerY + s(50));
+    ctx.font = `bold ${s(34)}px Arial, Helvetica, sans-serif`;
+    ctx.fillText(grade.credit, gradeX, centerY + s(45));
 
     // K-Score number
     ctx.fillStyle = theme.text.muted;
-    ctx.font = `bold ${s(28)}px Arial, Helvetica, sans-serif`;
-    ctx.fillText(`K-Score: ${score}`, gradeX, centerY + s(90));
+    ctx.font = `bold ${s(26)}px Arial, Helvetica, sans-serif`;
+    ctx.fillText(`K-Score: ${score}`, gradeX, centerY + s(82));
 
     // ═══════════════════════════════════════════════════════════════
     // RIGHT ZONE: Conviction Analysis
@@ -999,9 +999,9 @@ async function drawMinimalCard(ctx, token, theme) {
         ctx.fillText(item.val.toString(), itemX + s(160), itemY);
     });
 
-    // Diamond Hands box
-    const dhY = legendY + s(115);
-    const dhBoxW = barW, dhBoxH = s(80);
+    // Diamond Hands box (positioned at bottom of right zone)
+    const dhY = legendY + s(140);
+    const dhBoxW = barW, dhBoxH = s(70);
 
     ctx.fillStyle = theme.bg.tertiary;
     roundRect(ctx, rightX, dhY, dhBoxW, dhBoxH, s(12));
