@@ -19,7 +19,7 @@ const { getClient: getRedis } = require('./redis');
 
 // Cache TTLs (in seconds)
 const ESCORE_CACHE_TTL = 300;      // 5 minutes
-const BENEFITS_CACHE_TTL = 300;   // 5 minutes
+const _BENEFITS_CACHE_TTL = 300;  // 5 minutes (reserved)
 const COSTS_CACHE_TTL = 3600;     // 1 hour
 
 // In-memory fallback cache

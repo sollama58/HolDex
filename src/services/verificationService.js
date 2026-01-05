@@ -10,11 +10,10 @@
  * 4. Audit logging for all data changes
  */
 
-const { Connection, PublicKey } = require('@solana/web3.js');
+const { Connection: _Connection, PublicKey: _PublicKey } = require('@solana/web3.js');
 const crypto = require('crypto');
 const config = require('../config/env');
 const logger = require('./logger');
-const { getClient: getRedisClient } = require('./redis');
 
 // ============================================
 // RPC PROVIDERS (Priority Order)
@@ -64,9 +63,9 @@ const RPC_HEALTH_CHECK_INTERVAL = 60000; // 1 minute
 const MAX_RPC_FAILURES = 3;
 const AUDIT_LOG_RETENTION_DAYS = 30;
 
-// Token programs
-const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
-const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+// Token programs (reserved for future verification)
+const _TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+const _TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 
 // ============================================
 // MULTI-RPC MANAGEMENT

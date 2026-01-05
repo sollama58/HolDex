@@ -27,7 +27,6 @@
 
 const config = require('../config/env');
 const { logger } = require('../services');
-const priceService = require('../services/priceService');
 const bs58 = require('bs58');
 const { getClient: getRedisClient } = require('../services/redis');
 const verification = require('../services/verificationService');
@@ -552,7 +551,7 @@ const KNOWN_POOL_WALLETS = new Set([
 const POOL_CACHE_TTL_SECONDS = 3600; // 1 hour
 const memoryPoolCache = new Map(); // Fallback if Redis unavailable
 
-async function getPoolFromCache(address) {
+async function _getPoolFromCache(address) {
     const redis = getRedisClient();
     if (redis) {
         try {
@@ -567,7 +566,7 @@ async function getPoolFromCache(address) {
     return undefined;
 }
 
-async function setPoolInCache(address, isPool) {
+async function _setPoolInCache(address, isPool) {
     const redis = getRedisClient();
     if (redis) {
         try {
@@ -956,7 +955,7 @@ function classifyRetention(retentionData) {
  * @param {Object} db - Database connection (for saving snapshots)
  * @returns {Object} { score, analyzed, accumulators, holders, reducers, extractors, realHoldersCount, totalHolders }
  */
-async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, db = null) {
+async function calculateConvictionAndHolders(mint, priceUsd = 0, _decimals = 9, db = null) {
     const TOP_HOLDERS = 20;
     const CANDIDATES = 50;
 
@@ -1055,7 +1054,7 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
                     }
 
                     // Use stored values - DO NOT estimate or multiply
-                    const realHoldersCount = storedRealHolders;
+                    const _realHoldersCount = storedRealHolders;
 
                     logger.info(`[Webhook Mode] ${mint.slice(0,8)}: ${score}% conviction from cache (${analyzed} analyzed, ${storedTotalHolders} total, ${storedRealHolders} real, ${ageMinutes.toFixed(0)}m old) - 0 RPC`);
 
@@ -1095,7 +1094,7 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9, d
                     [mint]
                 );
                 const cachedHolders = tokenRow?.holders || 0;
-                const cachedPrice = tokenRow?.priceusd || priceUsd;
+                const _cachedPrice = tokenRow?.priceusd || priceUsd;
 
                 // Estimate real holders from snapshot data (no API call!)
                 // K-Score v10: Real holders = holders with ≥0.001% supply (from last deep refresh)
@@ -2792,7 +2791,7 @@ async function updateSingleToken(deps, mint) {
 
                     logger.debug(`[DexScreener] ${token.symbol}: $${dexData.priceUsd.toExponential(2)}, MCap $${dexData.mcap.toLocaleString()}`);
                 }
-            } catch (e) {
+            } catch (_e) {
                 logger.debug(`[Market] ${mint.slice(0,8)}: DexScreener failed, using cached`);
             }
         }
@@ -3107,7 +3106,7 @@ async function updateKScores(deps) {
 
                             logger.debug(`[DexScreener] ${t.symbol}: $${dexData.priceUsd.toExponential(2)}, MCap $${dexData.mcap.toLocaleString()}`);
                         }
-                    } catch (e) {
+                    } catch (_e) {
                         logger.debug(`[Market] ${t.mint.slice(0,8)}: DexScreener failed, using cached`);
                     }
                 }

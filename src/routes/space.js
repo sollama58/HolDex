@@ -21,11 +21,9 @@ const {
     requireSession,
     requireGrant,
     requireSignature,
-    optionalSession,
     createSession,
     destroySession,
     getGrants,
-    hasGrant,
     createGrant,
     revokeGrant,
     logAction,
@@ -33,7 +31,6 @@ const {
     VALID_GRANTS,
 } = require('../middleware/spaceAuth');
 const { getHarmonyEngine, harmony } = require('../services/harmonyEngine');
-const { getClient: getRedis } = require('../services/redis');
 const config = require('../config/env');
 
 let db = null;
@@ -141,7 +138,7 @@ router.post('/auth/logout', requireSession(), async (req, res) => {
         await logAction(req.wallet, 'logout', null, {});
 
         res.json({ success: true });
-    } catch (e) {
+    } catch (_e) {
         res.status(500).json({ success: false, error: 'Logout failed' });
     }
 });
@@ -362,7 +359,7 @@ router.get('/card/history', requireSession(), requireGrant('card_generator'), sp
                 createdAt: h.created_at
             }))
         });
-    } catch (e) {
+    } catch (_e) {
         res.status(500).json({ success: false, error: 'Failed to fetch history' });
     }
 });
@@ -503,7 +500,7 @@ router.get('/admin/grants', requireSession(), requireGrant('grants_admin'), spac
             success: true,
             data: grants
         });
-    } catch (e) {
+    } catch (_e) {
         res.status(500).json({ success: false, error: 'Failed to fetch grants' });
     }
 });
@@ -538,7 +535,7 @@ router.get('/admin/grants/password', spaceRateLimiter, async (req, res) => {
             success: true,
             data: grants
         });
-    } catch (e) {
+    } catch (_e) {
         res.status(500).json({ success: false, error: 'Failed to fetch grants' });
     }
 });
@@ -747,7 +744,7 @@ router.delete('/admin/grants/password/:targetWallet',
             await revokeGrant(targetWallet, 'ADMIN_PASSWORD');
             await logAction('ADMIN_PASSWORD', 'revoke_grant', 'grants_admin', { targetWallet }, null);
             res.json({ success: true });
-        } catch (e) {
+        } catch (_e) {
             res.status(500).json({ success: false, error: 'Failed to revoke grant' });
         }
     }
@@ -780,7 +777,7 @@ router.delete('/admin/grants/:targetWallet',
             }, req.walletSignature);
 
             res.json({ success: true });
-        } catch (e) {
+        } catch (_e) {
             res.status(500).json({ success: false, error: 'Failed to revoke grant' });
         }
     }

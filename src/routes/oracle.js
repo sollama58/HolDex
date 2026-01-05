@@ -150,8 +150,8 @@ function verifyWebhookSignature(payload, signature) {
 
 // Cache TTLs
 const KSCORE_CACHE_TTL = 60;     // 1 minute
-const ESCORE_CACHE_TTL = 300;    // 5 minutes
-const COSTS_CACHE_TTL = 3600;    // 1 hour
+const _ESCORE_CACHE_TTL = 300;   // 5 minutes (reserved)
+const _COSTS_CACHE_TTL = 3600;   // 1 hour (reserved)
 
 // K-Score acceptance threshold (configurable)
 const KSCORE_ACCEPTANCE_THRESHOLD = 50;
@@ -227,7 +227,6 @@ function init(deps) {
             // Try cache
             const redis = getRedis();
             const cacheKey = `oracle:kscore:${mint}`;
-            let cached = false;
 
             if (redis) {
                 try {

@@ -15,8 +15,7 @@ const { hashApiKey } = require('../utils/apiKeyHash');
 const {
     MIN_HOLDINGS,
     checkApiEligibility,
-    deductCall,
-    getWalletBalance
+    deductCall
 } = require('../services/burnCredits');
 const logger = require('../services/logger');
 

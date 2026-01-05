@@ -13,7 +13,7 @@ const router = express.Router();
 const logger = require('../services/logger');
 const config = require('../config/env');
 const { getClient } = require('../services/redis');
-const { isValidSolanaAddress, sanitizeError, isValidTimestamp } = require('../utils/validation');
+const { isValidSolanaAddress, sanitizeError } = require('../utils/validation');
 const verification = require('../services/verificationService');
 
 // Security: Replay attack prevention via Redis (cluster-safe, persistent)

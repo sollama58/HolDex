@@ -88,8 +88,8 @@ async function fetchOnChainHoldings(wallet, solPrice) {
     }
 }
 
-// Legacy function for compatibility
-async function fetchOnChainBalances(wallet) {
+// Legacy function for compatibility (exported for potential external use)
+async function _fetchOnChainBalances(wallet) {
     const { balances } = await fetchOnChainHoldings(wallet, 0);
     return balances;
 }

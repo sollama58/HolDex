@@ -11,7 +11,6 @@
  */
 
 const { logger } = require('../services');
-const { getClient: getRedisClient } = require('../services/redis');
 const { signMarket } = require('../utils/dataSignature');
 
 // DexScreener batch endpoint: up to 30 tokens

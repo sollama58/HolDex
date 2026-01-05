@@ -1522,7 +1522,7 @@ function init(deps) {
                         res.setHeader('X-Cache', 'HIT');
                         return res.json(JSON.parse(cached));
                     }
-                } catch(_) {}
+                } catch (_) { /* ignore cache errors */ }
             }
 
             let rows = [];
@@ -1620,7 +1620,7 @@ function init(deps) {
             const response = { success: true, page, limit, tokens };
 
             if (redis) {
-                try { await redis.setEx(cacheKey, 10, JSON.stringify(response)); } catch(_) {}
+                try { await redis.setEx(cacheKey, 10, JSON.stringify(response)); } catch (_) { /* ignore */ }
             }
 
             res.setHeader('X-Cache', 'MISS');
@@ -1653,7 +1653,7 @@ function init(deps) {
                         res.setHeader('X-Cache', 'HIT');
                         return res.json(JSON.parse(cached));
                     }
-                } catch(_) {}
+                } catch (_) { /* ignore cache errors */ }
             }
 
             // Parallel queries for performance
@@ -1753,7 +1753,7 @@ function init(deps) {
 
             // Cache for 10 seconds
             if (redis) {
-                try { await redis.setEx(cacheKey, 10, JSON.stringify(response)); } catch(_) {}
+                try { await redis.setEx(cacheKey, 10, JSON.stringify(response)); } catch (_) { /* ignore */ }
             }
 
             res.setHeader('X-Cache', 'MISS');
