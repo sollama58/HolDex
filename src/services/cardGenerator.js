@@ -897,28 +897,29 @@ async function drawMinimalCard(ctx, token, theme) {
 
     // ═══════════════════════════════════════════════════════════════
     // CENTER ZONE: Grade HERO (the star of the show)
+    // Position weighted left (40%) to avoid overlap with right zone
     // ═══════════════════════════════════════════════════════════════
-    const gradeX = (CENTER_ZONE_X + RIGHT_ZONE_X) / 2; // Center between zones
+    const gradeX = CENTER_ZONE_X + (RIGHT_ZONE_X - CENTER_ZONE_X) * 0.40;
 
     // GRADE = THE HERO
     ctx.shadowColor = gradeStyle.glow;
-    ctx.shadowBlur = s(40);
+    ctx.shadowBlur = s(35);
     ctx.fillStyle = gradeStyle.color;
-    ctx.font = `bold ${s(140)}px Arial, Helvetica, sans-serif`;
+    ctx.font = `bold ${s(120)}px Arial, Helvetica, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(grade.label.toUpperCase(), gradeX, centerY - s(30));
+    ctx.fillText(grade.label.toUpperCase(), gradeX, centerY - s(25));
     ctx.shadowColor = 'transparent';
 
     // Credit rating below grade
     ctx.fillStyle = theme.text.secondary;
-    ctx.font = `bold ${s(40)}px Arial, Helvetica, sans-serif`;
-    ctx.fillText(grade.credit, gradeX, centerY + s(55));
+    ctx.font = `bold ${s(36)}px Arial, Helvetica, sans-serif`;
+    ctx.fillText(grade.credit, gradeX, centerY + s(50));
 
     // K-Score number
     ctx.fillStyle = theme.text.muted;
-    ctx.font = `bold ${s(32)}px Arial, Helvetica, sans-serif`;
-    ctx.fillText(`K-Score: ${score}`, gradeX, centerY + s(100));
+    ctx.font = `bold ${s(28)}px Arial, Helvetica, sans-serif`;
+    ctx.fillText(`K-Score: ${score}`, gradeX, centerY + s(90));
 
     // ═══════════════════════════════════════════════════════════════
     // RIGHT ZONE: Conviction Analysis
@@ -1006,12 +1007,12 @@ async function drawMinimalCard(ctx, token, theme) {
     roundRect(ctx, rightX, dhY, dhBoxW, dhBoxH, s(12));
     ctx.fill();
 
-    // DH label
+    // DH label (no emoji - doesn't render in canvas)
     ctx.fillStyle = theme.text.secondary;
-    ctx.font = `bold ${s(32)}px Arial, Helvetica, sans-serif`;
+    ctx.font = `bold ${s(28)}px Arial, Helvetica, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText('💎 HANDS', rightX + s(16), dhY + dhBoxH/2);
+    ctx.fillText('DIAMOND HANDS', rightX + s(16), dhY + dhBoxH/2);
 
     // DH percentage
     const dhColor = dhPct >= 60 ? theme.conviction.diamond
