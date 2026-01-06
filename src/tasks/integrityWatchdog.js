@@ -229,10 +229,11 @@ async function scanForTampering(db) {
 
         // Categories to IGNORE for tampering (volatile data that changes frequently)
         // "market" = price, mcap, liquidity - these change every 30s via PriceWorker
+        // "holders" = holder_snapshots evolve with every buy/sell between K-Score updates
         // "full" = composite HMAC of ALL category signatures - inherently volatile when market changes
         // Healing these causes infinite loops and wastes resources
         // Note: actual tampering is still detected via the 6 stable categories (identity, security, lp, supply, kscore, origin)
-        const IGNORED_CATEGORIES = new Set(['market', 'full']);
+        const IGNORED_CATEGORIES = new Set(['market', 'holders', 'full']);
 
         for (const token of tokens) {
             scanned++;
