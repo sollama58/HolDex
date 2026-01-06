@@ -93,9 +93,9 @@ const unifiedRateLimiter = async (req, res, next) => {
             });
         }
 
-        // 2. Check eligibility (holdings + burns)
+        // 2. Check eligibility (holdings + burns) - pass apiKey for whitelist bypass
         const connection = getSolanaConnection();
-        const eligibility = await checkApiEligibility(connection, db, wallet);
+        const eligibility = await checkApiEligibility(connection, db, wallet, apiKey);
 
         // Gate 1: Anti-Sybil (holdings)
         if (eligibility.holdings < MIN_HOLDINGS) {
@@ -135,23 +135,31 @@ const unifiedRateLimiter = async (req, res, next) => {
             });
         }
 
-        // 3. Deduct 1 call
-        await deductCall(db, wallet);
+        // 3. Deduct 1 call (skip for whitelisted keys)
+        await deductCall(db, wallet, apiKey);
 
         // 4. Add headers
         res.setHeader('X-Wallet', wallet);
-        res.setHeader('X-Credits-Remaining', eligibility.remainingCalls - 1);
-        res.setHeader('X-Credits-Burned', eligibility.burned);
-        res.setHeader('X-Credits-Used', (eligibility.usedCalls || 0) + 1);
 
-        // 5. Attach to request
-        req.wallet = wallet;
-        req.credits = {
-            holdings: eligibility.holdings,
-            burned: eligibility.burned,
-            used: (eligibility.usedCalls || 0) + 1,
-            remaining: eligibility.remainingCalls - 1
-        };
+        if (eligibility.whitelisted) {
+            res.setHeader('X-Whitelisted', 'true');
+            res.setHeader('X-Credits-Charged', '0');
+            req.wallet = wallet;
+            req.whitelisted = true;
+        } else {
+            res.setHeader('X-Credits-Remaining', eligibility.remainingCalls - 1);
+            res.setHeader('X-Credits-Burned', eligibility.burned);
+            res.setHeader('X-Credits-Used', (eligibility.usedCalls || 0) + 1);
+
+            // 5. Attach to request
+            req.wallet = wallet;
+            req.credits = {
+                holdings: eligibility.holdings,
+                burned: eligibility.burned,
+                used: (eligibility.usedCalls || 0) + 1,
+                remaining: eligibility.remainingCalls - 1
+            };
+        }
 
         next();
 
@@ -201,14 +209,18 @@ const checkOnly = async (req, res, next) => {
 
         if (wallet) {
             const connection = getSolanaConnection();
-            const eligibility = await checkApiEligibility(connection, db, wallet);
+            const eligibility = await checkApiEligibility(connection, db, wallet, apiKey);
             req.wallet = wallet;
-            req.credits = {
-                holdings: eligibility.holdings,
-                burned: eligibility.burned,
-                used: eligibility.usedCalls || 0,
-                remaining: eligibility.remainingCalls
-            };
+            if (eligibility.whitelisted) {
+                req.whitelisted = true;
+            } else {
+                req.credits = {
+                    holdings: eligibility.holdings,
+                    burned: eligibility.burned,
+                    used: eligibility.usedCalls || 0,
+                    remaining: eligibility.remainingCalls
+                };
+            }
         }
 
         next();

@@ -24,6 +24,20 @@ const ASDF_MINT = config.FEE_TOKEN_MINT || '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZ
 // Minimum holdings for API eligibility (anti-sybil gate)
 const MIN_HOLDINGS = 10_000;
 
+// Whitelisted API keys bypass anti-sybil gate (trusted services like GASdf)
+const WHITELISTED_API_KEYS = new Set(
+    (process.env.WHITELISTED_API_KEYS || '').split(',').map(k => k.trim()).filter(Boolean)
+);
+
+/**
+ * Check if API key is whitelisted (trusted service)
+ * Whitelisted keys bypass the anti-sybil token gate
+ */
+function isWhitelistedApiKey(apiKey) {
+    if (!apiKey || WHITELISTED_API_KEYS.size === 0) return false;
+    return WHITELISTED_API_KEYS.has(apiKey);
+}
+
 // Recognized burn destinations
 const BURN_ADDRESSES = new Set([
     '1111111111111111111111111111111111',           // Solana null address
@@ -251,9 +265,27 @@ async function getWalletBurns(walletAddress, db = null, forceRefresh = false) {
  * 1. Check DB for cached holdings + burns + used_calls
  * 2. Only hit RPC/Helius on cache miss
  *
- * Returns: { eligible, holdings, burned, remainingCalls, reason }
+ * @param {Object} connection - Solana connection
+ * @param {Object} db - Database instance
+ * @param {string} walletAddress - Wallet to check
+ * @param {string|null} apiKey - Optional API key (whitelisted keys bypass gate)
+ * @returns {{ eligible, holdings, burned, remainingCalls, reason, whitelisted? }}
  */
-async function checkApiEligibility(connection, db, walletAddress) {
+async function checkApiEligibility(connection, db, walletAddress, apiKey = null) {
+    // Whitelist bypass for trusted services (GASdf, etc.)
+    if (isWhitelistedApiKey(apiKey)) {
+        logger.debug(`[BurnCredits] Whitelisted API key - bypassing gate for ${walletAddress.slice(0, 8)}...`);
+        return {
+            eligible: true,
+            holdings: Infinity,
+            burned: Infinity,
+            usedCalls: 0,
+            remainingCalls: Infinity,
+            reason: null,
+            whitelisted: true
+        };
+    }
+
     // 1. Check holdings (cached in Redis/memory)
     const holdings = await getWalletBalance(connection, walletAddress);
 
@@ -313,8 +345,16 @@ async function checkApiEligibility(connection, db, walletAddress) {
 
 /**
  * Deduct one API call from wallet's credits
+ * @param {Object} db - Database instance
+ * @param {string} walletAddress - Wallet to deduct from
+ * @param {string|null} apiKey - Optional API key (whitelisted keys skip deduction)
  */
-async function deductCall(db, walletAddress) {
+async function deductCall(db, walletAddress, apiKey = null) {
+    // Whitelisted keys don't consume credits
+    if (isWhitelistedApiKey(apiKey)) {
+        return;
+    }
+
     await db.run(`
         INSERT INTO wallet_credits (wallet, used_calls, last_call)
         VALUES ($1, 1, $2)
@@ -377,6 +417,7 @@ module.exports = {
     ASDF_MINT,
     MIN_HOLDINGS,
     BURN_ADDRESSES,
+    isWhitelistedApiKey,
     getWalletBalance,
     getWalletBurns,
     checkApiEligibility,

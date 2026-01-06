@@ -18,6 +18,7 @@ const { getClient: getRedisClient } = require('../services/redis');
 const { hashApiKey } = require('../utils/apiKeyHash');
 const {
     MIN_HOLDINGS,
+    isWhitelistedApiKey,
     checkApiEligibility,
     deductCall
 } = require('../services/burnCredits');
@@ -159,21 +160,23 @@ const pnlRateLimiter = async (req, res, next) => {
             });
         }
 
-        // 2. Check rate limit (5 req/min per wallet)
-        const rateLimit = await checkRateLimit(authWallet);
-        res.setHeader('X-RateLimit-Limit', rateLimit.limit);
-        res.setHeader('X-RateLimit-Remaining', Math.max(0, rateLimit.limit - rateLimit.current));
-        res.setHeader('X-RateLimit-Reset', rateLimit.resetIn);
+        // 2. Check rate limit (5 req/min per wallet) - skip for whitelisted keys
+        if (!isWhitelistedApiKey(apiKey)) {
+            const rateLimit = await checkRateLimit(authWallet);
+            res.setHeader('X-RateLimit-Limit', rateLimit.limit);
+            res.setHeader('X-RateLimit-Remaining', Math.max(0, rateLimit.limit - rateLimit.current));
+            res.setHeader('X-RateLimit-Reset', rateLimit.resetIn);
 
-        if (!rateLimit.allowed) {
-            return res.status(429).json({
-                success: false,
-                error: 'PnL rate limit exceeded',
-                limit: `${PNL_RATE_LIMIT} requests per minute`,
-                current: rateLimit.current,
-                resetIn: rateLimit.resetIn,
-                help: 'PnL calculations are expensive. Please wait before retrying.'
-            });
+            if (!rateLimit.allowed) {
+                return res.status(429).json({
+                    success: false,
+                    error: 'PnL rate limit exceeded',
+                    limit: `${PNL_RATE_LIMIT} requests per minute`,
+                    current: rateLimit.current,
+                    resetIn: rateLimit.resetIn,
+                    help: 'PnL calculations are expensive. Please wait before retrying.'
+                });
+            }
         }
 
         // 3. Get target wallet and maxPages from request
@@ -198,7 +201,7 @@ const pnlRateLimiter = async (req, res, next) => {
 
         // 4. Cache MISS → Check eligibility and deduct credit
         const connection = getSolanaConnection();
-        const eligibility = await checkApiEligibility(connection, db, authWallet);
+        const eligibility = await checkApiEligibility(connection, db, authWallet, apiKey);
 
         // Gate 1: Holdings
         if (eligibility.holdings < MIN_HOLDINGS) {
@@ -235,24 +238,37 @@ const pnlRateLimiter = async (req, res, next) => {
             });
         }
 
-        // 5. Deduct 1 credit for cache miss
-        await deductCall(db, authWallet);
+        // 5. Deduct 1 credit for cache miss (skip for whitelisted keys)
+        await deductCall(db, authWallet, apiKey);
 
         res.setHeader('X-PnL-Cached', 'false');
-        res.setHeader('X-Credits-Charged', '1');
         res.setHeader('X-Wallet', authWallet);
-        res.setHeader('X-Credits-Remaining', eligibility.remainingCalls - 1);
 
-        req.wallet = authWallet;
-        req.pnlCached = false;
-        req.credits = {
-            holdings: eligibility.holdings,
-            burned: eligibility.burned,
-            used: (eligibility.usedCalls || 0) + 1,
-            remaining: eligibility.remainingCalls - 1
-        };
+        // Whitelisted keys get unlimited access, no credit deduction
+        if (eligibility.whitelisted) {
+            res.setHeader('X-Credits-Charged', '0');
+            res.setHeader('X-Whitelisted', 'true');
+            req.wallet = authWallet;
+            req.pnlCached = false;
+            req.whitelisted = true;
+        } else {
+            res.setHeader('X-Credits-Charged', '1');
+            res.setHeader('X-Credits-Remaining', eligibility.remainingCalls - 1);
+            req.wallet = authWallet;
+            req.pnlCached = false;
+            req.credits = {
+                holdings: eligibility.holdings,
+                burned: eligibility.burned,
+                used: (eligibility.usedCalls || 0) + 1,
+                remaining: eligibility.remainingCalls - 1
+            };
+        }
 
-        logger.debug(`[PnL] Cache miss for ${targetWallet.slice(0, 8)}... - 1 credit charged`);
+        if (eligibility.whitelisted) {
+            logger.debug(`[PnL] Cache miss for ${targetWallet.slice(0, 8)}... - whitelisted (no credit charged)`);
+        } else {
+            logger.debug(`[PnL] Cache miss for ${targetWallet.slice(0, 8)}... - 1 credit charged`);
+        }
         next();
 
     } catch (e) {
