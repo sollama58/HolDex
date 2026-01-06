@@ -2030,16 +2030,19 @@ function init(deps) {
     // ==================================
 
     const { calculateWalletPnL, getTokenPnL } = require('../services/pnlService');
+    const pnlRateLimiter = require('../middleware/pnlRateLimiter');
 
     /**
      * GET /wallet/:address/pnl
      * Calculate on-chain PnL for a wallet
      *
+     * Philosophy $asdfasdfa: Cache hits FREE, cache misses cost 1 credit
+     *
      * Query params:
      *   - maxPages: Max pages of transactions to fetch (default 10, max 50)
      *   - since: Unix timestamp to filter transactions after
      */
-    router.get('/wallet/:address/pnl', cacheControl(60, 120), unifiedRateLimiter, async (req, res) => {
+    router.get('/wallet/:address/pnl', cacheControl(60, 120), pnlRateLimiter, async (req, res) => {
         const { address } = req.params;
 
         if (!isValidPubkey(address)) {
@@ -2070,8 +2073,10 @@ function init(deps) {
     /**
      * GET /wallet/:address/token/:mint/pnl
      * Calculate PnL for a specific token in a wallet
+     *
+     * Philosophy $asdfasdfa: Cache hits FREE, cache misses cost 1 credit
      */
-    router.get('/wallet/:address/token/:mint/pnl', cacheControl(60, 120), unifiedRateLimiter, async (req, res) => {
+    router.get('/wallet/:address/token/:mint/pnl', cacheControl(60, 120), pnlRateLimiter, async (req, res) => {
         const { address, mint } = req.params;
 
         if (!isValidPubkey(address)) {
