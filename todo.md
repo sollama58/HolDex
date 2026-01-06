@@ -21,6 +21,15 @@
 ### P2 - Nice to Have
 - [x] Rate limit PnL endpoints specifically (5 req/min/wallet) ✅ 9cfd6c3
 
+## API Access Control
+
+### Whitelist for Trusted Services
+- [x] Add API key whitelist for trusted services (GASdf) ✅ 415cd0d
+  - `WHITELISTED_API_KEYS` env var (comma-separated)
+  - Bypasses anti-sybil gate (no 10K $ASDF requirement)
+  - No credit deduction, no rate limiting
+  - `X-Whitelisted: true` response header
+
 ---
 
 ## Notes

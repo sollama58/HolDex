@@ -82,6 +82,7 @@ K = 100 × ∛(D × O × L)
 - `DATA_SIGNING_SECRET` - HMAC secret (min 32 chars)
 - `HELIUS_API_KEY` - Solana RPC + webhooks
 - `REDIS_URL` - Cache connection
+- `WHITELISTED_API_KEYS` - Comma-separated trusted API keys (bypass anti-sybil gate)
 
 ## Database Tables
 - `tokens` - Main token data (42 columns)

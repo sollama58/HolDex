@@ -136,6 +136,14 @@ ORACLE_RATE_LIMIT=100
 ```
 Oracle endpoint rate limit per minute (default: 100).
 
+### API Key Whitelist
+```env
+WHITELISTED_API_KEYS=key1,key2,key3
+```
+Comma-separated list of API keys that bypass the anti-sybil token gate.
+Whitelisted keys get unlimited access without needing to hold $ASDFASDFA tokens.
+Used for trusted services like GASdf.
+
 ### Features
 ```env
 ENABLE_RPC_HOLDER_CHECK=true
@@ -212,6 +220,7 @@ For Render deployment, set these in the service's Environment tab:
 - `WEBHOOK_SECRET`
 - `ORACLE_WEBHOOK_SECRET`
 - `HELIUS_API_KEY`
+- `WHITELISTED_API_KEYS`
 
 ### Plain
 - `PORT`
