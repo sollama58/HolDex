@@ -1018,6 +1018,22 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, _decimals = 9, 
                             case 'holder': holders++; break;
                             case 'reducer': reducers++; break;
                             case 'extractor': extractors++; break;
+                            default:
+                                // NULL or unknown → classify based on buy/sell counts
+                                // This handles old snapshots without conviction_class
+                                if (snap.buy_count > 0 || snap.sell_count > 0) {
+                                    const ratio = snap.sell_count > 0
+                                        ? snap.buy_count / snap.sell_count
+                                        : (snap.buy_count > 0 ? 10 : 1);
+                                    if (ratio >= 2) accumulators++;
+                                    else if (ratio >= 0.8) holders++;
+                                    else if (ratio >= 0.3) reducers++;
+                                    else extractors++;
+                                } else {
+                                    // No activity data → conservative: count as holder
+                                    holders++;
+                                }
+                                break;
                         }
                     }
 
