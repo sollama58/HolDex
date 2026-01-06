@@ -496,8 +496,8 @@
                 document.getElementById('stat-grants').textContent = activeGrants;
 
                 // Pending updates
-                const updatesData = await apiGet('/api/admin/updates?type=pending');
-                document.getElementById('stat-pending').textContent = updatesData.length || 0;
+                const updatesData = await apiGet('/api/admin/updates');
+                document.getElementById('stat-pending').textContent = updatesData.updates?.length || 0;
 
                 // Verified tokens
                 const tokensData = await apiGet('/api/tokens/public?filter=verified&limit=1');
@@ -550,15 +550,16 @@
 
         async function loadUpdates() {
             try {
-                const data = await apiGet('/api/admin/updates?type=pending');
+                const resp = await apiGet('/api/admin/updates');
                 const tbody = document.getElementById('updates-table');
+                const updates = resp.updates || [];
 
-                if (!data?.length) {
+                if (!updates.length) {
                     tbody.innerHTML = '<tr><td colspan="4" class="py-8 text-center text-fire-muted">No pending updates</td></tr>';
                     return;
                 }
 
-                tbody.innerHTML = data.map(u => `
+                tbody.innerHTML = updates.map(u => `
                     <tr class="table-row">
                         <td class="py-3">
                             <div class="flex items-center gap-2">
