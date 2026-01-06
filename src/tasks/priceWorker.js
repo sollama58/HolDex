@@ -11,7 +11,7 @@
  */
 
 const { logger } = require('../services');
-const { signMarket } = require('../utils/dataSignature');
+const { signMarket, signFull } = require('../utils/dataSignature');
 
 // DexScreener batch endpoint: up to 30 tokens
 const DEXSCREENER_BATCH_URL = 'https://api.dexscreener.com/tokens/v1/solana';
@@ -352,13 +352,40 @@ async function runPriceUpdateCycle(db, broadcast) {
                         mint
                     ]);
 
-                    // Re-sign market data to maintain integrity
+                    // Re-sign market data AND sig_full to maintain integrity
+                    // Philosophy $asdfasdfa: ALL data must remain cryptographically valid
                     if (result) {
                         const sig_market = signMarket(result);
-                        await db.run(
-                            `UPDATE tokens SET sig_market = $1 WHERE mint = $2`,
-                            [sig_market, mint]
-                        );
+
+                        // Fetch all signatures to recompute sig_full
+                        const sigs = await db.get(`
+                            SELECT sig_identity, sig_security, sig_lp, sig_supply,
+                                   sig_kscore, sig_origin, chaos_nonce
+                            FROM tokens WHERE mint = $1
+                        `, [mint]);
+
+                        if (sigs && sigs.chaos_nonce) {
+                            const sig_full = signFull({
+                                sig_identity: sigs.sig_identity,
+                                sig_security: sigs.sig_security,
+                                sig_lp: sigs.sig_lp,
+                                sig_supply: sigs.sig_supply,
+                                sig_kscore: sigs.sig_kscore,
+                                sig_market: sig_market,
+                                sig_origin: sigs.sig_origin
+                            }, sigs.chaos_nonce);
+
+                            await db.run(
+                                `UPDATE tokens SET sig_market = $1, sig_full = $2 WHERE mint = $3`,
+                                [sig_market, sig_full, mint]
+                            );
+                        } else {
+                            // Fallback: just update sig_market (token may not have full signatures yet)
+                            await db.run(
+                                `UPDATE tokens SET sig_market = $1 WHERE mint = $2`,
+                                [sig_market, mint]
+                            );
+                        }
                     }
 
                     totalUpdated++;
