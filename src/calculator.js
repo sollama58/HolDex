@@ -102,6 +102,7 @@ async function main() {
 
         if (tamperedTokens.length > 0) {
             logger.info(`🔐 Re-signing ${tamperedTokens.length} tokens with current secret...`);
+            const { saveSnapshot } = require('./tasks/integrityWatchdog');
             let resigned = 0;
             for (const token of tamperedTokens) {
                 try {
@@ -118,12 +119,18 @@ async function main() {
                         signatures.sig_origin, signatures.sig_full, signatures.chaos_nonce,
                         token.mint
                     ]);
+
+                    // CRITICAL: Update Redis snapshot with new signatures
+                    // Otherwise watchdog will "heal" by restoring OLD signatures
+                    const tokenWithNewSigs = { ...token, ...signatures };
+                    await saveSnapshot(token.mint, tokenWithNewSigs);
+
                     resigned++;
                 } catch (e) {
                     logger.error(`Failed to re-sign ${token.symbol}: ${e.message}`);
                 }
             }
-            logger.info(`✅ Re-signed ${resigned}/${tamperedTokens.length} tokens`);
+            logger.info(`✅ Re-signed ${resigned}/${tamperedTokens.length} tokens (DB + Redis snapshots)`);
         } else {
             logger.info('✅ No tokens need re-signing');
         }

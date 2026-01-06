@@ -11,7 +11,9 @@
 require('dotenv').config();
 
 const { initDB, getDB } = require('../services/database');
+const { connectRedis } = require('../services/redis');
 const { signAllCategories } = require('../utils/dataSignature');
+const { saveSnapshot } = require('../tasks/integrityWatchdog');
 
 async function main() {
     console.log('='.repeat(60));
@@ -21,6 +23,11 @@ async function main() {
     // Init DB
     await initDB();
     const db = getDB();
+
+    // Init Redis (needed for snapshot updates)
+    console.log('Connecting to Redis...');
+    await connectRedis();
+    console.log('✅ Redis connected');
 
     // Get all tokens with signatures
     const tokens = await db.all(`
@@ -75,8 +82,13 @@ async function main() {
                 token.mint
             ]);
 
+            // CRITICAL: Update Redis snapshot with new signatures
+            // Otherwise watchdog will "heal" by restoring OLD signatures
+            const tokenWithNewSigs = { ...token, ...signatures };
+            await saveSnapshot(token.mint, tokenWithNewSigs);
+
             success++;
-            console.log(`✅ ${token.symbol.padEnd(12)} (${token.mint.slice(0, 8)}...)`);
+            console.log(`✅ ${token.symbol.padEnd(12)} (${token.mint.slice(0, 8)}...) [DB + Redis]`);
 
         } catch (e) {
             failed++;
@@ -85,7 +97,8 @@ async function main() {
     }
 
     console.log('\n' + '='.repeat(60));
-    console.log(`COMPLETE: ${success} re-signed, ${failed} failed`);
+    console.log(`COMPLETE: ${success} re-signed (DB + Redis), ${failed} failed`);
+    console.log('NOTE: Redis snapshots updated - watchdog will no longer "heal" back to old signatures');
     console.log('='.repeat(60));
 
     process.exit(0);
