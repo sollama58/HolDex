@@ -468,11 +468,13 @@ async function startServer() {
         startSnapshotter();
 
         // PriceWorker: Unified price service (DexScreener batch, 0 Helius credits)
-        // Must start BEFORE kScoreUpdater so prices are cached
         startPriceWorker({ db: getDB(), broadcast: null });
 
-        // KScoreUpdater: Conviction analysis (Helius RPC, our value-add)
-        kScoreUpdater.start({ db: getDB() });
+        // ARCHITECTURE FIX: kScoreUpdater.start() REMOVED from API
+        // K-Score periodic calculations run ONLY on Calculator service to prevent race conditions.
+        // API still has access to updateSingleToken() for on-demand recalcs (admin, approvals, etc.)
+        // Calculator = sole authority for K-Score calculations
+        // API = verification only (integrityWatchdog)
 
         integrityWatchdog.start({ db: getDB() });
 
