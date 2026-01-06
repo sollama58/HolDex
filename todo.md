@@ -15,7 +15,8 @@
 ### P1 - Important
 - [x] Add global wallet_tx_cache table (cross-token reuse) ✅ 16b095b
   - Fetch once, analyze many tokens - saves RPC when same wallet in multiple top 20s
-- [ ] Cache token supply in Redis (1h TTL)
+- [x] Cache token supply in Redis (1h TTL) ✅ 1db0d3f
+  - Supply rarely changes, safe to cache aggressively
 
 ### P2 - Nice to Have
 - [ ] Rate limit PnL endpoints specifically (5 req/min/wallet)
