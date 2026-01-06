@@ -83,17 +83,44 @@
             border-radius: 16px;
         }
         .glass-input {
-            background: rgba(0,0,0,0.3);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 8px;
-            padding: 10px 14px;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 10px;
+            padding: 12px 16px;
             color: #f8fafc;
             width: 100%;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', monospace;
+            transition: all 0.2s ease;
+        }
+        .glass-input::placeholder {
+            color: rgba(148, 163, 184, 0.6);
+        }
+        .glass-input:hover {
+            border-color: rgba(255, 255, 255, 0.2);
+            background: rgba(0, 0, 0, 0.5);
         }
         .glass-input:focus {
             outline: none;
             border-color: #f97316;
-            box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.2);
+            background: rgba(0, 0, 0, 0.6);
+            box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.15), 0 0 20px rgba(249, 115, 22, 0.1);
+        }
+        /* Select dropdown styling */
+        select.glass-input {
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 14px center;
+            padding-right: 40px;
+            cursor: pointer;
+            font-family: 'Inter', system-ui, sans-serif;
+        }
+        select.glass-input option {
+            background: #14141f;
+            color: #f8fafc;
+            padding: 12px;
         }
         .btn-primary {
             background: linear-gradient(135deg, #f97316, #ea580c);
@@ -302,22 +329,27 @@
                     <button onclick="closeModal('card-generator')" class="text-fire-muted hover:text-white text-2xl">&times;</button>
                 </div>
 
-                <div class="space-y-4">
+                <div class="space-y-5">
                     <div>
-                        <label class="text-sm text-fire-muted block mb-1">Token Mint Address</label>
-                        <input type="text" id="card-mint" class="glass-input" placeholder="Enter token mint address...">
+                        <label class="text-xs text-fire-muted uppercase tracking-wider block mb-2 font-medium">Contract Address</label>
+                        <div class="relative">
+                            <span class="absolute left-4 top-1/2 -translate-y-1/2 text-fire-muted opacity-50">◈</span>
+                            <input type="text" id="card-mint" class="glass-input pl-10" placeholder="Paste token mint address...">
+                        </div>
                     </div>
 
                     <div>
-                        <label class="text-sm text-fire-muted block mb-1">Card Style</label>
+                        <label class="text-xs text-fire-muted uppercase tracking-wider block mb-2 font-medium">Card Style</label>
                         <select id="card-style" class="glass-input">
-                            <option value="holdex">HolDex - Glassmorphism 🐕‍🦺🔥</option>
-                            <option value="asdf">ASDF - Fire Terminal 🔥</option>
-                            <option value="minimal">Minimal - Clean & Simple</option>
+                            <option value="holdex">🐕‍🦺 HolDex — Glassmorphism</option>
+                            <option value="asdf">🔥 ASDF — Fire Terminal</option>
+                            <option value="minimal">◆ Minimal — Clean & Simple</option>
                         </select>
                     </div>
 
-                    <button class="btn-primary w-full" onclick="generateCard()">Generate Card</button>
+                    <button class="btn-primary w-full py-3 text-sm font-semibold tracking-wide" onclick="generateCard()">
+                        Generate Card
+                    </button>
 
                     <div id="card-result" class="hidden">
                         <div class="border-t border-white/10 pt-4 mt-4">
