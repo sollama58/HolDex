@@ -187,6 +187,24 @@ async function initDB() {
                 );
 
                 -- ═══════════════════════════════════════════════════════════
+                -- WALLET TX CACHE: Cross-token transaction reuse
+                -- Philosophy: Fetch once, analyze many tokens
+                -- When fetching wallet transactions, extract ALL token interactions
+                -- ═══════════════════════════════════════════════════════════
+                CREATE TABLE IF NOT EXISTS wallet_tx_cache (
+                    wallet TEXT NOT NULL,
+                    mint TEXT NOT NULL,
+                    buy_count INTEGER DEFAULT 0,
+                    sell_count INTEGER DEFAULT 0,
+                    net_flow BIGINT DEFAULT 0,
+                    first_tx_timestamp BIGINT,
+                    last_tx_timestamp BIGINT,
+                    last_signature TEXT,
+                    analyzed_at BIGINT DEFAULT 0,
+                    PRIMARY KEY (wallet, mint)
+                );
+
+                -- ═══════════════════════════════════════════════════════════
                 -- HARMONY SYSTEM: φ-Powered E-Score Infrastructure
                 -- "Hold to enter. Burn to use. φ guides all ratios."
                 -- ═══════════════════════════════════════════════════════════
@@ -453,6 +471,9 @@ async function initDB() {
                 `CREATE INDEX IF NOT EXISTS idx_pools_mint ON pools (mint)`,
                 // Index for holder_snapshots queries
                 `CREATE INDEX IF NOT EXISTS idx_holder_snapshots_mint_balance ON holder_snapshots (mint, balance DESC)`,
+                // Index for wallet_tx_cache (cross-token reuse)
+                `CREATE INDEX IF NOT EXISTS idx_wallet_tx_cache_wallet ON wallet_tx_cache (wallet, analyzed_at DESC)`,
+                `CREATE INDEX IF NOT EXISTS idx_wallet_tx_cache_mint ON wallet_tx_cache (mint, wallet)`,
                 // Index for k_score_history date range queries
                 `CREATE INDEX IF NOT EXISTS idx_kscore_history_mint_date ON k_score_history (mint, date DESC)`,
                 // ═══════════════════════════════════════════════════════════

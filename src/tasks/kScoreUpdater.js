@@ -335,18 +335,87 @@ async function loadHolderSnapshots(db, mint) {
     }
 }
 
+// ============================================
+// WALLET TX CACHE: Cross-token transaction reuse
+// Philosophy: Fetch once, analyze many tokens
+// ============================================
+
+const WALLET_TX_CACHE_TTL = 60 * 60 * 1000; // 1 hour cache freshness
+
+/**
+ * Get cached wallet-mint analysis from DB
+ * Returns null if not cached or stale
+ */
+async function getWalletTxCache(db, wallet, mint) {
+    if (!db) return null;
+    try {
+        const cached = await db.get(
+            'SELECT * FROM wallet_tx_cache WHERE wallet = $1 AND mint = $2',
+            [wallet, mint]
+        );
+        if (cached && Date.now() - cached.analyzed_at < WALLET_TX_CACHE_TTL) {
+            return cached;
+        }
+    } catch (_e) { /* Cache miss */ }
+    return null;
+}
+
+/**
+ * Bulk cache wallet-token interactions (cross-token reuse)
+ * Called after fetching transactions - saves ALL token interactions found
+ */
+async function cacheWalletTxBulk(db, wallet, tokenInteractions, lastSignature) {
+    if (!db || tokenInteractions.length === 0) return;
+
+    const now = Date.now();
+    try {
+        // Use batch insert with ON CONFLICT UPDATE
+        for (const ti of tokenInteractions) {
+            await db.run(`
+                INSERT INTO wallet_tx_cache (wallet, mint, buy_count, sell_count, net_flow,
+                    first_tx_timestamp, last_tx_timestamp, last_signature, analyzed_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                ON CONFLICT (wallet, mint) DO UPDATE SET
+                    buy_count = wallet_tx_cache.buy_count + $3,
+                    sell_count = wallet_tx_cache.sell_count + $4,
+                    net_flow = wallet_tx_cache.net_flow + $5,
+                    last_tx_timestamp = GREATEST(wallet_tx_cache.last_tx_timestamp, $7),
+                    last_signature = $8,
+                    analyzed_at = $9
+            `, [wallet, ti.mint, ti.buyCount, ti.sellCount, ti.netFlow,
+                ti.firstTxTimestamp, ti.lastTxTimestamp, lastSignature, now]);
+        }
+    } catch (e) {
+        logger.debug(`[WalletTxCache] Bulk cache error: ${e.message}`);
+    }
+}
+
 /**
  * Get NEW transactions for a holder since last snapshot
- * Optimized with Helius time-based filtering when available
+ * Optimized with:
+ * 1. Cross-token caching: Extract ALL token interactions when fetching
+ * 2. Helius time-based filtering when available
  *
  * @param {string} wallet - Wallet address
  * @param {string} lastSignature - Last analyzed signature (fallback stop condition)
  * @param {string} mint - Token mint to filter for
  * @param {number} sinceTimestamp - Optional: Unix timestamp (ms) to filter from
+ * @param {Object} db - Optional: Database connection for cross-token caching
  */
-async function getNewTransactions(wallet, lastSignature, mint, sinceTimestamp = null) {
+async function getNewTransactions(wallet, lastSignature, mint, sinceTimestamp = null, db = null) {
+    // Check cross-token cache first
+    if (db) {
+        const cached = await getWalletTxCache(db, wallet, mint);
+        if (cached && cached.last_signature === lastSignature) {
+            // Cache is fresh and matches last analyzed state - no new txs
+            return [];
+        }
+    }
+
     const newTxs = [];
+    const allTokenInteractions = new Map(); // mint -> { buyCount, sellCount, netFlow, timestamps }
     let before = null;
+    let newestSignature = null;
 
     // Build query options with time filter optimization
     const baseOptions = {
@@ -361,21 +430,45 @@ async function getNewTransactions(wallet, lastSignature, mint, sinceTimestamp = 
 
         let foundLast = false;
         for (const tx of txs) {
+            // Track newest signature for cache
+            if (!newestSignature) newestSignature = tx.signature;
+
             // Stop if we've reached the last analyzed signature
             if (tx.signature === lastSignature) {
                 foundLast = true;
                 break;
             }
 
-            // Check if this tx involves our mint
+            // Extract ALL token interactions (cross-token caching)
             if (tx.tokenTransfers) {
                 for (const transfer of tx.tokenTransfers) {
-                    if (transfer.mint === mint) {
+                    const txMint = transfer.mint;
+                    if (!txMint || txMint.length < 30) continue;
+
+                    const isBuy = transfer.toUserAccount === wallet;
+                    const isSell = transfer.fromUserAccount === wallet;
+                    const amount = transfer.tokenAmount || 0;
+
+                    // Track for cross-token cache
+                    if (!allTokenInteractions.has(txMint)) {
+                        allTokenInteractions.set(txMint, {
+                            buyCount: 0, sellCount: 0, netFlow: 0,
+                            firstTxTimestamp: tx.timestamp * 1000,
+                            lastTxTimestamp: tx.timestamp * 1000
+                        });
+                    }
+                    const ti = allTokenInteractions.get(txMint);
+                    if (isBuy) { ti.buyCount++; ti.netFlow += amount; }
+                    if (isSell) { ti.sellCount++; ti.netFlow -= amount; }
+                    ti.lastTxTimestamp = Math.max(ti.lastTxTimestamp, tx.timestamp * 1000);
+
+                    // Return data for requested mint
+                    if (txMint === mint) {
                         newTxs.push({
                             signature: tx.signature,
-                            amount: transfer.tokenAmount || 0,
-                            isBuy: transfer.toUserAccount === wallet,
-                            isSell: transfer.fromUserAccount === wallet
+                            amount,
+                            isBuy,
+                            isSell
                         });
                     }
                 }
@@ -385,6 +478,19 @@ async function getNewTransactions(wallet, lastSignature, mint, sinceTimestamp = 
         if (foundLast) break;
         before = txs[txs.length - 1]?.signature;
         if (!before || txs.length < 50) break;
+    }
+
+    // Cache ALL token interactions for cross-token reuse
+    if (db && allTokenInteractions.size > 0) {
+        const interactions = Array.from(allTokenInteractions.entries()).map(([m, ti]) => ({
+            mint: m,
+            ...ti
+        }));
+        cacheWalletTxBulk(db, wallet, interactions, newestSignature || lastSignature).catch(() => {});
+
+        if (interactions.length > 1) {
+            logger.debug(`[WalletTxCache] Cached ${interactions.length} token interactions for ${wallet.slice(0,8)}...`);
+        }
     }
 
     return newTxs;
@@ -442,8 +548,8 @@ async function deltaConvictionAnalysis(db, mint) {
 
         const results = await Promise.allSettled(
             batch.map(async (snap) => {
-                // Get only NEW transactions since last check
-                const newTxs = await getNewTransactions(snap.holder, snap.last_signature, mint, snap.updated_at);
+                // Get only NEW transactions since last check (with cross-token caching)
+                const newTxs = await getNewTransactions(snap.holder, snap.last_signature, mint, snap.updated_at, db);
 
                 let convictionClass = snap.conviction_class;
 
