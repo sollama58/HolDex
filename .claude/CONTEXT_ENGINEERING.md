@@ -30,6 +30,7 @@ Just as HolDex verifies every piece of data cryptographically, we verify every p
 |--------|---------|-------------|
 | context7 | Documentation lookup | Research before implementation |
 | render | Deployment management | Deploy, logs, env vars |
+| claude-mem | Persistent memory | Cross-session context retrieval |
 
 ### Usage Guidelines
 
@@ -43,6 +44,13 @@ Just as HolDex verifies every piece of data cryptographically, we verify every p
 - Direct use from main agent is fine
 - Quick operations: logs, deploys, env vars
 - Service IDs cached in CLAUDE.md
+
+**claude-mem (Persistent Memory)**
+- Automatically captures observations from sessions
+- 3-layer progressive disclosure (50 tokens → 500 tokens)
+- Search historical context with `/mem-search`
+- Web viewer at http://localhost:37777
+- Privacy tags: `<private>content</private>` excluded from storage
 
 ## Subagent Architecture
 

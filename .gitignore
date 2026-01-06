@@ -47,9 +47,8 @@ temp/
 *.rdb
 dump.rdb
 
-# Claude Code (track configs, ignore sensitive settings)
+# Claude Code (track clean config, ignore local overrides with credentials)
 .claude/settings.local.json
-.claude/settings.json
 
 # Internal docs (if any)
 ROADMAP.md

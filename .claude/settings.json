@@ -1,0 +1,66 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git *:*)",
+      "Bash(npm *:*)",
+      "Bash(node *:*)",
+      "Bash(bun *:*)",
+      "Bash(curl *:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(jq:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(timeout:*)",
+      "Bash(redis-server:*)",
+      "Bash(redis-cli:*)",
+      "Bash(psql:*)",
+      "Bash(gh *:*)",
+      "Bash(docker *:*)",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(rm:*)",
+      "Bash(wc:*)",
+      "Bash(openssl *:*)",
+      "Bash(npx *:*)",
+      "Bash(claude mcp *:*)",
+      "WebSearch",
+      "WebFetch(domain:localhost)",
+      "WebFetch(domain:*.onrender.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:*.helius.dev)",
+      "WebFetch(domain:docs.helius.dev)",
+      "WebFetch(domain:api.dexscreener.com)",
+      "WebFetch(domain:dexscreener.com)",
+      "WebFetch(domain:dev.jup.ag)",
+      "WebFetch(domain:render.com)",
+      "WebFetch(domain:x.com)",
+      "mcp__render__*",
+      "Skill(commit-commands:*)"
+    ],
+    "deny": []
+  },
+  "model": "claude-opus-4-5-20251101",
+  "contextEngineering": {
+    "subagents": {
+      "librarian": {
+        "model": "sonnet",
+        "description": "Documentation research"
+      },
+      "integrity-auditor": {
+        "model": "haiku",
+        "description": "Signature verification"
+      },
+      "commit-analyzer": {
+        "model": "sonnet",
+        "description": "Git history analysis"
+      }
+    },
+    "tokenBudget": {
+      "activeWork": 0.618,
+      "research": 0.236,
+      "planning": 0.146
+    }
+  }
+}
