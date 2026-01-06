@@ -1038,7 +1038,7 @@ async function drawMinimalCard(ctx, token, theme) {
 
     // Footer text (small, unobtrusive)
     ctx.fillStyle = theme.text.muted;
-    ctx.font = `500 ${s(14)}px Arial, Helvetica, sans-serif`;
+    ctx.font = `500 ${s(17)}px Arial, Helvetica, sans-serif`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(BRAND_URL, panelX + s(40), footerY);
