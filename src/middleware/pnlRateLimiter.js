@@ -1,13 +1,15 @@
 /**
- * PnL Rate Limiter - Cache-Aware Credit Deduction
+ * PnL Rate Limiter - Cache-Aware Credit Deduction + Rate Limiting
  *
  * Philosophy $asdfasdfa: "Pay for work, not for cache hits"
  *
- * - Cache HIT  → FREE (no credit deducted)
- * - Cache MISS → 1 credit (expensive RPC work)
+ * Protection layers:
+ * 1. Rate limit: 5 req/min per wallet (prevents spam)
+ * 2. Cache HIT  → FREE (no credit deducted)
+ * 3. Cache MISS → 1 credit (expensive RPC work)
  *
  * This is fair: you only pay when we do expensive computation.
- * The 60s cache naturally rate-limits repeated queries.
+ * Rate limiting prevents abuse even with valid credits.
  */
 
 const { getSolanaConnection } = require('../services/solana');
@@ -23,6 +25,11 @@ const logger = require('../services/logger');
 
 // Must match pnlService.js
 const PNL_CACHE_PREFIX = 'pnl:wallet:';
+
+// Rate limit config
+const PNL_RATE_LIMIT = 5;           // requests per window
+const PNL_RATE_WINDOW = 60;         // window in seconds (1 minute)
+const PNL_RATE_PREFIX = 'pnl:rate:';
 
 /**
  * Check if PnL result is cached
@@ -41,13 +48,63 @@ async function isPnLCached(wallet, maxPages) {
 }
 
 /**
+ * Check and increment rate limit for wallet
+ * Returns { allowed: boolean, current: number, limit: number, resetIn: number }
+ */
+async function checkRateLimit(authWallet) {
+    const redis = getRedisClient();
+
+    // Fallback: allow if no Redis (degraded mode)
+    if (!redis) {
+        return { allowed: true, current: 0, limit: PNL_RATE_LIMIT, resetIn: 0 };
+    }
+
+    const key = `${PNL_RATE_PREFIX}${authWallet}`;
+
+    try {
+        // Increment counter and set TTL atomically
+        const current = await redis.incr(key);
+
+        // Set expiry only on first request in window
+        if (current === 1) {
+            await redis.expire(key, PNL_RATE_WINDOW);
+        }
+
+        // Get TTL for reset info
+        const ttl = await redis.ttl(key);
+
+        if (current > PNL_RATE_LIMIT) {
+            logger.warn(`[PnL] Rate limit exceeded for ${authWallet.slice(0, 8)}... (${current}/${PNL_RATE_LIMIT})`);
+            return {
+                allowed: false,
+                current,
+                limit: PNL_RATE_LIMIT,
+                resetIn: ttl > 0 ? ttl : PNL_RATE_WINDOW
+            };
+        }
+
+        return {
+            allowed: true,
+            current,
+            limit: PNL_RATE_LIMIT,
+            resetIn: ttl > 0 ? ttl : PNL_RATE_WINDOW
+        };
+    } catch (e) {
+        logger.error(`[PnL] Rate limit check error: ${e.message}`);
+        // Fail open on errors (allow request)
+        return { allowed: true, current: 0, limit: PNL_RATE_LIMIT, resetIn: 0 };
+    }
+}
+
+/**
  * PnL-specific rate limiter
  *
  * Flow:
  * 1. Authenticate (API key or wallet)
- * 2. Check if result is cached
- * 3. If cached → allow without credit deduction
- * 4. If not cached → verify credits, deduct 1, proceed
+ * 2. Check rate limit (5 req/min per wallet)
+ * 3. Check if result is cached
+ * 4. If cached → allow without credit deduction
+ * 5. If not cached → verify credits, deduct 1, proceed
  */
 const pnlRateLimiter = async (req, res, next) => {
     const headerApiKey = req.headers['x-api-key'];
@@ -102,7 +159,24 @@ const pnlRateLimiter = async (req, res, next) => {
             });
         }
 
-        // 2. Get target wallet and maxPages from request
+        // 2. Check rate limit (5 req/min per wallet)
+        const rateLimit = await checkRateLimit(authWallet);
+        res.setHeader('X-RateLimit-Limit', rateLimit.limit);
+        res.setHeader('X-RateLimit-Remaining', Math.max(0, rateLimit.limit - rateLimit.current));
+        res.setHeader('X-RateLimit-Reset', rateLimit.resetIn);
+
+        if (!rateLimit.allowed) {
+            return res.status(429).json({
+                success: false,
+                error: 'PnL rate limit exceeded',
+                limit: `${PNL_RATE_LIMIT} requests per minute`,
+                current: rateLimit.current,
+                resetIn: rateLimit.resetIn,
+                help: 'PnL calculations are expensive. Please wait before retrying.'
+            });
+        }
+
+        // 3. Get target wallet and maxPages from request
         const targetWallet = req.params.address;
         // Token-specific route uses maxPages=20, wallet route uses query param
         const isTokenRoute = !!req.params.mint;
