@@ -117,6 +117,16 @@ const pnlRateLimiter = async (req, res, next) => {
     const db = getDB();
 
     try {
+        // 0. Whitelisted API keys bypass all validation
+        if (isWhitelistedApiKey(apiKey)) {
+            logger.debug(`[PnL] Whitelisted API key - bypassing auth`);
+            // Use wallet header if provided, otherwise use placeholder
+            authWallet = walletDirect || 'whitelisted-service';
+            req.wallet = authWallet;
+            req.whitelisted = true;
+            return next();
+        }
+
         // 1. Resolve wallet from API key or direct header
         if (apiKey) {
             const keyHash = hashApiKey(apiKey);

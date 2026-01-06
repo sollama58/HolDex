@@ -14,6 +14,7 @@ const { getDB } = require('../services/database');
 const { hashApiKey } = require('../utils/apiKeyHash');
 const {
     MIN_HOLDINGS,
+    isWhitelistedApiKey,
     checkApiEligibility,
     deductCall
 } = require('../services/burnCredits');
@@ -39,6 +40,16 @@ const unifiedRateLimiter = async (req, res, next) => {
     const db = getDB();
 
     try {
+        // 0. Whitelisted API keys bypass all validation
+        if (isWhitelistedApiKey(apiKey)) {
+            logger.debug(`[UnifiedRateLimiter] Whitelisted API key - bypassing auth`);
+            wallet = walletDirect || 'whitelisted-service';
+            req.wallet = wallet;
+            req.whitelisted = true;
+            res.setHeader('X-Whitelisted', 'true');
+            return next();
+        }
+
         // 1. Resolve wallet from API key or direct header
         if (apiKey) {
             const keyHash = hashApiKey(apiKey);
