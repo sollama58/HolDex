@@ -10,7 +10,6 @@
 ### P0 - Critical
 - [ ] Protect PnL endpoints - Add Redis cache (60s TTL)
 - [ ] Protect PnL endpoints - Require burn credits before RPC calls
-- [ ] Reduce PnL maxPages default from 50 to 10
 
 ### P1 - Important
 - [ ] Add global wallet_analysis cache table (cross-token reuse)
