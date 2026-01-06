@@ -3139,6 +3139,7 @@ async function updateSingleToken(deps, mint) {
         ]);
 
         // Save snapshot for integrity watchdog (self-healing)
+        // CRITICAL: Must include signatures in snapshot, otherwise Watchdog heals with missing sigs
         // Include holder snapshots for complete integrity (v3 snapshot format)
         let holderSnapshotsForIntegrity = [];
         try {
@@ -3149,7 +3150,8 @@ async function updateSingleToken(deps, mint) {
         } catch (_e) {
             // Ignore - snapshots may not exist yet
         }
-        await saveSnapshot(mint, tokenForSigning, holderSnapshotsForIntegrity);
+        const tokenWithSignatures = { ...tokenForSigning, ...signatures };
+        await saveSnapshot(mint, tokenWithSignatures, holderSnapshotsForIntegrity);
 
         // Save holder history snapshot (daily)
         await saveHolderHistory(db, mint, conviction.totalHolders || 0, conviction.realHoldersCount || 0);
@@ -3446,6 +3448,7 @@ async function updateKScores(deps) {
                 ]);
 
                 // Save snapshot for integrity watchdog (self-healing)
+                // CRITICAL: Must include signatures in snapshot, otherwise Watchdog heals with missing sigs
                 // Include holder snapshots for complete integrity (v3 snapshot format)
                 let batchHolderSnapshots = [];
                 try {
@@ -3456,7 +3459,8 @@ async function updateKScores(deps) {
                 } catch (_e) {
                     // Ignore - snapshots may not exist yet
                 }
-                await saveSnapshot(t.mint, batchTokenForSigning, batchHolderSnapshots);
+                const batchTokenWithSignatures = { ...batchTokenForSigning, ...batchSignatures };
+                await saveSnapshot(t.mint, batchTokenWithSignatures, batchHolderSnapshots);
 
                 // Save holder history snapshot (daily)
                 await saveHolderHistory(db, t.mint, conviction.totalHolders || 0, conviction.realHoldersCount || 0);
