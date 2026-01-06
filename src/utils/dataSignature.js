@@ -38,6 +38,12 @@ if (!SIGNING_SECRET && process.env.NODE_ENV === 'production') {
     logger.error('CRITICAL: DATA_SIGNING_SECRET not set in production!');
 }
 
+// DEBUG: Log secret fingerprint to verify both services use same key
+if (SIGNING_SECRET) {
+    const fingerprint = crypto.createHash('sha256').update(SIGNING_SECRET).digest('hex').slice(0, 16);
+    logger.info(`[Signature] Secret fingerprint: ${fingerprint} (len=${SIGNING_SECRET.length})`);
+}
+
 if (SIGNING_SECRET_PREVIOUS) {
     logger.info('[Signature] Key rotation mode active - verifying with current + previous keys');
 }
