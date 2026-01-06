@@ -551,38 +551,127 @@
             document.getElementById('modal-card-generator').classList.add('flex');
         }
 
+        /**
+         * Validate Solana address (base58 encoded, 32-44 chars)
+         * SECURITY: Prevents injection, ensures valid format
+         */
+        function isValidSolanaAddress(address) {
+            if (!address || typeof address !== 'string') return false;
+
+            // Length check (base58 encoded 32 bytes = 32-44 chars)
+            if (address.length < 32 || address.length > 44) return false;
+
+            // Base58 alphabet: no 0, O, I, l
+            const base58Regex = /^[1-9A-HJ-NP-Za-km-z]+$/;
+            return base58Regex.test(address);
+        }
+
         async function generateCard() {
-            const mint = document.getElementById('card-mint').value.trim();
+            const input = document.getElementById('card-mint');
+            const rawValue = input.value;
+
+            // Sanitize: trim whitespace, remove any non-alphanumeric chars
+            const mint = rawValue.trim().replace(/[^1-9A-HJ-NP-Za-km-z]/g, '');
+
+            // Update input with sanitized value
+            if (mint !== rawValue.trim()) {
+                input.value = mint;
+            }
+
+            // Validate
+            if (!mint) {
+                toast('Please enter a contract address', 'error');
+                input.focus();
+                return;
+            }
+
+            if (!isValidSolanaAddress(mint)) {
+                toast('Invalid Solana address format', 'error');
+                input.classList.add('border-red-500');
+                setTimeout(() => input.classList.remove('border-red-500'), 2000);
+                return;
+            }
+
             const style = document.getElementById('card-style').value;
 
-            if (!mint || mint.length < 32) {
-                toast('Enter a valid mint address', 'error');
+            // Validate style (whitelist)
+            const allowedStyles = ['holdex', 'asdf', 'minimal'];
+            if (!allowedStyles.includes(style)) {
+                toast('Invalid card style', 'error');
                 return;
             }
 
             currentCardMint = mint;
             currentCardStyle = style;
-            const cardUrl = `${API_URL}/api/token/${mint}/card.png?style=${style}`;
 
-            document.getElementById('card-preview-img').src = cardUrl;
-            document.getElementById('card-result').classList.remove('hidden');
+            // Build URL safely (no user input in path beyond validated mint)
+            const cardUrl = `${API_URL}/api/token/${encodeURIComponent(mint)}/card.png?style=${encodeURIComponent(style)}`;
 
-            toast('Card generated!', 'success');
+            const preview = document.getElementById('card-preview-img');
+            const resultDiv = document.getElementById('card-result');
+
+            // Show loading state
+            preview.style.opacity = '0.5';
+            resultDiv.classList.remove('hidden');
+
+            // Load image and handle errors
+            preview.onload = () => {
+                preview.style.opacity = '1';
+                toast('Card generated!', 'success');
+            };
+            preview.onerror = () => {
+                preview.style.opacity = '1';
+                toast('Token not found or card generation failed', 'error');
+            };
+
+            preview.src = cardUrl;
         }
 
         function copyCardLink() {
-            if (!currentCardMint) return;
-            const link = `${API_URL}/k/${currentCardMint}`;
+            // SECURITY: Only use validated mint stored in currentCardMint
+            if (!currentCardMint || !isValidSolanaAddress(currentCardMint)) return;
+            const link = `${API_URL}/k/${encodeURIComponent(currentCardMint)}`;
             navigator.clipboard.writeText(link);
             toast('Link copied!', 'success');
         }
 
         function shareTwitter() {
-            if (!currentCardMint) return;
-            const link = `${API_URL}/k/${currentCardMint}`;
+            // SECURITY: Only use validated mint stored in currentCardMint
+            if (!currentCardMint || !isValidSolanaAddress(currentCardMint)) return;
+            const link = `${API_URL}/k/${encodeURIComponent(currentCardMint)}`;
             const text = encodeURIComponent(`Check out this K-Score! ${link}`);
             window.open(`https://twitter.com/intent/tweet?text=${text}`, '_blank');
         }
+
+        // Real-time validation feedback on input
+        document.addEventListener('DOMContentLoaded', () => {
+            const mintInput = document.getElementById('card-mint');
+            if (mintInput) {
+                mintInput.addEventListener('input', (e) => {
+                    const value = e.target.value.trim();
+                    if (value.length === 0) {
+                        e.target.style.borderColor = '';
+                    } else if (isValidSolanaAddress(value)) {
+                        e.target.style.borderColor = '#10b981'; // green
+                    } else if (value.length >= 32) {
+                        e.target.style.borderColor = '#ef4444'; // red
+                    } else {
+                        e.target.style.borderColor = '#f97316'; // orange (typing)
+                    }
+                });
+
+                // Paste handler - auto-sanitize
+                mintInput.addEventListener('paste', (e) => {
+                    setTimeout(() => {
+                        const sanitized = mintInput.value.trim().replace(/[^1-9A-HJ-NP-Za-km-z]/g, '');
+                        if (sanitized !== mintInput.value) {
+                            mintInput.value = sanitized;
+                            mintInput.dispatchEvent(new Event('input'));
+                        }
+                    }, 0);
+                });
+            }
+        });
 
         function openAnalytics() {
             if (!userGrants.includes('gasdf_analytics')) {
