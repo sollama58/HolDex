@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trencher's Dashboard | HolDex</title>
+    <meta name="description" content="K-Score analytics that filter the noise. LP status, holder conviction, rug signals - everything a memecoin trader needs.">
+
+    <meta property="og:title" content="Trencher's Dashboard | HolDex">
+    <meta property="og:description" content="Analytics that actually matter. K-Score predictions vs reality.">
+    <meta property="og:type" content="website">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        fire: {
+                            bg: '#0c0c14',
+                            panel: 'rgba(20, 20, 35, 0.6)',
+                            solid: '#14141f',
+                            border: 'rgba(255, 255, 255, 0.08)',
+                            accent: '#f97316',
+                            text: '#f8fafc',
+                            muted: '#94a3b8',
+                            glow: 'rgba(249, 115, 22, 0.4)'
+                        },
+                        neon: { cyan: '#22d3ee', purple: '#a855f7', pink: '#ec4899', green: '#10b981', red: '#ef4444', yellow: '#eab308' }
+                    },
+                    fontFamily: {
+                        mono: ['JetBrains Mono', 'monospace'],
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background: #0c0c14;
+            color: #f8fafc;
+            font-family: 'Inter', system-ui, sans-serif;
+            min-height: 100vh;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            top: -20%;
+            left: -10%;
+            width: 40%;
+            height: 50%;
+            background: radial-gradient(circle, rgba(249, 115, 22, 0.15) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+        body::after {
+            content: '';
+            position: fixed;
+            bottom: -30%;
+            right: -15%;
+            width: 50%;
+            height: 60%;
+            background: radial-gradient(circle, rgba(168, 85, 247, 0.12) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+        body > * { position: relative; z-index: 1; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+
+        .glass-panel {
+            background: rgba(20, 20, 35, 0.6);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px;
+        }
+        .stat-card {
+            background: rgba(20, 20, 35, 0.4);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            padding: 20px;
+        }
+        .stat-value { font-size: 2.5rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+        .stat-label { font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; }
+
+        .signal-card {
+            background: rgba(20, 20, 35, 0.4);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            padding: 16px;
+            transition: all 0.2s;
+        }
+        .signal-card:hover { border-color: rgba(249, 115, 22, 0.3); }
+        .signal-card.danger { border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.05); }
+        .signal-card.warning { border-color: rgba(234, 179, 8, 0.3); background: rgba(234, 179, 8, 0.05); }
+        .signal-card.safe { border-color: rgba(16, 185, 129, 0.3); background: rgba(16, 185, 129, 0.05); }
+
+        .tier-badge { padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; font-family: 'JetBrains Mono'; }
+        .tier-diamond { background: rgba(185, 242, 255, 0.15); color: #b9f2ff; }
+        .tier-platinum { background: rgba(192, 192, 255, 0.15); color: #c0c0ff; }
+        .tier-gold { background: rgba(255, 215, 0, 0.15); color: #ffd700; }
+        .tier-silver { background: rgba(192, 192, 192, 0.15); color: #c0c0c0; }
+        .tier-bronze { background: rgba(205, 127, 50, 0.15); color: #cd7f32; }
+        .tier-rust { background: rgba(183, 65, 14, 0.15); color: #b7410e; }
+
+        .conviction-bar { height: 8px; border-radius: 4px; overflow: hidden; display: flex; background: rgba(0,0,0,0.3); }
+        .conv-acc { background: #10b981; }
+        .conv-hold { background: #3b82f6; }
+        .conv-red { background: #eab308; }
+        .conv-ext { background: #ef4444; }
+
+        .token-row {
+            background: rgba(20, 20, 35, 0.3);
+            border: 1px solid rgba(255,255,255,0.04);
+            border-radius: 10px;
+            padding: 12px 16px;
+            transition: all 0.2s;
+        }
+        .token-row:hover { border-color: rgba(249, 115, 22, 0.2); background: rgba(249, 115, 22, 0.03); }
+
+        .nav-link {
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            color: #94a3b8;
+            transition: all 0.2s;
+        }
+        .nav-link:hover { color: #f8fafc; background: rgba(255,255,255,0.05); }
+        .nav-link.active { color: #f97316; background: rgba(249, 115, 22, 0.1); }
+
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .loading { animation: pulse 1.5s infinite; }
+
+        .insight-box {
+            background: rgba(249, 115, 22, 0.1);
+            border: 1px solid rgba(249, 115, 22, 0.2);
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 13px;
+        }
+        .insight-box.danger {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.2);
+        }
+        .insight-box.safe {
+            background: rgba(16, 185, 129, 0.1);
+            border-color: rgba(16, 185, 129, 0.2);
+        }
+
+        .progress-ring { width: 80px; height: 80px; }
+        .progress-ring circle { fill: none; stroke-width: 6; }
+        .progress-ring .bg { stroke: rgba(255,255,255,0.1); }
+        .progress-ring .progress { stroke-linecap: round; transform: rotate(-90deg); transform-origin: center; transition: stroke-dashoffset 0.5s; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-7xl mx-auto">
+        <!-- Navigation -->
+        <nav class="flex flex-wrap items-center justify-between gap-4 mb-8">
+            <div class="flex items-center gap-4">
+                <a href="/" class="text-2xl font-bold" style="color: #f97316; text-shadow: 0 0 30px rgba(249, 115, 22, 0.5);">
+                    HolDex
+                </a>
+                <span class="text-fire-muted text-sm hidden md:inline">Trencher's Dashboard</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <a href="/" class="nav-link">Home</a>
+                <a href="/track-record" class="nav-link active">Analytics</a>
+                <a href="/cult-space" class="nav-link">The Space</a>
+            </div>
+        </nav>
+
+        <!-- Loading State -->
+        <div id="loading" class="text-center py-20">
+            <div class="text-5xl mb-4 loading">🔥</div>
+            <p class="text-fire-muted">Loading analytics...</p>
+        </div>
+
+        <!-- Main Content -->
+        <div id="content" class="hidden">
+            <!-- TL;DR Section -->
+            <section class="glass-panel p-6 mb-8">
+                <div class="flex items-center gap-3 mb-4">
+                    <span class="text-2xl">🎯</span>
+                    <h2 class="text-xl font-bold">TL;DR - What You Need to Know</h2>
+                </div>
+                <div class="grid md:grid-cols-3 gap-4" id="tldr-insights">
+                    <!-- Filled by JS -->
+                </div>
+            </section>
+
+            <!-- Key Stats -->
+            <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                <div class="stat-card text-center">
+                    <div class="stat-value text-neon-green" id="stat-accuracy">-</div>
+                    <div class="stat-label">Prediction Accuracy</div>
+                </div>
+                <div class="stat-card text-center">
+                    <div class="stat-value text-neon-cyan" id="stat-tracked">-</div>
+                    <div class="stat-label">Tokens Tracked</div>
+                </div>
+                <div class="stat-card text-center">
+                    <div class="stat-value text-neon-purple" id="stat-avg-kscore">-</div>
+                    <div class="stat-label">Avg K-Score</div>
+                </div>
+                <div class="stat-card text-center">
+                    <div class="stat-value text-fire-accent" id="stat-rugs-dodged">-</div>
+                    <div class="stat-label">Rugs Dodged</div>
+                </div>
+            </section>
+
+            <!-- Two Column Layout -->
+            <div class="grid lg:grid-cols-2 gap-6 mb-8">
+                <!-- RUG SIGNALS -->
+                <section class="glass-panel p-6">
+                    <div class="flex items-center gap-3 mb-4">
+                        <span class="text-2xl">🚨</span>
+                        <h3 class="text-lg font-bold">Rug Signals</h3>
+                        <span class="text-fire-muted text-sm ml-auto">Stay away from these</span>
+                    </div>
+                    <div class="space-y-3" id="rug-signals">
+                        <p class="text-fire-muted">Loading...</p>
+                    </div>
+                </section>
+
+                <!-- SAFE PLAYS -->
+                <section class="glass-panel p-6">
+                    <div class="flex items-center gap-3 mb-4">
+                        <span class="text-2xl">✅</span>
+                        <h3 class="text-lg font-bold">Verified Safe</h3>
+                        <span class="text-fire-muted text-sm ml-auto">LP burned + strong holders</span>
+                    </div>
+                    <div class="space-y-3" id="safe-plays">
+                        <p class="text-fire-muted">Loading...</p>
+                    </div>
+                </section>
+            </div>
+
+            <!-- SELL PRESSURE HEATMAP -->
+            <section class="glass-panel p-6 mb-8">
+                <div class="flex items-center gap-3 mb-4">
+                    <span class="text-2xl">🌡️</span>
+                    <h3 class="text-lg font-bold">Sell Pressure Monitor</h3>
+                    <span class="text-fire-muted text-sm ml-auto">Extractor % = Active sellers</span>
+                </div>
+                <p class="text-fire-muted text-sm mb-4">High extractor % = Holders are dumping. Consider timing your exit.</p>
+                <div class="space-y-2" id="sell-pressure">
+                    <p class="text-fire-muted">Loading...</p>
+                </div>
+            </section>
+
+            <!-- CONVICTION BREAKDOWN -->
+            <section class="glass-panel p-6 mb-8">
+                <div class="flex items-center gap-3 mb-4">
+                    <span class="text-2xl">💎</span>
+                    <h3 class="text-lg font-bold">Holder Conviction</h3>
+                </div>
+                <p class="text-fire-muted text-sm mb-4">
+                    <span class="inline-block w-3 h-3 rounded bg-neon-green mr-1"></span> Accumulators (buying more)
+                    <span class="inline-block w-3 h-3 rounded bg-blue-500 mx-1 ml-4"></span> Diamond Hands (holding)
+                    <span class="inline-block w-3 h-3 rounded bg-neon-yellow mx-1 ml-4"></span> Reducers (taking profits)
+                    <span class="inline-block w-3 h-3 rounded bg-neon-red mx-1 ml-4"></span> Extractors (dumping)
+                </p>
+                <div class="space-y-2" id="conviction-list">
+                    <p class="text-fire-muted">Loading...</p>
+                </div>
+            </section>
+
+            <!-- K-SCORE VS SECURITY CORRELATION -->
+            <section class="glass-panel p-6 mb-8">
+                <div class="flex items-center gap-3 mb-4">
+                    <span class="text-2xl">📊</span>
+                    <h3 class="text-lg font-bold">K-Score Prediction Accuracy</h3>
+                </div>
+                <p class="text-fire-muted text-sm mb-4">Higher K-Score = More likely LP is burned and authorities revoked</p>
+                <div class="space-y-4" id="correlation-chart">
+                    <p class="text-fire-muted">Loading...</p>
+                </div>
+            </section>
+
+            <!-- EVOLUTION - Who's Growing Organically -->
+            <section class="glass-panel p-6 mb-8">
+                <div class="flex items-center gap-3 mb-4">
+                    <span class="text-2xl">📈</span>
+                    <h3 class="text-lg font-bold">Organic Growth Tracker</h3>
+                    <span class="text-fire-muted text-sm ml-auto">K-Score change over time</span>
+                </div>
+                <div class="grid md:grid-cols-2 gap-4" id="evolution-grid">
+                    <p class="text-fire-muted">Loading...</p>
+                </div>
+            </section>
+
+            <!-- Footer -->
+            <footer class="text-center text-fire-muted text-sm py-8">
+                <p>Data refreshes every 5 minutes. K-Score formula is <a href="https://github.com/zeyxx/HolDex" target="_blank" class="text-fire-accent hover:underline">open source</a>.</p>
+                <p class="mt-2">this is fine. 🐕‍🦺🔥</p>
+            </footer>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = window.location.origin;
+
+        const TIER_INFO = {
+            'Diamond': { icon: '💎', class: 'tier-diamond' },
+            'Platinum': { icon: '💠', class: 'tier-platinum' },
+            'Gold': { icon: '🥇', class: 'tier-gold' },
+            'Silver': { icon: '🥈', class: 'tier-silver' },
+            'Bronze': { icon: '🥉', class: 'tier-bronze' },
+            'Copper': { icon: '🟤', class: 'tier-bronze' },
+            'Iron': { icon: '⚫', class: 'tier-rust' },
+            'Rust': { icon: '🔩', class: 'tier-rust' }
+        };
+
+        async function loadData() {
+            try {
+                const res = await fetch(`${API_URL}/api/track-record`);
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+
+                renderAll(data);
+
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('content').classList.remove('hidden');
+            } catch (e) {
+                document.getElementById('loading').innerHTML = `
+                    <div class="text-neon-red text-xl mb-2">Failed to load</div>
+                    <p class="text-fire-muted">${e.message}</p>
+                `;
+            }
+        }
+
+        function renderAll(data) {
+            renderTLDR(data);
+            renderStats(data);
+            renderRugSignals(data.tokens);
+            renderSafePlays(data.tokens);
+            renderSellPressure(data.tokens);
+            renderConviction(data.tokens);
+            renderCorrelation(data.correlations?.kScoreVsSecurity || []);
+            renderEvolution(data.evolution || []);
+        }
+
+        function renderTLDR(data) {
+            const container = document.getElementById('tldr-insights');
+            const { summary, tokens } = data;
+
+            const highExtractors = tokens.filter(t => t.extractorPct > 30).length;
+            const unsafeTokens = tokens.filter(t => !t.secure).length;
+            const strongConviction = tokens.filter(t => {
+                const total = t.breakdown.accumulators + t.breakdown.holders;
+                const negative = t.breakdown.reducers + t.breakdown.extractors;
+                return total > negative * 2;
+            }).length;
+
+            let insights = [];
+
+            if (unsafeTokens > 0) {
+                insights.push({
+                    type: 'danger',
+                    icon: '⚠️',
+                    title: `${unsafeTokens} Tokens Unsecured`,
+                    text: 'LP not burned or authorities not revoked. Higher rug risk.'
+                });
+            }
+
+            if (highExtractors > 0) {
+                insights.push({
+                    type: 'warning',
+                    icon: '📉',
+                    title: `${highExtractors} High Sell Pressure`,
+                    text: 'Extractor % above 30%. Holders are actively dumping.'
+                });
+            }
+
+            if (summary.platinumPlus?.count > 0) {
+                insights.push({
+                    type: 'safe',
+                    icon: '💎',
+                    title: `${summary.platinumPlus.count} Platinum+ Tokens`,
+                    text: summary.platinumPlus.allSecure ? 'All verified secure. Strong holder conviction.' : 'High K-Score, check individually.'
+                });
+            }
+
+            if (strongConviction > 0) {
+                insights.push({
+                    type: 'safe',
+                    icon: '💪',
+                    title: `${strongConviction} Strong Communities`,
+                    text: 'More buyers + holders than sellers. Organic growth signals.'
+                });
+            }
+
+            if (insights.length === 0) {
+                insights.push({
+                    type: 'info',
+                    icon: '📊',
+                    title: 'Tracking in Progress',
+                    text: 'More data needed for actionable insights.'
+                });
+            }
+
+            container.innerHTML = insights.slice(0, 3).map(i => `
+                <div class="insight-box ${i.type}">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span>${i.icon}</span>
+                        <span class="font-semibold">${i.title}</span>
+                    </div>
+                    <p class="text-fire-muted text-sm">${i.text}</p>
+                </div>
+            `).join('');
+        }
+
+        function renderStats(data) {
+            const { summary, tokens } = data;
+
+            // Accuracy = Platinum secure + Rust unsafe
+            const platSecure = summary.platinumPlus?.allSecure ? summary.platinumPlus.count : 0;
+            const rustUnsafe = summary.rustTier?.allUnsafe ? summary.rustTier.count : 0;
+            const totalPredicted = summary.platinumPlus?.count + summary.rustTier?.count || 1;
+            const accuracy = Math.round((platSecure + rustUnsafe) / totalPredicted * 100) || 0;
+
+            document.getElementById('stat-accuracy').textContent = accuracy + '%';
+            document.getElementById('stat-tracked').textContent = summary.totalTracked || 0;
+
+            // Avg K-Score
+            const avgK = tokens.length > 0
+                ? Math.round(tokens.reduce((sum, t) => sum + t.kScore, 0) / tokens.length)
+                : 0;
+            document.getElementById('stat-avg-kscore').textContent = avgK;
+
+            // Rugs dodged = Rust tier tokens identified
+            document.getElementById('stat-rugs-dodged').textContent = summary.rustTier?.count || 0;
+        }
+
+        function renderRugSignals(tokens) {
+            const container = document.getElementById('rug-signals');
+
+            // Tokens with red flags: unsecure, high extractors, rust tier
+            const risky = tokens
+                .filter(t => !t.secure || t.extractorPct > 40 || t.kScore < 30)
+                .sort((a, b) => a.kScore - b.kScore)
+                .slice(0, 5);
+
+            if (risky.length === 0) {
+                container.innerHTML = '<div class="text-neon-green text-sm">No major rug signals detected 🎉</div>';
+                return;
+            }
+
+            container.innerHTML = risky.map(t => {
+                const flags = [];
+                if (!t.secure) flags.push('LP Unsecured');
+                if (t.extractorPct > 40) flags.push(`${t.extractorPct}% Dumping`);
+                if (t.kScore < 30) flags.push('Low K-Score');
+
+                return `
+                    <div class="signal-card danger">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <span class="tier-badge ${TIER_INFO[t.tier]?.class || 'tier-rust'}">
+                                    ${TIER_INFO[t.tier]?.icon || '🔩'} ${t.kScore}
+                                </span>
+                                <span class="font-mono font-bold">${t.symbol}</span>
+                            </div>
+                            <span class="text-neon-red text-xs">⚠️</span>
+                        </div>
+                        <div class="flex flex-wrap gap-2 mt-2">
+                            ${flags.map(f => `<span class="text-xs text-neon-red/80 bg-neon-red/10 px-2 py-0.5 rounded">${f}</span>`).join('')}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderSafePlays(tokens) {
+            const container = document.getElementById('safe-plays');
+
+            const safe = tokens
+                .filter(t => t.secure && t.kScore >= 60 && t.extractorPct < 25)
+                .sort((a, b) => b.kScore - a.kScore)
+                .slice(0, 5);
+
+            if (safe.length === 0) {
+                container.innerHTML = '<div class="text-fire-muted text-sm">No verified safe tokens yet</div>';
+                return;
+            }
+
+            container.innerHTML = safe.map(t => {
+                const accHold = t.breakdown.accumulators + t.breakdown.holders;
+                const total = accHold + t.breakdown.reducers + t.breakdown.extractors;
+                const diamondPct = total > 0 ? Math.round(accHold / total * 100) : 0;
+
+                return `
+                    <div class="signal-card safe">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <span class="tier-badge ${TIER_INFO[t.tier]?.class || 'tier-gold'}">
+                                    ${TIER_INFO[t.tier]?.icon || '🥇'} ${t.kScore}
+                                </span>
+                                <span class="font-mono font-bold">${t.symbol}</span>
+                            </div>
+                            <span class="text-neon-green text-xs">✓ LP Burned</span>
+                        </div>
+                        <div class="flex items-center gap-3 mt-2 text-xs text-fire-muted">
+                            <span>💎 ${diamondPct}% Diamond Hands</span>
+                            <span>📉 ${t.extractorPct}% Selling</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderSellPressure(tokens) {
+            const container = document.getElementById('sell-pressure');
+
+            const sorted = [...tokens]
+                .filter(t => t.extractorPct > 0)
+                .sort((a, b) => b.extractorPct - a.extractorPct)
+                .slice(0, 8);
+
+            if (sorted.length === 0) {
+                container.innerHTML = '<div class="text-fire-muted text-sm">No sell pressure data yet</div>';
+                return;
+            }
+
+            container.innerHTML = sorted.map(t => {
+                const level = t.extractorPct > 40 ? 'danger' : t.extractorPct > 25 ? 'warning' : 'normal';
+                const barColor = level === 'danger' ? 'bg-neon-red' : level === 'warning' ? 'bg-neon-yellow' : 'bg-neon-green';
+                const emoji = level === 'danger' ? '🔥' : level === 'warning' ? '⚡' : '✓';
+
+                return `
+                    <div class="token-row flex items-center gap-4">
+                        <div class="flex items-center gap-2 w-32 shrink-0">
+                            <span>${emoji}</span>
+                            <span class="font-mono font-bold truncate">${t.symbol}</span>
+                        </div>
+                        <div class="flex-1">
+                            <div class="h-3 bg-black/30 rounded-full overflow-hidden">
+                                <div class="${barColor} h-full rounded-full transition-all" style="width: ${Math.min(t.extractorPct, 100)}%"></div>
+                            </div>
+                        </div>
+                        <span class="font-mono text-sm w-12 text-right ${level === 'danger' ? 'text-neon-red' : level === 'warning' ? 'text-neon-yellow' : 'text-neon-green'}">${t.extractorPct}%</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderConviction(tokens) {
+            const container = document.getElementById('conviction-list');
+
+            const sorted = [...tokens]
+                .sort((a, b) => b.kScore - a.kScore)
+                .slice(0, 10);
+
+            container.innerHTML = sorted.map(t => {
+                const total = t.breakdown.accumulators + t.breakdown.holders + t.breakdown.reducers + t.breakdown.extractors;
+                const accPct = total > 0 ? (t.breakdown.accumulators / total * 100) : 0;
+                const holdPct = total > 0 ? (t.breakdown.holders / total * 100) : 0;
+                const redPct = total > 0 ? (t.breakdown.reducers / total * 100) : 0;
+                const extPct = total > 0 ? (t.breakdown.extractors / total * 100) : 0;
+
+                return `
+                    <div class="token-row flex items-center gap-4">
+                        <div class="flex items-center gap-2 w-28 shrink-0">
+                            <span class="tier-badge ${TIER_INFO[t.tier]?.class || 'tier-bronze'} text-xs">
+                                ${TIER_INFO[t.tier]?.icon || ''} ${t.kScore}
+                            </span>
+                            <span class="font-mono text-sm truncate">${t.symbol}</span>
+                        </div>
+                        <div class="flex-1">
+                            <div class="conviction-bar">
+                                <div class="conv-acc" style="width: ${accPct}%"></div>
+                                <div class="conv-hold" style="width: ${holdPct}%"></div>
+                                <div class="conv-red" style="width: ${redPct}%"></div>
+                                <div class="conv-ext" style="width: ${extPct}%"></div>
+                            </div>
+                        </div>
+                        <span class="text-xs text-fire-muted font-mono w-24 text-right">
+                            ${t.breakdown.accumulators}/${t.breakdown.holders}/${t.breakdown.reducers}/${t.breakdown.extractors}
+                        </span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderCorrelation(correlations) {
+            const container = document.getElementById('correlation-chart');
+
+            if (!correlations.length) {
+                container.innerHTML = '<div class="text-fire-muted text-sm">Correlation data loading...</div>';
+                return;
+            }
+
+            const labels = { 'HIGH': 'K-Score 70+', 'MID': 'K-Score 50-69', 'LOW': 'K-Score <50' };
+
+            container.innerHTML = correlations.map(c => {
+                const securePct = c.securePercent || 0;
+                const unsafePct = 100 - securePct;
+
+                return `
+                    <div>
+                        <div class="flex justify-between mb-2 text-sm">
+                            <span class="text-fire-text">${labels[c.tier] || c.tier}</span>
+                            <span class="font-mono text-fire-muted">${c.total} tokens</span>
+                        </div>
+                        <div class="h-6 bg-black/30 rounded-lg overflow-hidden flex">
+                            <div class="bg-neon-green h-full flex items-center justify-center text-xs font-bold" style="width: ${securePct}%">
+                                ${securePct > 15 ? securePct + '% Safe' : ''}
+                            </div>
+                            <div class="bg-neon-red/80 h-full flex items-center justify-center text-xs font-bold" style="width: ${unsafePct}%">
+                                ${unsafePct > 15 ? unsafePct + '% Risky' : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderEvolution(evolution) {
+            const container = document.getElementById('evolution-grid');
+
+            if (!evolution.length) {
+                container.innerHTML = '<div class="text-fire-muted text-sm col-span-2">No evolution data yet</div>';
+                return;
+            }
+
+            // Split into gainers and losers
+            const gainers = evolution.filter(e => e.change > 0).sort((a, b) => b.change - a.change).slice(0, 5);
+            const losers = evolution.filter(e => e.change < 0).sort((a, b) => a.change - b.change).slice(0, 5);
+
+            const renderList = (items, isGainer) => items.map(e => `
+                <div class="token-row flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <span class="text-lg">${isGainer ? '🚀' : '📉'}</span>
+                        <span class="font-mono font-bold">${e.symbol}</span>
+                    </div>
+                    <div class="text-right">
+                        <span class="font-mono text-sm">${e.first} → ${e.current}</span>
+                        <span class="font-mono text-sm ml-2 ${isGainer ? 'text-neon-green' : 'text-neon-red'}">
+                            ${isGainer ? '+' : ''}${e.change}
+                        </span>
+                    </div>
+                </div>
+            `).join('');
+
+            container.innerHTML = `
+                <div>
+                    <h4 class="text-sm font-semibold text-neon-green mb-3">📈 Growing</h4>
+                    <div class="space-y-2">
+                        ${gainers.length ? renderList(gainers, true) : '<p class="text-fire-muted text-sm">No gainers yet</p>'}
+                    </div>
+                </div>
+                <div>
+                    <h4 class="text-sm font-semibold text-neon-red mb-3">📉 Declining</h4>
+                    <div class="space-y-2">
+                        ${losers.length ? renderList(losers, false) : '<p class="text-fire-muted text-sm">No decliners</p>'}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Load on ready
+        loadData();
+    </script>
+</body>
+</html>

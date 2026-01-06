@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HolDex Theme Vote | $ASDFASDFA Cult Decision</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Comic Neue', cursive; }
+        .theme-card { transition: all 0.3s ease; cursor: pointer; }
+        .theme-card:hover { transform: translateY(-4px); }
+        .theme-card.selected { ring: 4px; ring-color: #ea580c; }
+
+        /* ============================================
+           THEME 1: EMBER (Cream/Warm)
+           Fond crème chaud, accents burnt orange
+           ============================================ */
+        .theme-ember {
+            --bg-primary: #faf8f5;
+            --bg-secondary: #f5f0e8;
+            --bg-tertiary: #ebe4d8;
+            --border: #d4c9b8;
+            --text-primary: #1a1410;
+            --text-secondary: #5c4d3d;
+            --text-muted: #8a7a66;
+            --accent: #ea580c;
+            --accent-light: #fb923c;
+            --accent-glow: rgba(234, 88, 12, 0.15);
+            --green: #16a34a;
+            --red: #dc2626;
+        }
+
+        /* ============================================
+           THEME 2: PAPER (Pure White/Clean)
+           Fond blanc pur, style minimaliste
+           ============================================ */
+        .theme-paper {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8f8f8;
+            --bg-tertiary: #f0f0f0;
+            --border: #e0e0e0;
+            --text-primary: #111111;
+            --text-secondary: #555555;
+            --text-muted: #888888;
+            --accent: #ea580c;
+            --accent-light: #fb923c;
+            --accent-glow: rgba(234, 88, 12, 0.1);
+            --green: #22c55e;
+            --red: #ef4444;
+        }
+
+        /* ============================================
+           THEME 3: PARCHMENT (Sepia/Vintage)
+           Style parchemin brûlé, vibe ancient scroll
+           ============================================ */
+        .theme-parchment {
+            --bg-primary: #f4e9d6;
+            --bg-secondary: #e8dcc4;
+            --bg-tertiary: #dcd0b8;
+            --border: #c4b59b;
+            --text-primary: #2d2416;
+            --text-secondary: #5a4a32;
+            --text-muted: #7a6a52;
+            --accent: #b84c00;
+            --accent-light: #d97706;
+            --accent-glow: rgba(184, 76, 0, 0.2);
+            --green: #15803d;
+            --red: #b91c1c;
+        }
+
+        .preview-box {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+        .preview-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+        }
+        .preview-accent { color: var(--accent); }
+        .preview-muted { color: var(--text-muted); }
+        .preview-btn {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            color: var(--accent);
+        }
+        .preview-btn:hover {
+            border-color: var(--accent);
+        }
+        .preview-badge-green {
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--green);
+            border: 1px solid var(--green);
+        }
+        .preview-badge-red {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--red);
+            border: 1px solid var(--red);
+        }
+        .preview-row:hover {
+            background: var(--accent-glow);
+        }
+    </style>
+</head>
+<body class="bg-[#0a0a0a] text-white min-h-screen p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto">
+        <!-- Header -->
+        <div class="text-center mb-12">
+            <h1 class="text-4xl md:text-5xl font-bold text-[#ea580c] mb-4">🔥 HolDex Theme Vote</h1>
+            <p class="text-[#737373] text-lg">The cult decides. Which light mode for HolDex?</p>
+            <p class="text-[#fb923c] text-sm mt-2 font-mono">Dark mode stays default • Light mode = toggle option</p>
+        </div>
+
+        <!-- Theme Options Grid -->
+        <div class="grid md:grid-cols-3 gap-6 mb-12">
+
+            <!-- THEME 1: EMBER -->
+            <div class="theme-card rounded-2xl overflow-hidden border-2 border-[#252525] hover:border-[#ea580c]" onclick="selectTheme('ember')">
+                <div class="bg-[#141414] p-4 border-b border-[#252525]">
+                    <div class="flex items-center justify-between">
+                        <h2 class="text-xl font-bold text-white">🔥 EMBER</h2>
+                        <span class="text-xs bg-[#ea580c] text-white px-2 py-1 rounded">Recommended</span>
+                    </div>
+                    <p class="text-[#737373] text-sm mt-1">Cream/Warm • Cozy vibes</p>
+                </div>
+
+                <!-- Preview -->
+                <div class="theme-ember preview-box p-4 min-h-[300px]">
+                    <div class="preview-panel rounded-lg p-3 mb-3">
+                        <div class="flex items-center gap-3 mb-3">
+                            <div class="w-8 h-8 rounded bg-[#ea580c] flex items-center justify-center text-white text-sm">🔥</div>
+                            <div>
+                                <div class="font-bold preview-accent">HolDex</div>
+                                <div class="text-xs preview-muted font-mono">Holdex it.</div>
+                            </div>
+                        </div>
+                        <input class="w-full preview-panel rounded px-3 py-2 text-sm preview-muted" placeholder="Search token...">
+                    </div>
+
+                    <!-- Fake table row -->
+                    <div class="preview-panel rounded-lg overflow-hidden">
+                        <div class="preview-row p-3 flex items-center justify-between border-b" style="border-color: var(--border)">
+                            <div class="flex items-center gap-2">
+                                <div class="w-8 h-8 rounded bg-[#ea580c]/20 flex items-center justify-center text-[#ea580c] text-xs font-bold">AS</div>
+                                <div>
+                                    <div class="font-bold text-sm">ASDFASDFA</div>
+                                    <div class="text-xs preview-muted">$ASDF</div>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <div class="preview-badge-green text-xs px-2 py-0.5 rounded font-mono">A1</div>
+                            </div>
+                        </div>
+                        <div class="preview-row p-3 flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <div class="w-8 h-8 rounded bg-gray-300 flex items-center justify-center text-gray-600 text-xs font-bold">XX</div>
+                                <div>
+                                    <div class="font-bold text-sm">SomeToken</div>
+                                    <div class="text-xs preview-muted">$SOME</div>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <div class="preview-badge-red text-xs px-2 py-0.5 rounded font-mono">C</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-[#141414] p-3 text-center">
+                    <span class="text-[#fb923c] font-bold">Vote #1</span>
+                </div>
+            </div>
+
+            <!-- THEME 2: PAPER -->
+            <div class="theme-card rounded-2xl overflow-hidden border-2 border-[#252525] hover:border-[#ea580c]" onclick="selectTheme('paper')">
+                <div class="bg-[#141414] p-4 border-b border-[#252525]">
+                    <h2 class="text-xl font-bold text-white">📄 PAPER</h2>
+                    <p class="text-[#737373] text-sm mt-1">Pure White • Clean minimal</p>
+                </div>
+
+                <!-- Preview -->
+                <div class="theme-paper preview-box p-4 min-h-[300px]">
+                    <div class="preview-panel rounded-lg p-3 mb-3">
+                        <div class="flex items-center gap-3 mb-3">
+                            <div class="w-8 h-8 rounded bg-[#ea580c] flex items-center justify-center text-white text-sm">🔥</div>
+                            <div>
+                                <div class="font-bold preview-accent">HolDex</div>
+                                <div class="text-xs preview-muted font-mono">Holdex it.</div>
+                            </div>
+                        </div>
+                        <input class="w-full preview-panel rounded px-3 py-2 text-sm preview-muted" placeholder="Search token...">
+                    </div>
+
+                    <!-- Fake table row -->
+                    <div class="preview-panel rounded-lg overflow-hidden">
+                        <div class="preview-row p-3 flex items-center justify-between border-b" style="border-color: var(--border)">
+                            <div class="flex items-center gap-2">
+                                <div class="w-8 h-8 rounded bg-[#ea580c]/20 flex items-center justify-center text-[#ea580c] text-xs font-bold">AS</div>
+                                <div>
+                                    <div class="font-bold text-sm">ASDFASDFA</div>
+                                    <div class="text-xs preview-muted">$ASDF</div>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <div class="preview-badge-green text-xs px-2 py-0.5 rounded font-mono">A1</div>
+                            </div>
+                        </div>
+                        <div class="preview-row p-3 flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <div class="w-8 h-8 rounded bg-gray-200 flex items-center justify-center text-gray-500 text-xs font-bold">XX</div>
+                                <div>
+                                    <div class="font-bold text-sm">SomeToken</div>
+                                    <div class="text-xs preview-muted">$SOME</div>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <div class="preview-badge-red text-xs px-2 py-0.5 rounded font-mono">C</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-[#141414] p-3 text-center">
+                    <span class="text-[#fb923c] font-bold">Vote #2</span>
+                </div>
+            </div>
+
+            <!-- THEME 3: PARCHMENT -->
+            <div class="theme-card rounded-2xl overflow-hidden border-2 border-[#252525] hover:border-[#ea580c]" onclick="selectTheme('parchment')">
+                <div class="bg-[#141414] p-4 border-b border-[#252525]">
+                    <h2 class="text-xl font-bold text-white">📜 PARCHMENT</h2>
+                    <p class="text-[#737373] text-sm mt-1">Sepia/Vintage • Ancient scroll</p>
+                </div>
+
+                <!-- Preview -->
+                <div class="theme-parchment preview-box p-4 min-h-[300px]">
+                    <div class="preview-panel rounded-lg p-3 mb-3">
+                        <div class="flex items-center gap-3 mb-3">
+                            <div class="w-8 h-8 rounded bg-[#b84c00] flex items-center justify-center text-white text-sm">🔥</div>
+                            <div>
+                                <div class="font-bold preview-accent">HolDex</div>
+                                <div class="text-xs preview-muted font-mono">Holdex it.</div>
+                            </div>
+                        </div>
+                        <input class="w-full preview-panel rounded px-3 py-2 text-sm preview-muted" placeholder="Search token...">
+                    </div>
+
+                    <!-- Fake table row -->
+                    <div class="preview-panel rounded-lg overflow-hidden">
+                        <div class="preview-row p-3 flex items-center justify-between border-b" style="border-color: var(--border)">
+                            <div class="flex items-center gap-2">
+                                <div class="w-8 h-8 rounded bg-[#b84c00]/20 flex items-center justify-center text-[#b84c00] text-xs font-bold">AS</div>
+                                <div>
+                                    <div class="font-bold text-sm">ASDFASDFA</div>
+                                    <div class="text-xs preview-muted">$ASDF</div>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <div class="preview-badge-green text-xs px-2 py-0.5 rounded font-mono">A1</div>
+                            </div>
+                        </div>
+                        <div class="preview-row p-3 flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <div class="w-8 h-8 rounded bg-[#c4b59b] flex items-center justify-center text-[#5a4a32] text-xs font-bold">XX</div>
+                                <div>
+                                    <div class="font-bold text-sm">SomeToken</div>
+                                    <div class="text-xs preview-muted">$SOME</div>
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <div class="preview-badge-red text-xs px-2 py-0.5 rounded font-mono">C</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-[#141414] p-3 text-center">
+                    <span class="text-[#fb923c] font-bold">Vote #3</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Comparison Table -->
+        <div class="bg-[#141414] rounded-2xl border border-[#252525] p-6 mb-8">
+            <h3 class="text-xl font-bold text-white mb-4">📊 Comparison</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="border-b border-[#252525]">
+                            <th class="text-left p-3 text-[#737373]">Feature</th>
+                            <th class="text-center p-3 text-[#ea580c]">🔥 EMBER</th>
+                            <th class="text-center p-3 text-[#fb923c]">📄 PAPER</th>
+                            <th class="text-center p-3 text-[#d97706]">📜 PARCHMENT</th>
+                        </tr>
+                    </thead>
+                    <tbody class="font-mono text-xs">
+                        <tr class="border-b border-[#252525]/50">
+                            <td class="p-3 text-[#737373]">Background</td>
+                            <td class="text-center p-3">#faf8f5 (cream)</td>
+                            <td class="text-center p-3">#ffffff (white)</td>
+                            <td class="text-center p-3">#f4e9d6 (sepia)</td>
+                        </tr>
+                        <tr class="border-b border-[#252525]/50">
+                            <td class="p-3 text-[#737373]">Vibe</td>
+                            <td class="text-center p-3">☕ Cozy/Warm</td>
+                            <td class="text-center p-3">✨ Clean/Pro</td>
+                            <td class="text-center p-3">📚 Vintage/Ancient</td>
+                        </tr>
+                        <tr class="border-b border-[#252525]/50">
+                            <td class="p-3 text-[#737373]">Eye strain</td>
+                            <td class="text-center p-3 text-green-500">Low</td>
+                            <td class="text-center p-3 text-yellow-500">Medium</td>
+                            <td class="text-center p-3 text-green-500">Low</td>
+                        </tr>
+                        <tr>
+                            <td class="p-3 text-[#737373]">$ASDF Aligned</td>
+                            <td class="text-center p-3 text-green-500">✓✓✓</td>
+                            <td class="text-center p-3 text-yellow-500">✓✓</td>
+                            <td class="text-center p-3 text-green-500">✓✓✓</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Vote CTA -->
+        <div class="text-center">
+            <p class="text-[#737373] mb-4">React in TG with your choice number</p>
+            <div class="flex justify-center gap-4 text-4xl">
+                <span class="cursor-pointer hover:scale-125 transition" title="Vote EMBER">1️⃣</span>
+                <span class="cursor-pointer hover:scale-125 transition" title="Vote PAPER">2️⃣</span>
+                <span class="cursor-pointer hover:scale-125 transition" title="Vote PARCHMENT">3️⃣</span>
+            </div>
+            <p class="text-[#ea580c] mt-6 font-bold">Dark mode stays default • Winner becomes the light option</p>
+        </div>
+
+        <!-- Footer -->
+        <div class="text-center mt-12 pt-8 border-t border-[#252525]">
+            <p class="text-[#737373] text-sm">HolDex • Powered by <a href="https://helius.dev" class="text-[#fb923c] hover:underline">Helius</a></p>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        function selectTheme(theme) {
+            document.querySelectorAll('.theme-card').forEach(c => c.classList.remove('ring-4', 'ring-[#ea580c]'));
+            event.currentTarget.classList.add('ring-4', 'ring-[#ea580c]');
+            console.log('Selected theme:', theme);
+        }
+    </script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { initDB, getDB } = require('../services/database');
-const logger = require('../services/logger');
+const _logger = require('../services/logger');
 
 (async () => {
     try {

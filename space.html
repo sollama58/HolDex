@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Space | HolDex</title>
+
+    <script src="https://bundle.run/buffer@6.0.3"></script>
+    <script>
+        if (typeof window.buffer !== 'undefined') {
+            window.Buffer = window.buffer.Buffer;
+        }
+    </script>
+    <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/tweetnacl@1.0.3/nacl-fast.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        fire: {
+                            bg: '#0c0c14',
+                            panel: 'rgba(20, 20, 35, 0.6)',
+                            solid: '#14141f',
+                            border: 'rgba(255, 255, 255, 0.08)',
+                            accent: '#f97316',
+                            text: '#f8fafc',
+                            muted: '#94a3b8',
+                            glow: 'rgba(249, 115, 22, 0.4)'
+                        },
+                        neon: { cyan: '#22d3ee', purple: '#a855f7', pink: '#ec4899', green: '#10b981' }
+                    },
+                    fontFamily: {
+                        mono: ['JetBrains Mono', 'monospace'],
+                        sans: ['Inter', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background: #0c0c14;
+            color: #f8fafc;
+            font-family: 'Inter', system-ui, sans-serif;
+            min-height: 100vh;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            top: -20%;
+            left: -10%;
+            width: 40%;
+            height: 50%;
+            background: radial-gradient(circle, rgba(249, 115, 22, 0.15) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+        body::after {
+            content: '';
+            position: fixed;
+            bottom: -30%;
+            right: -15%;
+            width: 50%;
+            height: 60%;
+            background: radial-gradient(circle, rgba(168, 85, 247, 0.12) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+        body > * { position: relative; z-index: 1; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+
+        .glass-panel {
+            background: rgba(20, 20, 35, 0.6);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px;
+        }
+        .glass-input {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 10px;
+            padding: 12px 16px;
+            color: #f8fafc;
+            width: 100%;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', monospace;
+            transition: all 0.2s ease;
+        }
+        .glass-input::placeholder {
+            color: rgba(148, 163, 184, 0.6);
+        }
+        .glass-input:hover {
+            border-color: rgba(255, 255, 255, 0.2);
+            background: rgba(0, 0, 0, 0.5);
+        }
+        .glass-input:focus {
+            outline: none;
+            border-color: #f97316;
+            background: rgba(0, 0, 0, 0.6);
+            box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.15), 0 0 20px rgba(249, 115, 22, 0.1);
+        }
+        /* Select dropdown styling */
+        select.glass-input {
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 14px center;
+            padding-right: 40px;
+            cursor: pointer;
+            font-family: 'Inter', system-ui, sans-serif;
+        }
+        select.glass-input option {
+            background: #14141f;
+            color: #f8fafc;
+            padding: 12px;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #f97316, #ea580c);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(249, 115, 22, 0.4); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #f8fafc;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 500;
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: all 0.2s;
+        }
+        .btn-secondary:hover { background: rgba(255, 255, 255, 0.15); }
+        .stat-card {
+            background: rgba(20, 20, 35, 0.4);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+        }
+        .stat-value { font-size: 2rem; font-weight: 700; color: #f97316; }
+        .stat-label { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .badge-grant { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+        .badge-tier { background: rgba(168, 85, 247, 0.2); color: #a855f7; }
+        .feature-card {
+            background: rgba(20, 20, 35, 0.4);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            padding: 24px;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        .feature-card:hover { border-color: rgba(249, 115, 22, 0.3); transform: translateY(-2px); }
+        .feature-card.disabled { opacity: 0.5; cursor: not-allowed; }
+        .feature-card.disabled:hover { transform: none; border-color: rgba(255,255,255,0.06); }
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+        }
+        .toast-success { background: rgba(16, 185, 129, 0.9); color: white; }
+        .toast-error { background: rgba(239, 68, 68, 0.9); color: white; }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .card-preview {
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            max-width: 100%;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <!-- Navigation -->
+    <nav class="flex items-center gap-4 mb-6 text-sm">
+        <a href="/" class="text-fire-muted hover:text-fire-accent transition">← Home</a>
+        <span class="text-fire-muted/30">|</span>
+        <a href="/track-record" class="text-fire-muted hover:text-fire-accent transition">Analytics</a>
+        <span class="text-fire-muted/30">|</span>
+        <span class="text-fire-accent">The Space</span>
+    </nav>
+
+    <!-- Header -->
+    <header class="flex items-center justify-between mb-8">
+        <div class="flex items-center gap-4">
+            <span class="text-2xl font-bold" style="color: #f97316; text-shadow: 0 0 30px rgba(249, 115, 22, 0.5);">
+                THE SPACE
+            </span>
+            <span class="text-fire-muted text-sm hidden md:inline">Hold to enter. Grants unlock features.</span>
+        </div>
+        <div id="auth-status" class="flex items-center gap-3">
+            <span id="wallet-display" class="text-fire-muted text-sm font-mono hidden"></span>
+            <button id="btn-logout" class="btn-secondary hidden" onclick="logout()">Disconnect</button>
+        </div>
+    </header>
+
+    <!-- Login Screen -->
+    <div id="login-screen" class="max-w-md mx-auto mt-20">
+        <div class="glass-panel p-8 text-center">
+            <div class="text-6xl mb-4">🐕‍🦺🔥</div>
+            <h2 class="text-xl font-bold mb-2">Welcome to The Space</h2>
+            <p class="text-fire-muted text-sm mb-6">Connect your wallet to access cult member features</p>
+
+            <button id="btn-connect-wallet" class="btn-primary w-full" onclick="connectWallet()">
+                Connect Wallet
+            </button>
+
+            <p class="text-fire-muted text-xs mt-4">
+                Need access? Contact an ambassador.
+            </p>
+        </div>
+    </div>
+
+    <!-- Main Dashboard (hidden until auth) -->
+    <main id="dashboard" class="hidden max-w-5xl mx-auto">
+        <!-- Profile Section -->
+        <div class="glass-panel p-6 mb-8">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <div class="flex items-center gap-3 mb-2">
+                        <span id="user-tier-icon" class="text-3xl"></span>
+                        <div>
+                            <h2 class="text-xl font-bold" id="user-wallet-short">-</h2>
+                            <span id="user-tier-name" class="badge badge-tier">-</span>
+                        </div>
+                    </div>
+                    <div id="user-grants" class="flex flex-wrap gap-2 mt-3"></div>
+                </div>
+                <div class="text-right">
+                    <div class="text-fire-muted text-xs uppercase tracking-wider mb-1">E-Score</div>
+                    <div class="text-4xl font-bold" style="color: #f97316;" id="user-escore">-</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Features Grid -->
+        <h3 class="text-lg font-bold mb-4 text-fire-muted">Your Features</h3>
+        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+            <!-- Card Generator -->
+            <div id="feature-card-generator" class="feature-card" onclick="openCardGenerator()">
+                <div class="text-3xl mb-3">🎴</div>
+                <h4 class="font-bold mb-1">K-Score Cards</h4>
+                <p class="text-fire-muted text-sm">Generate shareable K-Score cards for any token</p>
+                <div class="mt-3">
+                    <span class="badge badge-grant">card_generator</span>
+                </div>
+            </div>
+
+            <!-- GASdf Analytics -->
+            <div id="feature-analytics" class="feature-card" onclick="openAnalytics()">
+                <div class="text-3xl mb-3">📊</div>
+                <h4 class="font-bold mb-1">Burn Analytics</h4>
+                <p class="text-fire-muted text-sm">View $ASDF burn stats and rewards distribution</p>
+                <div class="mt-3">
+                    <span class="badge badge-grant">gasdf_analytics</span>
+                </div>
+            </div>
+
+            <!-- Direct Submit -->
+            <div id="feature-direct-submit" class="feature-card" onclick="openDirectSubmit()">
+                <div class="text-3xl mb-3">🚀</div>
+                <h4 class="font-bold mb-1">Direct Submit</h4>
+                <p class="text-fire-muted text-sm">Submit tokens without review queue</p>
+                <div class="mt-3">
+                    <span class="badge badge-grant">direct_submit</span>
+                </div>
+            </div>
+
+            <!-- Priority Queue -->
+            <div id="feature-priority" class="feature-card" onclick="openPriority()">
+                <div class="text-3xl mb-3">⚡</div>
+                <h4 class="font-bold mb-1">Priority Refresh</h4>
+                <p class="text-fire-muted text-sm">Priority K-Score calculation queue</p>
+                <div class="mt-3">
+                    <span class="badge badge-grant">priority_queue</span>
+                </div>
+            </div>
+
+            <!-- Leaderboard -->
+            <div id="feature-leaderboard" class="feature-card" onclick="openLeaderboard()">
+                <div class="text-3xl mb-3">🏆</div>
+                <h4 class="font-bold mb-1">E-Score Leaderboard</h4>
+                <p class="text-fire-muted text-sm">View top cult members by E-Score</p>
+                <div class="mt-3">
+                    <span class="badge badge-grant">space_access</span>
+                </div>
+            </div>
+
+            <!-- Admin (if has grant) -->
+            <div id="feature-admin" class="feature-card hidden" onclick="window.location.href='/admin'">
+                <div class="text-3xl mb-3">🔐</div>
+                <h4 class="font-bold mb-1">Admin Panel</h4>
+                <p class="text-fire-muted text-sm">Manage grants and site settings</p>
+                <div class="mt-3">
+                    <span class="badge badge-grant">grants_admin</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card Generator Modal -->
+        <div id="modal-card-generator" class="fixed inset-0 bg-black/80 hidden items-center justify-center z-50 p-4">
+            <div class="glass-panel p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-bold">Generate K-Score Card</h3>
+                    <button onclick="closeModal('card-generator')" class="text-fire-muted hover:text-white text-2xl">&times;</button>
+                </div>
+
+                <div class="space-y-5">
+                    <div>
+                        <label class="text-xs text-fire-muted uppercase tracking-wider block mb-2 font-medium">Contract Address</label>
+                        <div class="relative">
+                            <span class="absolute left-4 top-1/2 -translate-y-1/2 text-fire-muted opacity-50">◈</span>
+                            <input type="text" id="card-mint" class="glass-input pl-10" placeholder="Paste token mint address...">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="text-xs text-fire-muted uppercase tracking-wider block mb-2 font-medium">Card Style</label>
+                        <select id="card-style" class="glass-input">
+                            <option value="holdex">🐕‍🦺 HolDex — Glassmorphism</option>
+                            <option value="asdf">🔥 ASDF — Fire Terminal</option>
+                            <option value="minimal">◆ Minimal — Clean & Simple</option>
+                        </select>
+                    </div>
+
+                    <button class="btn-primary w-full py-3 text-sm font-semibold tracking-wide" onclick="generateCard()">
+                        Generate Card
+                    </button>
+
+                    <div id="card-result" class="hidden">
+                        <div class="border-t border-white/10 pt-4 mt-4">
+                            <p class="text-sm text-fire-muted mb-2">Preview:</p>
+                            <img id="card-preview-img" class="card-preview w-full" src="" alt="K-Score Card">
+
+                            <div class="flex gap-2 mt-4">
+                                <button class="btn-primary flex-1" onclick="copyCardLink()">Copy Link</button>
+                                <button class="btn-secondary flex-1" onclick="shareTwitter()">Share on X</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Leaderboard Modal -->
+        <div id="modal-leaderboard" class="fixed inset-0 bg-black/80 hidden items-center justify-center z-50 p-4">
+            <div class="glass-panel p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-bold">E-Score Leaderboard</h3>
+                    <button onclick="closeModal('leaderboard')" class="text-fire-muted hover:text-white text-2xl">&times;</button>
+                </div>
+
+                <div id="leaderboard-content">
+                    <p class="text-fire-muted text-center py-8">Loading...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="text-center text-fire-muted text-sm mt-12 mb-8">
+            this is fine. 🐕‍🦺🔥
+        </div>
+    </main>
+
+    <script>
+        const API_URL = window.location.origin;
+        let sessionToken = null;
+        let connectedWallet = null;
+        let userGrants = [];
+        let currentCardMint = null;
+        let currentCardStyle = 'holdex';
+
+        // ═══════════════════════════════════════════════════════════════
+        // AUTH
+        // ═══════════════════════════════════════════════════════════════
+
+        async function connectWallet() {
+            try {
+                if (!window.solana?.isPhantom) {
+                    toast('Please install Phantom wallet', 'error');
+                    return;
+                }
+
+                const resp = await window.solana.connect();
+                connectedWallet = resp.publicKey.toString();
+
+                // Sign message for session
+                const timestamp = Date.now();
+                const message = `Access HolDex Space: ${timestamp}`;
+                const encodedMessage = new TextEncoder().encode(message);
+                const signedMessage = await window.solana.signMessage(encodedMessage, 'utf8');
+                const signature = btoa(String.fromCharCode(...signedMessage.signature));
+
+                // Login to space
+                const loginResp = await fetch(`${API_URL}/space/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ wallet: connectedWallet, message, signature })
+                });
+
+                const data = await loginResp.json();
+                if (!data.success) {
+                    toast(data.error || 'Login failed', 'error');
+                    return;
+                }
+
+                sessionToken = data.data.sessionToken;
+                userGrants = data.data.grants || [];
+                showDashboard(data.data);
+                toast('Welcome to The Space!', 'success');
+
+            } catch (e) {
+                console.error(e);
+                toast('Connection failed', 'error');
+            }
+        }
+
+        function logout() {
+            fetch(`${API_URL}/space/auth/logout`, {
+                method: 'POST',
+                headers: { 'x-session-token': sessionToken }
+            }).catch(() => {});
+
+            sessionToken = null;
+            connectedWallet = null;
+            userGrants = [];
+            document.getElementById('login-screen').classList.remove('hidden');
+            document.getElementById('dashboard').classList.add('hidden');
+            document.getElementById('wallet-display').classList.add('hidden');
+            document.getElementById('btn-logout').classList.add('hidden');
+        }
+
+        async function showDashboard(userData) {
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('dashboard').classList.remove('hidden');
+            document.getElementById('btn-logout').classList.remove('hidden');
+
+            // Show wallet
+            document.getElementById('wallet-display').textContent = shortWallet(connectedWallet);
+            document.getElementById('wallet-display').classList.remove('hidden');
+            document.getElementById('user-wallet-short').textContent = shortWallet(connectedWallet);
+
+            // Load full profile
+            try {
+                const resp = await fetch(`${API_URL}/space/auth/me`, {
+                    headers: { 'x-session-token': sessionToken }
+                });
+                const data = await resp.json();
+
+                if (data.success) {
+                    const profile = data.data;
+                    userGrants = profile.grants || [];
+
+                    // E-Score
+                    document.getElementById('user-escore').textContent = profile.eScore?.toFixed(2) || '0';
+
+                    // Tier
+                    if (profile.tier) {
+                        document.getElementById('user-tier-icon').textContent = profile.tier.icon || '🔥';
+                        document.getElementById('user-tier-name').textContent = profile.tier.name || 'Member';
+                    }
+
+                    // Grants badges
+                    const grantsContainer = document.getElementById('user-grants');
+                    grantsContainer.innerHTML = userGrants.map(g =>
+                        `<span class="badge badge-grant">${g}</span>`
+                    ).join('');
+
+                    // Enable/disable features based on grants
+                    updateFeatureAccess();
+                }
+            } catch (e) {
+                console.error('Profile load error:', e);
+            }
+        }
+
+        function updateFeatureAccess() {
+            // Card Generator
+            const cardGen = document.getElementById('feature-card-generator');
+            if (!userGrants.includes('card_generator')) {
+                cardGen.classList.add('disabled');
+            } else {
+                cardGen.classList.remove('disabled');
+            }
+
+            // Analytics
+            const analytics = document.getElementById('feature-analytics');
+            if (!userGrants.includes('gasdf_analytics')) {
+                analytics.classList.add('disabled');
+            } else {
+                analytics.classList.remove('disabled');
+            }
+
+            // Direct Submit
+            const directSubmit = document.getElementById('feature-direct-submit');
+            if (!userGrants.includes('direct_submit')) {
+                directSubmit.classList.add('disabled');
+            } else {
+                directSubmit.classList.remove('disabled');
+            }
+
+            // Priority Queue
+            const priority = document.getElementById('feature-priority');
+            if (!userGrants.includes('priority_queue')) {
+                priority.classList.add('disabled');
+            } else {
+                priority.classList.remove('disabled');
+            }
+
+            // Admin
+            const admin = document.getElementById('feature-admin');
+            if (userGrants.includes('grants_admin')) {
+                admin.classList.remove('hidden');
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // FEATURES
+        // ═══════════════════════════════════════════════════════════════
+
+        function openCardGenerator() {
+            if (!userGrants.includes('card_generator')) {
+                toast('You need card_generator grant', 'error');
+                return;
+            }
+            document.getElementById('modal-card-generator').classList.remove('hidden');
+            document.getElementById('modal-card-generator').classList.add('flex');
+        }
+
+        /**
+         * Validate Solana address (base58 encoded, 32-44 chars)
+         * SECURITY: Prevents injection, ensures valid format
+         */
+        function isValidSolanaAddress(address) {
+            if (!address || typeof address !== 'string') return false;
+
+            // Length check (base58 encoded 32 bytes = 32-44 chars)
+            if (address.length < 32 || address.length > 44) return false;
+
+            // Base58 alphabet: no 0, O, I, l
+            const base58Regex = /^[1-9A-HJ-NP-Za-km-z]+$/;
+            return base58Regex.test(address);
+        }
+
+        async function generateCard() {
+            const input = document.getElementById('card-mint');
+            const rawValue = input.value;
+
+            // Sanitize: trim whitespace, remove any non-alphanumeric chars
+            const mint = rawValue.trim().replace(/[^1-9A-HJ-NP-Za-km-z]/g, '');
+
+            // Update input with sanitized value
+            if (mint !== rawValue.trim()) {
+                input.value = mint;
+            }
+
+            // Validate
+            if (!mint) {
+                toast('Please enter a contract address', 'error');
+                input.focus();
+                return;
+            }
+
+            if (!isValidSolanaAddress(mint)) {
+                toast('Invalid Solana address format', 'error');
+                input.classList.add('border-red-500');
+                setTimeout(() => input.classList.remove('border-red-500'), 2000);
+                return;
+            }
+
+            const style = document.getElementById('card-style').value;
+
+            // Validate style (whitelist)
+            const allowedStyles = ['holdex', 'asdf', 'minimal'];
+            if (!allowedStyles.includes(style)) {
+                toast('Invalid card style', 'error');
+                return;
+            }
+
+            currentCardMint = mint;
+            currentCardStyle = style;
+
+            // Build URL safely (no user input in path beyond validated mint)
+            const cardUrl = `${API_URL}/api/token/${encodeURIComponent(mint)}/card.png?style=${encodeURIComponent(style)}`;
+
+            const preview = document.getElementById('card-preview-img');
+            const resultDiv = document.getElementById('card-result');
+
+            // Show loading state
+            preview.style.opacity = '0.5';
+            resultDiv.classList.remove('hidden');
+
+            // Load image and handle errors
+            preview.onload = () => {
+                preview.style.opacity = '1';
+                toast('Card generated!', 'success');
+            };
+            preview.onerror = () => {
+                preview.style.opacity = '1';
+                toast('Token not found or card generation failed', 'error');
+            };
+
+            preview.src = cardUrl;
+        }
+
+        function copyCardLink() {
+            // SECURITY: Only use validated mint stored in currentCardMint
+            if (!currentCardMint || !isValidSolanaAddress(currentCardMint)) return;
+            const link = `${API_URL}/k/${encodeURIComponent(currentCardMint)}`;
+            navigator.clipboard.writeText(link);
+            toast('Link copied!', 'success');
+        }
+
+        function shareTwitter() {
+            // SECURITY: Only use validated mint stored in currentCardMint
+            if (!currentCardMint || !isValidSolanaAddress(currentCardMint)) return;
+            const link = `${API_URL}/k/${encodeURIComponent(currentCardMint)}`;
+            const text = encodeURIComponent(`Check out this K-Score! ${link}`);
+            window.open(`https://twitter.com/intent/tweet?text=${text}`, '_blank');
+        }
+
+        // Real-time validation feedback on input
+        document.addEventListener('DOMContentLoaded', () => {
+            const mintInput = document.getElementById('card-mint');
+            if (mintInput) {
+                mintInput.addEventListener('input', (e) => {
+                    const value = e.target.value.trim();
+                    if (value.length === 0) {
+                        e.target.style.borderColor = '';
+                    } else if (isValidSolanaAddress(value)) {
+                        e.target.style.borderColor = '#10b981'; // green
+                    } else if (value.length >= 32) {
+                        e.target.style.borderColor = '#ef4444'; // red
+                    } else {
+                        e.target.style.borderColor = '#f97316'; // orange (typing)
+                    }
+                });
+
+                // Paste handler - auto-sanitize
+                mintInput.addEventListener('paste', (e) => {
+                    setTimeout(() => {
+                        const sanitized = mintInput.value.trim().replace(/[^1-9A-HJ-NP-Za-km-z]/g, '');
+                        if (sanitized !== mintInput.value) {
+                            mintInput.value = sanitized;
+                            mintInput.dispatchEvent(new Event('input'));
+                        }
+                    }, 0);
+                });
+            }
+        });
+
+        function openAnalytics() {
+            if (!userGrants.includes('gasdf_analytics')) {
+                toast('You need gasdf_analytics grant', 'error');
+                return;
+            }
+            toast('Analytics coming soon!', 'success');
+        }
+
+        function openDirectSubmit() {
+            if (!userGrants.includes('direct_submit')) {
+                toast('You need direct_submit grant', 'error');
+                return;
+            }
+            toast('Direct submit coming soon!', 'success');
+        }
+
+        function openPriority() {
+            if (!userGrants.includes('priority_queue')) {
+                toast('You need priority_queue grant', 'error');
+                return;
+            }
+            toast('Priority queue coming soon!', 'success');
+        }
+
+        async function openLeaderboard() {
+            document.getElementById('modal-leaderboard').classList.remove('hidden');
+            document.getElementById('modal-leaderboard').classList.add('flex');
+
+            try {
+                const resp = await fetch(`${API_URL}/space/analytics/leaderboard`, {
+                    headers: { 'x-session-token': sessionToken }
+                });
+                const data = await resp.json();
+
+                if (data.success && data.data?.leaders) {
+                    const html = `
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="text-left text-fire-muted text-xs uppercase border-b border-white/10">
+                                    <th class="pb-3">#</th>
+                                    <th class="pb-3">Wallet</th>
+                                    <th class="pb-3">Tier</th>
+                                    <th class="pb-3 text-right">E-Score</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.data.leaders.map((l, i) => `
+                                    <tr class="border-b border-white/5">
+                                        <td class="py-3 text-fire-muted">${i + 1}</td>
+                                        <td class="py-3 font-mono">${shortWallet(l.wallet)}</td>
+                                        <td class="py-3">${l.tier_icon || '🔥'} ${l.tier || '-'}</td>
+                                        <td class="py-3 text-right font-bold" style="color: #f97316;">${l.e_score?.toFixed(2) || '0'}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
+                    document.getElementById('leaderboard-content').innerHTML = html;
+                } else {
+                    document.getElementById('leaderboard-content').innerHTML =
+                        '<p class="text-fire-muted text-center py-8">No leaderboard data yet</p>';
+                }
+            } catch (e) {
+                document.getElementById('leaderboard-content').innerHTML =
+                    '<p class="text-fire-muted text-center py-8">Failed to load leaderboard</p>';
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // UI HELPERS
+        // ═══════════════════════════════════════════════════════════════
+
+        function closeModal(name) {
+            document.getElementById(`modal-${name}`).classList.add('hidden');
+            document.getElementById(`modal-${name}`).classList.remove('flex');
+        }
+
+        function shortWallet(wallet) {
+            if (!wallet) return '-';
+            return wallet.slice(0, 4) + '...' + wallet.slice(-4);
+        }
+
+        function toast(message, type = 'success') {
+            const el = document.createElement('div');
+            el.className = `toast toast-${type}`;
+            el.textContent = message;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 3000);
+        }
+
+        // Close modals on escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('[id^="modal-"]').forEach(modal => {
+                    modal.classList.add('hidden');
+                    modal.classList.remove('flex');
+                });
+            }
+        });
+    </script>
+</body>
+</html>

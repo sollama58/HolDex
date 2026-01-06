@@ -5,12 +5,22 @@ const config = require('../config/env');
 const logger = require('./logger');
 
 let io;
+let pubClient = null;
+let subClient = null;
 
 async function initSocket(server) {
     // 1. Initialize Socket.io
+    // SECURITY: Never fallback to wildcard - use explicit origins only
+    const allowedOrigins = config.CORS_ORIGINS === '*' ? '*' : (config.CORS_ORIGINS || [
+        'https://www.alonisthe.dev',
+        'https://alonisthe.dev',
+        'http://localhost:3000',
+        'http://localhost:5173'
+    ]);
+
     io = new Server(server, {
         cors: {
-            origin: config.CORS_ORIGINS || "*", 
+            origin: allowedOrigins,
             methods: ["GET", "POST"]
         },
         transports: ['websocket', 'polling'],
@@ -19,8 +29,8 @@ async function initSocket(server) {
 
     // 2. Setup Redis Adapter for Scaling (Cluster Mode)
     try {
-        const pubClient = createClient({ url: config.REDIS_URL || 'redis://redis:6379' });
-        const subClient = pubClient.duplicate();
+        pubClient = createClient({ url: config.REDIS_URL || 'redis://redis:6379' });
+        subClient = pubClient.duplicate();
 
         // Handle Redis errors to prevent crashes
         pubClient.on('error', (err) => logger.error('Redis Pub Client Error', err));
@@ -37,16 +47,27 @@ async function initSocket(server) {
 
     // 3. Handle Connections
     io.on('connection', (socket) => {
+        // Track rooms per socket to prevent flooding
+        let roomCount = 0;
+        const MAX_ROOMS_PER_SOCKET = 50;
+
         // Room Management for Token Subscriptions
         socket.on('subscribe', (mint) => {
-            if (mint && typeof mint === 'string') {
-                // Must match the room name used in broadcastTokenUpdate
-                socket.join(`token:${mint}`);
-            }
+            // SECURITY: Validate mint format (base58, 32-44 chars)
+            if (!mint || typeof mint !== 'string') return;
+            if (mint.length < 32 || mint.length > 44) return;
+            if (!/^[1-9A-HJ-NP-Za-km-z]+$/.test(mint)) return; // base58 chars only
+            if (roomCount >= MAX_ROOMS_PER_SOCKET) return; // prevent room flooding
+
+            socket.join(`token:${mint}`);
+            roomCount++;
         });
 
         socket.on('unsubscribe', (mint) => {
-            if (mint) socket.leave(`token:${mint}`);
+            if (mint && typeof mint === 'string') {
+                socket.leave(`token:${mint}`);
+                if (roomCount > 0) roomCount--;
+            }
         });
     });
 
@@ -69,4 +90,24 @@ function broadcastTokenUpdate(mint, data) {
     io.to(`token:${mint}`).emit('update', data);
 }
 
-module.exports = { initSocket, getIO, broadcastTokenUpdate };
+/**
+ * Cleanup function for graceful shutdown
+ * Call this when the server is shutting down
+ */
+async function cleanupSocket() {
+    if (io) {
+        io.close();
+        io = null;
+    }
+    if (pubClient) {
+        try { await pubClient.quit(); } catch (_e) { /* ignore */ }
+        pubClient = null;
+    }
+    if (subClient) {
+        try { await subClient.quit(); } catch (_e) { /* ignore */ }
+        subClient = null;
+    }
+    logger.info('🔌 Socket.io: Cleaned up');
+}
+
+module.exports = { initSocket, getIO, broadcastTokenUpdate, cleanupSocket };

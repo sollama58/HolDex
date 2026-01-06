@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
     "worker": "node --max-old-space-size=4096 src/worker.js",
     "start:worker": "node --max-old-space-size=4096 src/worker.js",
     "listener": "node --max-old-space-size=4096 src/listener_worker.js",
@@ -14,7 +16,9 @@
     "migrate:timescale": "node src/scripts/migrate_timescaledb.js",
     "optimize:db": "node src/scripts/optimize_db.js",
     "prune:data": "node src/scripts/prune_data.js",
-    "seed": "node src/scripts/seed_data.js"
+    "seed": "node src/scripts/seed_data.js",
+    "calculator": "node src/calculator.js",
+    "start:calculator": "node src/calculator.js"
   },
   "dependencies": {
     "@socket.io/redis-adapter": "^8.2.1",
@@ -36,7 +40,13 @@
     "winston": "^3.11.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "eslint": "^9.39.2",
+    "globals": "^17.0.0",
     "nodemon": "^3.0.1"
+  },
+  "optionalDependencies": {
+    "canvas": "^3.2.0"
   },
   "engines": {
     "node": ">=18.0.0"

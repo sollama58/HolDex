@@ -63,7 +63,7 @@ async function scanGrowers(deps) {
             let data;
             try {
                 data = JSON.parse(memberStr);
-            } catch (e) {
+            } catch (_e) {
                 await redis.srem(PENDING_KEY, memberStr);
                 continue;
             }
@@ -71,7 +71,7 @@ async function scanGrowers(deps) {
             const { mint, addedAt } = data;
             const now = Date.now();
             const age = now - addedAt;
-            const ageMins = (age / 60000).toFixed(1);
+            const _ageMins = (age / 60000).toFixed(1);
 
             // 1. Prune Very Old Tokens (24h+)
             if (age > MAX_AGE_MS) {

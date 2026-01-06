@@ -1,9 +1,10 @@
 const { getDB } = require('../services/database');
 const { getClient } = require('../services/redis');
 const logger = require('../services/logger');
+const { hashApiKey } = require('../utils/apiKeyHash');
 
 // Local memory cache to prevent slamming Redis/DB for key validation
-// Cache valid keys for 60 seconds
+// Cache valid keys for 60 seconds (keyed by hash)
 const KEY_CACHE = new Map();
 
 /**
@@ -30,28 +31,30 @@ const apiKeyAuth = (required = true) => {
 
         try {
             const now = Date.now();
-            let keyData = KEY_CACHE.get(apiKey);
+            const keyHash = hashApiKey(apiKey);
+            let keyData = KEY_CACHE.get(keyHash);
 
-            // 4. Validate Key (Cache -> DB)
+            // 4. Validate Key (Cache -> DB) - Compare by hash
             if (!keyData || now > keyData.expiry) {
                 const db = getDB();
-                const record = await db.get('SELECT * FROM api_keys WHERE key = $1', [apiKey]);
+                const record = await db.get('SELECT * FROM api_keys WHERE key_hash = $1', [keyHash]);
 
                 if (!record) return res.status(403).json({ success: false, error: 'Invalid API Key' });
                 if (!record.is_active) return res.status(403).json({ success: false, error: 'API Key Revoked' });
 
-                keyData = { 
-                    ...record, 
+                keyData = {
+                    ...record,
+                    keyHash,
                     expiry: now + 60000 // Cache for 60s
                 };
-                KEY_CACHE.set(apiKey, keyData);
+                KEY_CACHE.set(keyHash, keyData);
             }
 
             // 5. Rate Limiting (Redis Optimized)
             const redis = getClient();
             if (redis) {
                 const dateStr = new Date().toISOString().split('T')[0];
-                const redisKey = `rate_limit:${apiKey}:${dateStr}`;
+                const redisKey = `rate_limit:${keyHash}:${dateStr}`;
 
                 // Atomic Increment
                 const currentUsage = await redis.incr(redisKey);
@@ -80,8 +83,8 @@ const apiKeyAuth = (required = true) => {
                 // Lazy Sync to Postgres (Every 20 requests)
                 if (currentUsage % 20 === 0) {
                     const db = getDB();
-                    db.run('UPDATE api_keys SET requests_today = $1, last_reset = $2 WHERE key = $3', 
-                        [currentUsage, now, apiKey]).catch(err => logger.error(`DB Sync Error: ${err.message}`));
+                    db.run('UPDATE api_keys SET requests_today = $1, last_reset = $2 WHERE key_hash = $3',
+                        [currentUsage, now, keyHash]).catch(err => logger.error(`DB Sync Error: ${err.message}`));
                 }
             } else {
                 // FALLBACK: If Redis is down, we skip strict counting to keep API alive,

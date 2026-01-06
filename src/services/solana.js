@@ -9,14 +9,20 @@ const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqC
 
 /**
  * Creates a NEW Connection instance.
+ *
+ * SECURITY NOTE: WebSocket connections require API key in URL (protocol limitation).
+ * Most WS clients don't support custom headers during handshake.
+ * HTTP RPC calls should use Authorization headers where possible.
  */
 function createConnection() {
     const rpcUrl = config.SOLANA_RPC_URL || config.RPC_URL || 'https://api.mainnet-beta.solana.com';
-    
+
     // PRIORITY 1: Explicit Env Var
     let wsUrl = config.SOLANA_WSS_URL;
 
     // PRIORITY 2: Helius API Key (Most Robust)
+    // NOTE: WSS requires API key in URL - this is a WebSocket protocol limitation
+    // The key is only sent during handshake, not visible in subsequent frames
     if (!wsUrl && config.HELIUS_API_KEY) {
         wsUrl = `wss://mainnet.helius-rpc.com/?api-key=${config.HELIUS_API_KEY}`;
     }
@@ -64,15 +70,31 @@ function getSolanaConnection(forceNew = false) {
     return connection;
 }
 
-async function retryRPC(fn, retries = 3, delay = 1000) {
+/**
+ * Retry RPC calls with exponential backoff and jitter
+ * @param {Function} fn - Async function to retry
+ * @param {number} retries - Max retry attempts (default: 5)
+ * @param {number} baseDelay - Base delay in ms (default: 1000)
+ */
+async function retryRPC(fn, retries = 5, baseDelay = 1000) {
     for (let i = 0; i < retries; i++) {
         try {
             return await fn();
         } catch (e) {
+            // Don't retry client errors (invalid params, etc.)
             if (e.message && (e.message.includes('400') || e.message.includes('Invalid param'))) throw e;
+
             const isRateLimit = e.message && (e.message.includes('429') || e.message.includes('Too Many Requests'));
-            if (i === retries - 1) throw e; 
-            const waitTime = isRateLimit ? delay * 3 * (i + 1) : delay * (i + 1);
+            if (i === retries - 1) throw e;
+
+            // Exponential backoff with jitter to avoid thundering herd
+            const exponentialDelay = baseDelay * Math.pow(2, i);
+            const jitter = Math.random() * baseDelay * 0.5; // 0-50% of baseDelay
+            const waitTime = isRateLimit
+                ? exponentialDelay * 3 + jitter  // Extra delay for rate limits
+                : exponentialDelay + jitter;
+
+            logger.debug(`[RPC] Retry ${i + 1}/${retries} in ${Math.round(waitTime)}ms: ${e.message?.slice(0, 50)}`);
             await new Promise(r => setTimeout(r, waitTime));
         }
     }
@@ -100,16 +122,74 @@ async function fetchAccountsForProgram(conn, programId, mintAddress) {
             }
         }
         return activeHolders;
-    } catch (e) {
+    } catch (_e) {
         return 0;
     }
 }
 
+/**
+ * Get holder count using Helius API (paginated, works for any token size)
+ * Falls back to standard RPC if Helius unavailable
+ */
 async function getHolderCountFromRPC(mintAddress) {
     if (!mintAddress) return 0;
     const cleanMint = mintAddress.trim();
+
+    // Try Helius API first (paginated, works for millions of holders)
+    if (config.HELIUS_API_KEY) {
+        try {
+            let count = 0;
+            let cursor = null;
+            // SECURITY: Use base URL without API key - key goes in Authorization header
+            const HELIUS_RPC = 'https://mainnet.helius-rpc.com';
+            const headers = {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${config.HELIUS_API_KEY}`
+            };
+
+            // Paginate through holders (cap at 10 pages = 10k holders for efficiency)
+            // Large tokens (USDT/USDC) have millions - sampling top 10k is sufficient
+            const MAX_PAGES = 10;
+            let page = 0;
+
+            while (page < MAX_PAGES) {
+                const params = { mint: cleanMint, limit: 1000 };
+                if (cursor) params.cursor = cursor;
+
+                const response = await fetch(HELIUS_RPC, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: Date.now(),
+                        method: 'getTokenAccounts',
+                        params
+                    })
+                });
+
+                const data = await response.json();
+                if (data.error || !data.result?.token_accounts) break;
+
+                // Count accounts with balance > 0
+                for (const acc of data.result.token_accounts) {
+                    if (acc.amount > 0) count++;
+                }
+
+                cursor = data.result.cursor;
+                page++;
+                if (!cursor) break;
+            }
+
+            if (count > 0) {
+                return count;
+            }
+        } catch (e) {
+            logger.warn(`[Holders] Helius API failed for ${cleanMint.slice(0,8)}: ${e.message}`);
+        }
+    }
+
+    // Fallback to standard RPC (may fail for large tokens)
     const conn = getSolanaConnection();
-    
     let count = await fetchAccountsForProgram(conn, TOKEN_PROGRAM_ID, cleanMint);
     if (count === 0) {
         const count2022 = await fetchAccountsForProgram(conn, TOKEN_2022_PROGRAM_ID, cleanMint);
@@ -148,11 +228,11 @@ async function analyzeTokenHolders(mintAddress, excludeAddresses = []) {
                     totalDuration += (24 * 3600);
                     validSamples++;
                 }
-            } catch (err) {}
+            } catch (_err) { /* ignore */ }
         }
         if (validSamples === 0) return { avgHoldHours: 0 };
         return { avgHoldHours: (totalDuration / validSamples) / 3600 };
-    } catch (e) {
+    } catch (_e) {
         return { avgHoldHours: 0 };
     }
 }

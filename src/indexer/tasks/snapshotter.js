@@ -1,7 +1,7 @@
 const { PublicKey } = require('@solana/web3.js');
 const { getSolanaConnection, retryRPC } = require('../../services/solana'); 
 const { getDB, aggregateAndSaveToken } = require('../../services/database');
-const { getClient } = require('../../services/redis');
+const { getClient: _getClient } = require('../../services/redis');
 const logger = require('../../services/logger');
 const { getRealVolume } = require('../services/volume_tracker');
 const { enrichPoolsWithReserves } = require('../../services/pool_finder');
@@ -26,7 +26,7 @@ function pruneStateCache() {
     if (now - lastPruneTime < 3600000) return;
     
     lastPruneTime = now;
-    const initialSize = stateCache.size;
+    const _initialSize = stateCache.size;
     
     for (const [key, val] of stateCache.entries()) {
         // If it's a timestamp (number) and older than 4 hours, delete it
@@ -61,12 +61,12 @@ async function updateSolPrice(db) {
         } else {
             if(solPriceCache === 0) solPriceCache = 0; 
         }
-    } catch(e) {
+    } catch(_e) {
         logger.warn("Failed to update SOL price cache");
     }
 }
 
-async function processPoolBatch(db, connection, pools, redis) {
+async function processPoolBatch(db, connection, pools, _redis) {
     const timestamp = Math.floor(Date.now() / 60000) * 60000;
     const now = Date.now();
     
@@ -103,7 +103,7 @@ async function processPoolBatch(db, connection, pools, redis) {
                  keysToFetch.push(new PublicKey(p.reserve_b));
                  poolMap.set(p.address, { type: 'standard', idxA: keysToFetch.length - 2, idxB: keysToFetch.length - 1, pool: p });
             }
-        } catch(e) {}
+        } catch(_e) { /* ignore */ }
     });
 
     if (keysToFetch.length === 0) {
@@ -203,7 +203,7 @@ async function processPoolBatch(db, connection, pools, redis) {
                     success = false;
                 }
             }
-        } catch (err) {}
+        } catch (_err) { /* ignore */ }
 
         // --- VOLUME TRACKING (ASYNC) ---
         const volKey = `vol_last_check:${p.address}`;
@@ -256,7 +256,11 @@ async function processPoolBatch(db, connection, pools, redis) {
     await Promise.allSettled([...updates, ...trackerUpdates]);
 
     if (affectedMints.size > 0) {
-        for (const mint of affectedMints) await aggregateAndSaveToken(db, mint);
+        // Run aggregation in background (don't block snapshotter)
+        // Holder counts are updated separately, no need to await here
+        Promise.allSettled(
+            [...affectedMints].map(mint => aggregateAndSaveToken(db, mint))
+        ).catch(e => logger.warn(`Aggregation batch error: ${e.message}`));
     }
     
     // Clean up sets/maps
@@ -314,7 +318,7 @@ async function runSnapshotCycle() {
         
         // Optional: Force GC if available (run with --expose-gc)
         if (global.gc) {
-            try { global.gc(); } catch (e) {}
+            try { global.gc(); } catch (_e) { /* ignore */ }
         }
     }
 }
