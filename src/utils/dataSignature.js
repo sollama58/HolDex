@@ -386,6 +386,13 @@ function verifyCategory(token, category, expectedSig) {
     if (result.valid) {
         return { valid: true, reason: 'verified', keyUsed: result.keyUsed };
     }
+
+    // DEBUG: Log data string for failed verifications to diagnose mismatch
+    if (category !== 'market') { // Skip market - too verbose and ignored anyway
+        const computedSig = hmacSign(data);
+        logger.warn(`[Signature] MISMATCH ${category} for ${token.mint?.slice(0, 8)}: expected=${expectedSig?.slice(0, 16)}... computed=${computedSig?.slice(0, 16)}...`);
+        logger.debug(`[Signature] ${category} data: ${data.slice(0, 200)}${data.length > 200 ? '...' : ''}`);
+    }
     return { valid: false, reason: 'signature_mismatch' };
 }
 
