@@ -82,6 +82,52 @@ async function main() {
         // Build dependencies object
         const deps = { db };
 
+        // 2.5. Re-sign any tampered tokens (after secret rotation)
+        logger.info('🔐 Checking for tampered tokens...');
+        const { signAllCategories } = require('./utils/dataSignature');
+        const tamperedTokens = await db.all(`
+            SELECT mint, symbol, name, image, decimals,
+                   k_score, conviction_score, conviction_accumulators,
+                   conviction_holders, conviction_reducers, conviction_extractors,
+                   conviction_analyzed, holders, priceusd, marketcap, liquidity,
+                   supply, initial_supply, burned_amount, burned_percent,
+                   mint_authority_revoked, freeze_authority_revoked, is_mutable_supply,
+                   hasCommunityUpdate, lp_burn_pct, lp_locked_pct, lp_status,
+                   is_pump_fun, bonding_curve_complete, timestamp, metadata,
+                   price_source, price_timestamp, price_pool,
+                   mcap_calculated, liquidity_source, liquidity_timestamp,
+                   holders_source, holders_timestamp, age_days
+            FROM tokens WHERE hasCommunityUpdate = TRUE
+        `);
+
+        if (tamperedTokens.length > 0) {
+            logger.info(`🔐 Re-signing ${tamperedTokens.length} tokens with current secret...`);
+            let resigned = 0;
+            for (const token of tamperedTokens) {
+                try {
+                    const signatures = signAllCategories(token);
+                    await db.run(`
+                        UPDATE tokens SET
+                            sig_identity = $1, sig_security = $2, sig_lp = $3,
+                            sig_supply = $4, sig_kscore = $5, sig_market = $6,
+                            sig_origin = $7, sig_full = $8, chaos_nonce = $9
+                        WHERE mint = $10
+                    `, [
+                        signatures.sig_identity, signatures.sig_security, signatures.sig_lp,
+                        signatures.sig_supply, signatures.sig_kscore, signatures.sig_market,
+                        signatures.sig_origin, signatures.sig_full, signatures.chaos_nonce,
+                        token.mint
+                    ]);
+                    resigned++;
+                } catch (e) {
+                    logger.error(`Failed to re-sign ${token.symbol}: ${e.message}`);
+                }
+            }
+            logger.info(`✅ Re-signed ${resigned}/${tamperedTokens.length} tokens`);
+        } else {
+            logger.info('✅ No tokens need re-signing');
+        }
+
         // 3. Start K-Score Updater
         logger.info('📈 Starting K-Score Updater...');
         const kScoreUpdater = require('./tasks/kScoreUpdater');
