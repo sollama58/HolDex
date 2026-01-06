@@ -136,8 +136,11 @@ function validatePriceData(raw) {
  * @param {string[]} mints - Array of token mint addresses (max 30)
  * @returns {Map<string, Object>} Map of mint -> price data
  */
-async function fetchBatchPrices(mints) {
+async function fetchBatchPrices(mints, retryCount = 0) {
     if (!mints || mints.length === 0) return new Map();
+
+    const MAX_RETRIES = 3;
+    const BASE_DELAY = 1000; // 1 second base delay for backoff
 
     // DexScreener batch: comma-separated addresses
     const batchMints = mints.slice(0, BATCH_SIZE);
@@ -149,6 +152,18 @@ async function fetchBatchPrices(mints) {
 
         const response = await fetch(url, { signal: controller.signal });
         clearTimeout(timeout);
+
+        // Handle rate limiting with exponential backoff
+        if (response.status === 429) {
+            if (retryCount < MAX_RETRIES) {
+                const delay = BASE_DELAY * Math.pow(2, retryCount); // 1s, 2s, 4s
+                logger.debug(`[PriceWorker] Rate limited, retry ${retryCount + 1}/${MAX_RETRIES} in ${delay}ms`);
+                await new Promise(r => setTimeout(r, delay));
+                return fetchBatchPrices(mints, retryCount + 1);
+            }
+            logger.warn(`[PriceWorker] Rate limited, max retries exceeded`);
+            return new Map();
+        }
 
         if (!response.ok) {
             logger.warn(`[PriceWorker] Batch fetch failed: ${response.status}`);
@@ -357,9 +372,9 @@ async function runPriceUpdateCycle(db, broadcast) {
                 }
             }
 
-            // Small delay between batches to be nice to DexScreener
+            // Delay between batches to respect DexScreener rate limits
             if (batches.length > 1) {
-                await new Promise(r => setTimeout(r, 200));
+                await new Promise(r => setTimeout(r, 500));
             }
         }
 
