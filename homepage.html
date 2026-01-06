@@ -983,8 +983,8 @@
                 </div>
             </div>
             <div class="grid md:grid-cols-3 gap-6">
-                <div class="feature-box"><div class="text-[#fb923c] mb-2"><i data-lucide="shield-check" width="24"></i></div><h4 class="font-bold text-white text-lg">Credit Rating</h4><p class="text-sm text-[#737373]">A1 to D. Like Moody's, but for memecoins. Diamond Hands × Organic Growth × Longevity = K-Score.</p></div>
-                <div class="feature-box"><div class="text-[#22c55e] mb-2"><i data-lucide="filter" width="24"></i></div><h4 class="font-bold text-white text-lg">Anti-Sybil</h4><p class="text-sm text-[#737373]">$1 minimum to count as holder. Dust wallets? Ignored. Airdrop farmers? Filtered. Real conviction only.</p></div>
+                <div class="feature-box"><div class="text-[#fb923c] mb-2"><i data-lucide="shield-check" width="24"></i></div><h4 class="font-bold text-white text-lg">Credit Rating</h4><p class="text-sm text-[#737373]">A1 to D. Like Moody's, but for memecoins. K = 100 × ∛(D × O × L) — geometric mean of Diamond Hands, Organic Growth & Longevity.</p></div>
+                <div class="feature-box"><div class="text-[#22c55e] mb-2"><i data-lucide="filter" width="24"></i></div><h4 class="font-bold text-white text-lg">On-Chain Pure</h4><p class="text-sm text-[#737373]">ALL on-chain holders count. No arbitrary thresholds. Log normalization handles scale, top-20 distribution handles quality.</p></div>
                 <div class="feature-box"><div class="text-[#a855f7] mb-2"><i data-lucide="badge-check" width="24"></i></div><h4 class="font-bold text-white text-lg">Verify to Unlock</h4><p class="text-sm text-[#737373]">K-Score locked until devs verify. No free alpha for anonymous rugs. Transparency earns trust.</p></div>
             </div>
             <div class="bg-[#000000] border border-[#252525] rounded-xl p-8 relative overflow-hidden group hover:border-[#ea580c] transition-colors">
@@ -1642,7 +1642,7 @@
         </div>
 
         <!-- Formula -->
-        <p class="text-xs text-[#737373] mb-2">K = 100 × DiamondHands^0.50 × OrganicGrowth^0.35 × Longevity^0.15</p>
+        <p class="text-xs text-[#737373] mb-2">K = 100 × ∛(D × O × L) — Geometric mean, equal weight to all factors</p>
         <p class="text-xs text-[#737373] italic">Below 50% Diamond+Gold = you're exit liquidity. <strong class="text-[#ea580c]">Holdex it.</strong></p>
         <button onclick="toggleKScoreModal()" class="w-full bg-[#141414] text-[#fb923c] py-3 rounded-lg font-bold text-sm mt-4">Close</button>
     </div>
