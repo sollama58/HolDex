@@ -30,6 +30,7 @@ async function main() {
     console.log('✅ Redis connected');
 
     // Get all tokens with signatures
+    // IMPORTANT: Must include ALL fields used by signAllCategories, including last_k_score_update
     const tokens = await db.all(`
         SELECT mint, symbol, name, image, decimals,
                k_score, conviction_score, conviction_accumulators,
@@ -41,7 +42,8 @@ async function main() {
                is_pump_fun, bonding_curve_complete, timestamp, metadata,
                price_source, price_timestamp, price_pool,
                mcap_calculated, liquidity_source, liquidity_timestamp,
-               holders_source, holders_timestamp, age_days
+               holders_source, holders_timestamp, age_days,
+               last_k_score_update
         FROM tokens
         WHERE hasCommunityUpdate = TRUE
     `);

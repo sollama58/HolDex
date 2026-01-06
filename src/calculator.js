@@ -116,7 +116,8 @@ async function main() {
                    is_pump_fun, bonding_curve_complete, timestamp, metadata,
                    price_source, price_timestamp, price_pool,
                    mcap_calculated, liquidity_source, liquidity_timestamp,
-                   holders_source, holders_timestamp, age_days
+                   holders_source, holders_timestamp, age_days,
+                   last_k_score_update
             FROM tokens WHERE hasCommunityUpdate = TRUE
         `);
 
