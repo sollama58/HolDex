@@ -83,7 +83,27 @@ async function main() {
         const deps = { db };
 
         // 2.5. Re-sign any tampered tokens (after secret rotation)
-        logger.info('🔐 Checking for tampered tokens...');
+        // CRITICAL: Clear stale Redis snapshots FIRST to prevent Watchdog from
+        // "healing" with old signatures during the re-sign process
+        logger.info('🔐 Clearing stale Redis snapshots...');
+        const { getClient: getRedisClient } = require('./services/redis');
+        const redisClient = getRedisClient();
+        if (redisClient) {
+            try {
+                // Get all snapshot keys and delete them
+                const snapshotKeys = await redisClient.keys('kscore:snapshot:*');
+                if (snapshotKeys.length > 0) {
+                    await redisClient.del(...snapshotKeys);
+                    logger.info(`🗑️ Cleared ${snapshotKeys.length} stale Redis snapshots`);
+                } else {
+                    logger.info('✅ No stale snapshots to clear');
+                }
+            } catch (e) {
+                logger.warn(`⚠️ Failed to clear Redis snapshots: ${e.message}`);
+            }
+        }
+
+        logger.info('🔐 Re-signing all verified tokens with current secret...');
         const { signAllCategories } = require('./utils/dataSignature');
         const tamperedTokens = await db.all(`
             SELECT mint, symbol, name, image, decimals,
@@ -132,7 +152,7 @@ async function main() {
             }
             logger.info(`✅ Re-signed ${resigned}/${tamperedTokens.length} tokens (DB + Redis snapshots)`);
         } else {
-            logger.info('✅ No tokens need re-signing');
+            logger.info('✅ No verified tokens found to re-sign');
         }
 
         // 3. Start K-Score Updater
