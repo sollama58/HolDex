@@ -9,7 +9,8 @@
 
 ### P0 - Critical
 - [x] Protect PnL endpoints - Add Redis cache (60s TTL) ✅ 25d8e4b
-- [ ] Protect PnL endpoints - Require burn credits before RPC calls
+- [x] Protect PnL endpoints - Cache-aware burn credits ✅ b0aedec
+  - Cache HIT = FREE, Cache MISS = 1 credit (philosophy $asdfasdfa)
 
 ### P1 - Important
 - [ ] Add global wallet_analysis cache table (cross-token reuse)
