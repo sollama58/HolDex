@@ -278,10 +278,16 @@ chaos_nonce TEXT
 Some categories are ignored during healing to prevent loops:
 
 ```javascript
-const IGNORED_CATEGORIES = ['market', 'full']; // Volatile data
+const IGNORED_CATEGORIES = ['market', 'holders', 'full']; // Volatile data
 ```
 
-Market signatures may be stale without triggering healing, since price data updates constantly.
+| Category | Why Ignored |
+|----------|-------------|
+| `market` | Price, mcap, liquidity update every 30s via PriceWorker |
+| `holders` | holder_snapshots evolve with every buy/sell between K-Score updates |
+| `full` | Composite HMAC of all signatures - inherently volatile when any category changes |
+
+**Note:** Actual tampering is still detected via the 6 stable categories: `identity`, `security`, `lp`, `supply`, `kscore`, `origin`.
 
 ---
 
