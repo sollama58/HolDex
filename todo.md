@@ -19,7 +19,7 @@
   - Supply rarely changes, safe to cache aggressively
 
 ### P2 - Nice to Have
-- [ ] Rate limit PnL endpoints specifically (5 req/min/wallet)
+- [x] Rate limit PnL endpoints specifically (5 req/min/wallet) ✅ 9cfd6c3
 
 ---
 
