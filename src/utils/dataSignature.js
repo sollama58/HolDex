@@ -384,11 +384,47 @@ function verifyCategory(token, category, expectedSig) {
 }
 
 /**
+ * Verify holders signature against holder_snapshots data
+ * @param {string} mint - Token mint address
+ * @param {string} expectedSig - Expected sig_holders from token
+ * @param {Array} snapshots - Array of {holder, balance} from holder_snapshots table
+ * @returns {{valid: boolean, reason: string}} Verification result
+ */
+function verifyHolders(mint, expectedSig, snapshots) {
+    if (!SIGNING_SECRET) return { valid: true, reason: 'dev_mode' };
+    if (!expectedSig) return { valid: false, reason: 'missing_signature' };
+    if (expectedSig === 'dev_unsigned') return { valid: false, reason: 'dev_signature_in_prod' };
+    if (!snapshots || snapshots.length === 0) return { valid: false, reason: 'no_snapshots' };
+
+    // Rebuild the data string that was signed
+    const sorted = (snapshots || [])
+        .sort((a, b) => {
+            const bBal = BigInt(b.balance || 0);
+            const aBal = BigInt(a.balance || 0);
+            return bBal > aBal ? 1 : bBal < aBal ? -1 : 0;
+        })
+        .slice(0, 20);
+
+    const data = [
+        mint,
+        sorted.length,
+        ...sorted.map(s => `${s.holder}:${s.balance}`)
+    ].join('|');
+
+    const result = verifyWithRotation(data, expectedSig);
+    if (result.valid) {
+        return { valid: true, reason: 'verified', keyUsed: result.keyUsed };
+    }
+    return { valid: false, reason: 'signature_mismatch' };
+}
+
+/**
  * Verify all token signatures
  * @param {Object} token - Token with all signatures
+ * @param {Object} options - Optional: { holderSnapshots: [] } for sig_holders verification
  * @returns {Object} { valid, tampered: [], unsigned: [], details }
  */
-function verifyAllSignatures(token) {
+function verifyAllSignatures(token, options = {}) {
     if (!SIGNING_SECRET) {
         return { valid: true, tampered: [], unsigned: [], reason: 'dev_mode' };
     }
@@ -411,6 +447,17 @@ function verifyAllSignatures(token) {
             if (!result.valid && result.reason === 'signature_mismatch') {
                 tampered.push(cat);
             }
+        }
+    }
+
+    // Verify sig_holders if snapshots are provided
+    if (options.holderSnapshots && options.holderSnapshots.length > 0) {
+        const holdersResult = verifyHolders(token.mint, token.sig_holders, options.holderSnapshots);
+        details['holders'] = holdersResult.reason;
+        if (!holdersResult.valid && holdersResult.reason === 'signature_mismatch') {
+            tampered.push('holders');
+        } else if (!token.sig_holders || token.sig_holders === 'dev_unsigned') {
+            unsigned.push('holders');
         }
     }
 
@@ -485,6 +532,7 @@ module.exports = {
 
     // Verification (with key rotation support)
     verifyCategory,
+    verifyHolders,
     verifyWithRotation,
 
     // Legacy compatibility

@@ -31,8 +31,9 @@ let isRunning = false;
  * Save a token snapshot to Redis (called after successful K-Score calculation)
  * @param {string} mint - Token mint address
  * @param {Object} tokenData - Complete token data with all fields
+ * @param {Array} holderSnapshots - Optional: top 20 holder snapshots for integrity
  */
-async function saveSnapshot(mint, tokenData) {
+async function saveSnapshot(mint, tokenData, holderSnapshots = null) {
     const redis = getRedisClient();
     if (!redis) return false;
 
@@ -40,7 +41,8 @@ async function saveSnapshot(mint, tokenData) {
         const snapshot = {
             ...tokenData,
             _snapshotTime: Date.now(),
-            _snapshotVersion: 2 // 8-category system
+            _snapshotVersion: 3, // v3: includes holder snapshots
+            _holderSnapshots: holderSnapshots || [] // Top 20 for integrity verification
         };
 
         await redis.set(
@@ -147,6 +149,28 @@ async function restoreFromSnapshot(db, mint, tamperedCategories) {
             mint
         ]);
 
+        // Restore holder_snapshots if 'holders' was tampered AND snapshot has them (v3+)
+        if (tamperedCategories.includes('holders') && snapshot._holderSnapshots && snapshot._holderSnapshots.length > 0) {
+            logger.info(`[Watchdog] Restoring ${snapshot._holderSnapshots.length} holder snapshots for ${mint.slice(0, 8)}...`);
+
+            // Delete current snapshots and restore from backup
+            await db.run('DELETE FROM holder_snapshots WHERE mint = $1', [mint]);
+
+            for (const hs of snapshot._holderSnapshots) {
+                await db.run(`
+                    INSERT INTO holder_snapshots (mint, holder, balance, updated_at)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (mint, holder) DO UPDATE SET balance = $3, updated_at = $4
+                `, [mint, hs.holder, hs.balance, Date.now()]);
+            }
+
+            // Re-sign sig_holders with restored data
+            const { signHolders } = require('../utils/dataSignature');
+            const sig_holders = signHolders(mint, snapshot._holderSnapshots);
+            await db.run('UPDATE tokens SET sig_holders = $1, holders_snapshot_check = $2 WHERE mint = $3',
+                [sig_holders, Date.now(), mint]);
+        }
+
         logger.info(`[Watchdog] HEALED: ${mint.slice(0, 8)}... (tampered: ${tamperedCategories.join(',')})`);
         return true;
 
@@ -182,7 +206,7 @@ async function scanForTampering(db) {
                    hasCommunityUpdate, lp_burn_pct, lp_locked_pct, lp_status,
                    is_pump_fun, bonding_curve_complete, timestamp, metadata,
                    sig_identity, sig_security, sig_lp, sig_supply,
-                   sig_kscore, sig_market, sig_origin, sig_full, chaos_nonce,
+                   sig_kscore, sig_market, sig_origin, sig_holders, sig_full, chaos_nonce,
                    last_k_score_update,
                    -- Fields required for sig_market verification:
                    price_source, price_timestamp, price_pool,
@@ -213,8 +237,19 @@ async function scanForTampering(db) {
         for (const token of tokens) {
             scanned++;
 
-            // Verify all 8 signatures
-            const result = verifyAllSignatures(token);
+            // Load holder snapshots for sig_holders verification
+            let holderSnapshots = [];
+            try {
+                holderSnapshots = await db.all(
+                    'SELECT holder, balance FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 20',
+                    [token.mint]
+                );
+            } catch (_e) {
+                // Ignore - snapshots may not exist
+            }
+
+            // Verify all 8 signatures (+ holders if snapshots exist)
+            const result = verifyAllSignatures(token, { holderSnapshots });
 
             // Filter out ignored categories (volatile data)
             const criticalTampered = result.tampered.filter(cat => !IGNORED_CATEGORIES.has(cat));

@@ -2964,7 +2964,17 @@ async function updateSingleToken(deps, mint) {
         ]);
 
         // Save snapshot for integrity watchdog (self-healing)
-        await saveSnapshot(mint, tokenForSigning);
+        // Include holder snapshots for complete integrity (v3 snapshot format)
+        let holderSnapshotsForIntegrity = [];
+        try {
+            holderSnapshotsForIntegrity = await db.all(
+                'SELECT holder, balance FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 20',
+                [mint]
+            );
+        } catch (_e) {
+            // Ignore - snapshots may not exist yet
+        }
+        await saveSnapshot(mint, tokenForSigning, holderSnapshotsForIntegrity);
 
         // Save holder history snapshot (daily)
         await saveHolderHistory(db, mint, conviction.totalHolders || 0, conviction.realHoldersCount || 0);
@@ -3261,7 +3271,17 @@ async function updateKScores(deps) {
                 ]);
 
                 // Save snapshot for integrity watchdog (self-healing)
-                await saveSnapshot(t.mint, batchTokenForSigning);
+                // Include holder snapshots for complete integrity (v3 snapshot format)
+                let batchHolderSnapshots = [];
+                try {
+                    batchHolderSnapshots = await db.all(
+                        'SELECT holder, balance FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 20',
+                        [t.mint]
+                    );
+                } catch (_e) {
+                    // Ignore - snapshots may not exist yet
+                }
+                await saveSnapshot(t.mint, batchTokenForSigning, batchHolderSnapshots);
 
                 // Save holder history snapshot (daily)
                 await saveHolderHistory(db, t.mint, conviction.totalHolders || 0, conviction.realHoldersCount || 0);
