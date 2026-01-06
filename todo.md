@@ -13,7 +13,8 @@
   - Cache HIT = FREE, Cache MISS = 1 credit (philosophy $asdfasdfa)
 
 ### P1 - Important
-- [ ] Add global wallet_analysis cache table (cross-token reuse)
+- [x] Add global wallet_tx_cache table (cross-token reuse) ✅ 16b095b
+  - Fetch once, analyze many tokens - saves RPC when same wallet in multiple top 20s
 - [ ] Cache token supply in Redis (1h TTL)
 
 ### P2 - Nice to Have
