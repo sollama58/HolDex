@@ -8,7 +8,7 @@
 ## RPC Credit Protection (Post K-Score Fix)
 
 ### P0 - Critical
-- [ ] Protect PnL endpoints - Add Redis cache (60s TTL)
+- [x] Protect PnL endpoints - Add Redis cache (60s TTL) ✅ 25d8e4b
 - [ ] Protect PnL endpoints - Require burn credits before RPC calls
 
 ### P1 - Important
