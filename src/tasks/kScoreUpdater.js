@@ -806,6 +806,59 @@ async function heliusRpc(method, params) {
     }
 }
 
+// ============================================
+// TOKEN SUPPLY CACHE: Reduce RPC calls
+// Philosophy: Supply rarely changes, cache aggressively
+// ============================================
+
+const SUPPLY_CACHE_TTL = 60 * 60; // 1 hour in seconds
+const SUPPLY_CACHE_PREFIX = 'supply:';
+
+/**
+ * Get token supply with Redis caching (1h TTL)
+ * Supply data rarely changes - safe to cache aggressively
+ *
+ * @param {string} mint - Token mint address
+ * @returns {Object|null} Supply data { value: { amount, decimals, uiAmount } }
+ */
+async function getCachedTokenSupply(mint) {
+    const redis = getRedisClient();
+    const cacheKey = `${SUPPLY_CACHE_PREFIX}${mint}`;
+
+    // 1. Try Redis cache first
+    if (redis) {
+        try {
+            const cached = await redis.get(cacheKey);
+            if (cached) {
+                logger.debug(`[Supply] Cache HIT for ${mint.slice(0, 8)}...`);
+                return JSON.parse(cached);
+            }
+        } catch (_e) { /* Cache miss, continue to RPC */ }
+    }
+
+    // 2. Cache miss - fetch from RPC
+    const supply = await heliusRpc('getTokenSupply', [mint]);
+    if (!supply) return null;
+
+    // 3. Cache the result (fire-and-forget)
+    if (redis) {
+        redis.set(cacheKey, JSON.stringify(supply), 'EX', SUPPLY_CACHE_TTL).catch(() => {});
+        logger.debug(`[Supply] Cached ${mint.slice(0, 8)}... (TTL: ${SUPPLY_CACHE_TTL}s)`);
+    }
+
+    return supply;
+}
+
+/**
+ * Invalidate supply cache (call after supply change detected)
+ */
+async function invalidateSupplyCache(mint) {
+    const redis = getRedisClient();
+    if (redis) {
+        await redis.del(`${SUPPLY_CACHE_PREFIX}${mint}`).catch(() => {});
+    }
+}
+
 /**
  * Enhanced Transaction History API with new Helius features
  *
@@ -1546,8 +1599,8 @@ async function calculateBurn(mint, allHolders = null, options = {}) {
     try {
         const { storedInitialSupply, isPumpFunFlag, db } = options;
 
-        // Get current supply from chain
-        const supply = await heliusRpc('getTokenSupply', [mint]);
+        // Get current supply (cached 1h - supply rarely changes)
+        const supply = await getCachedTokenSupply(mint);
         if (!supply) return { burnPct: 0, burned: 0, totalSupply: 0, initialSupply: 0 };
 
         const currentSupply = BigInt(supply.value.amount);
@@ -1661,8 +1714,8 @@ async function refreshSupply(db, mint, decimals = 9) {
     };
 
     try {
-        // 1. Fetch current supply from chain
-        const supplyInfo = await heliusRpc('getTokenSupply', [mint]);
+        // 1. Fetch current supply (cached 1h - supply rarely changes)
+        const supplyInfo = await getCachedTokenSupply(mint);
         if (!supplyInfo?.value?.amount) {
             return result;
         }
@@ -3563,4 +3616,5 @@ module.exports = {
     calculateConviction, // Exposed for testing
     getHealthStatus,     // For /health endpoint
     checkTokenSecurity,  // Exposed for direct security checks
+    invalidateSupplyCache, // Call when supply change detected
 };
