@@ -34,6 +34,8 @@ const { signAllCategories, signHolders, signSupply, signSecurity, signLP } = req
 const { saveSnapshot } = require('./integrityWatchdog');
 const alerting = require('../services/alerting');
 const nodeService = require('../services/nodeService');
+const signedWrites = require('../services/signedWrites');
+const nodeKeys = require('../utils/nodeKeys');
 
 // ============================================
 // HELIUS CONFIG
@@ -3031,6 +3033,39 @@ async function updateSingleToken(deps, mint) {
 
         const signatures = signAllCategories(tokenForSigning);
 
+        // ============================================
+        // NODE ED25519 SIGNATURE (Distributed Consensus)
+        // ============================================
+        // Sign this K-Score update with the node's private key
+        // This creates verifiable proof of which node calculated this score
+        const nodePrivateKey = nodeKeys.getNodePrivateKey();
+        const currentNodeId = nodeService.getNodeId();
+        let nodeSignatureData = {
+            node_id: null,
+            signature: null,
+            timestamp: updateTimestamp
+        };
+
+        if (nodePrivateKey && currentNodeId) {
+            // Create signed K-Score package
+            const signedKScore = signedWrites.signKScoreUpdate({
+                mint,
+                k_score: smoothedScore,
+                d_score: result.breakdown?.diamond || 0,
+                o_score: result.breakdown?.organic || 0,
+                l_score: result.breakdown?.longevity || 0,
+                conviction_score: conviction.score || 0
+            }, currentNodeId, nodePrivateKey);
+
+            nodeSignatureData = {
+                node_id: currentNodeId,
+                signature: signedKScore.signature,
+                timestamp: updateTimestamp
+            };
+
+            logger.debug(`[K-Score] Node ${currentNodeId} signed K=${smoothedScore} for ${mint.slice(0, 8)}...`);
+        }
+
         // Determine holder values based on mode
         const holdersValue = conviction.preserveHolders
             ? (token.holders || conviction.realHoldersCount || 0)
@@ -3088,8 +3123,12 @@ async function updateSingleToken(deps, mint) {
                 supply_last_check = $42,
                 volume24h = $43,
                 change24h = $44,
-                change1h = $45
-            WHERE mint = $46
+                change1h = $45,
+                sig_node_id = $46,
+                sig_node_signature = $47,
+                sig_node_timestamp = $48,
+                sig_node_status = $49
+            WHERE mint = $50
         `, [
             smoothedScore,
             updateTimestamp.toString(),
@@ -3136,6 +3175,10 @@ async function updateSingleToken(deps, mint) {
             marketData.volume24h || 0,
             marketData.change24h || 0,
             marketData.change1h || 0,
+            nodeSignatureData.node_id,
+            nodeSignatureData.signature,
+            nodeSignatureData.timestamp ? nodeSignatureData.timestamp.toString() : null,
+            nodeSignatureData.node_id ? 'signed' : 'unsigned',
             mint
         ]);
 
@@ -3163,6 +3206,21 @@ async function updateSingleToken(deps, mint) {
         // Record verification by this node (for decentralized consensus)
         try {
             await nodeService.recordVerification(db, mint, smoothedScore, true);
+
+            // Check for consensus after recording our verification
+            if (currentNodeId) {
+                const consensusResult = await signedWrites.checkTokenConsensus(mint, db);
+                if (consensusResult.hasConsensus) {
+                    await signedWrites.recordConsensus(
+                        mint,
+                        consensusResult.k_score,
+                        consensusResult.agreeing,
+                        consensusResult.total,
+                        db
+                    );
+                    logger.info(`[Consensus] ${mint.slice(0, 8)}... K=${consensusResult.k_score} (${consensusResult.agreeing}/${consensusResult.total} nodes agree)`);
+                }
+            }
         } catch (_e) {
             // Non-critical - continue without recording
         }
@@ -3362,6 +3420,30 @@ async function updateKScores(deps) {
 
                 const batchSignatures = signAllCategories(batchTokenForSigning);
 
+                // ============================================
+                // NODE ED25519 SIGNATURE (Distributed Consensus)
+                // ============================================
+                const batchNodePrivateKey = nodeKeys.getNodePrivateKey();
+                const batchCurrentNodeId = nodeService.getNodeId();
+                let batchNodeSigData = { node_id: null, signature: null, timestamp: batchUpdateTimestamp };
+
+                if (batchNodePrivateKey && batchCurrentNodeId) {
+                    const signedBatchKScore = signedWrites.signKScoreUpdate({
+                        mint: t.mint,
+                        k_score: smoothedScore,
+                        d_score: result.breakdown?.diamond || 0,
+                        o_score: result.breakdown?.organic || 0,
+                        l_score: result.breakdown?.longevity || 0,
+                        conviction_score: validatedConviction.score
+                    }, batchCurrentNodeId, batchNodePrivateKey);
+
+                    batchNodeSigData = {
+                        node_id: batchCurrentNodeId,
+                        signature: signedBatchKScore.signature,
+                        timestamp: batchUpdateTimestamp
+                    };
+                }
+
                 await db.run(`
                     UPDATE tokens
                     SET k_score = $1,
@@ -3406,8 +3488,12 @@ async function updateKScores(deps) {
                         supply_last_check = $40,
                         volume24h = $41,
                         change24h = $42,
-                        change1h = $43
-                    WHERE mint = $44
+                        change1h = $43,
+                        sig_node_id = $44,
+                        sig_node_signature = $45,
+                        sig_node_timestamp = $46,
+                        sig_node_status = $47
+                    WHERE mint = $48
                 `, [
                     smoothedScore,
                     batchUpdateTimestamp.toString(),
@@ -3452,6 +3538,10 @@ async function updateKScores(deps) {
                     batchMarketData.volume24h || 0,
                     batchMarketData.change24h || 0,
                     batchMarketData.change1h || 0,
+                    batchNodeSigData.node_id,
+                    batchNodeSigData.signature,
+                    batchNodeSigData.timestamp ? batchNodeSigData.timestamp.toString() : null,
+                    batchNodeSigData.node_id ? 'signed' : 'unsigned',
                     t.mint
                 ]);
 
@@ -3479,6 +3569,21 @@ async function updateKScores(deps) {
                 // Record verification by this node (for decentralized consensus)
                 try {
                     await nodeService.recordVerification(db, t.mint, smoothedScore, true);
+
+                    // Check for consensus after recording our verification
+                    if (batchCurrentNodeId) {
+                        const consensusResult = await signedWrites.checkTokenConsensus(t.mint, db);
+                        if (consensusResult.hasConsensus) {
+                            await signedWrites.recordConsensus(
+                                t.mint,
+                                consensusResult.k_score,
+                                consensusResult.agreeing,
+                                consensusResult.total,
+                                db
+                            );
+                            logger.info(`[Consensus] ${t.mint.slice(0, 8)}... K=${consensusResult.k_score} (${consensusResult.agreeing}/${consensusResult.total} nodes agree)`);
+                        }
+                    }
                 } catch (_e) {
                     // Non-critical - continue without recording
                 }

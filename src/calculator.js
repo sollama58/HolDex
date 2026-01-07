@@ -35,10 +35,22 @@ function logHeartbeat() {
 
 // Graceful shutdown
 let isShuttingDown = false;
+let distributedPollingRef = null; // Set during main()
+
 async function shutdown(signal) {
     if (isShuttingDown) return;
     isShuttingDown = true;
     logger.info(`\n📴 Received ${signal}, shutting down gracefully...`);
+
+    // Stop distributed polling first (announces departure)
+    if (distributedPollingRef) {
+        try {
+            await distributedPollingRef.stop();
+            logger.info('✅ Distributed polling stopped');
+        } catch (e) {
+            logger.warn(`⚠️ Error stopping distributed polling: ${e.message}`);
+        }
+    }
 
     // Give tasks time to complete current work
     await new Promise(r => setTimeout(r, 2000));
@@ -62,6 +74,14 @@ process.on('unhandledRejection', (reason, promise) => {
 // Main startup
 async function main() {
     try {
+        // 0. Node Identity
+        const nodeId = process.env.NODE_ID || `calc-${process.pid}`;
+        const nodeName = process.env.NODE_NAME || 'Calculator Node';
+        const useDistributed = process.env.USE_DISTRIBUTED_POLLING === 'true';
+
+        logger.info(`🔑 Node: ${nodeId} (${nodeName})`);
+        logger.info(`   Mode: ${useDistributed ? 'DISTRIBUTED' : 'STANDALONE'}`);
+
         // 1. Initialize Database
         logger.info('📊 Initializing Database...');
         const { initDB, getDB } = require('./services/database');
@@ -69,14 +89,42 @@ async function main() {
         const db = getDB();
         logger.info('✅ Database Ready');
 
-        // 2. Initialize Redis (optional - graceful failure)
+        // 1.5. Initialize Genesis Nodes (foundation of trust)
+        logger.info('🌱 Initializing Genesis Nodes...');
+        const nodeApproval = require('./services/nodeApproval');
+        await nodeApproval.initializeGenesisNodes(db);
+        logger.info('✅ Genesis Nodes Ready');
+
+        // 2. Initialize Redis (required for distributed mode)
         logger.info('🔴 Initializing Redis...');
         const { connectRedis } = require('./services/redis');
         const redis = await connectRedis();
         if (redis) {
             logger.info('✅ Redis Ready');
         } else {
-            logger.warn('⚠️ Redis unavailable - running in degraded mode');
+            if (useDistributed) {
+                logger.error('❌ Redis REQUIRED for distributed mode');
+                process.exit(1);
+            }
+            logger.warn('⚠️ Redis unavailable - running in standalone mode');
+        }
+
+        // 2.1 Initialize Node Service (for distributed identity)
+        const nodeService = require('./services/nodeService');
+        await nodeService.initializeNode(db);
+        const currentNodeId = nodeService.getNodeId();
+        logger.info(`✅ Node registered: ${currentNodeId}`);
+
+        // 2.2 Verify Node Approval Status
+        const genesis = require('./config/genesis');
+        const isApproved = await nodeApproval.isNodeApproved(db, currentNodeId);
+        const isGenesis = genesis.isGenesisNode(currentNodeId);
+
+        if (isApproved || isGenesis) {
+            logger.info(`🔐 Node ${currentNodeId} is ${isGenesis ? 'GENESIS' : 'APPROVED'} - can participate in consensus`);
+        } else {
+            logger.warn(`⚠️ Node ${currentNodeId} is NOT APPROVED - running in observation mode`);
+            logger.warn('   To get approved, request approval from existing nodes');
         }
 
         // Build dependencies object
@@ -156,19 +204,47 @@ async function main() {
             logger.info('✅ No verified tokens found to re-sign');
         }
 
-        // 3. Start K-Score Updater
+        // 3. Initialize Distributed Polling (if enabled)
+        let distributedPolling = null;
+        if (useDistributed) {
+            logger.info('🌐 Initializing Distributed Polling...');
+            distributedPolling = require('./services/distributedPolling');
+            const initialized = await distributedPolling.initialize({
+                capabilities: (process.env.NODE_CAPABILITIES || 'polling,webhooks,verification').split(',')
+            });
+            if (initialized) {
+                distributedPollingRef = distributedPolling; // For graceful shutdown
+                logger.info('✅ Distributed Polling Ready');
+            } else {
+                logger.warn('⚠️ Distributed Polling failed - falling back to standalone');
+            }
+        }
+
+        // 4. Start K-Score Updater
         logger.info('📈 Starting K-Score Updater...');
         const kScoreUpdater = require('./tasks/kScoreUpdater');
         kScoreUpdater.start(deps);
         logger.info('✅ K-Score Updater Running');
 
-        // 4. Start Metadata Updater
+        // 5. Start Distributed Polling (if initialized)
+        if (distributedPolling) {
+            distributedPolling.start(deps);
+            logger.info('✅ Distributed Polling Running');
+
+            // Log network status periodically
+            setInterval(async () => {
+                const status = await distributedPolling.getNetworkStatus();
+                logger.info(`🌐 Network: ${status.nodes_active} nodes | ${status.tasks_pending} tasks | credits: ${status.my_credits?.toFixed(2)}`);
+            }, 30000); // Every 30s
+        }
+
+        // 6. Start Metadata Updater
         logger.info('📊 Starting Metadata Updater...');
         const metadataUpdater = require('./tasks/metadataUpdater');
         metadataUpdater.start(deps);
         logger.info('✅ Metadata Updater Running');
 
-        // 5. Start Grower Scanner
+        // 7. Start Grower Scanner
         logger.info('🌱 Starting Grower Scanner...');
         const growerScanner = require('./tasks/growerScanner');
         growerScanner.start(deps);
@@ -180,7 +256,11 @@ async function main() {
 
         logger.info('='.repeat(50));
         logger.info('🧠 Calculator Brain ACTIVE');
+        logger.info(`   Mode: ${useDistributed ? 'DISTRIBUTED' : 'STANDALONE'}`);
         logger.info('   Running: K-Score, Metadata, Growers');
+        if (useDistributed) {
+            logger.info('   Network: Distributed polling enabled');
+        }
         logger.info('='.repeat(50));
 
     } catch (err) {
