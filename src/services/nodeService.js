@@ -16,6 +16,7 @@ const logger = require('./logger');
 const crypto = require('crypto');
 const config = require('../config/env');
 const nodeKeys = require('../utils/nodeKeys');
+const { signNodeIdentity, signNodeStatus, verifyNodeSignatures } = require('../utils/dataSignature');
 
 // Node status constants
 const NODE_STATUS = {
@@ -72,14 +73,34 @@ async function initializeNode(db) {
     }
 
     try {
-        // Upsert node registration with key info
+        // Build node object for signing
+        const nodeData = {
+            node_id: currentNodeId,
+            name: nodeName,
+            operator,
+            node_key_fingerprint: fingerprint,
+            region,
+            status: NODE_STATUS.ACTIVE,
+            last_heartbeat: now,
+            version: process.env.npm_package_version || '1.0.0',
+            tokens_verified: 0,
+            verifications_24h: 0
+        };
+
+        // Sign node data (HMAC integrity protection)
+        const sigIdentity = signNodeIdentity(nodeData);
+        const sigStatus = signNodeStatus(nodeData);
+        const chaosNonce = require('crypto').randomBytes(16).toString('hex');
+
+        // Upsert node registration with key info AND signatures
         await db.query(`
             INSERT INTO nodes (
                 node_id, name, operator, api_url, region,
                 status, last_heartbeat, joined_at,
-                node_public_key, node_key_fingerprint, key_registered_at
+                node_public_key, node_key_fingerprint, key_registered_at,
+                sig_node_identity, sig_node_status, node_chaos_nonce, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, $10, $11, $12, $13, $7)
             ON CONFLICT (node_id) DO UPDATE SET
                 name = EXCLUDED.name,
                 operator = EXCLUDED.operator,
@@ -94,15 +115,19 @@ async function initializeNode(db) {
                     WHEN nodes.node_public_key IS NULL AND EXCLUDED.node_public_key IS NOT NULL
                     THEN EXCLUDED.key_registered_at
                     ELSE nodes.key_registered_at
-                END
+                END,
+                sig_node_identity = EXCLUDED.sig_node_identity,
+                sig_node_status = EXCLUDED.sig_node_status,
+                node_chaos_nonce = EXCLUDED.node_chaos_nonce
         `, [
             currentNodeId, nodeName, operator, apiUrl, region,
             NODE_STATUS.ACTIVE, now,
-            publicKey, fingerprint, publicKey ? now : null
+            publicKey, fingerprint, publicKey ? now : null,
+            sigIdentity, sigStatus, chaosNonce
         ]);
 
         const keyStatus = fingerprint ? `🔑 ${fingerprint}` : '⚠️ unsigned';
-        logger.info(`🌐 Node initialized: ${currentNodeId} (${nodeName}) [${keyStatus}]`);
+        logger.info(`🌐 Node initialized: ${currentNodeId} (${nodeName}) [${keyStatus}] [sig:✅]`);
         return currentNodeId;
     } catch (e) {
         logger.error(`❌ Node initialization failed: ${e.message}`);
@@ -633,8 +658,14 @@ async function registerNode(db, nodeData) {
  * @param {Object} db - Database wrapper
  * @returns {Array} List of nodes with key info
  */
-async function listNodes(db) {
+async function listNodes(db, { verifiedOnly = true, checkSignatures = true } = {}) {
     try {
+        // SECURITY: Only show nodes with valid signing keys by default
+        // Attackers can INSERT fake nodes but they won't appear without a key
+        const whereClause = verifiedOnly
+            ? 'WHERE node_public_key IS NOT NULL'
+            : '';
+
         const result = await db.query(`
             SELECT
                 node_id,
@@ -650,8 +681,12 @@ async function listNodes(db) {
                 version,
                 joined_at,
                 node_key_fingerprint,
-                key_registered_at
+                key_registered_at,
+                sig_node_identity,
+                sig_node_status,
+                node_chaos_nonce
             FROM nodes
+            ${whereClause}
             ORDER BY
                 CASE status
                     WHEN 'active' THEN 1
@@ -662,10 +697,28 @@ async function listNodes(db) {
                 last_heartbeat DESC
         `);
 
-        return result.rows.map(node => ({
-            ...node,
-            has_signing_key: !!node.node_key_fingerprint
-        }));
+        // SECURITY: Verify signatures and filter out tampered nodes
+        const nodes = result.rows.map(node => {
+            const sigResult = checkSignatures ? verifyNodeSignatures(node) : { valid: true };
+            return {
+                ...node,
+                has_signing_key: !!node.node_key_fingerprint,
+                signatures_valid: sigResult.valid,
+                tampered_fields: sigResult.tampered || []
+            };
+        });
+
+        // Filter out tampered nodes if verifying signatures
+        if (checkSignatures) {
+            const validNodes = nodes.filter(n => n.signatures_valid);
+            const tamperedCount = nodes.length - validNodes.length;
+            if (tamperedCount > 0) {
+                logger.warn(`[Nodes] ${tamperedCount} tampered node(s) filtered out (HMAC mismatch)`);
+            }
+            return validNodes;
+        }
+
+        return nodes;
     } catch (e) {
         logger.error(`❌ List nodes failed: ${e.message}`);
         return [];

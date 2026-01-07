@@ -18,17 +18,32 @@ const nodeService = require('../services/nodeService');
 const config = require('../config/env');
 
 /**
- * GET /api/nodes - List all nodes
+ * GET /api/nodes - List verified nodes only
+ * SECURITY: Only nodes with valid signing keys are shown
+ * Attackers can INSERT fake nodes but they won't appear without cryptographic identity
  */
 router.get('/', async (req, res) => {
     try {
         const db = req.app.get('db');
-        const nodes = await nodeService.listNodes(db);
+
+        // Only show verified nodes (with signing keys)
+        const nodes = await nodeService.listNodes(db, { verifiedOnly: true });
+
+        // Count unverified for monitoring (not exposed in response)
+        const allNodes = await nodeService.listNodes(db, { verifiedOnly: false });
+        const unverifiedCount = allNodes.length - nodes.length;
+
+        if (unverifiedCount > 0) {
+            // Log potential attack attempts
+            const logger = require('../services/logger');
+            logger.warn(`[Nodes] ${unverifiedCount} unverified node(s) hidden from API (potential attack)`);
+        }
 
         res.json({
             success: true,
             count: nodes.length,
-            signed_nodes: nodes.filter(n => n.has_signing_key).length,
+            verified_nodes: nodes.length,
+            active_nodes: nodes.filter(n => n.status === 'active').length,
             nodes: nodes.map(n => ({
                 node_id: n.node_id,
                 name: n.name,
@@ -40,9 +55,8 @@ router.get('/', async (req, res) => {
                 verifications_24h: n.verifications_24h,
                 version: n.version,
                 joined_at: n.joined_at,
-                // Key info
+                // Key info - proves cryptographic identity
                 fingerprint: n.node_key_fingerprint,
-                has_signing_key: n.has_signing_key,
                 key_registered_at: n.key_registered_at
             }))
         });

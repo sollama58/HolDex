@@ -510,6 +510,11 @@ async function initDB() {
                 `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS node_public_key TEXT DEFAULT NULL`,      // Ed25519 public key (base64)
                 `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS node_key_fingerprint TEXT DEFAULT NULL`, // SHA256 of public key (hex, first 16 chars)
                 `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS key_registered_at BIGINT DEFAULT NULL`,  // When key was registered
+                // Node integrity signatures (HMAC-SHA256, like tokens)
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS sig_node_identity TEXT DEFAULT NULL`,    // Signs: node_id, name, operator, public_key
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS sig_node_status TEXT DEFAULT NULL`,      // Signs: status, last_heartbeat, version
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS node_chaos_nonce TEXT DEFAULT NULL`,     // Random nonce for unpredictability
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS updated_at BIGINT DEFAULT 0`,            // Last update timestamp
                 // Token verifications: Add cryptographic proof
                 `ALTER TABLE token_verifications ADD COLUMN IF NOT EXISTS node_signature TEXT DEFAULT NULL`, // Ed25519 signature (base64)
                 `ALTER TABLE token_verifications ADD COLUMN IF NOT EXISTS signature_version TEXT DEFAULT 'v1'`, // For future algorithm upgrades

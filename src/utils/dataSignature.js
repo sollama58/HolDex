@@ -526,6 +526,143 @@ function verifySignature(data, signature) {
     return verifyCategory(data, 'kscore', signature);
 }
 
+// ============================================
+// NODE SIGNATURES - Defense against DB attacks
+// ============================================
+// Nodes in the decentralized network need integrity protection too.
+// Attackers can INSERT fake nodes in the public DB, but without valid
+// signatures they will be rejected by the verification layer.
+
+/**
+ * Sign Node Identity
+ * Protects: node_id, name, operator, public_key fingerprint
+ * This is the core identity - cannot be forged without signing key
+ */
+function signNodeIdentity(node) {
+    const data = [
+        node.node_id,
+        node.name || '',
+        node.operator || '',
+        node.node_key_fingerprint || '',
+        node.region || ''
+    ].join('|');
+    return hmacSign(data);
+}
+
+/**
+ * Sign Node Status
+ * Protects: status, heartbeat, version, stats
+ * Changes over time but must stay consistent
+ */
+function signNodeStatus(node) {
+    const data = [
+        node.node_id,
+        node.status || 'pending',
+        node.last_heartbeat || 0,
+        node.version || '1.0.0',
+        node.tokens_verified || 0,
+        node.verifications_24h || 0
+    ].join('|');
+    return hmacSign(data);
+}
+
+/**
+ * Sign all node categories
+ * @param {Object} node - Node object
+ * @returns {Object} { sig_node_identity, sig_node_status, node_chaos_nonce }
+ */
+function signNodeAllCategories(node) {
+    const chaosNonce = generateChaosNonce();
+    return {
+        sig_node_identity: signNodeIdentity(node),
+        sig_node_status: signNodeStatus(node),
+        node_chaos_nonce: chaosNonce
+    };
+}
+
+/**
+ * Verify Node Identity signature
+ * @param {Object} node - Node object
+ * @returns {{valid: boolean, reason: string}}
+ */
+function verifyNodeIdentity(node) {
+    if (!SIGNING_SECRET) return { valid: true, reason: 'dev_mode' };
+    if (!node.sig_node_identity) return { valid: false, reason: 'unsigned' };
+
+    const data = [
+        node.node_id,
+        node.name || '',
+        node.operator || '',
+        node.node_key_fingerprint || '',
+        node.region || ''
+    ].join('|');
+
+    const result = verifyWithRotation(data, node.sig_node_identity);
+    return result.valid
+        ? { valid: true, reason: 'verified' }
+        : { valid: false, reason: 'signature_mismatch' };
+}
+
+/**
+ * Verify Node Status signature
+ * @param {Object} node - Node object
+ * @returns {{valid: boolean, reason: string}}
+ */
+function verifyNodeStatus(node) {
+    if (!SIGNING_SECRET) return { valid: true, reason: 'dev_mode' };
+    if (!node.sig_node_status) return { valid: false, reason: 'unsigned' };
+
+    const data = [
+        node.node_id,
+        node.status || 'pending',
+        node.last_heartbeat || 0,
+        node.version || '1.0.0',
+        node.tokens_verified || 0,
+        node.verifications_24h || 0
+    ].join('|');
+
+    const result = verifyWithRotation(data, node.sig_node_status);
+    return result.valid
+        ? { valid: true, reason: 'verified' }
+        : { valid: false, reason: 'signature_mismatch' };
+}
+
+/**
+ * Verify all node signatures
+ * @param {Object} node - Node with signatures
+ * @returns {{valid: boolean, tampered: string[], unsigned: string[]}}
+ */
+function verifyNodeSignatures(node) {
+    if (!SIGNING_SECRET) {
+        return { valid: true, tampered: [], unsigned: [], reason: 'dev_mode' };
+    }
+
+    const tampered = [];
+    const unsigned = [];
+
+    // Check identity signature
+    const identityResult = verifyNodeIdentity(node);
+    if (identityResult.reason === 'unsigned') {
+        unsigned.push('identity');
+    } else if (!identityResult.valid) {
+        tampered.push('identity');
+    }
+
+    // Check status signature
+    const statusResult = verifyNodeStatus(node);
+    if (statusResult.reason === 'unsigned') {
+        unsigned.push('status');
+    } else if (!statusResult.valid) {
+        tampered.push('status');
+    }
+
+    return {
+        valid: tampered.length === 0 && unsigned.length === 0,
+        tampered,
+        unsigned
+    };
+}
+
 module.exports = {
     // New 8-category system
     signAllCategories,
@@ -551,6 +688,14 @@ module.exports = {
     // Legacy compatibility
     signData,
     verifySignature,
+
+    // Node signatures (defense against DB attacks)
+    signNodeIdentity,
+    signNodeStatus,
+    signNodeAllCategories,
+    verifyNodeIdentity,
+    verifyNodeStatus,
+    verifyNodeSignatures,
 
     // Constants (for external use)
     SIG_VERSION

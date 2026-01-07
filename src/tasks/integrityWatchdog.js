@@ -514,7 +514,151 @@ async function forceScan(db) {
     await scanForTampering(db);
 }
 
+// =============================================================================
+// NODE WATCHDOG - Defense against fake node injection
+// =============================================================================
+// Attackers can INSERT fake nodes in the public DB, but:
+// 1. Nodes without signing keys are hidden from API
+// 2. Nodes without valid HMAC signatures are deleted
+// 3. Nodes with stale heartbeats are marked offline/deleted
+
+const { verifyNodeSignatures } = require('../utils/dataSignature');
+
+// Node watchdog config
+const NODE_SCAN_INTERVAL = 60 * 1000; // 1 minute (more aggressive than token watchdog)
+const NODE_STALE_THRESHOLD = 24 * 60 * 60 * 1000; // 24 hours without heartbeat = delete
+const NODE_DEGRADED_THRESHOLD = 5 * 60 * 1000; // 5 minutes = degraded
+
+let nodeWatchdogInterval = null;
+
+/**
+ * Scan nodes for tampering and clean up fake/stale nodes
+ * @param {Object} db - Database instance
+ */
+async function scanNodesForTampering(db) {
+    if (!config.DATA_SIGNING_SECRET) return;
+
+    try {
+        const startTime = Date.now();
+
+        // Get ALL nodes (including those without keys, to clean them up)
+        const allNodes = await db.all(`
+            SELECT node_id, name, operator, region, status, last_heartbeat,
+                   tokens_verified, verifications_24h, version,
+                   node_public_key, node_key_fingerprint,
+                   sig_node_identity, sig_node_status, node_chaos_nonce
+            FROM nodes
+        `);
+
+        if (!allNodes || allNodes.length === 0) {
+            logger.debug('[NodeWatchdog] No nodes to scan');
+            return;
+        }
+
+        const now = Date.now();
+        let scanned = 0;
+        let deleted = 0;
+        let degraded = 0;
+        let tamperedCount = 0;
+
+        for (const node of allNodes) {
+            scanned++;
+
+            // 1. DELETE nodes without signing key (no cryptographic identity)
+            if (!node.node_public_key) {
+                await db.query('DELETE FROM nodes WHERE node_id = $1', [node.node_id]);
+                deleted++;
+                logger.warn(`[NodeWatchdog] 🗑️ Deleted unsigned node: ${node.node_id} (operator: ${node.operator})`);
+                continue;
+            }
+
+            // 2. VERIFY HMAC signatures
+            const sigResult = verifyNodeSignatures(node);
+            if (!sigResult.valid && sigResult.tampered && sigResult.tampered.length > 0) {
+                // Tampered node - DELETE it
+                await db.query('DELETE FROM nodes WHERE node_id = $1', [node.node_id]);
+                deleted++;
+                tamperedCount++;
+                logger.error(`[NodeWatchdog] 🚨 Deleted TAMPERED node: ${node.node_id} (fields: ${sigResult.tampered.join(',')})`);
+                continue;
+            }
+
+            // 3. Check heartbeat staleness
+            const heartbeatAge = now - (node.last_heartbeat || 0);
+
+            if (heartbeatAge > NODE_STALE_THRESHOLD) {
+                // Very stale - DELETE (abandoned or attacker-injected)
+                await db.query('DELETE FROM nodes WHERE node_id = $1', [node.node_id]);
+                deleted++;
+                logger.warn(`[NodeWatchdog] 🗑️ Deleted stale node: ${node.node_id} (${Math.round(heartbeatAge / 3600000)}h old)`);
+                continue;
+            }
+
+            if (heartbeatAge > NODE_DEGRADED_THRESHOLD && node.status !== 'degraded') {
+                // Mark as degraded
+                await db.query(`
+                    UPDATE nodes SET status = 'degraded', updated_at = $1
+                    WHERE node_id = $2 AND status != 'degraded'
+                `, [now, node.node_id]);
+                degraded++;
+            }
+        }
+
+        const duration = Date.now() - startTime;
+
+        if (deleted > 0 || degraded > 0 || tamperedCount > 0) {
+            logger.info(`[NodeWatchdog] Scan: ${scanned} nodes | 🗑️${deleted} deleted, ⚠️${degraded} degraded, 🚨${tamperedCount} tampered (${duration}ms)`);
+
+            // Alert if tampering detected
+            if (tamperedCount > 0) {
+                alerting.alertInfo(
+                    'Node Tampering Detected',
+                    `${tamperedCount} tampered node(s) were deleted from the network.`
+                ).catch(() => {});
+            }
+        } else {
+            logger.debug(`[NodeWatchdog] Scan: ${scanned} nodes, all valid (${duration}ms)`);
+        }
+
+    } catch (e) {
+        logger.error(`[NodeWatchdog] Scan error: ${e.message}`);
+    }
+}
+
+/**
+ * Start the node watchdog
+ * @param {Object} deps - Dependencies { db }
+ */
+function startNodeWatchdog(deps) {
+    const { db } = deps;
+
+    if (!config.DATA_SIGNING_SECRET) {
+        logger.warn('[NodeWatchdog] DATA_SIGNING_SECRET not set - node watchdog disabled');
+        return;
+    }
+
+    logger.info(`[NodeWatchdog] Starting node integrity monitor (interval: ${NODE_SCAN_INTERVAL / 1000}s)`);
+
+    // Initial scan after 10 seconds
+    setTimeout(() => scanNodesForTampering(db), 10 * 1000);
+
+    // Periodic scans
+    nodeWatchdogInterval = setInterval(() => scanNodesForTampering(db), NODE_SCAN_INTERVAL);
+}
+
+/**
+ * Stop the node watchdog
+ */
+function stopNodeWatchdog() {
+    if (nodeWatchdogInterval) {
+        clearInterval(nodeWatchdogInterval);
+        nodeWatchdogInterval = null;
+        logger.info('[NodeWatchdog] Stopped');
+    }
+}
+
 module.exports = {
+    // Token watchdog
     start,
     stop,
     forceScan,
@@ -525,5 +669,12 @@ module.exports = {
     getIntegrityAction,
     SNAPSHOT_PREFIX,
     ALL_CATEGORIES,
-    STABLE_CATEGORIES
+    STABLE_CATEGORIES,
+
+    // Node watchdog
+    startNodeWatchdog,
+    stopNodeWatchdog,
+    scanNodesForTampering,
+    NODE_SCAN_INTERVAL,
+    NODE_STALE_THRESHOLD
 };

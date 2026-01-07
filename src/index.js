@@ -479,6 +479,7 @@ async function startServer() {
         // API = verification only (integrityWatchdog)
 
         integrityWatchdog.start({ db: getDB() });
+        integrityWatchdog.startNodeWatchdog({ db: getDB() }); // Node tampering defense
 
         // Initialize Routes
         app.use('/api', tokensRoutes.init({ db: getDB() }));
