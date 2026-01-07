@@ -62,5 +62,28 @@
       "research": 0.236,
       "planning": 0.146
     }
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /workspaces/HolDex/.claude/hooks/session-quality.js post-tool \"$TOOL_NAME\" \"$TOOL_INPUT\" \"$TOOL_RESULT\" 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /workspaces/HolDex/.claude/hooks/session-quality.js stop"
+          }
+        ]
+      }
+    ]
   }
 }
