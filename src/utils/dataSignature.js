@@ -565,6 +565,8 @@ function signNodeStatus(node) {
         String(parseInt(node.tokens_verified, 10) || 0),
         String(parseInt(node.verifications_24h, 10) || 0)
     ].join('|');
+    // DEBUG: Log when signing
+    logger.debug(`[NodeSig] Signing status: ${data}`);
     return hmacSign(data);
 }
 
@@ -625,6 +627,13 @@ function verifyNodeStatus(node) {
     ].join('|');
 
     const result = verifyWithRotation(data, node.sig_node_status);
+    if (!result.valid) {
+        // DEBUG: Log the data string to diagnose mismatch
+        const computedSig = hmacSign(data);
+        logger.warn(`[NodeSig] MISMATCH status for ${node.node_id}: expected=${node.sig_node_status?.slice(0, 20)}... computed=${computedSig?.slice(0, 20)}...`);
+        logger.warn(`[NodeSig] status data: ${data}`);
+        logger.warn(`[NodeSig] Raw values: heartbeat=${node.last_heartbeat} (${typeof node.last_heartbeat}), version=${node.version}, verified=${node.tokens_verified}, 24h=${node.verifications_24h}`);
+    }
     return result.valid
         ? { valid: true, reason: 'verified' }
         : { valid: false, reason: 'signature_mismatch' };
