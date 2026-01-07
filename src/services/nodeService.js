@@ -156,8 +156,11 @@ async function sendHeartbeat(db, stats = {}) {
     }
 
     const now = Date.now();
+    const version = process.env.npm_package_version || '1.0.0';
+    const newStatus = NODE_STATUS.ACTIVE;
 
     try {
+        // First update the heartbeat
         await db.query(`
             UPDATE nodes SET
                 last_heartbeat = $1,
@@ -168,16 +171,37 @@ async function sendHeartbeat(db, stats = {}) {
             WHERE node_id = $5
         `, [
             now,
-            NODE_STATUS.ACTIVE,
-            process.env.npm_package_version || '1.0.0',
+            newStatus,
+            version,
             stats.verifications_24h || null,
             currentNodeId
         ]);
 
+        // CRITICAL: Re-sign the status signature after heartbeat update
+        // The status signature includes last_heartbeat, so it must be re-signed
+        // Fetch current node state to ensure signature matches exactly what's in DB
+        const nodeResult = await db.query(`
+            SELECT tokens_verified, verifications_24h FROM nodes WHERE node_id = $1
+        `, [currentNodeId]);
+
+        const nodeForSigning = {
+            node_id: currentNodeId,
+            status: newStatus,
+            last_heartbeat: now,
+            version: version,
+            tokens_verified: nodeResult.rows[0]?.tokens_verified || 0,
+            verifications_24h: nodeResult.rows[0]?.verifications_24h || 0
+        };
+        const newStatusSig = signNodeStatus(nodeForSigning);
+
+        await db.query(`
+            UPDATE nodes SET sig_node_status = $1 WHERE node_id = $2
+        `, [newStatusSig, currentNodeId]);
+
         // Get network status
         const networkStatus = await getNetworkStatus(db);
 
-        logger.debug(`💓 Heartbeat sent: ${currentNodeId}`);
+        logger.debug(`💓 Heartbeat sent: ${currentNodeId} [sig:✅]`);
         return {
             success: true,
             node_id: currentNodeId,
