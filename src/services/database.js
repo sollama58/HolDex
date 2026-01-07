@@ -617,6 +617,17 @@ async function initDB() {
                 logger.info('⚗️ Harmony: Seeded operation costs (φ-ratio efficiency floor)');
             }
 
+            // Clean up auto-generated nodes with unknown operators
+            const cleanupResult = await primaryPool.query(`
+                DELETE FROM nodes
+                WHERE operator = 'unknown'
+                   OR node_id LIKE 'node-srv-%'
+                RETURNING node_id
+            `);
+            if (cleanupResult.rows.length > 0) {
+                logger.info(`🧹 Network: Cleaned up ${cleanupResult.rows.length} orphan node(s)`);
+            }
+
             // Ensure founding nodes exist (ON CONFLICT handles duplicates)
             const foundingNodes = [
                 ['node-zeyxx-001', 'jeanterre552-primary', 'jeanterre552', 'https://holdex-api.onrender.com', 'us-oregon'],
