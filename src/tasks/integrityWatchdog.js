@@ -191,6 +191,10 @@ async function restoreFromSnapshot(db, mint, tamperedCategories) {
     }
 
     try {
+        // CRITICAL: Ensure snapshot.mint is set (legacy snapshots may not have it)
+        // All signature functions use token.mint as the first field
+        snapshot.mint = mint;
+
         // Re-sign the snapshot data (new chaos_nonce for unpredictability)
         const signatures = signAllCategories(snapshot);
 
@@ -278,7 +282,7 @@ async function restoreFromSnapshot(db, mint, tamperedCategories) {
             snapshot.conviction_extractors,
             snapshot.conviction_analyzed,
             snapshot.holders,
-            snapshot.last_k_score_update || Date.now(),
+            snapshot.last_k_score_update || 0,  // Must match signKScore fallback
             // Market (25-27)
             snapshot.priceusd,
             snapshot.marketcap,
