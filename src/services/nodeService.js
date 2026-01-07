@@ -2,17 +2,20 @@
  * Node Service - Decentralized Validation Infrastructure
  *
  * "Multiple nodes, shared truth, verified consensus."
+ * Philosophy: "Don't trust. Verify." - Each node has unique cryptographic identity
  *
  * Manages the HolDex node network:
  * - Node registration and heartbeat
+ * - Per-node Ed25519 key management
  * - Status tracking (active, degraded, offline)
- * - Token verification logging
+ * - Token verification logging with cryptographic signatures
  * - Consensus calculations
  */
 
 const logger = require('./logger');
 const crypto = require('crypto');
 const config = require('../config/env');
+const nodeKeys = require('../utils/nodeKeys');
 
 // Node status constants
 const NODE_STATUS = {
@@ -27,8 +30,10 @@ const _HEARTBEAT_INTERVAL = 60 * 1000;          // 60 seconds (used in index.js)
 const DEGRADED_THRESHOLD = 5 * 60 * 1000;       // 5 minutes without heartbeat
 const OFFLINE_THRESHOLD = 15 * 60 * 1000;       // 15 minutes without heartbeat
 
-// Current node identifier (set via env or generated)
+// Current node state
 let currentNodeId = null;
+let currentNodePublicKey = null;
+let currentNodeFingerprint = null;
 
 /**
  * Initialize the current node
@@ -44,12 +49,37 @@ async function initializeNode(db) {
     const operator = process.env.NODE_OPERATOR || 'unknown';
     const apiUrl = process.env.NODE_API_URL || null;
     const region = process.env.NODE_REGION || 'unknown';
+    const now = Date.now();
+
+    // Derive public key from private key if available
+    const privateKey = nodeKeys.getNodePrivateKey();
+    let publicKey = null;
+    let fingerprint = null;
+
+    if (privateKey) {
+        const derived = nodeKeys.derivePublicKey(privateKey);
+        if (derived) {
+            publicKey = derived.publicKey;
+            fingerprint = derived.fingerprint;
+            currentNodePublicKey = publicKey;
+            currentNodeFingerprint = fingerprint;
+            logger.info(`🔑 Node key loaded: ${fingerprint}`);
+        } else {
+            logger.warn('⚠️ NODE_PRIVATE_KEY set but failed to derive public key');
+        }
+    } else {
+        logger.warn('⚠️ No NODE_PRIVATE_KEY - verifications will be unsigned');
+    }
 
     try {
-        // Upsert node registration
+        // Upsert node registration with key info
         await db.query(`
-            INSERT INTO nodes (node_id, name, operator, api_url, region, status, last_heartbeat, joined_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+            INSERT INTO nodes (
+                node_id, name, operator, api_url, region,
+                status, last_heartbeat, joined_at,
+                node_public_key, node_key_fingerprint, key_registered_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, $10)
             ON CONFLICT (node_id) DO UPDATE SET
                 name = EXCLUDED.name,
                 operator = EXCLUDED.operator,
@@ -57,10 +87,22 @@ async function initializeNode(db) {
                 region = EXCLUDED.region,
                 status = 'active',
                 last_heartbeat = EXCLUDED.last_heartbeat,
-                updated_at = EXCLUDED.last_heartbeat
-        `, [currentNodeId, nodeName, operator, apiUrl, region, NODE_STATUS.ACTIVE, Date.now()]);
+                updated_at = EXCLUDED.last_heartbeat,
+                node_public_key = COALESCE(EXCLUDED.node_public_key, nodes.node_public_key),
+                node_key_fingerprint = COALESCE(EXCLUDED.node_key_fingerprint, nodes.node_key_fingerprint),
+                key_registered_at = CASE
+                    WHEN nodes.node_public_key IS NULL AND EXCLUDED.node_public_key IS NOT NULL
+                    THEN EXCLUDED.key_registered_at
+                    ELSE nodes.key_registered_at
+                END
+        `, [
+            currentNodeId, nodeName, operator, apiUrl, region,
+            NODE_STATUS.ACTIVE, now,
+            publicKey, fingerprint, publicKey ? now : null
+        ]);
 
-        logger.info(`🌐 Node initialized: ${currentNodeId} (${nodeName})`);
+        const keyStatus = fingerprint ? `🔑 ${fingerprint}` : '⚠️ unsigned';
+        logger.info(`🌐 Node initialized: ${currentNodeId} (${nodeName}) [${keyStatus}]`);
         return currentNodeId;
     } catch (e) {
         logger.error(`❌ Node initialization failed: ${e.message}`);
@@ -283,6 +325,7 @@ async function getNetworkStatus(db) {
 
 /**
  * Record token verification by current node
+ * Signs the verification with node's private key for cryptographic proof
  * @param {Object} db - Database wrapper
  * @param {string} mint - Token mint address
  * @param {number} kScore - Calculated K-Score
@@ -291,15 +334,40 @@ async function getNetworkStatus(db) {
 async function recordVerification(db, mint, kScore, signaturesValid = true) {
     if (!currentNodeId) return;
 
+    const now = Date.now();
+
+    // Create verification object for signing
+    const verification = {
+        mint,
+        node_id: currentNodeId,
+        verified_at: now,
+        k_score: kScore,
+        signatures_valid: signaturesValid
+    };
+
+    // Sign with node's private key (if available)
+    const privateKey = nodeKeys.getNodePrivateKey();
+    const nodeSignature = privateKey
+        ? nodeKeys.signVerification(verification, privateKey)
+        : null;
+
     try {
         await db.query(`
-            INSERT INTO token_verifications (mint, node_id, verified_at, k_score, signatures_valid)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO token_verifications (
+                mint, node_id, verified_at, k_score, signatures_valid,
+                node_signature, signature_version
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             ON CONFLICT (mint, node_id) DO UPDATE SET
                 verified_at = EXCLUDED.verified_at,
                 k_score = EXCLUDED.k_score,
-                signatures_valid = EXCLUDED.signatures_valid
-        `, [mint, currentNodeId, Date.now(), kScore, signaturesValid]);
+                signatures_valid = EXCLUDED.signatures_valid,
+                node_signature = EXCLUDED.node_signature,
+                signature_version = EXCLUDED.signature_version
+        `, [
+            mint, currentNodeId, now, kScore, signaturesValid,
+            nodeSignature, nodeSignature ? 'v1' : null
+        ]);
 
         // Update node stats
         await db.query(`
@@ -308,7 +376,7 @@ async function recordVerification(db, mint, kScore, signaturesValid = true) {
                 verifications_24h = verifications_24h + 1,
                 updated_at = $1
             WHERE node_id = $2
-        `, [Date.now(), currentNodeId]);
+        `, [now, currentNodeId]);
     } catch (e) {
         // Non-critical, just log
         logger.debug(`Verification record failed: ${e.message}`);
@@ -317,25 +385,30 @@ async function recordVerification(db, mint, kScore, signaturesValid = true) {
 
 /**
  * Get validation info for a token (nodes that verified it)
+ * Includes cryptographic verification of node signatures
  * @param {Object} db - Database wrapper
  * @param {string} mint - Token mint address
- * @returns {Object} Validation info
+ * @returns {Object} Validation info with signature verification
  */
 async function getTokenValidation(db, mint) {
     try {
         const now = Date.now();
         const dayAgo = now - 24 * 60 * 60 * 1000;
 
-        // Get recent verifications for this token
+        // Get recent verifications with node public keys for signature verification
         const verifications = await db.query(`
             SELECT
                 tv.node_id,
                 tv.verified_at,
                 tv.k_score,
                 tv.signatures_valid,
+                tv.node_signature,
+                tv.signature_version,
                 n.name as node_name,
                 n.status as node_status,
-                n.last_heartbeat
+                n.last_heartbeat,
+                n.node_public_key,
+                n.node_key_fingerprint
             FROM token_verifications tv
             JOIN nodes n ON tv.node_id = n.node_id
             WHERE tv.mint = $1 AND tv.verified_at > $2
@@ -345,48 +418,118 @@ async function getTokenValidation(db, mint) {
         // Get active nodes
         const networkStatus = await getNetworkStatus(db);
 
-        // Calculate consensus
-        const kScores = verifications.rows
+        // Verify signatures and calculate consensus
+        const verifiedResults = verifications.rows.map(v => {
+            let nodeSigValid = false;
+            let nodeSigError = null;
+
+            // Verify node signature if present
+            if (v.node_signature && v.node_public_key) {
+                const verification = {
+                    mint,
+                    node_id: v.node_id,
+                    verified_at: parseInt(v.verified_at),
+                    k_score: v.k_score,
+                    signatures_valid: v.signatures_valid
+                };
+                const result = nodeKeys.verifyVerificationSignature(
+                    verification,
+                    v.node_signature,
+                    v.node_public_key
+                );
+                nodeSigValid = result.valid;
+                nodeSigError = result.error;
+            } else if (v.node_signature && !v.node_public_key) {
+                nodeSigError = 'No public key registered';
+            } else {
+                nodeSigError = 'Unsigned verification';
+            }
+
+            return {
+                ...v,
+                node_sig_valid: nodeSigValid,
+                node_sig_error: nodeSigError
+            };
+        });
+
+        // Calculate consensus (only from cryptographically verified nodes)
+        const trustedVerifications = verifiedResults.filter(v => v.node_sig_valid);
+        const allKScores = verifiedResults
+            .filter(v => v.k_score != null)
+            .map(v => v.k_score);
+        const trustedKScores = trustedVerifications
             .filter(v => v.k_score != null)
             .map(v => v.k_score);
 
         let consensus = 'unknown';
         let nodesAgreed = 0;
+        let trustedConsensus = 'unknown';
+        let trustedNodesAgreed = 0;
 
-        if (kScores.length >= 2) {
-            const min = Math.min(...kScores);
-            const max = Math.max(...kScores);
+        // Calculate overall consensus
+        if (allKScores.length >= 2) {
+            const min = Math.min(...allKScores);
+            const max = Math.max(...allKScores);
             const tolerance = 5; // ±5 points
 
             if (max - min <= tolerance) {
                 consensus = 'unanimous';
-                nodesAgreed = kScores.length;
+                nodesAgreed = allKScores.length;
             } else {
                 consensus = 'divergent';
-                // Count nodes within tolerance of median
-                const median = kScores.sort((a, b) => a - b)[Math.floor(kScores.length / 2)];
-                nodesAgreed = kScores.filter(k => Math.abs(k - median) <= tolerance).length;
+                const sorted = [...allKScores].sort((a, b) => a - b);
+                const median = sorted[Math.floor(sorted.length / 2)];
+                nodesAgreed = allKScores.filter(k => Math.abs(k - median) <= tolerance).length;
             }
-        } else if (kScores.length === 1) {
+        } else if (allKScores.length === 1) {
             consensus = 'single';
             nodesAgreed = 1;
         }
 
+        // Calculate trusted (signed) consensus separately
+        if (trustedKScores.length >= 2) {
+            const min = Math.min(...trustedKScores);
+            const max = Math.max(...trustedKScores);
+            const tolerance = 5;
+
+            if (max - min <= tolerance) {
+                trustedConsensus = 'unanimous';
+                trustedNodesAgreed = trustedKScores.length;
+            } else {
+                trustedConsensus = 'divergent';
+                const sorted = [...trustedKScores].sort((a, b) => a - b);
+                const median = sorted[Math.floor(sorted.length / 2)];
+                trustedNodesAgreed = trustedKScores.filter(k => Math.abs(k - median) <= tolerance).length;
+            }
+        } else if (trustedKScores.length === 1) {
+            trustedConsensus = 'single';
+            trustedNodesAgreed = 1;
+        }
+
         // Most recent verification
-        const lastVerified = verifications.rows[0]?.verified_at || null;
+        const lastVerified = verifiedResults[0]?.verified_at || null;
 
         return {
             nodes_active: networkStatus.nodes_active,
-            nodes_verified: verifications.rows.length,
+            nodes_verified: verifiedResults.length,
+            nodes_signed: trustedVerifications.length,
             nodes_agreed: nodesAgreed,
             consensus,
+            trusted: {
+                nodes_verified: trustedVerifications.length,
+                nodes_agreed: trustedNodesAgreed,
+                consensus: trustedConsensus
+            },
             last_verified: lastVerified,
-            verifiers: verifications.rows.map(v => ({
+            verifiers: verifiedResults.map(v => ({
                 node_id: v.node_id,
                 name: v.node_name,
+                fingerprint: v.node_key_fingerprint,
                 verified_at: v.verified_at,
                 k_score: v.k_score,
-                signatures_valid: v.signatures_valid
+                signatures_valid: v.signatures_valid,
+                node_sig_valid: v.node_sig_valid,
+                node_sig_error: v.node_sig_error
             }))
         };
     } catch (e) {
@@ -488,7 +631,7 @@ async function registerNode(db, nodeData) {
 /**
  * Get list of all nodes
  * @param {Object} db - Database wrapper
- * @returns {Array} List of nodes
+ * @returns {Array} List of nodes with key info
  */
 async function listNodes(db) {
     try {
@@ -505,7 +648,9 @@ async function listNodes(db) {
                 verifications_24h,
                 consensus_rate,
                 version,
-                joined_at
+                joined_at,
+                node_key_fingerprint,
+                key_registered_at
             FROM nodes
             ORDER BY
                 CASE status
@@ -517,17 +662,85 @@ async function listNodes(db) {
                 last_heartbeat DESC
         `);
 
-        return result.rows;
+        return result.rows.map(node => ({
+            ...node,
+            has_signing_key: !!node.node_key_fingerprint
+        }));
     } catch (e) {
         logger.error(`❌ List nodes failed: ${e.message}`);
         return [];
     }
 }
 
+/**
+ * Get current node's key info
+ * @returns {Object} Key info
+ */
+function getNodeKeyInfo() {
+    return {
+        node_id: currentNodeId,
+        public_key: currentNodePublicKey,
+        fingerprint: currentNodeFingerprint,
+        has_key: !!currentNodePublicKey
+    };
+}
+
+/**
+ * Get a node's public key from database
+ * @param {Object} db - Database wrapper
+ * @param {string} nodeId - Node ID
+ * @returns {Object|null} Node key info
+ */
+async function getNodePublicKey(db, nodeId) {
+    try {
+        const result = await db.query(`
+            SELECT node_id, node_public_key, node_key_fingerprint, key_registered_at
+            FROM nodes
+            WHERE node_id = $1
+        `, [nodeId]);
+
+        if (result.rows.length === 0) {
+            return null;
+        }
+
+        const node = result.rows[0];
+        return {
+            node_id: node.node_id,
+            public_key: node.node_public_key,
+            fingerprint: node.node_key_fingerprint,
+            registered_at: node.key_registered_at
+        };
+    } catch (e) {
+        logger.error(`❌ Get node public key failed: ${e.message}`);
+        return null;
+    }
+}
+
+/**
+ * Verify a raw verification signature
+ * @param {Object} verification - Verification data
+ * @param {string} signature - Node signature
+ * @param {string} publicKey - Node public key
+ * @returns {{ valid: boolean, error?: string }}
+ */
+function verifyNodeSignature(verification, signature, publicKey) {
+    return nodeKeys.verifyVerificationSignature(verification, signature, publicKey);
+}
+
+/**
+ * Generate a new keypair (for CLI tools)
+ * @returns {{ publicKey: string, privateKey: string, fingerprint: string }}
+ */
+function generateNodeKeyPair() {
+    return nodeKeys.generateKeyPair();
+}
+
 module.exports = {
     NODE_STATUS,
     initializeNode,
     getNodeId,
+    getNodeKeyInfo,
+    getNodePublicKey,
     sendHeartbeat,
     processHeartbeat,
     createHeartbeatSignature,
@@ -537,5 +750,7 @@ module.exports = {
     getTokenValidation,
     updateNodeStatuses,
     registerNode,
-    listNodes
+    listNodes,
+    verifyNodeSignature,
+    generateNodeKeyPair
 };

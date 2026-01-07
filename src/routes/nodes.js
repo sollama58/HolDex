@@ -5,6 +5,7 @@
  *   GET /api/nodes           - List all nodes
  *   GET /api/nodes/status    - Network status
  *   GET /api/nodes/:id       - Node details
+ *   GET /api/nodes/:id/key   - Node public key (for signature verification)
  *
  * Internal endpoints (authenticated):
  *   POST /internal/heartbeat - Node heartbeat
@@ -27,6 +28,7 @@ router.get('/', async (req, res) => {
         res.json({
             success: true,
             count: nodes.length,
+            signed_nodes: nodes.filter(n => n.has_signing_key).length,
             nodes: nodes.map(n => ({
                 node_id: n.node_id,
                 name: n.name,
@@ -37,7 +39,11 @@ router.get('/', async (req, res) => {
                 tokens_verified: n.tokens_verified,
                 verifications_24h: n.verifications_24h,
                 version: n.version,
-                joined_at: n.joined_at
+                joined_at: n.joined_at,
+                // Key info
+                fingerprint: n.node_key_fingerprint,
+                has_signing_key: n.has_signing_key,
+                key_registered_at: n.key_registered_at
             }))
         });
     } catch (e) {
@@ -63,6 +69,44 @@ router.get('/status', async (req, res) => {
 });
 
 /**
+ * GET /api/nodes/:id/key - Get node's public key for signature verification
+ * Philosophy: "Don't trust. Verify." - Anyone can verify node signatures
+ */
+router.get('/:id/key', async (req, res) => {
+    try {
+        const db = req.app.get('db');
+        const { id } = req.params;
+
+        const keyInfo = await nodeService.getNodePublicKey(db, id);
+
+        if (!keyInfo) {
+            return res.status(404).json({ success: false, error: 'Node not found' });
+        }
+
+        if (!keyInfo.public_key) {
+            return res.status(404).json({
+                success: false,
+                error: 'Node has no registered public key',
+                node_id: id
+            });
+        }
+
+        res.json({
+            success: true,
+            node_id: keyInfo.node_id,
+            public_key: keyInfo.public_key,
+            fingerprint: keyInfo.fingerprint,
+            registered_at: keyInfo.registered_at,
+            algorithm: 'Ed25519',
+            encoding: 'base64-der-spki',
+            usage: 'Use this key to verify node_signature on token verifications'
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+/**
  * GET /api/nodes/:id - Get specific node details
  */
 router.get('/:id', async (req, res) => {
@@ -80,9 +124,9 @@ router.get('/:id', async (req, res) => {
 
         const node = result.rows[0];
 
-        // Get recent verifications by this node
+        // Get recent verifications by this node (with signatures)
         const verifications = await db.query(`
-            SELECT mint, k_score, verified_at, signatures_valid
+            SELECT mint, k_score, verified_at, signatures_valid, node_signature, signature_version
             FROM token_verifications
             WHERE node_id = $1
             ORDER BY verified_at DESC
@@ -93,7 +137,14 @@ router.get('/:id', async (req, res) => {
             success: true,
             node: {
                 ...node,
-                recent_verifications: verifications.rows
+                // Expose key info (but not the full public key here, use /key endpoint)
+                has_signing_key: !!node.node_key_fingerprint,
+                key_fingerprint: node.node_key_fingerprint,
+                key_registered_at: node.key_registered_at,
+                recent_verifications: verifications.rows.map(v => ({
+                    ...v,
+                    is_signed: !!v.node_signature
+                }))
             }
         });
     } catch (e) {

@@ -503,6 +503,16 @@ async function initDB() {
                 `ALTER TABLE participants ADD COLUMN IF NOT EXISTS escore_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
                 `ALTER TABLE participants ADD COLUMN IF NOT EXISTS first_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
                 `ALTER TABLE participants ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+                // ═══════════════════════════════════════════════════════════
+                // PER-NODE CRYPTOGRAPHIC IDENTITY (Ed25519)
+                // Philosophy: "Don't trust. Verify." - Each node has unique identity
+                // ═══════════════════════════════════════════════════════════
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS node_public_key TEXT DEFAULT NULL`,      // Ed25519 public key (base64)
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS node_key_fingerprint TEXT DEFAULT NULL`, // SHA256 of public key (hex, first 16 chars)
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS key_registered_at BIGINT DEFAULT NULL`,  // When key was registered
+                // Token verifications: Add cryptographic proof
+                `ALTER TABLE token_verifications ADD COLUMN IF NOT EXISTS node_signature TEXT DEFAULT NULL`, // Ed25519 signature (base64)
+                `ALTER TABLE token_verifications ADD COLUMN IF NOT EXISTS signature_version TEXT DEFAULT 'v1'`, // For future algorithm upgrades
             ];
 
             // PERFORMANCE: Add indexes for frequently queried columns
@@ -563,6 +573,8 @@ async function initDB() {
                 `CREATE INDEX IF NOT EXISTS idx_token_verifications_mint ON token_verifications (mint, verified_at DESC)`,
                 // Token verifications by node (for node stats)
                 `CREATE INDEX IF NOT EXISTS idx_token_verifications_node ON token_verifications (node_id, verified_at DESC)`,
+                // Node key fingerprint lookup (for signature verification)
+                `CREATE INDEX IF NOT EXISTS idx_nodes_key_fingerprint ON nodes (node_key_fingerprint) WHERE node_key_fingerprint IS NOT NULL`,
             ];
 
             for (const sql of migrations) {
