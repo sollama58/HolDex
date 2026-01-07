@@ -97,33 +97,82 @@ async function restoreFromSnapshot(db, mint, tamperedCategories) {
         // Re-sign the snapshot data (new chaos_nonce for unpredictability)
         const signatures = signAllCategories(snapshot);
 
-        // Restore all signed fields from snapshot
+        // Restore ALL signed fields from snapshot (data + signatures)
+        // CRITICAL: Must restore data fields too, not just signatures!
+        // Otherwise sig_identity is based on snapshot.name but DB keeps old name → mismatch
         await db.run(`
             UPDATE tokens
-            SET k_score = $1,
-                conviction_score = $2,
-                conviction_accumulators = $3,
-                conviction_holders = $4,
-                conviction_reducers = $5,
-                conviction_extractors = $6,
-                conviction_analyzed = $7,
-                holders = $8,
-                priceusd = $9,
-                marketcap = $10,
-                liquidity = $11,
-                burned_amount = $12,
-                burned_percent = $13,
-                sig_identity = $14,
-                sig_security = $15,
-                sig_lp = $16,
-                sig_supply = $17,
-                sig_kscore = $18,
-                sig_market = $19,
-                sig_origin = $20,
-                sig_full = $21,
-                chaos_nonce = $22
-            WHERE mint = $23
+            SET
+                -- Identity fields (sig_identity)
+                name = $1,
+                symbol = $2,
+                image = $3,
+                decimals = $4,
+                -- Security fields (sig_security)
+                mint_authority_revoked = $5,
+                freeze_authority_revoked = $6,
+                is_mutable_supply = $7,
+                hasCommunityUpdate = $8,
+                -- LP fields (sig_lp)
+                lp_burn_pct = $9,
+                lp_locked_pct = $10,
+                lp_status = $11,
+                -- Supply fields (sig_supply)
+                supply = $12,
+                initial_supply = $13,
+                burned_amount = $14,
+                burned_percent = $15,
+                -- K-Score fields (sig_kscore)
+                k_score = $16,
+                conviction_score = $17,
+                conviction_accumulators = $18,
+                conviction_holders = $19,
+                conviction_reducers = $20,
+                conviction_extractors = $21,
+                conviction_analyzed = $22,
+                holders = $23,
+                last_k_score_update = $24,
+                -- Market fields (sig_market) - volatile but needed for consistency
+                priceusd = $25,
+                marketcap = $26,
+                liquidity = $27,
+                -- Origin fields (sig_origin)
+                is_pump_fun = $28,
+                bonding_curve_complete = $29,
+                timestamp = $30,
+                metadata = $31,
+                -- All signatures
+                sig_identity = $32,
+                sig_security = $33,
+                sig_lp = $34,
+                sig_supply = $35,
+                sig_kscore = $36,
+                sig_market = $37,
+                sig_origin = $38,
+                sig_full = $39,
+                chaos_nonce = $40
+            WHERE mint = $41
         `, [
+            // Identity (1-4)
+            snapshot.name || '',
+            snapshot.symbol || '',
+            snapshot.image || '',
+            snapshot.decimals || 9,
+            // Security (5-8)
+            snapshot.mint_authority_revoked || false,
+            snapshot.freeze_authority_revoked || false,
+            snapshot.is_mutable_supply || false,
+            snapshot.hasCommunityUpdate || snapshot.hascommunityupdate || false,
+            // LP (9-11)
+            snapshot.lp_burn_pct || 0,
+            snapshot.lp_locked_pct || 0,
+            snapshot.lp_status || 'unknown',
+            // Supply (12-15)
+            snapshot.supply || '0',
+            snapshot.initial_supply || snapshot.supply || '0',
+            snapshot.burned_amount || 0,
+            snapshot.burned_percent || 0,
+            // K-Score (16-24)
             snapshot.k_score,
             snapshot.conviction_score,
             snapshot.conviction_accumulators,
@@ -132,11 +181,17 @@ async function restoreFromSnapshot(db, mint, tamperedCategories) {
             snapshot.conviction_extractors,
             snapshot.conviction_analyzed,
             snapshot.holders,
+            snapshot.last_k_score_update || Date.now(),
+            // Market (25-27)
             snapshot.priceusd,
             snapshot.marketcap,
             snapshot.liquidity,
-            snapshot.burned_amount,
-            snapshot.burned_percent,
+            // Origin (28-31)
+            snapshot.is_pump_fun || false,
+            snapshot.bonding_curve_complete || false,
+            snapshot.timestamp || 0,
+            snapshot.metadata || '',
+            // Signatures (32-40)
             signatures.sig_identity,
             signatures.sig_security,
             signatures.sig_lp,
@@ -146,6 +201,7 @@ async function restoreFromSnapshot(db, mint, tamperedCategories) {
             signatures.sig_origin,
             signatures.sig_full,
             signatures.chaos_nonce,
+            // WHERE (41)
             mint
         ]);
 
