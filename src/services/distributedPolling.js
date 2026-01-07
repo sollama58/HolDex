@@ -207,7 +207,7 @@ async function sendHeartbeat() {
 async function pruneDeadNodes() {
     if (!db) return;
 
-    const cutoff = Date.now() - CONFIG.DEAD_NODE_THRESHOLD_MS;
+    const cutoff = Math.floor(Date.now() - CONFIG.DEAD_NODE_THRESHOLD_MS);
 
     // Mark nodes as degraded if no heartbeat
     const result = await db.query(`
