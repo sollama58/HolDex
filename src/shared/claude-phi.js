@@ -315,31 +315,39 @@ function calculateFreshness(messageAge) {
 // =============================================================================
 
 /**
- * Token budgets for subagents based on φ ratios
- * Total research budget split by agent priority
+ * Subagent token budgets using normalized φ ratios
+ * Uses same partition as CONTEXT_RATIOS: φ⁻¹ + (φ⁻² × φ⁻¹) + (φ⁻² × φ⁻²) = 1.0
  */
 const SUBAGENT_BUDGETS = Object.freeze({
-  // Primary research agents
+  // PRIMARY: Gets the golden ratio share
   librarian: {
-    ratio: PHI_INVERSE,           // 61.8% of research budget
+    ratio: PHI_INVERSE,                           // 61.8% of research budget
     model: 'sonnet',
+    maxOutputTokens: 500,
+    priority: 'PRIMARY',
     purpose: 'Documentation lookup, context7, external research',
   },
 
-  // Secondary analysis agents
+  // SECONDARY: Gets φ⁻² × φ⁻¹ share
   'integrity-auditor': {
-    ratio: PHI_INVERSE_SQUARED,   // 23.6% of research budget
+    ratio: PHI_INVERSE_SQUARED * PHI_INVERSE,     // 23.6% of research budget
     model: 'haiku',
+    maxOutputTokens: 300,
+    priority: 'SECONDARY',
     purpose: 'Signature verification, HMAC audit',
   },
 
-  // Tertiary analysis agents
+  // TERTIARY: Gets φ⁻² × φ⁻² share
   'commit-analyzer': {
-    ratio: PHI_INVERSE_CUBED,     // 14.6% of research budget
+    ratio: PHI_INVERSE_SQUARED * PHI_INVERSE_SQUARED,  // 14.6% of research budget
     model: 'sonnet',
+    maxOutputTokens: 400,
+    priority: 'TERTIARY',
     purpose: 'Git history, pattern analysis',
   },
 });
+
+// Verification: 0.618 + 0.236 + 0.146 = 1.0 ✓
 
 /**
  * Calculate token budget for a specific subagent

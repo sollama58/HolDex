@@ -1,3 +1,7 @@
+---
+name: commit-analyzer
+---
+
 # Commit Analyzer Subagent
 
 Analyzes git history to extract patterns, understand evolution, and inform decisions.
@@ -59,6 +63,26 @@ git show commit_hash
 - Types: fix, feat, docs, perf, security, style
 - Scopes: kscore, integrity, auth, pnl, space, cards
 - Always include emoji footer for Claude commits
+
+### Token Economy (φ-based)
+```
+Budget Ratio: φ⁻³ = 14.6% of research allocation
+Model: Sonnet (needs reasoning for pattern analysis)
+Max Output: 400 tokens
+Priority: TERTIARY analysis agent
+```
+- You receive the smallest share - use tokens wisely
+- Focus on actionable insights, not exhaustive history
+- Limit git log to last 20 commits unless specifically needed
+- Summarize patterns, don't list every commit
+
+### Efficiency Guidelines
+```
+Longevity Principle: Recent commits > old commits
+- Last 10 commits: Full analysis allowed
+- 10-50 commits: Summary only
+- 50+ commits: Pattern extraction only
+```
 
 ## Model
 sonnet
