@@ -633,7 +633,8 @@ async function initDB() {
                 logger.info(`🧹 Network: Cleaned up ${cleanupResult.rows.length} orphan node(s)`);
             }
 
-            // Ensure founding nodes exist (ON CONFLICT handles duplicates)
+            // Ensure founding nodes exist (DO NOTHING if exists - initializeNode() will sign them)
+            // IMPORTANT: Using DO NOTHING to avoid race condition with initializeNode() signatures
             const foundingNodes = [
                 ['node-zeyxx-001', 'jeanterre552-primary', 'jeanterre552', 'https://holdex-api.onrender.com', 'us-oregon'],
                 ['node-gcrtrd-001', 'gcrtrd-secondary', 'sollama58', null, 'us-oregon']
@@ -644,11 +645,7 @@ async function initDB() {
                 const result = await primaryPool.query(`
                     INSERT INTO nodes (node_id, name, operator, api_url, region, status, joined_at, updated_at)
                     VALUES ($1, $2, $3, $4, $5, 'pending', $6, $6)
-                    ON CONFLICT (node_id) DO UPDATE SET
-                        name = EXCLUDED.name,
-                        operator = EXCLUDED.operator,
-                        api_url = COALESCE(EXCLUDED.api_url, nodes.api_url),
-                        updated_at = EXCLUDED.updated_at
+                    ON CONFLICT (node_id) DO NOTHING
                     RETURNING node_id
                 `, [nodeId, name, operator, apiUrl, region, now]);
                 if (result.rows.length > 0) nodesSeeded++;

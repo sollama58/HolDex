@@ -686,8 +686,9 @@ async function scanNodesForTampering(db) {
 
             // Alert if tampering detected
             if (tamperedCount > 0) {
-                alerting.alertInfo(
-                    'Node Tampering Detected',
+                alerting.alertHealthIssue(
+                    'NodeNetwork',
+                    'Tampering Detected',
                     `${tamperedCount} tampered node(s) were deleted from the network.`
                 ).catch(() => {});
             }
