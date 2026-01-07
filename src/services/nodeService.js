@@ -295,7 +295,8 @@ async function recordVerification(db, mint, kScore, signaturesValid = true) {
         await db.query(`
             INSERT INTO token_verifications (mint, node_id, verified_at, k_score, signatures_valid)
             VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (mint, node_id, (verified_at / 3600000)) DO UPDATE SET
+            ON CONFLICT (mint, node_id) DO UPDATE SET
+                verified_at = EXCLUDED.verified_at,
                 k_score = EXCLUDED.k_score,
                 signatures_valid = EXCLUDED.signatures_valid
         `, [mint, currentNodeId, Date.now(), kScore, signaturesValid]);

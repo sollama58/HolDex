@@ -419,8 +419,8 @@ async function initDB() {
                     k_score DOUBLE PRECISION,
                     signatures_valid BOOLEAN DEFAULT TRUE,
 
-                    -- Unique constraint: one verification per node per token per hour
-                    UNIQUE(mint, node_id, (verified_at / 3600000))
+                    -- Simple unique: one verification per node per token
+                    UNIQUE(mint, node_id)
                 );
             `);
 
