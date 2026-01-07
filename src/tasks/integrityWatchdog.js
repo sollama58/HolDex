@@ -18,6 +18,7 @@ const { getClient: getRedisClient } = require('../services/redis');
 const { verifyAllSignatures, signAllCategories } = require('../utils/dataSignature');
 const config = require('../config/env');
 const alerting = require('../services/alerting');
+const { QualityBuilder, QUALITY_PROFILES } = require('../shared/geometric-quality');
 
 // Watchdog config
 const SCAN_INTERVAL = 5 * 60 * 1000; // 5 minutes
@@ -76,6 +77,102 @@ async function getSnapshot(mint) {
         return null;
     }
 }
+
+// =============================================================================
+// INTEGRITY SCORE (D × O × L)
+// =============================================================================
+
+// All 8 signature categories for coverage calculation
+const ALL_CATEGORIES = ['identity', 'security', 'lp', 'supply', 'kscore', 'market', 'origin', 'full'];
+const STABLE_CATEGORIES = ['identity', 'security', 'lp', 'supply', 'kscore', 'origin']; // Excludes volatile
+
+/**
+ * Calculate integrity score for a token using D×O×L formula
+ * D (Coverage): Signature completeness (valid/total categories)
+ * O (Consistency): Cross-signature agreement (stable categories match)
+ * L (Recency): Time since last verification/snapshot
+ *
+ * @param {Object} verificationResult - Result from verifyAllSignatures
+ * @param {Object} token - Token data with timestamps
+ * @param {Object} snapshot - Optional snapshot data
+ * @returns {Object} Integrity score with components
+ */
+function calculateIntegrityScore(verificationResult, token, snapshot = null) {
+  const { valid, invalid, tampered } = verificationResult;
+
+  // D (Coverage): % of valid signatures
+  const totalCategories = ALL_CATEGORIES.length;
+  const validCount = valid.length;
+  const D = validCount / totalCategories;
+
+  // O (Consistency): % of stable categories that are NOT tampered
+  const stableTampered = tampered.filter(cat => STABLE_CATEGORIES.includes(cat));
+  const O = 1 - (stableTampered.length / STABLE_CATEGORIES.length);
+
+  // L (Recency): Based on snapshot age or last_k_score_update
+  const now = Date.now();
+  let lastVerified = token.last_k_score_update || token.timestamp || 0;
+  if (snapshot && snapshot._snapshotTime) {
+    lastVerified = Math.max(lastVerified, snapshot._snapshotTime);
+  }
+
+  // Decay: half-life of 24 hours (in ms)
+  const HALF_LIFE_MS = 24 * 60 * 60 * 1000;
+  const age = now - lastVerified;
+  const L = Math.max(0.1, Math.pow(0.5, age / HALF_LIFE_MS));
+
+  // Calculate using QualityBuilder
+  const result = new QualityBuilder('INTEGRITY')
+    .setDimensions({ D, O, L })
+    .calculate();
+
+  return {
+    score: result.score,
+    level: result.level,
+    emoji: result.emoji,
+    action: result.action,
+    components: {
+      coverage: Math.round(D * 100),
+      consistency: Math.round(O * 100),
+      recency: Math.round(L * 100),
+    },
+    details: {
+      validCategories: valid,
+      invalidCategories: invalid,
+      tamperedCategories: tampered,
+      stableTampered,
+      lastVerified: new Date(lastVerified).toISOString(),
+    },
+  };
+}
+
+/**
+ * Get integrity action based on score
+ * @param {Object} integrityResult - From calculateIntegrityScore
+ * @returns {string} Action to take
+ */
+function getIntegrityAction(integrityResult) {
+  const { level, score } = integrityResult;
+
+  switch (level) {
+    case 'excellent':
+      return 'none'; // Fully verified, no action
+    case 'good':
+      return 'monitor'; // Minor gaps, watch
+    case 'warning':
+      return 'refresh_snapshot'; // Needs fresh snapshot
+    case 'critical':
+      return 'heal'; // Integrity breach, restore from snapshot
+    case 'failed':
+      return 'recalculate'; // Full recalculation needed
+    default:
+      return score < 40 ? 'heal' : 'monitor';
+  }
+}
+
+// =============================================================================
+// RESTORATION
+// =============================================================================
 
 /**
  * Restore a token from snapshot (0 RPC calls)
@@ -291,6 +388,9 @@ async function scanForTampering(db) {
         // Note: actual tampering is still detected via the 6 stable categories (identity, security, lp, supply, kscore, origin)
         const IGNORED_CATEGORIES = new Set(['market', 'holders', 'full']);
 
+        // Integrity score distribution tracking
+        const scoreDistribution = { excellent: 0, good: 0, warning: 0, critical: 0, failed: 0 };
+
         for (const token of tokens) {
             scanned++;
 
@@ -308,15 +408,28 @@ async function scanForTampering(db) {
             // Verify all 8 signatures (+ holders if snapshots exist)
             const result = verifyAllSignatures(token, { holderSnapshots });
 
+            // Get snapshot for recency calculation
+            const snapshot = await getSnapshot(token.mint);
+
+            // Calculate integrity score using D×O×L formula
+            const integrity = calculateIntegrityScore(result, token, snapshot);
+            const action = getIntegrityAction(integrity);
+
+            // Track score distribution
+            scoreDistribution[integrity.level] = (scoreDistribution[integrity.level] || 0) + 1;
+
             // Filter out ignored categories (volatile data)
             const criticalTampered = result.tampered.filter(cat => !IGNORED_CATEGORIES.has(cat));
 
-            if (criticalTampered.length > 0) {
+            // Action based on integrity score
+            if (action === 'heal' || action === 'recalculate' || criticalTampered.length > 0) {
                 tampered++;
-                logger.warn(`[Watchdog] TAMPERED: ${token.symbol} (${token.mint.slice(0, 8)}...) - categories: ${criticalTampered.join(',')}`);
+                logger.warn(`[Watchdog] ${integrity.emoji} I:${integrity.score} ${token.symbol} (${token.mint.slice(0, 8)}...) - ${criticalTampered.join(',') || 'stale'} [${action}]`);
 
                 // ALERT: Tampering detected (fire-and-forget)
-                alerting.alertTamperingDetected(token.mint, token.symbol, criticalTampered).catch(() => {});
+                if (criticalTampered.length > 0) {
+                    alerting.alertTamperingDetected(token.mint, token.symbol, criticalTampered).catch(() => {});
+                }
 
                 // Attempt restoration from snapshot
                 const restored = await restoreFromSnapshot(db, token.mint, criticalTampered);
@@ -327,6 +440,9 @@ async function scanForTampering(db) {
                 } else {
                     failed++;
                 }
+            } else if (action === 'refresh_snapshot') {
+                // Warning level - snapshot is getting stale, but don't heal yet
+                logger.debug(`[Watchdog] ${integrity.emoji} I:${integrity.score} ${token.symbol} needs fresh snapshot (L:${integrity.components.recency}%)`);
             } else if (result.tampered.length > 0) {
                 // Only volatile categories tampered - log but don't heal
                 logger.debug(`[Watchdog] Volatile change: ${token.symbol} (${token.mint.slice(0, 8)}...) - ${result.tampered.join(',')}`);
@@ -335,10 +451,19 @@ async function scanForTampering(db) {
 
         const duration = Date.now() - startTime;
 
+        // Build integrity distribution string
+        const distStr = Object.entries(scoreDistribution)
+            .filter(([_, count]) => count > 0)
+            .map(([level, count]) => {
+                const emoji = { excellent: '🟢', good: '🟡', warning: '🟠', critical: '🔴', failed: '⛔' }[level] || '?';
+                return `${emoji}${count}`;
+            })
+            .join(' ');
+
         if (tampered > 0) {
-            logger.info(`[Watchdog] Scan complete: ${scanned} tokens, ${tampered} tampered, ${healed} healed, ${failed} failed (${duration}ms)`);
+            logger.info(`[Watchdog] Scan: ${scanned} tokens [${distStr}] | ${tampered} tampered, ${healed} healed, ${failed} failed (${duration}ms)`);
         } else {
-            logger.debug(`[Watchdog] Scan complete: ${scanned} tokens verified (${duration}ms)`);
+            logger.debug(`[Watchdog] Scan: ${scanned} tokens [${distStr}] (${duration}ms)`);
         }
 
     } catch (e) {
@@ -396,5 +521,9 @@ module.exports = {
     saveSnapshot,
     getSnapshot,
     restoreFromSnapshot,
-    SNAPSHOT_PREFIX
+    calculateIntegrityScore,
+    getIntegrityAction,
+    SNAPSHOT_PREFIX,
+    ALL_CATEGORIES,
+    STABLE_CATEGORIES
 };
