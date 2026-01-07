@@ -555,13 +555,15 @@ function signNodeIdentity(node) {
  * Changes over time but must stay consistent
  */
 function signNodeStatus(node) {
+    // IMPORTANT: Ensure consistent types for signature computation
+    // PostgreSQL BIGINT may return as string, must normalize
     const data = [
-        node.node_id,
-        node.status || 'pending',
-        node.last_heartbeat || 0,
-        node.version || '1.0.0',
-        node.tokens_verified || 0,
-        node.verifications_24h || 0
+        String(node.node_id || ''),
+        String(node.status || 'pending'),
+        String(parseInt(node.last_heartbeat, 10) || 0),
+        String(node.version || '1.0.0'),
+        String(parseInt(node.tokens_verified, 10) || 0),
+        String(parseInt(node.verifications_24h, 10) || 0)
     ].join('|');
     return hmacSign(data);
 }
@@ -612,13 +614,14 @@ function verifyNodeStatus(node) {
     if (!SIGNING_SECRET) return { valid: true, reason: 'dev_mode' };
     if (!node.sig_node_status) return { valid: false, reason: 'unsigned' };
 
+    // IMPORTANT: Must match signNodeStatus() exactly - normalize types
     const data = [
-        node.node_id,
-        node.status || 'pending',
-        node.last_heartbeat || 0,
-        node.version || '1.0.0',
-        node.tokens_verified || 0,
-        node.verifications_24h || 0
+        String(node.node_id || ''),
+        String(node.status || 'pending'),
+        String(parseInt(node.last_heartbeat, 10) || 0),
+        String(node.version || '1.0.0'),
+        String(parseInt(node.tokens_verified, 10) || 0),
+        String(parseInt(node.verifications_24h, 10) || 0)
     ].join('|');
 
     const result = verifyWithRotation(data, node.sig_node_status);
