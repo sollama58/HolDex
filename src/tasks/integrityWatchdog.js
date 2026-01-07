@@ -522,14 +522,89 @@ async function forceScan(db) {
 // 2. Nodes without valid HMAC signatures are deleted
 // 3. Nodes with stale heartbeats are marked offline/deleted
 
-const { verifyNodeSignatures } = require('../utils/dataSignature');
+const { verifyNodeSignatures, signNodeAllCategories } = require('../utils/dataSignature');
 
 // Node watchdog config
 const NODE_SCAN_INTERVAL = 60 * 1000; // 1 minute (more aggressive than token watchdog)
 const NODE_STALE_THRESHOLD = 24 * 60 * 60 * 1000; // 24 hours without heartbeat = delete
 const NODE_DEGRADED_THRESHOLD = 5 * 60 * 1000; // 5 minutes = degraded
+const NODE_SNAPSHOT_PREFIX = 'holdex:node:snapshot:';
+const NODE_SNAPSHOT_TTL = 7 * 24 * 60 * 60; // 7 days
 
 let nodeWatchdogInterval = null;
+
+/**
+ * Save node snapshot to Redis (for audit + network recovery)
+ * @param {Object} node - Node data with all fields
+ */
+async function saveNodeSnapshot(node) {
+    const redis = getRedisClient();
+    if (!redis || !node.node_id) return false;
+
+    try {
+        const snapshot = {
+            ...node,
+            _snapshotTime: Date.now(),
+            _snapshotVersion: 1
+        };
+
+        await redis.set(
+            `${NODE_SNAPSHOT_PREFIX}${node.node_id}`,
+            JSON.stringify(snapshot),
+            'EX',
+            NODE_SNAPSHOT_TTL
+        );
+        return true;
+    } catch (e) {
+        logger.error(`[NodeWatchdog] Snapshot save failed for ${node.node_id}: ${e.message}`);
+        return false;
+    }
+}
+
+/**
+ * Get node snapshot from Redis
+ * @param {string} nodeId - Node ID
+ * @returns {Object|null}
+ */
+async function getNodeSnapshot(nodeId) {
+    const redis = getRedisClient();
+    if (!redis) return null;
+
+    try {
+        const data = await redis.get(`${NODE_SNAPSHOT_PREFIX}${nodeId}`);
+        return data ? JSON.parse(data) : null;
+    } catch (e) {
+        logger.error(`[NodeWatchdog] Snapshot read failed for ${nodeId}: ${e.message}`);
+        return null;
+    }
+}
+
+/**
+ * Save snapshots of all valid nodes
+ * @param {Object} db - Database instance
+ */
+async function snapshotAllValidNodes(db) {
+    try {
+        const validNodes = await db.all(`
+            SELECT * FROM nodes
+            WHERE node_public_key IS NOT NULL
+              AND sig_node_identity IS NOT NULL
+        `);
+
+        let saved = 0;
+        for (const node of validNodes) {
+            if (await saveNodeSnapshot(node)) saved++;
+        }
+
+        if (saved > 0) {
+            logger.debug(`[NodeWatchdog] Saved ${saved} node snapshot(s) to Redis`);
+        }
+        return saved;
+    } catch (e) {
+        logger.error(`[NodeWatchdog] Snapshot all failed: ${e.message}`);
+        return 0;
+    }
+}
 
 /**
  * Scan nodes for tampering and clean up fake/stale nodes
@@ -620,6 +695,11 @@ async function scanNodesForTampering(db) {
             logger.debug(`[NodeWatchdog] Scan: ${scanned} nodes, all valid (${duration}ms)`);
         }
 
+        // Save snapshots of valid nodes to Redis (every 5 minutes)
+        if (scanned > 0 && Date.now() % (5 * 60 * 1000) < NODE_SCAN_INTERVAL) {
+            await snapshotAllValidNodes(db);
+        }
+
     } catch (e) {
         logger.error(`[NodeWatchdog] Scan error: ${e.message}`);
     }
@@ -675,6 +755,10 @@ module.exports = {
     startNodeWatchdog,
     stopNodeWatchdog,
     scanNodesForTampering,
+    saveNodeSnapshot,
+    getNodeSnapshot,
+    snapshotAllValidNodes,
     NODE_SCAN_INTERVAL,
-    NODE_STALE_THRESHOLD
+    NODE_STALE_THRESHOLD,
+    NODE_SNAPSHOT_PREFIX
 };

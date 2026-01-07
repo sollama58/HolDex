@@ -198,22 +198,50 @@ async function sendHeartbeat(db, stats = {}) {
  * @returns {Object} Processing result
  */
 async function processHeartbeat(db, payload, signature) {
-    // Verify signature
-    if (!verifyHeartbeatSignature(payload, signature)) {
-        logger.warn(`⚠️ Invalid heartbeat signature from ${payload.node_id}`);
-        return { success: false, error: 'Invalid signature' };
-    }
-
     const { node_id, timestamp, stats = {}, version } = payload;
-    const now = Date.now();
 
-    // Reject stale heartbeats (more than 5 minutes old)
-    if (now - timestamp > DEGRADED_THRESHOLD) {
-        return { success: false, error: 'Heartbeat too old' };
+    if (!node_id) {
+        return { success: false, error: 'Missing node_id in payload' };
     }
 
     try {
-        // Update node status
+        // SECURITY: Fetch node's public key for Ed25519 verification
+        const nodeResult = await db.query(
+            'SELECT node_public_key FROM nodes WHERE node_id = $1',
+            [node_id]
+        );
+
+        if (nodeResult.rows.length === 0) {
+            logger.warn(`⚠️ Heartbeat from unknown node: ${node_id}`);
+            return { success: false, error: 'Node not registered' };
+        }
+
+        const publicKey = nodeResult.rows[0].node_public_key;
+
+        // Verify signature with node's Ed25519 key (or legacy HMAC fallback)
+        if (!verifyHeartbeatSignature(payload, signature, publicKey)) {
+            logger.warn(`⚠️ Invalid heartbeat signature from ${node_id}`);
+            return { success: false, error: 'Invalid signature' };
+        }
+
+        const now = Date.now();
+
+        // Reject stale heartbeats (more than 5 minutes old)
+        if (now - timestamp > DEGRADED_THRESHOLD) {
+            return { success: false, error: 'Heartbeat too old' };
+        }
+
+        // Update node status and re-sign status (HMAC integrity)
+        const nodeData = {
+            node_id,
+            status: NODE_STATUS.ACTIVE,
+            last_heartbeat: timestamp,
+            version: version || '1.0.0',
+            tokens_verified: stats.tokens_verified || 0,
+            verifications_24h: stats.verifications_24h || 0
+        };
+        const sigStatus = signNodeStatus(nodeData);
+
         const result = await db.query(`
             UPDATE nodes SET
                 last_heartbeat = $1,
@@ -221,8 +249,9 @@ async function processHeartbeat(db, payload, signature) {
                 version = $3,
                 verifications_24h = COALESCE($4, verifications_24h),
                 tokens_verified = COALESCE($5, tokens_verified),
-                updated_at = $1
-            WHERE node_id = $6
+                updated_at = $1,
+                sig_node_status = $6
+            WHERE node_id = $7
             RETURNING *
         `, [
             timestamp,
@@ -230,11 +259,12 @@ async function processHeartbeat(db, payload, signature) {
             version || '1.0.0',
             stats.verifications_24h,
             stats.tokens_verified,
+            sigStatus,
             node_id
         ]);
 
         if (result.rows.length === 0) {
-            return { success: false, error: 'Node not registered' };
+            return { success: false, error: 'Node update failed' };
         }
 
         const networkStatus = await getNetworkStatus(db);
@@ -243,7 +273,8 @@ async function processHeartbeat(db, payload, signature) {
             success: true,
             acknowledged: true,
             nodes_active: networkStatus.nodes_active,
-            consensus_status: networkStatus.status
+            consensus_status: networkStatus.status,
+            signature_type: publicKey ? 'ed25519' : 'legacy_hmac'
         };
     } catch (e) {
         logger.error(`❌ Process heartbeat failed: ${e.message}`);
@@ -252,32 +283,58 @@ async function processHeartbeat(db, payload, signature) {
 }
 
 /**
- * Verify heartbeat signature
- * @param {Object} payload - Heartbeat payload
- * @param {string} signature - HMAC signature
+ * Verify heartbeat signature using Ed25519 per-node key
+ * SECURITY: Uses per-node asymmetric key, not compromised shared secret
+ * @param {Object} payload - Heartbeat payload (must include node_id)
+ * @param {string} signature - Ed25519 signature
+ * @param {string} publicKey - Node's public key (fetched from DB)
  * @returns {boolean} Valid or not
  */
-function verifyHeartbeatSignature(payload, signature) {
-    if (!signature || !config.DATA_SIGNING_SECRET) return false;
+function verifyHeartbeatSignature(payload, signature, publicKey) {
+    if (!signature || !publicKey) {
+        // Fallback to HMAC for backward compatibility during migration
+        if (config.DATA_SIGNING_SECRET && signature) {
+            const expected = crypto
+                .createHmac('sha256', config.DATA_SIGNING_SECRET)
+                .update(JSON.stringify(payload))
+                .digest('hex');
+            if (signature === expected) {
+                logger.debug('[Heartbeat] Verified with legacy HMAC (migration mode)');
+                return true;
+            }
+        }
+        return false;
+    }
 
-    const expected = crypto
-        .createHmac('sha256', config.DATA_SIGNING_SECRET)
-        .update(JSON.stringify(payload))
-        .digest('hex');
-
-    return signature === expected;
+    // Use Ed25519 verification (per-node key) - preferred
+    const result = nodeKeys.verifySignature(payload, signature, publicKey);
+    return result.valid;
 }
 
 /**
- * Create heartbeat signature
+ * Create heartbeat signature with node's Ed25519 private key
+ * SECURITY: Uses per-node asymmetric key, not compromised shared secret
  * @param {Object} payload - Heartbeat payload
- * @returns {string} HMAC signature
+ * @returns {string} Ed25519 signature or legacy HMAC if no key
  */
 function createHeartbeatSignature(payload) {
-    return crypto
-        .createHmac('sha256', config.DATA_SIGNING_SECRET)
-        .update(JSON.stringify(payload))
-        .digest('hex');
+    const privateKey = nodeKeys.getNodePrivateKey();
+    if (privateKey) {
+        // Use Ed25519 per-node signature (preferred)
+        return nodeKeys.signData(payload, privateKey);
+    }
+
+    // Fallback to legacy HMAC (during migration)
+    if (config.DATA_SIGNING_SECRET) {
+        logger.warn('[Heartbeat] Using legacy HMAC (set NODE_PRIVATE_KEY for Ed25519)');
+        return crypto
+            .createHmac('sha256', config.DATA_SIGNING_SECRET)
+            .update(JSON.stringify(payload))
+            .digest('hex');
+    }
+
+    logger.warn('[Heartbeat] No signing key available - heartbeat unsigned');
+    return null;
 }
 
 /**
