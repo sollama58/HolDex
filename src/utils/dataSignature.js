@@ -388,10 +388,9 @@ function verifyCategory(token, category, expectedSig) {
     }
 
     // DEBUG: Log data string for failed verifications to diagnose mismatch
-    if (category === 'identity' || category === 'security') { // Log identity + security for debugging
+    if (category === 'identity') { // Only log identity to reduce noise
         const computedSig = hmacSign(data);
-        logger.warn(`[Signature] MISMATCH ${category} for ${token.mint?.slice(0, 8)}: stored=${expectedSig?.slice(0, 20)}... computed=${computedSig?.slice(0, 20)}...`);
-        logger.warn(`[Signature] ${category} data from DB: ${data}`);
+        logger.debug(`[Signature] MISMATCH ${category} for ${token.mint?.slice(0, 8)}: stored=${expectedSig?.slice(0, 16)}... computed=${computedSig?.slice(0, 16)}...`);
     }
     return { valid: false, reason: 'signature_mismatch' };
 }

@@ -98,7 +98,10 @@ const STABLE_CATEGORIES = ['identity', 'security', 'lp', 'supply', 'kscore', 'or
  * @returns {Object} Integrity score with components
  */
 function calculateIntegrityScore(verificationResult, token, snapshot = null) {
-  const { valid, invalid, tampered } = verificationResult;
+  // Defensive: ensure arrays exist
+  const valid = verificationResult?.valid || [];
+  const invalid = verificationResult?.invalid || [];
+  const tampered = verificationResult?.tampered || [];
 
   // D (Coverage): % of valid signatures
   const totalCategories = ALL_CATEGORIES.length;
@@ -194,9 +197,6 @@ async function restoreFromSnapshot(db, mint, tamperedCategories) {
         // CRITICAL: Ensure snapshot.mint is set (legacy snapshots may not have it)
         // All signature functions use token.mint as the first field
         snapshot.mint = mint;
-
-        // DEBUG: Log snapshot data to diagnose infinite loop
-        logger.warn(`[Watchdog] RESTORE DEBUG ${mint.slice(0, 8)}: snapshotVersion=${snapshot._snapshotVersion}, name="${snapshot.name}", decimals=${snapshot.decimals}, hasCommunityUpdate=${snapshot.hasCommunityUpdate || snapshot.hascommunityupdate}`);
 
         // Re-sign the snapshot data (new chaos_nonce for unpredictability)
         const signatures = signAllCategories(snapshot);
@@ -428,15 +428,15 @@ async function scanForTampering(db) {
             // Filter out ignored categories (volatile data)
             const criticalTampered = result.tampered.filter(cat => !IGNORED_CATEGORIES.has(cat));
 
-            // Action based on integrity score
-            if (action === 'heal' || action === 'recalculate' || criticalTampered.length > 0) {
+            // FIX: Only heal when there are ACTUALLY tampered signatures
+            // Previously this also healed on action='heal'/'recalculate' even with no tampering,
+            // causing an infinite loop when integrity score calculation returned NaN/failed
+            if (criticalTampered.length > 0) {
                 tampered++;
-                logger.warn(`[Watchdog] ${integrity.emoji} I:${integrity.score} ${token.symbol} (${token.mint.slice(0, 8)}...) - ${criticalTampered.join(',') || 'stale'} [${action}]`);
+                logger.warn(`[Watchdog] ${integrity.emoji} I:${integrity.score} ${token.symbol} (${token.mint.slice(0, 8)}...) - ${criticalTampered.join(',')} [${action}]`);
 
                 // ALERT: Tampering detected (fire-and-forget)
-                if (criticalTampered.length > 0) {
-                    alerting.alertTamperingDetected(token.mint, token.symbol, criticalTampered).catch(() => {});
-                }
+                alerting.alertTamperingDetected(token.mint, token.symbol, criticalTampered).catch(() => {});
 
                 // Attempt restoration from snapshot
                 const restored = await restoreFromSnapshot(db, token.mint, criticalTampered);
@@ -447,6 +447,10 @@ async function scanForTampering(db) {
                 } else {
                     failed++;
                 }
+            } else if (action === 'heal' || action === 'recalculate') {
+                // Integrity score indicates problem but no signatures are tampered
+                // This can happen with stale snapshots - log but don't heal
+                logger.debug(`[Watchdog] ${integrity.emoji} I:${integrity.score} ${token.symbol} needs K-Score recalc (no tampering detected)`);
             } else if (action === 'refresh_snapshot') {
                 // Warning level - snapshot is getting stale, but don't heal yet
                 logger.debug(`[Watchdog] ${integrity.emoji} I:${integrity.score} ${token.symbol} needs fresh snapshot (L:${integrity.components.recency}%)`);
