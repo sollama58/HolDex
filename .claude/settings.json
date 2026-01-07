@@ -91,7 +91,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /workspaces/HolDex/.claude/hooks/session-quality.js post-tool \"$TOOL_NAME\" \"$TOOL_INPUT\" \"$TOOL_RESULT\" 2>/dev/null || true"
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-quality.js\""
           }
         ]
       }
@@ -101,7 +101,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /workspaces/HolDex/.claude/hooks/session-quality.js stop"
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-quality.js\" stop"
           }
         ]
       }

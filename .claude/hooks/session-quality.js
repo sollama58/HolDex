@@ -21,11 +21,20 @@ const os = require('os');
 // SHARED MODULE IMPORTS
 // =============================================================================
 
-// Use absolute path for hook context compatibility
-const PROJECT_ROOT = '/workspaces/HolDex';
+// Dynamic project root detection (works in any codespace location)
+const PROJECT_ROOT = process.env.CLAUDE_PROJECT_DIR ||
+                     process.cwd() ||
+                     path.dirname(path.dirname(__dirname));
+
 let geometricQuality;
 let PHI, PHI_INVERSE, PHI_INVERSE_SQUARED;
 
+// Inline constants (always available, no external dependency)
+PHI = 1.618033988749895;
+PHI_INVERSE = 1 / PHI;
+PHI_INVERSE_SQUARED = 1 / (PHI * PHI);
+
+// Try to load shared modules for enhanced features
 try {
   geometricQuality = require(path.join(PROJECT_ROOT, 'src/shared/geometric-quality.js'));
   const claudePhi = require(path.join(PROJECT_ROOT, 'src/shared/claude-phi.js'));
@@ -33,10 +42,7 @@ try {
   PHI_INVERSE = claudePhi.PHI_INVERSE;
   PHI_INVERSE_SQUARED = claudePhi.PHI_INVERSE_SQUARED;
 } catch (e) {
-  // Fallback to inline constants if modules not available
-  PHI = 1.618033988749895;
-  PHI_INVERSE = 1 / PHI;
-  PHI_INVERSE_SQUARED = 1 / (PHI * PHI);
+  // Shared modules not critical - inline constants work fine
   geometricQuality = null;
 }
 
@@ -44,9 +50,32 @@ try {
 // CONFIGURATION
 // =============================================================================
 
+// Persistent storage path (survives container rebuild)
+// Priority: env var > codespace shared > project local > temp
+const PERSISTENT_CANDIDATES = [
+  process.env.CLAUDE_SESSION_STATE_DIR,
+  '/workspaces/.claude-mem-data',
+  path.join(PROJECT_ROOT, '.claude', 'state'),
+].filter(Boolean);
+
+const PERSISTENT_DIR = PERSISTENT_CANDIDATES.find(dir => {
+  try {
+    if (fs.existsSync(dir)) return true;
+    // Try to create if parent exists
+    const parent = path.dirname(dir);
+    if (fs.existsSync(parent)) {
+      fs.mkdirSync(dir, { recursive: true });
+      return true;
+    }
+  } catch (e) { /* ignore */ }
+  return false;
+}) || os.tmpdir();
+
+const SESSION_STATE_FILE = path.join(PERSISTENT_DIR, 'claude-session-quality.json');
+
 const CONFIG = {
-  // State file location
-  stateFile: path.join(os.tmpdir(), 'claude-session-quality.json'),
+  // State file location (persistent if available)
+  stateFile: SESSION_STATE_FILE,
 
   // Quality thresholds
   thresholds: {
@@ -345,22 +374,23 @@ function handlePostToolUse(toolName, toolInput, toolResult) {
   const quality = calculateSessionQuality(state);
   const recommendation = getRecommendation(quality.score);
 
-  state.lastQuality = quality.score;
-
-  // Check for quality degradation
+  // Track degradation (before updating lastQuality)
   const previousQuality = state.lastQuality || 100;
   const degradation = previousQuality - quality.score;
+  state.lastQuality = quality.score;
 
   saveState(state);
 
-  // Output warning if quality is concerning
-  if (recommendation.level === 'warning' || recommendation.level === 'critical' || recommendation.level === 'failed') {
+  // Output warning if quality is concerning OR rapid degradation detected
+  const rapidDegradation = degradation > 10; // More than 10 points drop
+  if (recommendation.level === 'warning' || recommendation.level === 'critical' || recommendation.level === 'failed' || rapidDegradation) {
     const output = {
       type: 'session_quality_warning',
       quality: quality.score,
       components: quality.components,
       recommendation: recommendation.action,
-      message: `Session quality ${recommendation.emoji} ${quality.score}/100 (D:${quality.components.efficiency}% O:${quality.components.completion}% L:${quality.components.freshness}%)`,
+      degradation: rapidDegradation ? degradation : undefined,
+      message: `Session quality ${recommendation.emoji} ${quality.score}/100 (D:${quality.components.efficiency}% O:${quality.components.completion}% L:${quality.components.freshness}%)${rapidDegradation ? ` ⚡-${degradation}pts` : ''}`,
     };
 
     // Output to stderr so it shows as hook feedback
@@ -412,20 +442,51 @@ function handleStop() {
 // CLI INTERFACE
 // =============================================================================
 
-function main() {
+/**
+ * Read from stdin with timeout (Claude Code sends JSON via stdin)
+ * @returns {Promise<string>} stdin content
+ */
+function readStdin(timeoutMs = 1000) {
+  return new Promise((resolve) => {
+    let input = '';
+    let resolved = false;
+
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        resolve(input);
+      }
+    }, timeoutMs);
+
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('readable', () => {
+      let chunk;
+      while ((chunk = process.stdin.read()) !== null) {
+        input += chunk;
+      }
+    });
+    process.stdin.on('end', () => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        resolve(input);
+      }
+    });
+
+    // Handle case where stdin is empty/closed immediately
+    if (process.stdin.readableEnded) {
+      resolved = true;
+      clearTimeout(timeout);
+      resolve(input);
+    }
+  });
+}
+
+async function main() {
   const args = process.argv.slice(2);
   const command = args[0];
 
   switch (command) {
-    case 'post-tool': {
-      // Called after tool use: post-tool <toolName> <toolInput> <toolResult>
-      const toolName = args[1] || 'Unknown';
-      const toolInput = args[2] || '{}';
-      const toolResult = args[3] || '';
-      handlePostToolUse(toolName, toolInput, toolResult);
-      break;
-    }
-
     case 'status': {
       // Get current session status
       const status = handleNotification();
@@ -456,29 +517,35 @@ function main() {
     }
 
     default: {
-      // When called as hook, read from stdin
-      let input = '';
-      process.stdin.setEncoding('utf8');
-      process.stdin.on('readable', () => {
-        let chunk;
-        while ((chunk = process.stdin.read()) !== null) {
-          input += chunk;
+      // Default: read from stdin (Claude Code hook format)
+      // Claude Code sends JSON: {tool_name, tool_input, tool_response, ...}
+      try {
+        const input = await readStdin();
+        if (!input.trim()) {
+          // No stdin = probably manual invocation, show help
+          console.log('Session Quality Hook - Commands:');
+          console.log('  status  - Show current session quality');
+          console.log('  reset   - Reset session state');
+          console.log('  stop    - End session and show summary');
+          console.log('  quality - Quick quality check for statusline');
+          console.log('\nWhen called as hook, reads JSON from stdin');
+          return;
         }
-      });
-      process.stdin.on('end', () => {
-        try {
-          const data = JSON.parse(input);
-          if (data.tool_name) {
-            handlePostToolUse(
-              data.tool_name,
-              JSON.stringify(data.tool_input || {}),
-              JSON.stringify(data.tool_result || {})
-            );
-          }
-        } catch (e) {
-          // Ignore parse errors for non-JSON input
+
+        const data = JSON.parse(input);
+        if (data.tool_name) {
+          handlePostToolUse(
+            data.tool_name,
+            JSON.stringify(data.tool_input || {}),
+            JSON.stringify(data.tool_response || data.tool_result || {})
+          );
         }
-      });
+      } catch (e) {
+        // Silent fail for hooks - don't disrupt Claude Code
+        if (process.env.DEBUG_HOOK) {
+          console.error('Hook error:', e.message);
+        }
+      }
     }
   }
 }
@@ -497,5 +564,5 @@ module.exports = {
 
 // Run if called directly
 if (require.main === module) {
-  main();
+  main().catch(() => {});
 }
