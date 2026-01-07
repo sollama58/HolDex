@@ -195,6 +195,9 @@ async function restoreFromSnapshot(db, mint, tamperedCategories) {
         // All signature functions use token.mint as the first field
         snapshot.mint = mint;
 
+        // DEBUG: Log snapshot data to diagnose infinite loop
+        logger.warn(`[Watchdog] RESTORE DEBUG ${mint.slice(0, 8)}: snapshotVersion=${snapshot._snapshotVersion}, name="${snapshot.name}", decimals=${snapshot.decimals}, hasCommunityUpdate=${snapshot.hasCommunityUpdate || snapshot.hascommunityupdate}`);
+
         // Re-sign the snapshot data (new chaos_nonce for unpredictability)
         const signatures = signAllCategories(snapshot);
 
