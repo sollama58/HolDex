@@ -605,6 +605,26 @@ async function initDB() {
                 logger.info('⚗️ Harmony: Seeded operation costs (φ-ratio efficiency floor)');
             }
 
+            // Ensure founding nodes exist (ON CONFLICT handles duplicates)
+            const foundingNodes = [
+                ['node-zeyxx-001', 'zeyxx-primary', 'zeyxx', 'https://holdex-api.onrender.com', 'us-oregon'],
+                ['node-gcrtrd-001', 'gcrtrd-secondary', 'sollama58', null, 'us-oregon']
+            ];
+            const now = Date.now();
+            let nodesSeeded = 0;
+            for (const [nodeId, name, operator, apiUrl, region] of foundingNodes) {
+                const result = await primaryPool.query(`
+                    INSERT INTO nodes (node_id, name, operator, api_url, region, status, joined_at, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, 'pending', $6, $6)
+                    ON CONFLICT (node_id) DO NOTHING
+                    RETURNING node_id
+                `, [nodeId, name, operator, apiUrl, region, now]);
+                if (result.rows.length > 0) nodesSeeded++;
+            }
+            if (nodesSeeded > 0) {
+                logger.info(`🌐 Network: Registered ${nodesSeeded} founding node(s)`);
+            }
+
             logger.info('⚗️ Harmony: E-Score tables ready (φ = 1.618)');
 
             dbWrapper = {
