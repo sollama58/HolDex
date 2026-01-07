@@ -372,6 +372,56 @@ async function initDB() {
                     -- Timestamps
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
+
+                -- ═══════════════════════════════════════════════════════════
+                -- NODE NETWORK: Decentralized Validation Infrastructure
+                -- "Multiple nodes, shared truth, verified consensus."
+                -- ═══════════════════════════════════════════════════════════
+
+                -- Nodes: Registry of HolDex node operators
+                -- Each node independently calculates K-Scores and validates data
+                CREATE TABLE IF NOT EXISTS nodes (
+                    node_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    operator TEXT NOT NULL,               -- Operator wallet address
+
+                    -- Endpoints
+                    api_url TEXT,                         -- Public API endpoint (optional)
+                    region TEXT,                          -- Geographic region (us-west, eu-central, etc.)
+
+                    -- Health metrics
+                    last_heartbeat BIGINT DEFAULT 0,      -- Last heartbeat timestamp (ms)
+                    uptime_30d DOUBLE PRECISION DEFAULT 0, -- 30-day uptime percentage
+
+                    -- Verification stats
+                    tokens_verified INTEGER DEFAULT 0,    -- Total tokens verified
+                    verifications_24h INTEGER DEFAULT 0,  -- Verifications in last 24h
+                    consensus_rate DOUBLE PRECISION DEFAULT 1.0, -- Agreement with other nodes
+
+                    -- Status
+                    status TEXT DEFAULT 'pending',        -- pending | active | degraded | offline
+                    version TEXT DEFAULT '1.0.0',         -- Node software version
+
+                    -- Timestamps
+                    joined_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
+                    updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000
+                );
+
+                -- Token Verifications: Per-token verification log by node
+                -- Tracks which nodes verified which tokens and when
+                CREATE TABLE IF NOT EXISTS token_verifications (
+                    id SERIAL PRIMARY KEY,
+                    mint TEXT NOT NULL,
+                    node_id TEXT NOT NULL REFERENCES nodes(node_id),
+
+                    -- Verification data
+                    verified_at BIGINT NOT NULL,
+                    k_score DOUBLE PRECISION,
+                    signatures_valid BOOLEAN DEFAULT TRUE,
+
+                    -- Unique constraint: one verification per node per token per hour
+                    UNIQUE(mint, node_id, (verified_at / 3600000))
+                );
             `);
 
             // Add new columns if they don't exist (migration-safe)
@@ -500,6 +550,19 @@ async function initDB() {
                 `CREATE INDEX IF NOT EXISTS idx_space_actions_wallet ON space_actions (wallet, created_at DESC)`,
                 // Space actions by action type (for analytics)
                 `CREATE INDEX IF NOT EXISTS idx_space_actions_action ON space_actions (action, created_at DESC)`,
+                // ═══════════════════════════════════════════════════════════
+                // NODE NETWORK INDEXES
+                // ═══════════════════════════════════════════════════════════
+                // Active nodes lookup (for consensus)
+                `CREATE INDEX IF NOT EXISTS idx_nodes_status ON nodes (status) WHERE status = 'active'`,
+                // Heartbeat monitoring (for health checks)
+                `CREATE INDEX IF NOT EXISTS idx_nodes_heartbeat ON nodes (last_heartbeat DESC)`,
+                // Operator lookup (for E-Score integration)
+                `CREATE INDEX IF NOT EXISTS idx_nodes_operator ON nodes (operator)`,
+                // Token verifications by mint (for node count per token)
+                `CREATE INDEX IF NOT EXISTS idx_token_verifications_mint ON token_verifications (mint, verified_at DESC)`,
+                // Token verifications by node (for node stats)
+                `CREATE INDEX IF NOT EXISTS idx_token_verifications_node ON token_verifications (node_id, verified_at DESC)`,
             ];
 
             for (const sql of migrations) {

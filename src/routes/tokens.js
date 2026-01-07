@@ -41,6 +41,7 @@ const { indexTokenOnChain } = require('../services/indexer');
 const { addTokenToMasterWebhook } = require('../services/heliusWebhook');
 const verification = require('../services/verificationService');
 const dataVerification = require('../services/dataVerification');
+const nodeService = require('../services/nodeService');
 
 // Lazy load canvas-based card generator (avoid build failures on workers without native deps)
 let cardGeneratorModule = null;
@@ -1349,7 +1350,15 @@ function init(deps) {
                 tokenData._dataVerified = dataVerified;
                 tokenData._integrityStatus = tampered ? 'tampered' : (dataVerified ? 'verified' : 'unsigned');
 
-                return { success: true, token: { ...tokenData, pairs: formattedPairs, holderHistory } };
+                // Add node validation info (non-blocking)
+                let validation = null;
+                try {
+                    validation = await nodeService.getTokenValidation(db, mint);
+                } catch (_e) {
+                    // Non-critical, continue without validation info
+                }
+
+                return { success: true, token: { ...tokenData, pairs: formattedPairs, holderHistory, validation } };
             });
             res.json(result);
         } catch(e) { res.status(500).json({ success: false, error: sanitizeError(e) }); }

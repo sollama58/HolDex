@@ -33,6 +33,7 @@ const verification = require('../services/verificationService');
 const { signAllCategories, signHolders, signSupply, signSecurity, signLP } = require('../utils/dataSignature');
 const { saveSnapshot } = require('./integrityWatchdog');
 const alerting = require('../services/alerting');
+const nodeService = require('../services/nodeService');
 
 // ============================================
 // HELIUS CONFIG
@@ -3159,6 +3160,13 @@ async function updateSingleToken(deps, mint) {
         // Save K-Score history snapshot (daily) for credit rating trajectory
         await saveKScoreHistory(db, mint, smoothedScore, conviction.score || 0, conviction.realHoldersCount || 0);
 
+        // Record verification by this node (for decentralized consensus)
+        try {
+            await nodeService.recordVerification(db, mint, smoothedScore, true);
+        } catch (_e) {
+            // Non-critical - continue without recording
+        }
+
         // Broadcast K-Score update via WebSocket (use smoothed score)
         if (broadcast) {
             broadcast.kscoreUpdate(mint, {
@@ -3467,6 +3475,13 @@ async function updateKScores(deps) {
 
                 // Save K-Score history snapshot (daily) for credit rating trajectory
                 await saveKScoreHistory(db, t.mint, smoothedScore, conviction.score || 0, conviction.realHoldersCount || 0);
+
+                // Record verification by this node (for decentralized consensus)
+                try {
+                    await nodeService.recordVerification(db, t.mint, smoothedScore, true);
+                } catch (_e) {
+                    // Non-critical - continue without recording
+                }
 
                 // Broadcast K-Score update via WebSocket (use smoothed score)
                 if (broadcast) {

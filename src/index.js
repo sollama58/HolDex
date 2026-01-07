@@ -20,6 +20,8 @@ const tokensRoutes = require('./routes/tokens');
 const webhooksRoutes = require('./routes/webhooks');
 const oracleRoutes = require('./routes/oracle');
 const spaceRoutes = require('./routes/space');
+const nodesRoutes = require('./routes/nodes');
+const nodeService = require('./services/nodeService');
 const { getOrCreateMasterWebhook } = require('./services/heliusWebhook');
 const fs = require('fs');
 const path = require('path');
@@ -483,6 +485,23 @@ async function startServer() {
         app.use('/webhook', webhooksRoutes.init({ db: getDB() }));
         app.use('/oracle', oracleRoutes.init({ db: getDB(), logger }));
         app.use('/space', spaceRoutes.init({ db: getDB(), logger }));
+
+        // Node Network Routes
+        app.set('db', getDB()); // Make db available to routes
+        app.use('/api/nodes', nodesRoutes);
+        app.use('/internal', nodesRoutes.internalRouter);
+
+        // Initialize this node in the network
+        await nodeService.initializeNode(getDB());
+
+        // Start heartbeat interval (every 60 seconds)
+        setInterval(async () => {
+            await nodeService.sendHeartbeat(getDB());
+            await nodeService.updateNodeStatuses(getDB());
+        }, 60 * 1000);
+
+        // Send initial heartbeat
+        await nodeService.sendHeartbeat(getDB());
 
         app.use((err, req, res, _next) => {
             logger.error(`🔥 Unhandled Server Error: ${err.message}`);
