@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Session Quality Hook
- * Based on $asdfasdfa Philosophy & claude-phi.js
+ * Based on $asdfasdfa Philosophy & geometric-quality.js
  *
  * Monitors session health using geometric mean: Q = 100 × ∛(D × O × L)
  * - D (Diamond/Efficiency): Token conviction ratio
@@ -18,12 +18,27 @@ const path = require('path');
 const os = require('os');
 
 // =============================================================================
-// PHI CONSTANTS (inline to avoid require path issues in hook context)
+// SHARED MODULE IMPORTS
 // =============================================================================
 
-const PHI = 1.618033988749895;
-const PHI_INVERSE = 1 / PHI;
-const PHI_INVERSE_SQUARED = 1 / (PHI * PHI);
+// Use absolute path for hook context compatibility
+const PROJECT_ROOT = '/workspaces/HolDex';
+let geometricQuality;
+let PHI, PHI_INVERSE, PHI_INVERSE_SQUARED;
+
+try {
+  geometricQuality = require(path.join(PROJECT_ROOT, 'src/shared/geometric-quality.js'));
+  const claudePhi = require(path.join(PROJECT_ROOT, 'src/shared/claude-phi.js'));
+  PHI = claudePhi.PHI;
+  PHI_INVERSE = claudePhi.PHI_INVERSE;
+  PHI_INVERSE_SQUARED = claudePhi.PHI_INVERSE_SQUARED;
+} catch (e) {
+  // Fallback to inline constants if modules not available
+  PHI = 1.618033988749895;
+  PHI_INVERSE = 1 / PHI;
+  PHI_INVERSE_SQUARED = 1 / (PHI * PHI);
+  geometricQuality = null;
+}
 
 // =============================================================================
 // CONFIGURATION
@@ -178,17 +193,34 @@ function calculateFreshness(messageCount) {
 /**
  * Calculate overall session quality using geometric mean
  * Q = 100 × ∛(D × O × L)
+ * Uses shared geometric-quality module when available
  */
 function calculateSessionQuality(state) {
   const D = calculateTokenEfficiency(state.toolCalls);
   const O = calculateTaskCompletion(state);
   const L = calculateFreshness(state.messageCount);
 
-  // Geometric mean - if any is 0, quality is 0
-  const geometricMean = Math.cbrt(D * O * L);
+  // Use shared module if available
+  if (geometricQuality) {
+    const result = new geometricQuality.QualityBuilder('SESSION')
+      .setDimensions({ D, O, L })
+      .calculate();
+
+    return {
+      score: result.score,
+      components: {
+        efficiency: Math.round(D * 100),
+        completion: Math.round(O * 100),
+        freshness: Math.round(L * 100),
+      },
+    };
+  }
+
+  // Fallback: inline geometric mean
+  const mean = Math.cbrt(D * O * L);
 
   return {
-    score: Math.round(100 * geometricMean),
+    score: Math.round(100 * mean),
     components: {
       efficiency: Math.round(D * 100),
       completion: Math.round(O * 100),
@@ -199,8 +231,29 @@ function calculateSessionQuality(state) {
 
 /**
  * Get recommendation based on quality score
+ * Uses shared geometric-quality module when available
  */
 function getRecommendation(score) {
+  // Use shared module if available
+  if (geometricQuality) {
+    const evaluation = geometricQuality.evaluateQuality(
+      score,
+      geometricQuality.QUALITY_PROFILES.SESSION.thresholds
+    );
+    // Map generic actions to session-specific commands
+    const actionMap = {
+      review: '/compact',
+      intervene: '/rewind',
+      reset: '/new',
+    };
+    return {
+      level: evaluation.level,
+      action: actionMap[evaluation.action] || evaluation.action,
+      emoji: evaluation.emoji,
+    };
+  }
+
+  // Fallback: inline thresholds
   if (score >= CONFIG.thresholds.excellent) {
     return { level: 'excellent', action: null, emoji: '🟢' };
   }
