@@ -623,6 +623,15 @@ async function initDB() {
             }
 
             // Clean up auto-generated nodes with unknown operators
+            // First delete associated verifications to avoid foreign key constraint violations
+            await primaryPool.query(`
+                DELETE FROM token_verifications
+                WHERE node_id IN (
+                    SELECT node_id FROM nodes
+                    WHERE operator = 'unknown'
+                       OR node_id LIKE 'node-srv-%'
+                )
+            `);
             const cleanupResult = await primaryPool.query(`
                 DELETE FROM nodes
                 WHERE operator = 'unknown'
