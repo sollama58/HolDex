@@ -707,6 +707,32 @@ async function scanNodesForTampering(db) {
 }
 
 /**
+ * Try to acquire a distributed lock for NodeWatchdog
+ * Only one instance should run the watchdog at a time to prevent conflicts during rolling deploys
+ */
+async function tryAcquireNodeWatchdogLock() {
+    const redis = require('../services/redis');
+    const lockKey = 'holdex:node_watchdog:lock';
+    const lockTTL = NODE_SCAN_INTERVAL + 30000; // Lock expires slightly after scan interval
+    const instanceId = process.env.RENDER_INSTANCE_ID || process.pid;
+
+    try {
+        // SET NX with expiry - only succeeds if key doesn't exist
+        const result = await redis.set(lockKey, instanceId, 'PX', lockTTL, 'NX');
+        if (result === 'OK') {
+            return true;
+        }
+        // Check if we already hold the lock
+        const holder = await redis.get(lockKey);
+        return holder === String(instanceId);
+    } catch (e) {
+        // If Redis fails, don't run watchdog to avoid conflicts
+        logger.debug(`[NodeWatchdog] Redis lock check failed: ${e.message}`);
+        return false;
+    }
+}
+
+/**
  * Start the node watchdog
  * @param {Object} deps - Dependencies { db }
  */
@@ -720,11 +746,21 @@ function startNodeWatchdog(deps) {
 
     logger.info(`[NodeWatchdog] Starting node integrity monitor (interval: ${NODE_SCAN_INTERVAL / 1000}s)`);
 
+    // Wrapper that checks for distributed lock before scanning
+    const lockedScan = async () => {
+        const hasLock = await tryAcquireNodeWatchdogLock();
+        if (hasLock) {
+            await scanNodesForTampering(db);
+        } else {
+            logger.debug('[NodeWatchdog] Another instance holds the lock, skipping scan');
+        }
+    };
+
     // Initial scan after 30 seconds (give nodes time to initialize and avoid race conditions)
-    setTimeout(() => scanNodesForTampering(db), 30 * 1000);
+    setTimeout(lockedScan, 30 * 1000);
 
     // Periodic scans
-    nodeWatchdogInterval = setInterval(() => scanNodesForTampering(db), NODE_SCAN_INTERVAL);
+    nodeWatchdogInterval = setInterval(lockedScan, NODE_SCAN_INTERVAL);
 }
 
 /**
