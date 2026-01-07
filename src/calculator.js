@@ -231,6 +231,27 @@ async function main() {
             distributedPolling.start(deps);
             logger.info('✅ Distributed Polling Running');
 
+            // Schedule initial refresh tasks
+            const scheduled = await distributedPolling.scheduleRefreshTasks(deps.db, {
+                maxAge: 4 * 60 * 60 * 1000, // 4 hours
+                limit: 50,
+                onlyVerified: true
+            });
+            logger.info(`📋 Initial task scheduling: ${scheduled} tokens queued`);
+
+            // Schedule refresh tasks periodically (every 5 minutes)
+            setInterval(async () => {
+                try {
+                    await distributedPolling.scheduleRefreshTasks(deps.db, {
+                        maxAge: 4 * 60 * 60 * 1000,
+                        limit: 20,
+                        onlyVerified: true
+                    });
+                } catch (e) {
+                    logger.error(`Task scheduling error: ${e.message}`);
+                }
+            }, 5 * 60 * 1000);
+
             // Log network status periodically
             setInterval(async () => {
                 const status = await distributedPolling.getNetworkStatus();
