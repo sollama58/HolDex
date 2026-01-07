@@ -635,9 +635,10 @@ async function initDB() {
 
             // Ensure founding nodes exist (DO NOTHING if exists - initializeNode() will sign them)
             // IMPORTANT: Using DO NOTHING to avoid race condition with initializeNode() signatures
+            // NOTE: Only seed nodes that have active services - inactive nodes will be unsigned and deleted
             const foundingNodes = [
-                ['node-zeyxx-001', 'jeanterre552-primary', 'jeanterre552', 'https://holdex-api.onrender.com', 'us-oregon'],
-                ['node-gcrtrd-001', 'gcrtrd-secondary', 'sollama58', null, 'us-oregon']
+                ['node-zeyxx-001', 'jeanterre552-primary', 'jeanterre552', 'https://holdex-api.onrender.com', 'us-oregon']
+                // gcrtrd-001 removed - service not active, would be deleted as unsigned
             ];
             const now = Date.now();
             let nodesSeeded = 0;

@@ -720,8 +720,8 @@ function startNodeWatchdog(deps) {
 
     logger.info(`[NodeWatchdog] Starting node integrity monitor (interval: ${NODE_SCAN_INTERVAL / 1000}s)`);
 
-    // Initial scan after 10 seconds
-    setTimeout(() => scanNodesForTampering(db), 10 * 1000);
+    // Initial scan after 30 seconds (give nodes time to initialize and avoid race conditions)
+    setTimeout(() => scanNodesForTampering(db), 30 * 1000);
 
     // Periodic scans
     nodeWatchdogInterval = setInterval(() => scanNodesForTampering(db), NODE_SCAN_INTERVAL);
