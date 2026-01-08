@@ -74,7 +74,7 @@ async function getRaydiumPoolInfo(mint) {
 }
 
 /**
- * Fetch price from Jupiter API
+ * Fetch price from Jupiter API V3
  */
 async function getJupiterPrice(mint) {
     try {
@@ -84,7 +84,7 @@ async function getJupiterPrice(mint) {
         }
 
         const response = await fetch(
-            `https://api.jup.ag/price/v2?ids=${mint}`,
+            `https://api.jup.ag/price/v3?ids=${mint}`,
             {
                 timeout: 10000,
                 headers: Object.keys(headers).length > 0 ? headers : undefined
@@ -96,7 +96,8 @@ async function getJupiterPrice(mint) {
         const data = await response.json();
         const priceData = data?.data?.[mint] || data?.[mint];
 
-        return priceData ? parseFloat(priceData.price) : null;
+        // V3 returns usdPrice instead of price
+        return priceData ? parseFloat(priceData.usdPrice || priceData.price) : null;
 
     } catch (e) {
         console.log(`Jupiter API error: ${e.message}`);
