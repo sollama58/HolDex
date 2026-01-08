@@ -109,6 +109,7 @@ const CONFIG = {
     holder: [
       'Read', 'Glob', 'Grep', 'LSP',
       'WebFetch', 'WebSearch', 'Task',
+      'mcp__',  // All MCP tools default to holder
     ],
     // REDUCER: Potentially redundant
     reducer: [
