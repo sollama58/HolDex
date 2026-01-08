@@ -56,14 +56,14 @@ async function heliusRpc(method, params) {
 
 /**
  * Fetch holder data from on-chain
- * Returns { totalHolders, realHolders } where realHolders = holders with $1+ value
+ * K-Score v10: Philosophy $asdfasdfa - no arbitrary thresholds
+ * Returns { totalHolders, realHolders } where realHolders = ALL holders (no USD filter)
  */
-async function fetchHolderData(mint, priceUsd = 0, decimals = 6) {
+async function fetchHolderData(mint) {
     let allHolders = [];
     let cursor = null;
     let pageCount = 0;
     const MAX_PAGES = 10;
-    const MIN_USD_VALUE = 1; // $1 minimum
 
     while (pageCount < MAX_PAGES) {
         const params = { mint, limit: 1000 };
@@ -88,20 +88,10 @@ async function fetchHolderData(mint, priceUsd = 0, decimals = 6) {
 
     const totalHolders = allHolders.length;
 
-    // Calculate real holders ($1+ value)
-    let realHolders = 0;
-    if (priceUsd > 0) {
-        const divisor = Math.pow(10, decimals);
-        for (const h of allHolders) {
-            const usdValue = (h.balance / divisor) * priceUsd;
-            if (usdValue >= MIN_USD_VALUE) {
-                realHolders++;
-            }
-        }
-    } else {
-        // Fallback: all holders are "real"
-        realHolders = totalHolders;
-    }
+    // K-Score v10: ALL holders are "real" - no USD threshold
+    // Philosophy $asdfasdfa: Simple, on-chain pure, no arbitrary thresholds
+    // Log normalization handles scale, T (top20 distribution) handles quality
+    const realHolders = totalHolders;
 
     return { totalHolders, realHolders };
 }
@@ -111,9 +101,9 @@ async function main() {
     console.log('             FORCE DEEP REFRESH - On-Chain Truth                   ');
     console.log('═══════════════════════════════════════════════════════════════════\n');
 
-    // Get all verified tokens with price for $1+ calculation
+    // Get all verified tokens
     const tokens = await db.all(`
-        SELECT mint, symbol, holders, real_holders, total_holders, priceusd, k_score
+        SELECT mint, symbol, holders, real_holders, total_holders, k_score
         FROM tokens
         WHERE hascommunityupdate = TRUE
         ORDER BY symbol
@@ -127,11 +117,10 @@ async function main() {
         console.log(`\n[${token.symbol}] Current: real=${currentReal}, total=${currentTotal}`);
 
         try {
-            // Fetch holder data from on-chain with price for $1+ calculation
-            const priceUsd = parseFloat(token.priceusd) || 0;
-            const { totalHolders, realHolders } = await fetchHolderData(token.mint, priceUsd, 6);
+            // Fetch holder data from on-chain (no USD filter - philosophy $asdfasdfa)
+            const { totalHolders, realHolders } = await fetchHolderData(token.mint);
 
-            console.log(`[${token.symbol}] On-chain: real=${realHolders} ($1+), total=${totalHolders}`);
+            console.log(`[${token.symbol}] On-chain: holders=${realHolders} (all), total=${totalHolders}`);
 
             // Update the database with both values and re-sign ("Don't Trust, Verify")
             const updatedToken = await db.get(`
@@ -172,7 +161,7 @@ async function main() {
     `);
 
     console.log('Updated Token Data:');
-    console.log('Symbol'.padEnd(12) + 'Real($1+)'.padEnd(12) + 'Total'.padEnd(10) + 'K-Score'.padEnd(10) + 'Conv%');
+    console.log('Symbol'.padEnd(12) + 'Holders'.padEnd(12) + 'Total'.padEnd(10) + 'K-Score'.padEnd(10) + 'Conv%');
     console.log('-'.repeat(55));
     for (const t of updated) {
         console.log(

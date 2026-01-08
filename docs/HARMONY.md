@@ -107,11 +107,14 @@ Active dimensions provide a bonus:
 
 1. **Theoretical Discount** (E-Score only)
 ```javascript
-discount = 0.90 * (1 - Math.exp(-eScore / 15));
+// Pure PHI formula - no magic numbers
+discount = min(95%, 1 - φ^(-eScore / 25));
+
+// Where 25 = 5² (5 is Fibonacci number - phi connection)
 ```
-- Approaches 90% asymptotically
-- Never reaches 100%
-- Curve flattens at high E-Scores
+- Uses golden ratio (φ) - aligned with $asdfasdfa philosophy
+- Each 25 E-Score = one power of φ in discount
+- Gives EXACT phi ratios at milestones (see table below)
 
 2. **Efficiency Floor** (cost-based constraint)
 ```javascript
@@ -128,18 +131,20 @@ effectiveDiscount = Math.min(theoretical, maxAllowed);
 finalFee = Math.max(minFee, baseFee * (1 - effectiveDiscount));
 ```
 
-### Discount Table
+### Discount Table (Pure PHI Milestones)
 
-| E-Score | Theoretical Discount |
-|---------|---------------------|
-| 0 | 0% |
-| 5 | ~25% |
-| 10 | ~45% |
-| 20 | ~63% |
-| 30 | ~75% |
-| 50 | ~86% |
-| 100 | ~89% |
-| ∞ | 90% (asymptote) |
+| E-Score | Discount | Phi Relationship |
+|---------|----------|------------------|
+| 0 | 0% | - |
+| 5 | 9.2% | - |
+| 10 | 17.5% | - |
+| 20 | 32.0% | - |
+| **25** | **38.2%** | **= 1/φ² (same as burn rate)** |
+| 30 | 43.9% | - |
+| **50** | **61.8%** | **= 1/φ (golden cut)** |
+| **75** | **76.4%** | **= 1-1/φ³** |
+| **100** | **85.4%** | **= 1-1/φ⁴** |
+| ∞ | 95% (cap) | - |
 
 ## Fee Distribution
 

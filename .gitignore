@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
-package-lock.json
 
 # Environment
 .env
@@ -47,8 +46,8 @@ temp/
 *.rdb
 dump.rdb
 
-# Claude Code
-.claude/
+# Claude Code (track clean config, ignore local overrides with credentials)
+.claude/settings.local.json
 
 # Internal docs (if any)
 ROADMAP.md

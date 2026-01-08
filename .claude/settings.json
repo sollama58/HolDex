@@ -1,0 +1,110 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "Bash(npm:*)",
+      "Bash(node:*)",
+      "Bash(bun:*)",
+      "Bash(curl:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(jq:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(timeout:*)",
+      "Bash(redis-server:*)",
+      "Bash(redis-cli:*)",
+      "Bash(psql:*)",
+      "Bash(gh:*)",
+      "Bash(docker:*)",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(rm:*)",
+      "Bash(wc:*)",
+      "Bash(openssl:*)",
+      "Bash(npx:*)",
+      "Bash(claude:*)",
+      "WebSearch",
+      "WebFetch(domain:localhost)",
+      "WebFetch(domain:*.onrender.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:*.helius.dev)",
+      "WebFetch(domain:docs.helius.dev)",
+      "WebFetch(domain:api.dexscreener.com)",
+      "WebFetch(domain:dexscreener.com)",
+      "WebFetch(domain:dev.jup.ag)",
+      "WebFetch(domain:render.com)",
+      "WebFetch(domain:x.com)",
+      "mcp__render__*",
+      "Skill(commit-commands:*)"
+    ],
+    "deny": []
+  },
+  "model": "claude-opus-4-5-20251101",
+  "contextEngineering": {
+    "philosophy": "$asdfasdfa - Don't Trust, Verify",
+    "subagents": {
+      "librarian": {
+        "model": "sonnet",
+        "description": "Documentation research",
+        "budgetRatio": 0.618,
+        "maxOutputTokens": 500,
+        "priority": "PRIMARY",
+        "comment": "φ⁻¹ = 61.8% of research allocation"
+      },
+      "integrity-auditor": {
+        "model": "haiku",
+        "description": "Signature verification",
+        "budgetRatio": 0.236,
+        "maxOutputTokens": 300,
+        "priority": "SECONDARY",
+        "comment": "φ⁻² = 23.6% of research allocation"
+      },
+      "commit-analyzer": {
+        "model": "sonnet",
+        "description": "Git history analysis",
+        "budgetRatio": 0.146,
+        "maxOutputTokens": 400,
+        "priority": "TERTIARY",
+        "comment": "φ⁻³ = 14.6% of research allocation"
+      }
+    },
+    "tokenBudget": {
+      "activeWork": 0.618,
+      "research": 0.236,
+      "planning": 0.146,
+      "comment": "φ⁻¹ + φ⁻² + φ⁻³ ≈ 1.0 (golden ratio partition)"
+    },
+    "qualityThresholds": {
+      "excellent": 80,
+      "good": 60,
+      "warning": 40,
+      "critical": 25,
+      "comment": "Session quality Q = 100 × ∛(D × O × L)"
+    }
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-quality.js\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-quality.js\" stop"
+          }
+        ]
+      }
+    ]
+  }
+}

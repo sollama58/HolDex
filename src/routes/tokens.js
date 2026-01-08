@@ -41,6 +41,7 @@ const { indexTokenOnChain } = require('../services/indexer');
 const { addTokenToMasterWebhook } = require('../services/heliusWebhook');
 const verification = require('../services/verificationService');
 const dataVerification = require('../services/dataVerification');
+const nodeService = require('../services/nodeService');
 
 // Lazy load canvas-based card generator (avoid build failures on workers without native deps)
 let cardGeneratorModule = null;
@@ -1349,7 +1350,15 @@ function init(deps) {
                 tokenData._dataVerified = dataVerified;
                 tokenData._integrityStatus = tampered ? 'tampered' : (dataVerified ? 'verified' : 'unsigned');
 
-                return { success: true, token: { ...tokenData, pairs: formattedPairs, holderHistory } };
+                // Add node validation info (non-blocking)
+                let validation = null;
+                try {
+                    validation = await nodeService.getTokenValidation(db, mint);
+                } catch (_e) {
+                    // Non-critical, continue without validation info
+                }
+
+                return { success: true, token: { ...tokenData, pairs: formattedPairs, holderHistory, validation } };
             });
             res.json(result);
         } catch(e) { res.status(500).json({ success: false, error: sanitizeError(e) }); }
@@ -2030,16 +2039,19 @@ function init(deps) {
     // ==================================
 
     const { calculateWalletPnL, getTokenPnL } = require('../services/pnlService');
+    const pnlRateLimiter = require('../middleware/pnlRateLimiter');
 
     /**
      * GET /wallet/:address/pnl
      * Calculate on-chain PnL for a wallet
      *
+     * Philosophy $asdfasdfa: Cache hits FREE, cache misses cost 1 credit
+     *
      * Query params:
      *   - maxPages: Max pages of transactions to fetch (default 10, max 50)
      *   - since: Unix timestamp to filter transactions after
      */
-    router.get('/wallet/:address/pnl', cacheControl(60, 120), unifiedRateLimiter, async (req, res) => {
+    router.get('/wallet/:address/pnl', cacheControl(60, 120), pnlRateLimiter, async (req, res) => {
         const { address } = req.params;
 
         if (!isValidPubkey(address)) {
@@ -2070,8 +2082,10 @@ function init(deps) {
     /**
      * GET /wallet/:address/token/:mint/pnl
      * Calculate PnL for a specific token in a wallet
+     *
+     * Philosophy $asdfasdfa: Cache hits FREE, cache misses cost 1 credit
      */
-    router.get('/wallet/:address/token/:mint/pnl', cacheControl(60, 120), unifiedRateLimiter, async (req, res) => {
+    router.get('/wallet/:address/token/:mint/pnl', cacheControl(60, 120), pnlRateLimiter, async (req, res) => {
         const { address, mint } = req.params;
 
         if (!isValidPubkey(address)) {

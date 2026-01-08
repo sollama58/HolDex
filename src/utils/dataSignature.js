@@ -38,6 +38,12 @@ if (!SIGNING_SECRET && process.env.NODE_ENV === 'production') {
     logger.error('CRITICAL: DATA_SIGNING_SECRET not set in production!');
 }
 
+// DEBUG: Log secret fingerprint to verify both services use same key
+if (SIGNING_SECRET) {
+    const fingerprint = crypto.createHash('sha256').update(SIGNING_SECRET).digest('hex').slice(0, 16);
+    logger.info(`[Signature] Secret fingerprint: ${fingerprint} (len=${SIGNING_SECRET.length})`);
+}
+
 if (SIGNING_SECRET_PREVIOUS) {
     logger.info('[Signature] Key rotation mode active - verifying with current + previous keys');
 }
@@ -380,15 +386,57 @@ function verifyCategory(token, category, expectedSig) {
     if (result.valid) {
         return { valid: true, reason: 'verified', keyUsed: result.keyUsed };
     }
+
+    // DEBUG: Log data string for failed verifications to diagnose mismatch
+    if (category === 'identity') { // Only log identity to reduce noise
+        const computedSig = hmacSign(data);
+        logger.debug(`[Signature] MISMATCH ${category} for ${token.mint?.slice(0, 8)}: stored=${expectedSig?.slice(0, 16)}... computed=${computedSig?.slice(0, 16)}...`);
+    }
+    return { valid: false, reason: 'signature_mismatch' };
+}
+
+/**
+ * Verify holders signature against holder_snapshots data
+ * @param {string} mint - Token mint address
+ * @param {string} expectedSig - Expected sig_holders from token
+ * @param {Array} snapshots - Array of {holder, balance} from holder_snapshots table
+ * @returns {{valid: boolean, reason: string}} Verification result
+ */
+function verifyHolders(mint, expectedSig, snapshots) {
+    if (!SIGNING_SECRET) return { valid: true, reason: 'dev_mode' };
+    if (!expectedSig) return { valid: false, reason: 'missing_signature' };
+    if (expectedSig === 'dev_unsigned') return { valid: false, reason: 'dev_signature_in_prod' };
+    if (!snapshots || snapshots.length === 0) return { valid: false, reason: 'no_snapshots' };
+
+    // Rebuild the data string that was signed
+    const sorted = (snapshots || [])
+        .sort((a, b) => {
+            const bBal = BigInt(b.balance || 0);
+            const aBal = BigInt(a.balance || 0);
+            return bBal > aBal ? 1 : bBal < aBal ? -1 : 0;
+        })
+        .slice(0, 20);
+
+    const data = [
+        mint,
+        sorted.length,
+        ...sorted.map(s => `${s.holder}:${s.balance}`)
+    ].join('|');
+
+    const result = verifyWithRotation(data, expectedSig);
+    if (result.valid) {
+        return { valid: true, reason: 'verified', keyUsed: result.keyUsed };
+    }
     return { valid: false, reason: 'signature_mismatch' };
 }
 
 /**
  * Verify all token signatures
  * @param {Object} token - Token with all signatures
+ * @param {Object} options - Optional: { holderSnapshots: [] } for sig_holders verification
  * @returns {Object} { valid, tampered: [], unsigned: [], details }
  */
-function verifyAllSignatures(token) {
+function verifyAllSignatures(token, options = {}) {
     if (!SIGNING_SECRET) {
         return { valid: true, tampered: [], unsigned: [], reason: 'dev_mode' };
     }
@@ -411,6 +459,17 @@ function verifyAllSignatures(token) {
             if (!result.valid && result.reason === 'signature_mismatch') {
                 tampered.push(cat);
             }
+        }
+    }
+
+    // Verify sig_holders if snapshots are provided
+    if (options.holderSnapshots && options.holderSnapshots.length > 0) {
+        const holdersResult = verifyHolders(token.mint, token.sig_holders, options.holderSnapshots);
+        details['holders'] = holdersResult.reason;
+        if (!holdersResult.valid && holdersResult.reason === 'signature_mismatch') {
+            tampered.push('holders');
+        } else if (!token.sig_holders || token.sig_holders === 'dev_unsigned') {
+            unsigned.push('holders');
         }
     }
 
@@ -466,6 +525,155 @@ function verifySignature(data, signature) {
     return verifyCategory(data, 'kscore', signature);
 }
 
+// ============================================
+// NODE SIGNATURES - Defense against DB attacks
+// ============================================
+// Nodes in the decentralized network need integrity protection too.
+// Attackers can INSERT fake nodes in the public DB, but without valid
+// signatures they will be rejected by the verification layer.
+
+/**
+ * Sign Node Identity
+ * Protects: node_id, name, operator, public_key fingerprint
+ * This is the core identity - cannot be forged without signing key
+ */
+function signNodeIdentity(node) {
+    const data = [
+        node.node_id,
+        node.name || '',
+        node.operator || '',
+        node.node_key_fingerprint || '',
+        node.region || ''
+    ].join('|');
+    return hmacSign(data);
+}
+
+/**
+ * Sign Node Status
+ * Protects: status, heartbeat, version, stats
+ * Changes over time but must stay consistent
+ */
+function signNodeStatus(node) {
+    // IMPORTANT: Ensure consistent types for signature computation
+    // PostgreSQL BIGINT may return as string, must normalize
+    const data = [
+        String(node.node_id || ''),
+        String(node.status || 'pending'),
+        String(parseInt(node.last_heartbeat, 10) || 0),
+        String(node.version || '1.0.0'),
+        String(parseInt(node.tokens_verified, 10) || 0),
+        String(parseInt(node.verifications_24h, 10) || 0)
+    ].join('|');
+    // DEBUG: Log when signing
+    logger.debug(`[NodeSig] Signing status: ${data}`);
+    return hmacSign(data);
+}
+
+/**
+ * Sign all node categories
+ * @param {Object} node - Node object
+ * @returns {Object} { sig_node_identity, sig_node_status, node_chaos_nonce }
+ */
+function signNodeAllCategories(node) {
+    const chaosNonce = generateChaosNonce();
+    return {
+        sig_node_identity: signNodeIdentity(node),
+        sig_node_status: signNodeStatus(node),
+        node_chaos_nonce: chaosNonce
+    };
+}
+
+/**
+ * Verify Node Identity signature
+ * @param {Object} node - Node object
+ * @returns {{valid: boolean, reason: string}}
+ */
+function verifyNodeIdentity(node) {
+    if (!SIGNING_SECRET) return { valid: true, reason: 'dev_mode' };
+    if (!node.sig_node_identity) return { valid: false, reason: 'unsigned' };
+
+    const data = [
+        node.node_id,
+        node.name || '',
+        node.operator || '',
+        node.node_key_fingerprint || '',
+        node.region || ''
+    ].join('|');
+
+    const result = verifyWithRotation(data, node.sig_node_identity);
+    return result.valid
+        ? { valid: true, reason: 'verified' }
+        : { valid: false, reason: 'signature_mismatch' };
+}
+
+/**
+ * Verify Node Status signature
+ * @param {Object} node - Node object
+ * @returns {{valid: boolean, reason: string}}
+ */
+function verifyNodeStatus(node) {
+    if (!SIGNING_SECRET) return { valid: true, reason: 'dev_mode' };
+    if (!node.sig_node_status) return { valid: false, reason: 'unsigned' };
+
+    // IMPORTANT: Must match signNodeStatus() exactly - normalize types
+    const data = [
+        String(node.node_id || ''),
+        String(node.status || 'pending'),
+        String(parseInt(node.last_heartbeat, 10) || 0),
+        String(node.version || '1.0.0'),
+        String(parseInt(node.tokens_verified, 10) || 0),
+        String(parseInt(node.verifications_24h, 10) || 0)
+    ].join('|');
+
+    const result = verifyWithRotation(data, node.sig_node_status);
+    if (!result.valid) {
+        // DEBUG: Log the data string to diagnose mismatch
+        const computedSig = hmacSign(data);
+        logger.warn(`[NodeSig] MISMATCH status for ${node.node_id}: expected=${node.sig_node_status?.slice(0, 20)}... computed=${computedSig?.slice(0, 20)}...`);
+        logger.warn(`[NodeSig] status data: ${data}`);
+        logger.warn(`[NodeSig] Raw values: heartbeat=${node.last_heartbeat} (${typeof node.last_heartbeat}), version=${node.version}, verified=${node.tokens_verified}, 24h=${node.verifications_24h}`);
+    }
+    return result.valid
+        ? { valid: true, reason: 'verified' }
+        : { valid: false, reason: 'signature_mismatch' };
+}
+
+/**
+ * Verify all node signatures
+ * @param {Object} node - Node with signatures
+ * @returns {{valid: boolean, tampered: string[], unsigned: string[]}}
+ */
+function verifyNodeSignatures(node) {
+    if (!SIGNING_SECRET) {
+        return { valid: true, tampered: [], unsigned: [], reason: 'dev_mode' };
+    }
+
+    const tampered = [];
+    const unsigned = [];
+
+    // Check identity signature
+    const identityResult = verifyNodeIdentity(node);
+    if (identityResult.reason === 'unsigned') {
+        unsigned.push('identity');
+    } else if (!identityResult.valid) {
+        tampered.push('identity');
+    }
+
+    // Check status signature
+    const statusResult = verifyNodeStatus(node);
+    if (statusResult.reason === 'unsigned') {
+        unsigned.push('status');
+    } else if (!statusResult.valid) {
+        tampered.push('status');
+    }
+
+    return {
+        valid: tampered.length === 0 && unsigned.length === 0,
+        tampered,
+        unsigned
+    };
+}
+
 module.exports = {
     // New 8-category system
     signAllCategories,
@@ -485,11 +693,20 @@ module.exports = {
 
     // Verification (with key rotation support)
     verifyCategory,
+    verifyHolders,
     verifyWithRotation,
 
     // Legacy compatibility
     signData,
     verifySignature,
+
+    // Node signatures (defense against DB attacks)
+    signNodeIdentity,
+    signNodeStatus,
+    signNodeAllCategories,
+    verifyNodeIdentity,
+    verifyNodeStatus,
+    verifyNodeSignatures,
 
     // Constants (for external use)
     SIG_VERSION

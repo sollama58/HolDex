@@ -17,8 +17,57 @@
 const config = require('../config/env');
 const { getSolPrice } = require('./priceService');
 const logger = require('./logger');
+const { getClient: getRedisClient } = require('./redis');
 
 const HELIUS_API_KEY = config.HELIUS_API_KEY;
+
+// Cache config
+const PNL_CACHE_TTL = 60; // 60 seconds
+const PNL_CACHE_PREFIX = 'pnl:wallet:';
+
+/**
+ * Get cached PnL result from Redis
+ * @param {string} wallet - Wallet address
+ * @param {number} maxPages - Max pages used (affects cache key)
+ * @returns {Object|null} Cached result or null
+ */
+async function getCachedPnL(wallet, maxPages) {
+    const redis = getRedisClient();
+    if (!redis) return null;
+
+    try {
+        const key = `${PNL_CACHE_PREFIX}${wallet}:${maxPages}`;
+        const cached = await redis.get(key);
+        if (cached) {
+            logger.debug(`[PnL] Cache HIT for ${wallet.slice(0, 8)}...`);
+            return JSON.parse(cached);
+        }
+    } catch (e) {
+        logger.debug(`[PnL] Cache read error: ${e.message}`);
+    }
+    return null;
+}
+
+/**
+ * Cache PnL result in Redis
+ * @param {string} wallet - Wallet address
+ * @param {number} maxPages - Max pages used
+ * @param {Object} result - PnL result to cache
+ */
+async function setCachedPnL(wallet, maxPages, result) {
+    const redis = getRedisClient();
+    if (!redis) return;
+
+    try {
+        const key = `${PNL_CACHE_PREFIX}${wallet}:${maxPages}`;
+        // Don't cache _allTokens (internal only, large)
+        const { _allTokens, ...cacheableResult } = result;
+        await redis.set(key, JSON.stringify(cacheableResult), 'EX', PNL_CACHE_TTL);
+        logger.debug(`[PnL] Cached result for ${wallet.slice(0, 8)}... (TTL: ${PNL_CACHE_TTL}s)`);
+    } catch (e) {
+        logger.debug(`[PnL] Cache write error: ${e.message}`);
+    }
+}
 
 /**
  * Fetch actual on-chain token balances AND prices for a wallet using Helius DAS API
@@ -483,11 +532,24 @@ function parseSwapTransaction(tx, wallet) {
  * Calculate PnL for a wallet
  * Returns per-token breakdown + summary
  * @param {string} wallet - Wallet address
- * @param {Object} options - { db, maxPages, limit }
+ * @param {Object} options - { db, maxPages, limit, skipCache }
  */
 async function calculateWalletPnL(wallet, options = {}) {
-    const { db } = options; // Optional DB connection for pool price fallback
+    const { db, skipCache = false } = options;
+    const maxPages = options.maxPages || 10;
     const startTime = Date.now();
+
+    // Check cache first (60s TTL protects against RPC drain attacks)
+    if (!skipCache) {
+        const cached = await getCachedPnL(wallet, maxPages);
+        if (cached) {
+            return {
+                ...cached,
+                _cached: true,
+                _cacheAge: 'within 60s'
+            };
+        }
+    }
 
     // Fetch swap transactions
     const txs = await fetchSwapTransactions(wallet, options);
@@ -724,7 +786,7 @@ async function calculateWalletPnL(wallet, options = {}) {
         return bTotalPnl - aTotalPnl;
     });
 
-    return {
+    const result = {
         wallet,
         totalRealizedPnlSol,
         totalRealizedPnlUsd: totalRealizedPnlSol * solPrice,
@@ -745,6 +807,11 @@ async function calculateWalletPnL(wallet, options = {}) {
         swapCount: allSwaps.length,
         computeTimeMs: Date.now() - startTime
     };
+
+    // Cache result (fire-and-forget, 60s TTL)
+    setCachedPnL(wallet, maxPages, result).catch(() => {});
+
+    return result;
 }
 
 /**

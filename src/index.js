@@ -10,7 +10,7 @@ const logger = require('./services/logger');
 const { initDB, getDB } = require('./services/database');
 const { connectRedis } = require('./services/redis');
 const { startSnapshotter } = require('./indexer/tasks/snapshotter');
-const kScoreUpdater = require('./tasks/kScoreUpdater');
+const _kScoreUpdater = require('./tasks/kScoreUpdater');
 const integrityWatchdog = require('./tasks/integrityWatchdog');
 const { startPriceWorker } = require('./tasks/priceWorker');
 const alerting = require('./services/alerting');
@@ -20,6 +20,8 @@ const tokensRoutes = require('./routes/tokens');
 const webhooksRoutes = require('./routes/webhooks');
 const oracleRoutes = require('./routes/oracle');
 const spaceRoutes = require('./routes/space');
+const nodesRoutes = require('./routes/nodes');
+const nodeService = require('./services/nodeService');
 const { getOrCreateMasterWebhook } = require('./services/heliusWebhook');
 const fs = require('fs');
 const path = require('path');
@@ -468,19 +470,39 @@ async function startServer() {
         startSnapshotter();
 
         // PriceWorker: Unified price service (DexScreener batch, 0 Helius credits)
-        // Must start BEFORE kScoreUpdater so prices are cached
         startPriceWorker({ db: getDB(), broadcast: null });
 
-        // KScoreUpdater: Conviction analysis (Helius RPC, our value-add)
-        kScoreUpdater.start({ db: getDB() });
+        // ARCHITECTURE FIX: kScoreUpdater.start() REMOVED from API
+        // K-Score periodic calculations run ONLY on Calculator service to prevent race conditions.
+        // API still has access to updateSingleToken() for on-demand recalcs (admin, approvals, etc.)
+        // Calculator = sole authority for K-Score calculations
+        // API = verification only (integrityWatchdog)
 
         integrityWatchdog.start({ db: getDB() });
+        integrityWatchdog.startNodeWatchdog({ db: getDB() }); // Node tampering defense
 
         // Initialize Routes
         app.use('/api', tokensRoutes.init({ db: getDB() }));
         app.use('/webhook', webhooksRoutes.init({ db: getDB() }));
         app.use('/oracle', oracleRoutes.init({ db: getDB(), logger }));
         app.use('/space', spaceRoutes.init({ db: getDB(), logger }));
+
+        // Node Network Routes
+        app.set('db', getDB()); // Make db available to routes
+        app.use('/api/nodes', nodesRoutes);
+        app.use('/internal', nodesRoutes.internalRouter);
+
+        // Initialize this node in the network
+        await nodeService.initializeNode(getDB());
+
+        // Start heartbeat interval (every 60 seconds)
+        setInterval(async () => {
+            await nodeService.sendHeartbeat(getDB());
+            await nodeService.updateNodeStatuses(getDB());
+        }, 60 * 1000);
+
+        // Send initial heartbeat
+        await nodeService.sendHeartbeat(getDB());
 
         app.use((err, req, res, _next) => {
             logger.error(`🔥 Unhandled Server Error: ${err.message}`);

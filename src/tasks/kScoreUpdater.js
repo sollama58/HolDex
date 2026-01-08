@@ -33,6 +33,9 @@ const verification = require('../services/verificationService');
 const { signAllCategories, signHolders, signSupply, signSecurity, signLP } = require('../utils/dataSignature');
 const { saveSnapshot } = require('./integrityWatchdog');
 const alerting = require('../services/alerting');
+const nodeService = require('../services/nodeService');
+const signedWrites = require('../services/signedWrites');
+const nodeKeys = require('../utils/nodeKeys');
 
 // ============================================
 // HELIUS CONFIG
@@ -335,18 +338,87 @@ async function loadHolderSnapshots(db, mint) {
     }
 }
 
+// ============================================
+// WALLET TX CACHE: Cross-token transaction reuse
+// Philosophy: Fetch once, analyze many tokens
+// ============================================
+
+const WALLET_TX_CACHE_TTL = 60 * 60 * 1000; // 1 hour cache freshness
+
+/**
+ * Get cached wallet-mint analysis from DB
+ * Returns null if not cached or stale
+ */
+async function getWalletTxCache(db, wallet, mint) {
+    if (!db) return null;
+    try {
+        const cached = await db.get(
+            'SELECT * FROM wallet_tx_cache WHERE wallet = $1 AND mint = $2',
+            [wallet, mint]
+        );
+        if (cached && Date.now() - cached.analyzed_at < WALLET_TX_CACHE_TTL) {
+            return cached;
+        }
+    } catch (_e) { /* Cache miss */ }
+    return null;
+}
+
+/**
+ * Bulk cache wallet-token interactions (cross-token reuse)
+ * Called after fetching transactions - saves ALL token interactions found
+ */
+async function cacheWalletTxBulk(db, wallet, tokenInteractions, lastSignature) {
+    if (!db || tokenInteractions.length === 0) return;
+
+    const now = Date.now();
+    try {
+        // Use batch insert with ON CONFLICT UPDATE
+        for (const ti of tokenInteractions) {
+            await db.run(`
+                INSERT INTO wallet_tx_cache (wallet, mint, buy_count, sell_count, net_flow,
+                    first_tx_timestamp, last_tx_timestamp, last_signature, analyzed_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                ON CONFLICT (wallet, mint) DO UPDATE SET
+                    buy_count = wallet_tx_cache.buy_count + $3,
+                    sell_count = wallet_tx_cache.sell_count + $4,
+                    net_flow = wallet_tx_cache.net_flow + $5,
+                    last_tx_timestamp = GREATEST(wallet_tx_cache.last_tx_timestamp, $7),
+                    last_signature = $8,
+                    analyzed_at = $9
+            `, [wallet, ti.mint, ti.buyCount, ti.sellCount, ti.netFlow,
+                ti.firstTxTimestamp, ti.lastTxTimestamp, lastSignature, now]);
+        }
+    } catch (e) {
+        logger.debug(`[WalletTxCache] Bulk cache error: ${e.message}`);
+    }
+}
+
 /**
  * Get NEW transactions for a holder since last snapshot
- * Optimized with Helius time-based filtering when available
+ * Optimized with:
+ * 1. Cross-token caching: Extract ALL token interactions when fetching
+ * 2. Helius time-based filtering when available
  *
  * @param {string} wallet - Wallet address
  * @param {string} lastSignature - Last analyzed signature (fallback stop condition)
  * @param {string} mint - Token mint to filter for
  * @param {number} sinceTimestamp - Optional: Unix timestamp (ms) to filter from
+ * @param {Object} db - Optional: Database connection for cross-token caching
  */
-async function getNewTransactions(wallet, lastSignature, mint, sinceTimestamp = null) {
+async function getNewTransactions(wallet, lastSignature, mint, sinceTimestamp = null, db = null) {
+    // Check cross-token cache first
+    if (db) {
+        const cached = await getWalletTxCache(db, wallet, mint);
+        if (cached && cached.last_signature === lastSignature) {
+            // Cache is fresh and matches last analyzed state - no new txs
+            return [];
+        }
+    }
+
     const newTxs = [];
+    const allTokenInteractions = new Map(); // mint -> { buyCount, sellCount, netFlow, timestamps }
     let before = null;
+    let newestSignature = null;
 
     // Build query options with time filter optimization
     const baseOptions = {
@@ -361,21 +433,45 @@ async function getNewTransactions(wallet, lastSignature, mint, sinceTimestamp = 
 
         let foundLast = false;
         for (const tx of txs) {
+            // Track newest signature for cache
+            if (!newestSignature) newestSignature = tx.signature;
+
             // Stop if we've reached the last analyzed signature
             if (tx.signature === lastSignature) {
                 foundLast = true;
                 break;
             }
 
-            // Check if this tx involves our mint
+            // Extract ALL token interactions (cross-token caching)
             if (tx.tokenTransfers) {
                 for (const transfer of tx.tokenTransfers) {
-                    if (transfer.mint === mint) {
+                    const txMint = transfer.mint;
+                    if (!txMint || txMint.length < 30) continue;
+
+                    const isBuy = transfer.toUserAccount === wallet;
+                    const isSell = transfer.fromUserAccount === wallet;
+                    const amount = transfer.tokenAmount || 0;
+
+                    // Track for cross-token cache
+                    if (!allTokenInteractions.has(txMint)) {
+                        allTokenInteractions.set(txMint, {
+                            buyCount: 0, sellCount: 0, netFlow: 0,
+                            firstTxTimestamp: tx.timestamp * 1000,
+                            lastTxTimestamp: tx.timestamp * 1000
+                        });
+                    }
+                    const ti = allTokenInteractions.get(txMint);
+                    if (isBuy) { ti.buyCount++; ti.netFlow += amount; }
+                    if (isSell) { ti.sellCount++; ti.netFlow -= amount; }
+                    ti.lastTxTimestamp = Math.max(ti.lastTxTimestamp, tx.timestamp * 1000);
+
+                    // Return data for requested mint
+                    if (txMint === mint) {
                         newTxs.push({
                             signature: tx.signature,
-                            amount: transfer.tokenAmount || 0,
-                            isBuy: transfer.toUserAccount === wallet,
-                            isSell: transfer.fromUserAccount === wallet
+                            amount,
+                            isBuy,
+                            isSell
                         });
                     }
                 }
@@ -385,6 +481,19 @@ async function getNewTransactions(wallet, lastSignature, mint, sinceTimestamp = 
         if (foundLast) break;
         before = txs[txs.length - 1]?.signature;
         if (!before || txs.length < 50) break;
+    }
+
+    // Cache ALL token interactions for cross-token reuse
+    if (db && allTokenInteractions.size > 0) {
+        const interactions = Array.from(allTokenInteractions.entries()).map(([m, ti]) => ({
+            mint: m,
+            ...ti
+        }));
+        cacheWalletTxBulk(db, wallet, interactions, newestSignature || lastSignature).catch(() => {});
+
+        if (interactions.length > 1) {
+            logger.debug(`[WalletTxCache] Cached ${interactions.length} token interactions for ${wallet.slice(0,8)}...`);
+        }
     }
 
     return newTxs;
@@ -442,8 +551,8 @@ async function deltaConvictionAnalysis(db, mint) {
 
         const results = await Promise.allSettled(
             batch.map(async (snap) => {
-                // Get only NEW transactions since last check
-                const newTxs = await getNewTransactions(snap.holder, snap.last_signature, mint, snap.updated_at);
+                // Get only NEW transactions since last check (with cross-token caching)
+                const newTxs = await getNewTransactions(snap.holder, snap.last_signature, mint, snap.updated_at, db);
 
                 let convictionClass = snap.conviction_class;
 
@@ -697,6 +806,59 @@ async function heliusRpc(method, params) {
     } catch (error) {
         logger.error(`[Helius] RPC error: ${error.message}`);
         return null;
+    }
+}
+
+// ============================================
+// TOKEN SUPPLY CACHE: Reduce RPC calls
+// Philosophy: Supply rarely changes, cache aggressively
+// ============================================
+
+const SUPPLY_CACHE_TTL = 60 * 60; // 1 hour in seconds
+const SUPPLY_CACHE_PREFIX = 'supply:';
+
+/**
+ * Get token supply with Redis caching (1h TTL)
+ * Supply data rarely changes - safe to cache aggressively
+ *
+ * @param {string} mint - Token mint address
+ * @returns {Object|null} Supply data { value: { amount, decimals, uiAmount } }
+ */
+async function getCachedTokenSupply(mint) {
+    const redis = getRedisClient();
+    const cacheKey = `${SUPPLY_CACHE_PREFIX}${mint}`;
+
+    // 1. Try Redis cache first
+    if (redis) {
+        try {
+            const cached = await redis.get(cacheKey);
+            if (cached) {
+                logger.debug(`[Supply] Cache HIT for ${mint.slice(0, 8)}...`);
+                return JSON.parse(cached);
+            }
+        } catch (_e) { /* Cache miss, continue to RPC */ }
+    }
+
+    // 2. Cache miss - fetch from RPC
+    const supply = await heliusRpc('getTokenSupply', [mint]);
+    if (!supply) return null;
+
+    // 3. Cache the result (fire-and-forget)
+    if (redis) {
+        redis.set(cacheKey, JSON.stringify(supply), 'EX', SUPPLY_CACHE_TTL).catch(() => {});
+        logger.debug(`[Supply] Cached ${mint.slice(0, 8)}... (TTL: ${SUPPLY_CACHE_TTL}s)`);
+    }
+
+    return supply;
+}
+
+/**
+ * Invalidate supply cache (call after supply change detected)
+ */
+async function invalidateSupplyCache(mint) {
+    const redis = getRedisClient();
+    if (redis) {
+        await redis.del(`${SUPPLY_CACHE_PREFIX}${mint}`).catch(() => {});
     }
 }
 
@@ -1018,6 +1180,22 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, _decimals = 9, 
                             case 'holder': holders++; break;
                             case 'reducer': reducers++; break;
                             case 'extractor': extractors++; break;
+                            default:
+                                // NULL or unknown → classify based on buy/sell counts
+                                // This handles old snapshots without conviction_class
+                                if (snap.buy_count > 0 || snap.sell_count > 0) {
+                                    const ratio = snap.sell_count > 0
+                                        ? snap.buy_count / snap.sell_count
+                                        : (snap.buy_count > 0 ? 10 : 1);
+                                    if (ratio >= 2) accumulators++;
+                                    else if (ratio >= 0.8) holders++;
+                                    else if (ratio >= 0.3) reducers++;
+                                    else extractors++;
+                                } else {
+                                    // No activity data → conservative: count as holder
+                                    holders++;
+                                }
+                                break;
                         }
                     }
 
@@ -1424,8 +1602,8 @@ async function calculateBurn(mint, allHolders = null, options = {}) {
     try {
         const { storedInitialSupply, isPumpFunFlag, db } = options;
 
-        // Get current supply from chain
-        const supply = await heliusRpc('getTokenSupply', [mint]);
+        // Get current supply (cached 1h - supply rarely changes)
+        const supply = await getCachedTokenSupply(mint);
         if (!supply) return { burnPct: 0, burned: 0, totalSupply: 0, initialSupply: 0 };
 
         const currentSupply = BigInt(supply.value.amount);
@@ -1539,8 +1717,8 @@ async function refreshSupply(db, mint, decimals = 9) {
     };
 
     try {
-        // 1. Fetch current supply from chain
-        const supplyInfo = await heliusRpc('getTokenSupply', [mint]);
+        // 1. Fetch current supply (cached 1h - supply rarely changes)
+        const supplyInfo = await getCachedTokenSupply(mint);
         if (!supplyInfo?.value?.amount) {
             return result;
         }
@@ -2855,6 +3033,39 @@ async function updateSingleToken(deps, mint) {
 
         const signatures = signAllCategories(tokenForSigning);
 
+        // ============================================
+        // NODE ED25519 SIGNATURE (Distributed Consensus)
+        // ============================================
+        // Sign this K-Score update with the node's private key
+        // This creates verifiable proof of which node calculated this score
+        const nodePrivateKey = nodeKeys.getNodePrivateKey();
+        const currentNodeId = nodeService.getNodeId();
+        let nodeSignatureData = {
+            node_id: null,
+            signature: null,
+            timestamp: updateTimestamp
+        };
+
+        if (nodePrivateKey && currentNodeId) {
+            // Create signed K-Score package
+            const signedKScore = signedWrites.signKScoreUpdate({
+                mint,
+                k_score: smoothedScore,
+                d_score: result.breakdown?.diamond || 0,
+                o_score: result.breakdown?.organic || 0,
+                l_score: result.breakdown?.longevity || 0,
+                conviction_score: conviction.score || 0
+            }, currentNodeId, nodePrivateKey);
+
+            nodeSignatureData = {
+                node_id: currentNodeId,
+                signature: signedKScore.signature,
+                timestamp: updateTimestamp
+            };
+
+            logger.debug(`[K-Score] Node ${currentNodeId} signed K=${smoothedScore} for ${mint.slice(0, 8)}...`);
+        }
+
         // Determine holder values based on mode
         const holdersValue = conviction.preserveHolders
             ? (token.holders || conviction.realHoldersCount || 0)
@@ -2912,8 +3123,12 @@ async function updateSingleToken(deps, mint) {
                 supply_last_check = $42,
                 volume24h = $43,
                 change24h = $44,
-                change1h = $45
-            WHERE mint = $46
+                change1h = $45,
+                sig_node_id = $46,
+                sig_node_signature = $47,
+                sig_node_timestamp = $48,
+                sig_node_status = $49
+            WHERE mint = $50
         `, [
             smoothedScore,
             updateTimestamp.toString(),
@@ -2960,17 +3175,55 @@ async function updateSingleToken(deps, mint) {
             marketData.volume24h || 0,
             marketData.change24h || 0,
             marketData.change1h || 0,
+            nodeSignatureData.node_id,
+            nodeSignatureData.signature,
+            nodeSignatureData.timestamp ? nodeSignatureData.timestamp.toString() : null,
+            nodeSignatureData.node_id ? 'signed' : 'unsigned',
             mint
         ]);
 
         // Save snapshot for integrity watchdog (self-healing)
-        await saveSnapshot(mint, tokenForSigning);
+        // CRITICAL: Must include signatures in snapshot, otherwise Watchdog heals with missing sigs
+        // Include holder snapshots for complete integrity (v3 snapshot format)
+        let holderSnapshotsForIntegrity = [];
+        try {
+            holderSnapshotsForIntegrity = await db.all(
+                'SELECT holder, balance FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 20',
+                [mint]
+            );
+        } catch (_e) {
+            // Ignore - snapshots may not exist yet
+        }
+        const tokenWithSignatures = { ...tokenForSigning, ...signatures };
+        await saveSnapshot(mint, tokenWithSignatures, holderSnapshotsForIntegrity);
 
         // Save holder history snapshot (daily)
         await saveHolderHistory(db, mint, conviction.totalHolders || 0, conviction.realHoldersCount || 0);
 
         // Save K-Score history snapshot (daily) for credit rating trajectory
         await saveKScoreHistory(db, mint, smoothedScore, conviction.score || 0, conviction.realHoldersCount || 0);
+
+        // Record verification by this node (for decentralized consensus)
+        try {
+            await nodeService.recordVerification(db, mint, smoothedScore, true);
+
+            // Check for consensus after recording our verification
+            if (currentNodeId) {
+                const consensusResult = await signedWrites.checkTokenConsensus(mint, db);
+                if (consensusResult.hasConsensus) {
+                    await signedWrites.recordConsensus(
+                        mint,
+                        consensusResult.k_score,
+                        consensusResult.agreeing,
+                        consensusResult.total,
+                        db
+                    );
+                    logger.info(`[Consensus] ${mint.slice(0, 8)}... K=${consensusResult.k_score} (${consensusResult.agreeing}/${consensusResult.total} nodes agree)`);
+                }
+            }
+        } catch (_e) {
+            // Non-critical - continue without recording
+        }
 
         // Broadcast K-Score update via WebSocket (use smoothed score)
         if (broadcast) {
@@ -3167,6 +3420,30 @@ async function updateKScores(deps) {
 
                 const batchSignatures = signAllCategories(batchTokenForSigning);
 
+                // ============================================
+                // NODE ED25519 SIGNATURE (Distributed Consensus)
+                // ============================================
+                const batchNodePrivateKey = nodeKeys.getNodePrivateKey();
+                const batchCurrentNodeId = nodeService.getNodeId();
+                let batchNodeSigData = { node_id: null, signature: null, timestamp: batchUpdateTimestamp };
+
+                if (batchNodePrivateKey && batchCurrentNodeId) {
+                    const signedBatchKScore = signedWrites.signKScoreUpdate({
+                        mint: t.mint,
+                        k_score: smoothedScore,
+                        d_score: result.breakdown?.diamond || 0,
+                        o_score: result.breakdown?.organic || 0,
+                        l_score: result.breakdown?.longevity || 0,
+                        conviction_score: validatedConviction.score
+                    }, batchCurrentNodeId, batchNodePrivateKey);
+
+                    batchNodeSigData = {
+                        node_id: batchCurrentNodeId,
+                        signature: signedBatchKScore.signature,
+                        timestamp: batchUpdateTimestamp
+                    };
+                }
+
                 await db.run(`
                     UPDATE tokens
                     SET k_score = $1,
@@ -3211,8 +3488,12 @@ async function updateKScores(deps) {
                         supply_last_check = $40,
                         volume24h = $41,
                         change24h = $42,
-                        change1h = $43
-                    WHERE mint = $44
+                        change1h = $43,
+                        sig_node_id = $44,
+                        sig_node_signature = $45,
+                        sig_node_timestamp = $46,
+                        sig_node_status = $47
+                    WHERE mint = $48
                 `, [
                     smoothedScore,
                     batchUpdateTimestamp.toString(),
@@ -3257,17 +3538,55 @@ async function updateKScores(deps) {
                     batchMarketData.volume24h || 0,
                     batchMarketData.change24h || 0,
                     batchMarketData.change1h || 0,
+                    batchNodeSigData.node_id,
+                    batchNodeSigData.signature,
+                    batchNodeSigData.timestamp ? batchNodeSigData.timestamp.toString() : null,
+                    batchNodeSigData.node_id ? 'signed' : 'unsigned',
                     t.mint
                 ]);
 
                 // Save snapshot for integrity watchdog (self-healing)
-                await saveSnapshot(t.mint, batchTokenForSigning);
+                // CRITICAL: Must include signatures in snapshot, otherwise Watchdog heals with missing sigs
+                // Include holder snapshots for complete integrity (v3 snapshot format)
+                let batchHolderSnapshots = [];
+                try {
+                    batchHolderSnapshots = await db.all(
+                        'SELECT holder, balance FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 20',
+                        [t.mint]
+                    );
+                } catch (_e) {
+                    // Ignore - snapshots may not exist yet
+                }
+                const batchTokenWithSignatures = { ...batchTokenForSigning, ...batchSignatures };
+                await saveSnapshot(t.mint, batchTokenWithSignatures, batchHolderSnapshots);
 
                 // Save holder history snapshot (daily)
                 await saveHolderHistory(db, t.mint, conviction.totalHolders || 0, conviction.realHoldersCount || 0);
 
                 // Save K-Score history snapshot (daily) for credit rating trajectory
                 await saveKScoreHistory(db, t.mint, smoothedScore, conviction.score || 0, conviction.realHoldersCount || 0);
+
+                // Record verification by this node (for decentralized consensus)
+                try {
+                    await nodeService.recordVerification(db, t.mint, smoothedScore, true);
+
+                    // Check for consensus after recording our verification
+                    if (batchCurrentNodeId) {
+                        const consensusResult = await signedWrites.checkTokenConsensus(t.mint, db);
+                        if (consensusResult.hasConsensus) {
+                            await signedWrites.recordConsensus(
+                                t.mint,
+                                consensusResult.k_score,
+                                consensusResult.agreeing,
+                                consensusResult.total,
+                                db
+                            );
+                            logger.info(`[Consensus] ${t.mint.slice(0, 8)}... K=${consensusResult.k_score} (${consensusResult.agreeing}/${consensusResult.total} nodes agree)`);
+                        }
+                    }
+                } catch (_e) {
+                    // Non-critical - continue without recording
+                }
 
                 // Broadcast K-Score update via WebSocket (use smoothed score)
                 if (broadcast) {
@@ -3421,4 +3740,5 @@ module.exports = {
     calculateConviction, // Exposed for testing
     getHealthStatus,     // For /health endpoint
     checkTokenSecurity,  // Exposed for direct security checks
+    invalidateSupplyCache, // Call when supply change detected
 };

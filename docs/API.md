@@ -2,6 +2,35 @@
 
 Base URL: `https://holdex-api.onrender.com`
 
+## Authentication
+
+### Burn Credits System
+
+Philosophy: **"Hold to enter. Burn to use."**
+
+| Gate | Requirement | Purpose |
+|------|-------------|---------|
+| Anti-Sybil | Hold 10,000+ $ASDFASDFA | Prevents spam accounts |
+| Credits | Burn tokens | 1 token burned = 1 API call (lifetime) |
+
+**Authentication Methods:**
+- `x-api-key` header: API key linked to wallet
+- `x-wallet` header: Direct wallet address
+
+### Whitelisted API Keys
+
+Trusted services (e.g., GASdf) can bypass the anti-sybil gate using whitelisted API keys.
+
+**Benefits:**
+- No token holding requirement
+- No credit deduction
+- No rate limiting (for PnL endpoints)
+- `X-Whitelisted: true` response header
+
+Configure via `WHITELISTED_API_KEYS` environment variable.
+
+---
+
 ## Rate Limits
 
 | Type | Limit | Scope |
@@ -11,6 +40,12 @@ Base URL: `https://holdex-api.onrender.com`
 | Proxy Endpoints | 30 req/min | Per IP |
 | Public Endpoints | 100 req/min | Per IP |
 | Oracle Endpoints | 100 req/min | Per IP |
+| PnL Endpoints | 5 req/min | Per wallet |
+
+**Response Headers:**
+- `X-RateLimit-Limit` - Max requests allowed
+- `X-RateLimit-Remaining` - Requests remaining
+- `X-RateLimit-Reset` - Seconds until reset
 
 ---
 

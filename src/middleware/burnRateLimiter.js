@@ -30,10 +30,10 @@ const logger = require('../services/logger');
  */
 const burnRateLimiter = async (req, res, next) => {
     const wallet = req.headers['x-wallet'] || req.query.wallet;
+    const apiKey = req.headers['x-api-key'] || req.query.api_key;
 
     // If no wallet provided, check for legacy API key
     if (!wallet) {
-        const apiKey = req.headers['x-api-key'] || req.query.api_key;
         if (apiKey) {
             // Fall back to legacy API key system (for backward compatibility)
             return require('./rateLimiter')(req, res, next);
@@ -55,8 +55,8 @@ const burnRateLimiter = async (req, res, next) => {
         const connection = getSolanaConnection();
         const db = getDB();
 
-        // Check eligibility
-        const eligibility = await checkApiEligibility(connection, db, wallet);
+        // Check eligibility (pass apiKey for whitelist bypass)
+        const eligibility = await checkApiEligibility(connection, db, wallet, apiKey);
 
         if (!eligibility.eligible) {
             return res.status(403).json({
@@ -81,21 +81,30 @@ const burnRateLimiter = async (req, res, next) => {
             });
         }
 
-        // Deduct 1 call
-        await deductCall(db, wallet);
+        // Deduct 1 call (skip for whitelisted keys)
+        await deductCall(db, wallet, apiKey);
 
         // Add credit info to response headers
-        res.setHeader('X-Credits-Remaining', eligibility.remainingCalls - 1);
-        res.setHeader('X-Credits-Burned', eligibility.burned);
-        res.setHeader('X-Credits-Used', (eligibility.usedCalls || 0) + 1);
+        if (eligibility.whitelisted) {
+            res.setHeader('X-Whitelisted', 'true');
+            res.setHeader('X-Credits-Charged', '0');
+            req.burnWallet = {
+                address: wallet,
+                whitelisted: true
+            };
+        } else {
+            res.setHeader('X-Credits-Remaining', eligibility.remainingCalls - 1);
+            res.setHeader('X-Credits-Burned', eligibility.burned);
+            res.setHeader('X-Credits-Used', (eligibility.usedCalls || 0) + 1);
 
-        // Attach wallet info to request
-        req.burnWallet = {
-            address: wallet,
-            holdings: eligibility.holdings,
-            burned: eligibility.burned,
-            remaining: eligibility.remainingCalls - 1
-        };
+            // Attach wallet info to request
+            req.burnWallet = {
+                address: wallet,
+                holdings: eligibility.holdings,
+                burned: eligibility.burned,
+                remaining: eligibility.remainingCalls - 1
+            };
+        }
 
         next();
 

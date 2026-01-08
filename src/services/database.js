@@ -187,6 +187,24 @@ async function initDB() {
                 );
 
                 -- ═══════════════════════════════════════════════════════════
+                -- WALLET TX CACHE: Cross-token transaction reuse
+                -- Philosophy: Fetch once, analyze many tokens
+                -- When fetching wallet transactions, extract ALL token interactions
+                -- ═══════════════════════════════════════════════════════════
+                CREATE TABLE IF NOT EXISTS wallet_tx_cache (
+                    wallet TEXT NOT NULL,
+                    mint TEXT NOT NULL,
+                    buy_count INTEGER DEFAULT 0,
+                    sell_count INTEGER DEFAULT 0,
+                    net_flow BIGINT DEFAULT 0,
+                    first_tx_timestamp BIGINT,
+                    last_tx_timestamp BIGINT,
+                    last_signature TEXT,
+                    analyzed_at BIGINT DEFAULT 0,
+                    PRIMARY KEY (wallet, mint)
+                );
+
+                -- ═══════════════════════════════════════════════════════════
                 -- HARMONY SYSTEM: φ-Powered E-Score Infrastructure
                 -- "Hold to enter. Burn to use. φ guides all ratios."
                 -- ═══════════════════════════════════════════════════════════
@@ -354,6 +372,56 @@ async function initDB() {
                     -- Timestamps
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
+
+                -- ═══════════════════════════════════════════════════════════
+                -- NODE NETWORK: Decentralized Validation Infrastructure
+                -- "Multiple nodes, shared truth, verified consensus."
+                -- ═══════════════════════════════════════════════════════════
+
+                -- Nodes: Registry of HolDex node operators
+                -- Each node independently calculates K-Scores and validates data
+                CREATE TABLE IF NOT EXISTS nodes (
+                    node_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    operator TEXT NOT NULL,               -- Operator wallet address
+
+                    -- Endpoints
+                    api_url TEXT,                         -- Public API endpoint (optional)
+                    region TEXT,                          -- Geographic region (us-west, eu-central, etc.)
+
+                    -- Health metrics
+                    last_heartbeat BIGINT DEFAULT 0,      -- Last heartbeat timestamp (ms)
+                    uptime_30d DOUBLE PRECISION DEFAULT 0, -- 30-day uptime percentage
+
+                    -- Verification stats
+                    tokens_verified INTEGER DEFAULT 0,    -- Total tokens verified
+                    verifications_24h INTEGER DEFAULT 0,  -- Verifications in last 24h
+                    consensus_rate DOUBLE PRECISION DEFAULT 1.0, -- Agreement with other nodes
+
+                    -- Status
+                    status TEXT DEFAULT 'pending',        -- pending | active | degraded | offline
+                    version TEXT DEFAULT '1.0.0',         -- Node software version
+
+                    -- Timestamps
+                    joined_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
+                    updated_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000
+                );
+
+                -- Token Verifications: Per-token verification log by node
+                -- Tracks which nodes verified which tokens and when
+                CREATE TABLE IF NOT EXISTS token_verifications (
+                    id SERIAL PRIMARY KEY,
+                    mint TEXT NOT NULL,
+                    node_id TEXT NOT NULL REFERENCES nodes(node_id),
+
+                    -- Verification data
+                    verified_at BIGINT NOT NULL,
+                    k_score DOUBLE PRECISION,
+                    signatures_valid BOOLEAN DEFAULT TRUE,
+
+                    -- Simple unique: one verification per node per token
+                    UNIQUE(mint, node_id)
+                );
             `);
 
             // Add new columns if they don't exist (migration-safe)
@@ -435,6 +503,21 @@ async function initDB() {
                 `ALTER TABLE participants ADD COLUMN IF NOT EXISTS escore_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
                 `ALTER TABLE participants ADD COLUMN IF NOT EXISTS first_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
                 `ALTER TABLE participants ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+                // ═══════════════════════════════════════════════════════════
+                // PER-NODE CRYPTOGRAPHIC IDENTITY (Ed25519)
+                // Philosophy: "Don't trust. Verify." - Each node has unique identity
+                // ═══════════════════════════════════════════════════════════
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS node_public_key TEXT DEFAULT NULL`,      // Ed25519 public key (base64)
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS node_key_fingerprint TEXT DEFAULT NULL`, // SHA256 of public key (hex, first 16 chars)
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS key_registered_at BIGINT DEFAULT NULL`,  // When key was registered
+                // Node integrity signatures (HMAC-SHA256, like tokens)
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS sig_node_identity TEXT DEFAULT NULL`,    // Signs: node_id, name, operator, public_key
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS sig_node_status TEXT DEFAULT NULL`,      // Signs: status, last_heartbeat, version
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS node_chaos_nonce TEXT DEFAULT NULL`,     // Random nonce for unpredictability
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS updated_at BIGINT DEFAULT 0`,            // Last update timestamp
+                // Token verifications: Add cryptographic proof
+                `ALTER TABLE token_verifications ADD COLUMN IF NOT EXISTS node_signature TEXT DEFAULT NULL`, // Ed25519 signature (base64)
+                `ALTER TABLE token_verifications ADD COLUMN IF NOT EXISTS signature_version TEXT DEFAULT 'v1'`, // For future algorithm upgrades
             ];
 
             // PERFORMANCE: Add indexes for frequently queried columns
@@ -453,6 +536,9 @@ async function initDB() {
                 `CREATE INDEX IF NOT EXISTS idx_pools_mint ON pools (mint)`,
                 // Index for holder_snapshots queries
                 `CREATE INDEX IF NOT EXISTS idx_holder_snapshots_mint_balance ON holder_snapshots (mint, balance DESC)`,
+                // Index for wallet_tx_cache (cross-token reuse)
+                `CREATE INDEX IF NOT EXISTS idx_wallet_tx_cache_wallet ON wallet_tx_cache (wallet, analyzed_at DESC)`,
+                `CREATE INDEX IF NOT EXISTS idx_wallet_tx_cache_mint ON wallet_tx_cache (mint, wallet)`,
                 // Index for k_score_history date range queries
                 `CREATE INDEX IF NOT EXISTS idx_kscore_history_mint_date ON k_score_history (mint, date DESC)`,
                 // ═══════════════════════════════════════════════════════════
@@ -479,6 +565,21 @@ async function initDB() {
                 `CREATE INDEX IF NOT EXISTS idx_space_actions_wallet ON space_actions (wallet, created_at DESC)`,
                 // Space actions by action type (for analytics)
                 `CREATE INDEX IF NOT EXISTS idx_space_actions_action ON space_actions (action, created_at DESC)`,
+                // ═══════════════════════════════════════════════════════════
+                // NODE NETWORK INDEXES
+                // ═══════════════════════════════════════════════════════════
+                // Active nodes lookup (for consensus)
+                `CREATE INDEX IF NOT EXISTS idx_nodes_status ON nodes (status) WHERE status = 'active'`,
+                // Heartbeat monitoring (for health checks)
+                `CREATE INDEX IF NOT EXISTS idx_nodes_heartbeat ON nodes (last_heartbeat DESC)`,
+                // Operator lookup (for E-Score integration)
+                `CREATE INDEX IF NOT EXISTS idx_nodes_operator ON nodes (operator)`,
+                // Token verifications by mint (for node count per token)
+                `CREATE INDEX IF NOT EXISTS idx_token_verifications_mint ON token_verifications (mint, verified_at DESC)`,
+                // Token verifications by node (for node stats)
+                `CREATE INDEX IF NOT EXISTS idx_token_verifications_node ON token_verifications (node_id, verified_at DESC)`,
+                // Node key fingerprint lookup (for signature verification)
+                `CREATE INDEX IF NOT EXISTS idx_nodes_key_fingerprint ON nodes (node_key_fingerprint) WHERE node_key_fingerprint IS NOT NULL`,
             ];
 
             for (const sql of migrations) {
@@ -521,13 +622,59 @@ async function initDB() {
                 logger.info('⚗️ Harmony: Seeded operation costs (φ-ratio efficiency floor)');
             }
 
+            // Clean up auto-generated nodes with unknown operators
+            // First delete associated verifications to avoid foreign key constraint violations
+            await primaryPool.query(`
+                DELETE FROM token_verifications
+                WHERE node_id IN (
+                    SELECT node_id FROM nodes
+                    WHERE operator = 'unknown'
+                       OR node_id LIKE 'node-srv-%'
+                )
+            `);
+            const cleanupResult = await primaryPool.query(`
+                DELETE FROM nodes
+                WHERE operator = 'unknown'
+                   OR node_id LIKE 'node-srv-%'
+                RETURNING node_id
+            `);
+            if (cleanupResult.rows.length > 0) {
+                logger.info(`🧹 Network: Cleaned up ${cleanupResult.rows.length} orphan node(s)`);
+            }
+
+            // Ensure founding nodes exist (DO NOTHING if exists - initializeNode() will sign them)
+            // IMPORTANT: Using DO NOTHING to avoid race condition with initializeNode() signatures
+            // NOTE: Only seed nodes that have active services - inactive nodes will be unsigned and deleted
+            const foundingNodes = [
+                ['node-zeyxx-001', 'jeanterre552-primary', 'jeanterre552', 'https://holdex-api.onrender.com', 'us-oregon']
+                // gcrtrd-001 removed - service not active, would be deleted as unsigned
+            ];
+            const now = Date.now();
+            let nodesSeeded = 0;
+            for (const [nodeId, name, operator, apiUrl, region] of foundingNodes) {
+                const result = await primaryPool.query(`
+                    INSERT INTO nodes (node_id, name, operator, api_url, region, status, joined_at, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, 'pending', $6, $6)
+                    ON CONFLICT (node_id) DO NOTHING
+                    RETURNING node_id
+                `, [nodeId, name, operator, apiUrl, region, now]);
+                if (result.rows.length > 0) nodesSeeded++;
+            }
+            if (nodesSeeded > 0) {
+                logger.info(`🌐 Network: Registered ${nodesSeeded} founding node(s)`);
+            }
+
             logger.info('⚗️ Harmony: E-Score tables ready (φ = 1.618)');
 
             dbWrapper = {
                 query: (text, params) => (text.trim().toUpperCase().startsWith('SELECT') ? readPool : primaryPool).query(text, params),
                 get: async (text, params) => { const res = await readPool.query(text, params); return res.rows[0]; },
                 all: async (text, params) => { const res = await readPool.query(text, params); return res.rows; },
-                run: async (text, params) => { const res = await primaryPool.query(text, params); return { rowCount: res.rowCount }; }
+                // FIX: Return first row if RETURNING clause is used, otherwise return rowCount
+                run: async (text, params) => {
+                    const res = await primaryPool.query(text, params);
+                    return res.rows && res.rows.length > 0 ? res.rows[0] : { rowCount: res.rowCount };
+                }
             };
 
             return dbWrapper;

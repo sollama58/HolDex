@@ -11,7 +11,7 @@
  */
 
 const { logger } = require('../services');
-const { signMarket } = require('../utils/dataSignature');
+const { signMarket, signFull } = require('../utils/dataSignature');
 
 // DexScreener batch endpoint: up to 30 tokens
 const DEXSCREENER_BATCH_URL = 'https://api.dexscreener.com/tokens/v1/solana';
@@ -136,8 +136,11 @@ function validatePriceData(raw) {
  * @param {string[]} mints - Array of token mint addresses (max 30)
  * @returns {Map<string, Object>} Map of mint -> price data
  */
-async function fetchBatchPrices(mints) {
+async function fetchBatchPrices(mints, retryCount = 0) {
     if (!mints || mints.length === 0) return new Map();
+
+    const MAX_RETRIES = 3;
+    const BASE_DELAY = 1000; // 1 second base delay for backoff
 
     // DexScreener batch: comma-separated addresses
     const batchMints = mints.slice(0, BATCH_SIZE);
@@ -149,6 +152,18 @@ async function fetchBatchPrices(mints) {
 
         const response = await fetch(url, { signal: controller.signal });
         clearTimeout(timeout);
+
+        // Handle rate limiting with exponential backoff
+        if (response.status === 429) {
+            if (retryCount < MAX_RETRIES) {
+                const delay = BASE_DELAY * Math.pow(2, retryCount); // 1s, 2s, 4s
+                logger.debug(`[PriceWorker] Rate limited, retry ${retryCount + 1}/${MAX_RETRIES} in ${delay}ms`);
+                await new Promise(r => setTimeout(r, delay));
+                return fetchBatchPrices(mints, retryCount + 1);
+            }
+            logger.warn(`[PriceWorker] Rate limited, max retries exceeded`);
+            return new Map();
+        }
 
         if (!response.ok) {
             logger.warn(`[PriceWorker] Batch fetch failed: ${response.status}`);
@@ -337,13 +352,40 @@ async function runPriceUpdateCycle(db, broadcast) {
                         mint
                     ]);
 
-                    // Re-sign market data to maintain integrity
+                    // Re-sign market data AND sig_full to maintain integrity
+                    // Philosophy $asdfasdfa: ALL data must remain cryptographically valid
                     if (result) {
                         const sig_market = signMarket(result);
-                        await db.run(
-                            `UPDATE tokens SET sig_market = $1 WHERE mint = $2`,
-                            [sig_market, mint]
-                        );
+
+                        // Fetch all signatures to recompute sig_full
+                        const sigs = await db.get(`
+                            SELECT sig_identity, sig_security, sig_lp, sig_supply,
+                                   sig_kscore, sig_origin, chaos_nonce
+                            FROM tokens WHERE mint = $1
+                        `, [mint]);
+
+                        if (sigs && sigs.chaos_nonce) {
+                            const sig_full = signFull({
+                                sig_identity: sigs.sig_identity,
+                                sig_security: sigs.sig_security,
+                                sig_lp: sigs.sig_lp,
+                                sig_supply: sigs.sig_supply,
+                                sig_kscore: sigs.sig_kscore,
+                                sig_market: sig_market,
+                                sig_origin: sigs.sig_origin
+                            }, sigs.chaos_nonce);
+
+                            await db.run(
+                                `UPDATE tokens SET sig_market = $1, sig_full = $2 WHERE mint = $3`,
+                                [sig_market, sig_full, mint]
+                            );
+                        } else {
+                            // Fallback: just update sig_market (token may not have full signatures yet)
+                            await db.run(
+                                `UPDATE tokens SET sig_market = $1 WHERE mint = $2`,
+                                [sig_market, mint]
+                            );
+                        }
                     }
 
                     totalUpdated++;
@@ -357,9 +399,9 @@ async function runPriceUpdateCycle(db, broadcast) {
                 }
             }
 
-            // Small delay between batches to be nice to DexScreener
+            // Delay between batches to respect DexScreener rate limits
             if (batches.length > 1) {
-                await new Promise(r => setTimeout(r, 200));
+                await new Promise(r => setTimeout(r, 500));
             }
         }
 

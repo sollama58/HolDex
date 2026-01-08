@@ -8,6 +8,8 @@
     "dev": "nodemon src/index.js",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
+    "test": "node --test tests/*.test.js",
+    "test:watch": "node --test --watch tests/*.test.js",
     "worker": "node --max-old-space-size=4096 src/worker.js",
     "start:worker": "node --max-old-space-size=4096 src/worker.js",
     "listener": "node --max-old-space-size=4096 src/listener_worker.js",

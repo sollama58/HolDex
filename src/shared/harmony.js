@@ -62,15 +62,16 @@ const SAFETY_MARGIN = 1.2;
 const MAX_DISCOUNT_CAP = 0.95;
 
 /**
- * Paramètre de courbe pour le discount théorique
- * Plus élevé = courbe plus lente
+ * E-Score unit for PHI-based discount curve
+ *
+ * At E=25 → discount = 1 - φ^(-1) = 38.2% (1/φ²)
+ * At E=50 → discount = 1 - φ^(-2) = 61.8% (1/φ)
+ * At E=75 → discount = 1 - φ^(-3) = 76.4% (1-1/φ³)
+ *
+ * 25 = 5² where 5 is a Fibonacci number (phi connection)
+ * Each unit of 25 E-Score = one power of φ in discount
  */
-const DISCOUNT_CURVE_FACTOR = 15;
-
-/**
- * Discount asymptotique maximum (avant cap)
- */
-const DISCOUNT_ASYMPTOTE = 0.90;
+const E_SCORE_PHI_UNIT = 25;
 
 // ═══════════════════════════════════════════════════════════════
 // E-SCORE CALCULATION
@@ -214,24 +215,25 @@ function calculateMaxDiscount(baseFee, operationCost) {
 /**
  * Calcule le discount THÉORIQUE basé uniquement sur le E-Score
  *
- * Courbe asymptotique: approche 90% mais ne l'atteint jamais
+ * Pure PHI formula - no magic numbers
  *
- * Formule: discount = 0.90 * (1 - e^(-eScore/15))
+ * Formule: discount = min(95%, 1 - φ^(-eScore/25))
  *
- * Exemples:
- * - E-Score 0  → 0%
- * - E-Score 5  → 25%
- * - E-Score 10 → 45%
- * - E-Score 20 → 63%
- * - E-Score 50 → 86%
- * - E-Score ∞  → 90%
+ * Milestones (exact phi ratios):
+ * - E-Score 0   → 0%
+ * - E-Score 25  → 38.2% (1/φ²) - same as burn rate
+ * - E-Score 50  → 61.8% (1/φ)  - golden cut
+ * - E-Score 75  → 76.4% (1-1/φ³)
+ * - E-Score 100 → 85.4% (1-1/φ⁴)
+ * - E-Score ∞   → 95% (capped)
  *
  * @param {number} eScore - E-Score du participant
- * @returns {number} Discount théorique (0-0.90)
+ * @returns {number} Discount théorique (0-0.95)
  */
 function calculateTheoreticalDiscount(eScore) {
     if (eScore <= 0) return 0;
-    return DISCOUNT_ASYMPTOTE * (1 - Math.exp(-eScore / DISCOUNT_CURVE_FACTOR));
+    const discount = 1 - Math.pow(PHI, -eScore / E_SCORE_PHI_UNIT);
+    return Math.min(MAX_DISCOUNT_CAP, discount);
 }
 
 /**
@@ -549,8 +551,7 @@ module.exports = {
     MULTIPLIERS,
     SAFETY_MARGIN,
     MAX_DISCOUNT_CAP,
-    DISCOUNT_CURVE_FACTOR,
-    DISCOUNT_ASYMPTOTE,
+    E_SCORE_PHI_UNIT,
     TIERS,
 
     // E-Score

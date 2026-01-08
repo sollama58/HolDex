@@ -64,7 +64,9 @@ O = √(H * T)
 | T | 1 - (TOP20_holdings / circulating) | Top 20 distribution |
 
 **Notes:**
-- ALL unique holders count (no minimum threshold)
+- **Philosophy $asdfasdfa**: ALL unique holders count, no USD threshold
+- Log normalization handles scale (1000 holders ≈ 0.70, 10K ≈ 0.82)
+- T (top 20 distribution) handles quality/concentration
 - TOP20 concentration penalizes whale dominance
 - Target of 1000 holders for full score
 
@@ -249,6 +251,40 @@ Returns acceptance status for payments.
 4. **Freshness Decay**: Old activity loses value
 5. **Survival Factor**: Dead tokens score low
 6. **Data Signatures**: Tamper detection
+
+## Data Integrity System
+
+### 8-Category Signature System
+
+All K-Score data is cryptographically signed using HMAC-SHA256:
+
+| Category | Signature | Protected Data |
+|----------|-----------|----------------|
+| Identity | `sig_identity` | name, symbol, image, decimals |
+| Security | `sig_security` | mint/freeze authority, mutable |
+| LP | `sig_lp` | LP burn %, locked %, status |
+| Supply | `sig_supply` | supply, burned amount/% |
+| K-Score | `sig_kscore` | k_score, conviction_*, holders |
+| Market | `sig_market` | price, mcap, liquidity + provenance |
+| Origin | `sig_origin` | is_pump_fun, bonding_complete |
+| Holders | `sig_holders` | Top 20 holder balances (integrity) |
+| Full | `sig_full` | HMAC of all sigs + chaos_nonce |
+
+### Integrity Watchdog
+
+- Scans all verified tokens every 5 minutes
+- Detects tampering via signature verification
+- Auto-restores from Redis snapshots (v3: includes holder data)
+- Alerts on tampering detection/healing
+
+### Philosophy $asdfasdfa
+
+> "Don't Trust, Verify"
+
+- All data cryptographically signed
+- Snapshot v3 includes holder_snapshots for complete restoration
+- Chaos nonce prevents signature prediction
+- Key rotation support with zero downtime
 
 ## Version History
 
