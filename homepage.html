@@ -1898,12 +1898,12 @@
     function renderKScore(score, isVerified, mint = null) {
         // Native tokens always show Infrastructure badge
         if (mint && isNativeToken(mint)) {
-            return '<span class="credit-badge credit-native" title="Infrastructure - Not Rated">🏛️</span>';
+            return '<span class="k-rank k-rank-native" title="Infrastructure - Not Rated">🏛️</span>';
         }
         if (!isVerified) return '<span class="text-gray-600" title="Verify token to unlock K-Score">🔒</span>';
         if (score <= 0) return '<span class="animate-pulse" title="Calculating...">⏳</span>';
-        const { grade, label, class: gradeClass } = getCreditRating(score, mint);
-        return `<span class="credit-badge ${gradeClass}" title="${label} (K=${score})">${grade}</span>`;
+        const { rank, icon, label, class: rankClass } = getCreditRating(score, mint);
+        return `<span class="${rankClass}" title="${label}">${icon} ${score} - ${rank}</span>`;
     }
 
     // --- POPOVER SYSTEM (Orb Markets inspired, credit: helius.dev) ---
@@ -1931,8 +1931,8 @@
         // K-Score & Credit
         if (isVerified && score > 0) {
             document.getElementById('popover-kscore').textContent = score;
-            const { grade, label } = getCreditRating(score);
-            document.getElementById('popover-credit').innerHTML = `<span class="credit-badge ${getCreditRating(score).class}">${grade}</span>`;
+            const { rank, icon, label, class: rankClass } = getCreditRating(score);
+            document.getElementById('popover-credit').innerHTML = `<span class="${rankClass}">${icon} ${rank}</span>`;
         } else {
             document.getElementById('popover-kscore').textContent = isVerified ? '⏳' : '🔒';
             document.getElementById('popover-credit').textContent = isVerified ? '...' : 'Locked';
