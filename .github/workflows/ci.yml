@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop, NewDexSOCKETS]
+  pull_request:
+    branches: [main, master, develop, NewDexSOCKETS]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  # Verify Ed25519 signatures work on target platform
+  crypto-verify:
+    name: Crypto Verification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify Ed25519 keypair generation
+        run: node -e "const k = require('./src/utils/nodeKeys'); const keys = k.generateKeyPair(); console.log('Generated fingerprint:', keys.fingerprint); const sig = k.signData('test', keys.privateKey); const v = k.verifySignature('test', sig, keys.publicKey); if (!v.valid) throw new Error('Signature verification failed'); console.log('Ed25519 signatures working correctly');"
+
+      - name: Verify genesis nodes are configured
+        run: node -e "const g = require('./src/config/genesis'); const ids = g.getGenesisNodeIds(); if (ids.length !== 2) throw new Error('Expected 2 genesis nodes'); console.log('Genesis nodes:', ids.join(', '));"
