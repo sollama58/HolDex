@@ -541,7 +541,7 @@ function init(deps) {
      * Get new token discovery statistics
      */
     router.get('/new-tokens/stats', (_req, res) => {
-        res.json(newTokenWebhook.getStats());
+        res.json(newTokenWebhook.getStatsCopy());
     });
 
     /**

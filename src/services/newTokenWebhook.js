@@ -272,6 +272,12 @@ const stats = {
 };
 
 function getStats() {
+    // Return reference for direct mutation in route handlers
+    return stats;
+}
+
+function getStatsCopy() {
+    // Return copy for external reads (API responses)
     return { ...stats };
 }
 
@@ -301,6 +307,7 @@ module.exports = {
 
     // Stats
     getStats,
+    getStatsCopy,
     resetStats,
 
     // Constants
