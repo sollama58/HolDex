@@ -51,7 +51,7 @@ async function saveHolderHistory(db, mint, totalHolders, realHolders) {
                 holders = EXCLUDED.holders,
                 real_holders = EXCLUDED.real_holders
         `, [mint, totalHolders, realHolders]);
-    } catch (e) {
+    } catch (_e) {
         // Ignore errors (table might not exist on first run)
     }
 }
@@ -70,7 +70,7 @@ async function saveKScoreHistory(db, mint, kScore, convictionScore, holders) {
                 conviction_score = EXCLUDED.conviction_score,
                 holders = EXCLUDED.holders
         `, [mint, kScore, convictionScore, holders]);
-    } catch (e) {
+    } catch (_e) {
         // Ignore errors (table might not exist on first run)
     }
 }
@@ -153,7 +153,7 @@ async function getEnhancedTransactions(address, options = {}) {
         const response = await rateLimitedFetch(url, { method: 'GET' });
         if (!response.ok) return [];
         return await response.json();
-    } catch (error) {
+    } catch (_error) {
         return [];
     }
 }
@@ -189,7 +189,7 @@ async function batchCheckPools(addresses) {
                 results.set(addr, isPool);
                 poolCache.set(addr, { isPool, ts: Date.now() });
             }
-        } catch (error) {
+        } catch (_error) {
             for (const addr of uncached) {
                 results.set(addr, false);
             }
@@ -338,7 +338,7 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, decimals = 9) {
 
                 analyzed++;
                 await sleep(100); // Rate limit
-            } catch (e) {
+            } catch (_e) {
                 // Skip failed holders
             }
         }
@@ -386,7 +386,7 @@ async function calculateConviction(mint) {
 
 // Known trusted program authorities (PumpFun, etc.)
 // If mint/freeze authority belongs to a known program, it's OK
-const TRUSTED_AUTHORITIES = new Set([
+const _TRUSTED_AUTHORITIES = new Set([
     // PumpFun
     '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',  // PumpFun program
     'Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1', // PumpFun bonding curve
@@ -570,7 +570,7 @@ const LP_LOCKER_PROGRAMS = new Set([
 ]);
 
 // Known launchpads with auto LP burn on graduation
-const LAUNCHPAD_DEXES = new Set([
+const _LAUNCHPAD_DEXES = new Set([
     'pumpswap',
     'pump-fun',
     'moonshot',   // Moonshot also burns LP
@@ -700,7 +700,7 @@ async function checkRaydiumLPBurn(poolAddress) {
 
         return null; // Fallback for now
 
-    } catch (e) {
+    } catch (_e) {
         return null;
     }
 }
@@ -708,7 +708,7 @@ async function checkRaydiumLPBurn(poolAddress) {
 /**
  * Check LP token holders for burn/lock status
  */
-async function checkLPHolders(lpMint) {
+async function _checkLPHolders(lpMint) {
     try {
         const holders = await fetchTokenHolders(lpMint);
         if (!holders || holders.length === 0) {
@@ -744,7 +744,7 @@ async function checkLPHolders(lpMint) {
 
         return { burnPct, lockedPct, status };
 
-    } catch (e) {
+    } catch (_e) {
         return { burnPct: 0, lockedPct: 0, status: 'error' };
     }
 }
@@ -760,7 +760,7 @@ const USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
 /**
  * Get token account balance from RPC
  */
-async function getTokenAccountBalance(vaultAddress) {
+async function _getTokenAccountBalance(vaultAddress) {
     try {
         const result = await heliusRpc('getAccountInfo', [vaultAddress, { encoding: 'base64' }]);
         if (!result || !result.value || !result.value.data) return null;
@@ -771,7 +771,7 @@ async function getTokenAccountBalance(vaultAddress) {
 
         const amount = data.readBigUInt64LE(64);
         return Number(amount);
-    } catch (e) {
+    } catch (_e) {
         return null;
     }
 }
@@ -780,7 +780,7 @@ async function getTokenAccountBalance(vaultAddress) {
  * Calculate on-chain liquidity for a token
  * Uses vault balances from the highest liquidity pool
  */
-async function calculateOnChainLiquidity(db, mint, solPrice) {
+async function _calculateOnChainLiquidity(db, mint, _solPrice) {
     try {
         // Get pools for this token paired with SOL/USDC/USDT
         const pools = await db.all(`
@@ -971,7 +971,7 @@ function applyEMA(calculated, previous, alpha = EMA_ALPHA) {
 
 async function computeScoreInternal(mint, dbData = null, skipConviction = false, db = null) {
     // Raw metrics
-    let raw = {
+    const raw = {
         holders: 0,
         ageDays: 0,
         top10Pct: 50,  // default: assume 50% if unknown
@@ -980,7 +980,7 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
     };
 
     // Normalized metrics [0-1]
-    let normalized = {
+    const normalized = {
         H: 0,  // holders
         A: 0,  // age
         T: 0,  // top10 (inverted)
@@ -989,7 +989,7 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
     };
 
     // Pillars
-    let pillars = {
+    const pillars = {
         diamondHands: 0,
         organicGrowth: 0,
         longevity: 0

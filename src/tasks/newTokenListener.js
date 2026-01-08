@@ -36,8 +36,6 @@ async function checkNewTokens(deps) {
         // Sort by creation time (Newest first)
         pairs.sort((a, b) => (b.pairCreatedAt || 0) - (a.pairCreatedAt || 0));
 
-        let addedCount = 0;
-
         for (const pair of pairs) {
             const mint = pair.baseToken.address;
 
@@ -76,7 +74,6 @@ async function checkNewTokens(deps) {
             await saveTokenData(null, mint, metadata, createdAt);
 
             knownMints.add(mint);
-            addedCount++;
 
             // Broadcast new token via WebSocket
             if (deps.broadcast) {

@@ -176,10 +176,10 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         subscriptions.tokens.delete(socket.id);
         // Clean up from all price/kscore subscriptions
-        for (const [mint, sockets] of subscriptions.prices) {
+        for (const [_mint, sockets] of subscriptions.prices) {
             sockets.delete(socket.id);
         }
-        for (const [mint, sockets] of subscriptions.kscore) {
+        for (const [_mint, sockets] of subscriptions.kscore) {
             sockets.delete(socket.id);
         }
         console.log(`[WS] Client disconnected: ${socket.id}`);

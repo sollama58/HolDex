@@ -127,8 +127,8 @@ async function checkExternalRateLimit() {
         }
 
         return current <= 250;
-    } catch (e) {
-        return true; 
+    } catch (_e) {
+        return true;
     }
 }
 
@@ -266,7 +266,7 @@ function init(deps) {
                     }
                 } else {
                     let query = `SELECT * FROM tokens`;
-                    let where = [];
+                    const where = [];
                     if (filter === 'verified') where.push(`hascommunityupdate = TRUE`);
                     if (where.length > 0) query += ` WHERE ${where.join(' AND ')}`;
                     query += ` ${orderByClause} LIMIT ${limitVal} OFFSET ${offsetVal}`;
@@ -297,7 +297,7 @@ function init(deps) {
                                  });
                              }
                         }
-                    } catch(e) {}
+                    } catch(_e) { /* ignore */ }
                 }
 
                 return {
@@ -327,7 +327,7 @@ function init(deps) {
         const cacheKey = `api:token:${mint}`;
         const result = await smartCache(cacheKey, 30, async () => {
             const token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
-            let tokenData = token || { mint, name: 'Unknown', ticker: 'Unknown' };
+            const tokenData = token || { mint, name: 'Unknown', ticker: 'Unknown' };
 
             // Normalize field names for frontend compatibility (DB lowercase -> camelCase)
             if (token) {
@@ -360,7 +360,7 @@ function init(deps) {
                         else if (change <= -5) trajectory = 'slightly_declining';
                         else trajectory = 'stable';
                     }
-                } catch (e) { /* no history yet */ }
+                } catch (_e) { /* no history yet */ }
 
                 tokenData.creditRating = getCreditRating(score, trajectory);
             }
@@ -390,7 +390,7 @@ function init(deps) {
                         count: h.holders || 0,           // Total holders (for chart)
                         realCount: h.real_holders || 0   // $1+ holders (for breakdown)
                     }));
-                } catch (e) {
+                } catch (_e) {
                     tokenData.holderHistory = [];
                 }
             }
@@ -401,7 +401,7 @@ function init(deps) {
                 if (dexRes.data?.pairs) {
                     tokenData.pairs = dexRes.data.pairs;
                 }
-            } catch(e) {}
+            } catch(_e) { /* ignore */ }
 
             return { success: true, token: tokenData };
         });
@@ -544,7 +544,7 @@ function init(deps) {
                         else if (change <= -5) trajectory = 'slightly_declining';
                         else trajectory = 'stable';
                     }
-                } catch (e) { /* no history yet */ }
+                } catch (_e) { /* no history yet */ }
 
                 return {
                     success: true,
