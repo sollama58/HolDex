@@ -18,7 +18,7 @@ const { getClient: getRedisClient } = require('../services/redis');
 const { verifyAllSignatures, signAllCategories } = require('../utils/dataSignature');
 const config = require('../config/env');
 const alerting = require('../services/alerting');
-const { QualityBuilder, QUALITY_PROFILES } = require('../shared/geometric-quality');
+const { QualityBuilder, QUALITY_PROFILES: _QUALITY_PROFILES } = require('../shared/geometric-quality');
 
 // Watchdog config
 const SCAN_INTERVAL = 5 * 60 * 1000; // 5 minutes
@@ -540,7 +540,7 @@ async function forceScan(db) {
 // 2. Nodes without valid HMAC signatures are deleted
 // 3. Nodes with stale heartbeats are marked offline/deleted
 
-const { verifyNodeSignatures, signNodeAllCategories } = require('../utils/dataSignature');
+const { verifyNodeSignatures, signNodeAllCategories: _signNodeAllCategories } = require('../utils/dataSignature');
 
 // Node watchdog config
 const NODE_SCAN_INTERVAL = 60 * 1000; // 1 minute (more aggressive than token watchdog)

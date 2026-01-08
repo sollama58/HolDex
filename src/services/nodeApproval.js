@@ -11,7 +11,7 @@
 
 'use strict';
 
-const crypto = require('crypto');
+const _crypto = require('crypto');
 const logger = require('./logger');
 const nodeKeys = require('../utils/nodeKeys');
 const genesis = require('../config/genesis');
