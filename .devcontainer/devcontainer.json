@@ -1,0 +1,12 @@
+{
+  "name": "HolDex Development",
+  "postStartCommand": "rm -rf ~/.claude-mem 2>/dev/null; ln -sf /workspaces/.claude-mem-data ~/.claude-mem && cd /workspaces/claude-mem && npm run worker:start",
+  "postAttachCommand": "cd /workspaces/claude-mem && npm run worker:status",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  }
+}
