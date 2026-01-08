@@ -9,6 +9,7 @@
  * - L (Longevity/Freshness): Context decay over time
  *
  * Usage: Called by Claude Code hooks on PostToolUse events
+ * Tested: 2026-01-08 - stdin JSON + tool classification fixed
  */
 
 'use strict';
@@ -303,17 +304,12 @@ function getRecommendation(score) {
 // =============================================================================
 
 function classifyTool(toolName, toolInput, toolResult) {
-  // Check for error patterns in result (extractor)
-  if (toolResult) {
-    const resultStr = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult);
-    for (const pattern of CONFIG.extractorPatterns) {
-      if (pattern.test(resultStr)) {
-        return 'extractor';
-      }
-    }
+  // Debug logging
+  if (process.env.DEBUG_HOOK) {
+    console.error(`[DEBUG] classifyTool: ${toolName}`);
   }
 
-  // Check tool name against classifications
+  // First: Check tool name against classifications (more reliable)
   for (const [conviction, tools] of Object.entries(CONFIG.toolClassification)) {
     for (const tool of tools) {
       if (toolName.startsWith(tool.split(':')[0])) {
@@ -325,13 +321,33 @@ function classifyTool(toolName, toolInput, toolResult) {
             return conviction;
           }
         } else {
+          // Tool matched - but check for actual errors in result
+          if (conviction === 'accumulator' && toolResult) {
+            const resultStr = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult);
+            // Only check for real error indicators, not code comments
+            if (/\b(error|failed|permission denied):/i.test(resultStr) ||
+                /^error\b/im.test(resultStr)) {
+              return 'extractor';
+            }
+          }
           return conviction;
         }
       }
     }
   }
 
-  return 'holder';  // Default
+  // For unclassified tools, check for error patterns in result
+  if (toolResult) {
+    const resultStr = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult);
+    // Only match real error messages, not code containing the word "error"
+    if (/\b(error|failed|permission denied):/i.test(resultStr) ||
+        /^error\b/im.test(resultStr) ||
+        /"error":\s*true/i.test(resultStr)) {
+      return 'extractor';
+    }
+  }
+
+  return 'holder';  // Default for unknown tools
 }
 
 // =============================================================================
