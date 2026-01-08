@@ -15,6 +15,8 @@ const config = require('../config/env');
 const { getClient } = require('../services/redis');
 const { isValidSolanaAddress, sanitizeError } = require('../utils/validation');
 const verification = require('../services/verificationService');
+const newTokenWebhook = require('../services/newTokenWebhook');
+const { indexTokenOnChain } = require('../services/indexer');
 
 // Security: Replay attack prevention via Redis (cluster-safe, persistent)
 const REPLAY_WINDOW_SECONDS = 300; // 5 minutes TTL
@@ -381,6 +383,197 @@ function init(deps) {
      */
     router.get('/health', (req, res) => {
         res.json({ status: 'ok', mode: 'webhook-receiver' });
+    });
+
+    // ════════════════════════════════════════════════════════════════════════
+    // NEW TOKEN DISCOVERY WEBHOOK
+    // Receives CREATE_POOL and TOKEN_MINT events from Helius
+    // Cost: 1 credit per event (vs ~5000 credits/hour with WebSocket listener)
+    // ════════════════════════════════════════════════════════════════════════
+
+    /**
+     * POST /webhook/new-tokens
+     * Receives new token creation events from Helius
+     *
+     * Transaction types:
+     *   - CREATE_POOL (Raydium pool initialization)
+     *   - TOKEN_MINT (SPL token creation)
+     *   - SWAP (First Pump.fun swap)
+     */
+    router.post('/new-tokens', async (req, res) => {
+        const stats = newTokenWebhook.getStats();
+        stats.eventsReceived++;
+        stats.lastEventTime = Date.now();
+
+        try {
+            // ══════════════════════════════════════════════════════════════
+            // SECURITY: Verify webhook signature
+            // ══════════════════════════════════════════════════════════════
+            if (config.WEBHOOK_SECRET) {
+                const authHeader = req.headers['authorization'];
+                if (!authHeader) {
+                    logger.warn('[NewToken] Rejected - no auth header');
+                    return res.status(401).json({ error: 'Authorization required' });
+                }
+
+                const expected = Buffer.from(config.WEBHOOK_SECRET);
+                const received = Buffer.from(authHeader);
+                if (expected.length !== received.length ||
+                    !require('crypto').timingSafeEqual(expected, received)) {
+                    logger.warn('[NewToken] Rejected - auth mismatch');
+                    return res.status(401).json({ error: 'Unauthorized' });
+                }
+            } else if (process.env.NODE_ENV === 'production') {
+                logger.error('[NewToken] WEBHOOK_SECRET not configured in production');
+                return res.status(503).json({ error: 'Webhook not configured' });
+            }
+
+            const events = Array.isArray(req.body) ? req.body : [req.body];
+            let discovered = 0;
+            let skipped = 0;
+
+            // Limit batch size
+            if (events.length > 50) {
+                logger.warn(`[NewToken] Batch too large: ${events.length}`);
+                return res.status(400).json({ error: 'Batch too large', max: 50 });
+            }
+
+            const redis = getClient();
+
+            for (const event of events) {
+                // ══════════════════════════════════════════════════════════════
+                // REPLAY PROTECTION
+                // ══════════════════════════════════════════════════════════════
+                const signature = event.signature;
+                if (signature && await newTokenWebhook.isReplayAttack(signature)) {
+                    stats.duplicatesSkipped++;
+                    skipped++;
+                    continue;
+                }
+
+                // ══════════════════════════════════════════════════════════════
+                // EXTRACT MINTS
+                // ══════════════════════════════════════════════════════════════
+                const source = newTokenWebhook.detectSource(event);
+                const mints = newTokenWebhook.extractMintsFromEvent(event);
+
+                if (mints.length === 0) {
+                    skipped++;
+                    continue;
+                }
+
+                // ══════════════════════════════════════════════════════════════
+                // PROCESS EACH MINT
+                // ══════════════════════════════════════════════════════════════
+                for (const mint of mints) {
+                    // Validate address
+                    if (!isValidSolanaAddress(mint)) continue;
+
+                    // Check if already exists
+                    const exists = await db.get(
+                        'SELECT mint FROM tokens WHERE mint = $1',
+                        [mint]
+                    );
+
+                    if (exists) {
+                        skipped++;
+                        continue;
+                    }
+
+                    // ══════════════════════════════════════════════════════════
+                    // NEW TOKEN DISCOVERED!
+                    // ══════════════════════════════════════════════════════════
+                    logger.info(`✨ [${source}] New token: ${mint}`);
+                    stats.tokensDiscovered++;
+                    discovered++;
+
+                    // Insert into database
+                    try {
+                        await db.run(`
+                            INSERT INTO tokens (
+                                mint, name, symbol, timestamp,
+                                k_score, marketCap, hasCommunityUpdate, updated_at
+                            )
+                            VALUES ($1, 'New Discovery', 'NEW', $2, 10, 0, FALSE, NOW())
+                            ON CONFLICT (mint) DO NOTHING
+                        `, [mint, Date.now()]);
+                    } catch (dbErr) {
+                        logger.error(`[NewToken] DB error: ${dbErr.message}`);
+                        stats.errors++;
+                    }
+
+                    // Trigger async indexing (non-blocking)
+                    indexTokenOnChain(mint).catch(e =>
+                        logger.warn(`[NewToken] Index failed ${mint}: ${e.message}`)
+                    );
+
+                    // Add to grower scanner queue
+                    if (redis) {
+                        try {
+                            await redis.sadd('pending_growers', JSON.stringify({
+                                mint,
+                                addedAt: Date.now(),
+                                source
+                            }));
+                        } catch (_e) { /* ignore */ }
+                    }
+                }
+            }
+
+            logger.info(`📥 [NewToken] Discovered: ${discovered}, Skipped: ${skipped}`);
+
+            res.status(200).json({
+                received: true,
+                discovered,
+                skipped,
+                stats: newTokenWebhook.getStats()
+            });
+
+        } catch (error) {
+            stats.errors++;
+            logger.error(`[NewToken] Error: ${error.message}`);
+            res.status(500).json({ error: sanitizeError(error) });
+        }
+    });
+
+    /**
+     * GET /webhook/new-tokens/stats
+     * Get new token discovery statistics
+     */
+    router.get('/new-tokens/stats', (_req, res) => {
+        res.json(newTokenWebhook.getStats());
+    });
+
+    /**
+     * POST /webhook/new-tokens/setup
+     * Setup the new token discovery webhook with Helius
+     * Requires admin authentication
+     */
+    router.post('/new-tokens/setup', async (req, res) => {
+        try {
+            // Simple admin check (should be more robust in production)
+            const adminKey = req.headers['x-admin-key'];
+            if (adminKey !== config.ADMIN_KEY) {
+                return res.status(401).json({ error: 'Admin access required' });
+            }
+
+            const callbackUrl = req.body.callbackUrl ||
+                config.WEBHOOK_URL ||
+                `${config.API_URL}/webhook/new-tokens`;
+
+            const webhookId = await newTokenWebhook.getOrCreateNewTokenWebhook(db, callbackUrl);
+
+            res.json({
+                success: true,
+                webhookId,
+                callbackUrl,
+                monitoring: ['Raydium V4', 'Pump.fun'],
+                transactionTypes: newTokenWebhook.NEW_TOKEN_TX_TYPES
+            });
+        } catch (error) {
+            logger.error(`[NewToken] Setup failed: ${error.message}`);
+            res.status(500).json({ error: error.message });
+        }
     });
 
     return router;
