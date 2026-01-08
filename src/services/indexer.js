@@ -47,16 +47,16 @@ async function indexTokenOnChain(mint) {
     const initialMcap = marketData?.marketCap || 0;
 
     // 1. CREATE TOKEN RECORD
+    // FIX: Do NOT update identity fields (name, symbol, image, decimals) on conflict
+    // Identity fields are signed with sig_identity - updating them breaks the signature
+    // Once a token is indexed, identity should remain stable
     await db.run(`
         INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, change1h, change5m, timestamp)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         ON CONFLICT(mint) DO UPDATE SET
-        name = EXCLUDED.name,
-        symbol = EXCLUDED.symbol,
-        image = EXCLUDED.image,
-        decimals = EXCLUDED.decimals
+        updated_at = NOW()
     `, [
-        mint, baseData.name, baseData.ticker, baseData.image, supply, decimals, 
+        mint, baseData.name, baseData.ticker, baseData.image, supply, decimals,
         initialPrice, 0, initialMcap, initialVol, initialChange,
         initialChange1h, initialChange5m, Date.now()
     ]);

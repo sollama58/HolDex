@@ -670,7 +670,11 @@ async function initDB() {
                 query: (text, params) => (text.trim().toUpperCase().startsWith('SELECT') ? readPool : primaryPool).query(text, params),
                 get: async (text, params) => { const res = await readPool.query(text, params); return res.rows[0]; },
                 all: async (text, params) => { const res = await readPool.query(text, params); return res.rows; },
-                run: async (text, params) => { const res = await primaryPool.query(text, params); return { rowCount: res.rowCount }; }
+                // FIX: Return first row if RETURNING clause is used, otherwise return rowCount
+                run: async (text, params) => {
+                    const res = await primaryPool.query(text, params);
+                    return res.rows && res.rows.length > 0 ? res.rows[0] : { rowCount: res.rowCount };
+                }
             };
 
             return dbWrapper;

@@ -41,22 +41,21 @@ async function processToken(mint) {
         const finalSupply = supply || '0';
         const finalDecimals = decimals || 9;
 
+        // FIX: Do NOT update identity fields (name, symbol, image, decimals) on conflict
+        // Identity fields are signed with sig_identity - updating them breaks the signature
         await db.run(`
             INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, timestamp)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ON CONFLICT(mint) DO UPDATE SET
-            name = EXCLUDED.name,
-            symbol = EXCLUDED.symbol,
-            image = EXCLUDED.image,
-            decimals = EXCLUDED.decimals
+            updated_at = NOW()
         `, [
-            mint, 
-            baseData.name, 
-            baseData.ticker, 
-            baseData.image, 
-            finalSupply, 
-            finalDecimals, 
-            0, 0, 0, 0, 0, 
+            mint,
+            baseData.name,
+            baseData.ticker,
+            baseData.image,
+            finalSupply,
+            finalDecimals,
+            0, 0, 0, 0, 0,
             Date.now()
         ]);
 
