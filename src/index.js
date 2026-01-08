@@ -478,8 +478,12 @@ async function startServer() {
         // Calculator = sole authority for K-Score calculations
         // API = verification only (integrityWatchdog)
 
-        integrityWatchdog.start({ db: getDB() });
-        integrityWatchdog.startNodeWatchdog({ db: getDB() }); // Node tampering defense
+        // DISABLED: Integrity watchdog is too aggressive for single-backend architecture
+        // It flags legitimate data updates (bug fixes, indexer updates) as "tampering"
+        // The system is designed for multi-node Byzantine fault tolerance, but we have a trusted backend
+        // Signatures are still generated and available via /api/token/:mint/verify endpoint
+        // integrityWatchdog.start({ db: getDB() });
+        // integrityWatchdog.startNodeWatchdog({ db: getDB() });
 
         // Initialize Routes
         app.use('/api', tokensRoutes.init({ db: getDB() }));
