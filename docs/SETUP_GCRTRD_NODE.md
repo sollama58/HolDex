@@ -44,7 +44,7 @@ Add these environment variables in Render dashboard:
 ```
 NODE_ID=gcrtrd
 NODE_NAME=Genesis Prod (sollama58)
-NODE_PRIVATE_KEY=MC4CAQAwBQYDK2VwBCIEIHWmuaYMcGbR1RXTeKf2i1SQcuJlK4PwQy9h4VyxQPBF
+NODE_PRIVATE_KEY=<sent via secure channel>
 USE_DISTRIBUTED_POLLING=true
 DATABASE_URL=<will be provided>
 REDIS_URL=<will be provided>
@@ -77,16 +77,12 @@ Click **Create Background Worker**. The node will automatically:
 
 ## Your Credentials
 
-**KEEP THESE SECRET - DO NOT SHARE**
+**Node ID:** `gcrtrd`
 
-```
-Node ID:     gcrtrd
-Fingerprint: 173693ac6d4e08cb
-Public Key:  MCowBQYDK2VwAyEA9bvnTdmwUc3x7nEsayr83CsFN8O4zutTLgfBp3ANP0Q=
-Private Key: MC4CAQAwBQYDK2VwBCIEIHWmuaYMcGbR1RXTeKf2i1SQcuJlK4PwQy9h4VyxQPBF
-```
+Your **private key** has been sent to you via secure channel (DM/encrypted).
+**NEVER commit your private key to git or share it publicly.**
 
-Your **public key** is already hardcoded in the HolDex source code (`src/config/genesis.js`). This means:
+Your **public key** is hardcoded in `src/config/genesis.js`. This means:
 - Anyone can verify your signatures
 - Only you can create valid signatures
 - Your node is permanently recognized as a genesis authority
