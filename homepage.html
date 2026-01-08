@@ -260,9 +260,9 @@
             box-shadow: 0 0 20px rgba(249, 115, 22, 0.2), 0 0 40px rgba(249, 115, 22, 0.1);
         }
         .search-box::placeholder { color: #64748b; }
-        .clear-search { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: #64748b; cursor: pointer; display: none; transition: color 0.2s; z-index: 10; }
+        .clear-search { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: #64748b; cursor: pointer; display: none !important; transition: color 0.2s; z-index: 10; }
         .clear-search:hover { color: #f97316; }
-        .clear-search.active { display: block; }
+        .clear-search.active { display: block !important; }
 
         .nav-btn {
             background: transparent;
@@ -833,7 +833,7 @@
                 </div>
                 <div>
                     <h1 class="text-2xl md:text-3xl brand-text tracking-tight font-sans">HolDex</h1>
-                    <p class="text-[10px] md:text-xs text-[#737373] font-mono hidden md:block">Moody's for Memecoins. This is fine. 🔥</p>
+                    <p class="text-[10px] md:text-xs text-[#737373] font-mono hidden md:block">K-Score: Diamond Hands + Organic Growth + Longevity 🔥</p>
                 </div>
             </div>
         </div>

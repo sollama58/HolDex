@@ -375,6 +375,11 @@ async function cacheWalletTxBulk(db, wallet, tokenInteractions, lastSignature) {
     try {
         // Use batch insert with ON CONFLICT UPDATE
         for (const ti of tokenInteractions) {
+            // FIX: Convert netFlow to integer (BIGINT column requirement)
+            const buyCount = Math.floor(Number(ti.buyCount)) || 0;
+            const sellCount = Math.floor(Number(ti.sellCount)) || 0;
+            const netFlow = Math.floor(Number(ti.netFlow)) || 0;
+
             await db.run(`
                 INSERT INTO wallet_tx_cache (wallet, mint, buy_count, sell_count, net_flow,
                     first_tx_timestamp, last_tx_timestamp, last_signature, analyzed_at)
@@ -386,7 +391,7 @@ async function cacheWalletTxBulk(db, wallet, tokenInteractions, lastSignature) {
                     last_tx_timestamp = GREATEST(wallet_tx_cache.last_tx_timestamp, $7),
                     last_signature = $8,
                     analyzed_at = $9
-            `, [wallet, ti.mint, ti.buyCount, ti.sellCount, ti.netFlow,
+            `, [wallet, ti.mint, buyCount, sellCount, netFlow,
                 ti.firstTxTimestamp, ti.lastTxTimestamp, lastSignature, now]);
         }
     } catch (e) {
