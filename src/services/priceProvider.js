@@ -18,8 +18,10 @@ const { getRedis } = require('./redis');
 // CONFIGURATION
 // ============================================
 
-// Jupiter Price API V3 (free tier via lite-api, paid via api.jup.ag)
-const JUPITER_PRICE_URL = 'https://lite-api.jup.ag/price/v2';
+// Jupiter Price API - uses api.jup.ag with optional API key
+// Set JUPITER_API_KEY in environment for higher rate limits
+const JUPITER_API_KEY = config.JUPITER_API_KEY || process.env.JUPITER_API_KEY;
+const JUPITER_PRICE_URL = 'https://api.jup.ag/price/v2';
 const JUPITER_BATCH_SIZE = 100; // Jupiter allows up to 100 tokens per request
 
 // Helius RPC for on-chain data
@@ -138,11 +140,20 @@ async function fetchJupiterPrices(mints, retryCount = 0) {
     const ids = batchMints.join(',');
     const url = `${JUPITER_PRICE_URL}?ids=${ids}&showExtraInfo=true`;
 
+    // Build headers - include API key if available
+    const headers = {};
+    if (JUPITER_API_KEY) {
+        headers['x-api-key'] = JUPITER_API_KEY;
+    }
+
     try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 15000);
 
-        const response = await fetch(url, { signal: controller.signal });
+        const response = await fetch(url, {
+            signal: controller.signal,
+            headers: Object.keys(headers).length > 0 ? headers : undefined
+        });
         clearTimeout(timeout);
 
         // Handle rate limiting

@@ -78,9 +78,17 @@ async function getRaydiumPoolInfo(mint) {
  */
 async function getJupiterPrice(mint) {
     try {
+        const headers = {};
+        if (config.JUPITER_API_KEY) {
+            headers['x-api-key'] = config.JUPITER_API_KEY;
+        }
+
         const response = await fetch(
-            `https://lite-api.jup.ag/price/v2?ids=${mint}`,
-            { timeout: 10000 }
+            `https://api.jup.ag/price/v2?ids=${mint}`,
+            {
+                timeout: 10000,
+                headers: Object.keys(headers).length > 0 ? headers : undefined
+            }
         );
 
         if (!response.ok) return null;
