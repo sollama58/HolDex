@@ -36,6 +36,7 @@ const alerting = require('../services/alerting');
 const nodeService = require('../services/nodeService');
 const signedWrites = require('../services/signedWrites');
 const nodeKeys = require('../utils/nodeKeys');
+const rpcMonitor = require('../services/rpcMonitor');
 
 // ============================================
 // HELIUS CONFIG
@@ -802,6 +803,10 @@ async function heliusRpc(method, params) {
         });
         const data = await response.json();
         if (data.error) throw new Error(data.error.message);
+
+        // Track RPC call for monitoring (fire-and-forget)
+        rpcMonitor.trackRpcCall(method, 1, { params }).catch(() => {});
+
         return data.result;
     } catch (error) {
         logger.error(`[Helius] RPC error: ${error.message}`);
@@ -3622,25 +3627,22 @@ function start(deps) {
         logger.warn("[K-Score] No HELIUS_API_KEY - conviction analysis disabled");
     }
 
-    // Determine interval based on webhook mode
-    // Webhook mode: Data arrives in real-time, so we just need to aggregate periodically
-    // Polling mode: We need to fetch data ourselves, but 10 min is overkill for conviction
-    const LIGHT_INTERVAL = config.USE_WEBHOOKS ? 3600000 : 1800000; // 1h (webhook) or 30m (polling)
-    const DEEP_INTERVAL = 86400000; // 24h for full holder refresh
+    // OPTIMIZATION: Reduce K-Score refresh frequency to save RPC credits
+    // K-Scores only update every 12 hours (instead of 30min-1h)
+    // On-demand updates still work for new tokens and admin panel
+    const KSCORE_INTERVAL = 12 * 60 * 60 * 1000; // 12 hours
+    const DEEP_INTERVAL = 24 * 60 * 60 * 1000;   // 24h for full holder refresh
 
-    const modeLabel = config.USE_WEBHOOKS ? 'WEBHOOK (0 RPC)' : 'POLLING';
-    const intervalMin = LIGHT_INTERVAL / 60000;
+    const intervalHours = KSCORE_INTERVAL / (60 * 60 * 1000);
+    logger.info(`🟢 K-Score Updater Started - Interval: ${intervalHours}h (RPC optimized)`);
 
-    logger.info(`🟢 K-Score Updater Started - Mode: ${modeLabel}, Interval: ${intervalMin}min`);
-
-    // Light updates (uses cached data in webhook mode)
-    setInterval(() => updateKScores(deps), LIGHT_INTERVAL);
+    // Run K-Score updates every 12 hours
+    setInterval(() => updateKScores(deps), KSCORE_INTERVAL);
 
     // Deep refresh once per day (full RPC analysis to update holder counts, burn, etc.)
     // Runs at a different offset to avoid overlap
     setInterval(() => {
         logger.info('[K-Score] Starting daily deep refresh (full RPC analysis)');
-        // Force polling mode for deep refresh by temporarily clearing webhook flag
         updateKScores({ ...deps, forceDeepRefresh: true });
     }, DEEP_INTERVAL);
 
@@ -3733,6 +3735,7 @@ function getHealthStatus() {
 module.exports = {
     start,
     updateSingleToken,
+    updateKScores, // Exported for admin panel bulk refresh
     calculateTokenScore: async (mint) => {
         const result = await computeScoreInternal(mint, null, true);
         return result.score;

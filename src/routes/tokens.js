@@ -31,7 +31,7 @@ const proxyRateLimit = rateLimit({
 const { smartCache, aggregateAndSaveToken } = require('../services/database');
 const { getSolanaConnection } = require('../services/solana'); 
 const config = require('../config/env');
-const { updateSingleToken, getHealthStatus } = require('../tasks/kScoreUpdater'); 
+const { updateSingleToken, updateKScores, getHealthStatus } = require('../tasks/kScoreUpdater'); 
 const { getClient } = require('../services/redis'); 
 const { snapshotPools } = require('../indexer/tasks/snapshotter'); 
 const logger = require('../services/logger');
@@ -871,6 +871,45 @@ function init(deps) {
             const newScore = await updateSingleToken({ db }, mint);
             res.json({ success: true, message: `K-Score Updated: ${newScore}` });
         } catch (e) { res.status(500).json({ success: false, error: sanitizeError(e) }); }
+    });
+
+    // Bulk K-Score refresh (all verified tokens)
+    // CAUTION: This will consume significant RPC credits
+    router.post('/admin/refresh-all-kscores', requireAdmin, async (req, res) => {
+        const { deepRefresh } = req.body;
+
+        try {
+            // Check cooldown (1 hour minimum between bulk refreshes)
+            const redis = getClient();
+            if (redis) {
+                const cooldownKey = 'kscore:bulk:cooldown';
+                const lastRun = await redis.get(cooldownKey);
+                if (lastRun) {
+                    const elapsed = Date.now() - parseInt(lastRun);
+                    const remaining = Math.ceil((3600000 - elapsed) / 60000); // minutes
+                    return res.status(429).json({
+                        success: false,
+                        error: `Bulk refresh rate limited. Try again in ${remaining} min.`,
+                        lastRun: new Date(parseInt(lastRun)).toISOString()
+                    });
+                }
+                // Set cooldown (1 hour TTL)
+                await redis.set(cooldownKey, Date.now().toString(), { EX: 3600 });
+            }
+
+            // Trigger bulk update (runs async)
+            const broadcast = () => {}; // No WebSocket broadcast from admin panel
+            updateKScores({ db, broadcast, forceDeepRefresh: !!deepRefresh }).catch(err => {
+                logger.error(`[Admin] Bulk K-Score refresh failed: ${err.message}`);
+            });
+
+            res.json({
+                success: true,
+                message: `Bulk K-Score refresh started${deepRefresh ? ' (deep mode)' : ''}. Check logs for progress.`
+            });
+        } catch (e) {
+            res.status(500).json({ success: false, error: sanitizeError(e) });
+        }
     });
 
     // --- API KEY ADMIN ---

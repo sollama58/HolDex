@@ -22,6 +22,7 @@ const router = express.Router();
 const { getHarmonyEngine, harmony } = require('../services/harmonyEngine');
 const { getClient: getRedis } = require('../services/redis');
 const config = require('../config/env');
+const rpcMonitor = require('../services/rpcMonitor');
 
 // ═══════════════════════════════════════════════════════════════
 // SECURITY: Oracle-Specific Rate Limiting
@@ -706,6 +707,58 @@ function init(deps) {
             res.status(500).json({
                 success: false,
                 error: 'Stats lookup failed'
+            });
+        }
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // RPC MONITORING (Admin Only)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * GET /oracle/rpc-stats
+     *
+     * Returns Helius RPC usage statistics (admin endpoint).
+     * Requires ADMIN_PASSWORD in x-admin-password header.
+     *
+     * Response:
+     * {
+     *   hourly: { usage, budget, percent },
+     *   daily: { usage, budget, percent },
+     *   methods: { [method]: count },
+     *   timestamp
+     * }
+     */
+    router.get('/rpc-stats', async (req, res) => {
+        try {
+            // Admin authentication
+            const adminPassword = req.headers['x-admin-password'];
+            if (!adminPassword || adminPassword !== config.ADMIN_PASSWORD) {
+                return res.status(401).json({
+                    success: false,
+                    error: 'Unauthorized: Invalid admin password'
+                });
+            }
+
+            const stats = await rpcMonitor.getUsageStats();
+
+            if (!stats) {
+                return res.status(503).json({
+                    success: false,
+                    error: 'Monitoring data unavailable (Redis offline?)'
+                });
+            }
+
+            res.json({
+                success: true,
+                data: stats
+            });
+
+        } catch (error) {
+            logger.error(`[Oracle] RPC stats failed: ${error.message}`);
+            res.status(500).json({
+                success: false,
+                error: 'RPC stats lookup failed'
             });
         }
     });

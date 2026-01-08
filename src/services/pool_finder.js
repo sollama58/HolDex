@@ -1,7 +1,8 @@
 const axios = require('axios');
 const { PublicKey } = require('@solana/web3.js');
-const { getSolanaConnection, retryRPC } = require('./solana'); 
+const { getSolanaConnection, retryRPC } = require('./solana');
 const logger = require('./logger');
+const { getRedis } = require('./redis');
 
 // --- PROGRAM IDS ---
 const PROG_ID_RAYDIUM_V4 = '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8';
@@ -73,24 +74,64 @@ async function findPoolsViaGeckoTerminal(mintAddress, retries = 3) {
 }
 
 // Exported for use in Snapshotter (Self-Healing)
+// OPTIMIZATION: 1-hour Redis cache for pool reserves to reduce RPC calls
 async function enrichPoolsWithReserves(pools) {
     if (pools.length === 0) return;
     const targets = pools.filter(p => p.dexId !== 'pumpfun' && !p.reserve_a);
     if (targets.length === 0) return;
 
     const connection = getSolanaConnection();
-    
+    let redis = null;
+    try {
+        redis = await getRedis();
+    } catch (_e) {
+        // Redis unavailable, continue without cache
+    }
+
     // Process in batches
     for (let i = 0; i < targets.length; i += 50) {
         const batch = targets.slice(i, i + 50);
-        const pubkeys = batch.map(p => new PublicKey(p.pairAddress || p.address)); 
+        const uncachedBatch = [];
+        const uncachedIndices = [];
+
+        // Check cache for each pool
+        for (let j = 0; j < batch.length; j++) {
+            const pool = batch[j];
+            const cacheKey = `pool:reserves:${pool.dexId}:${pool.pairAddress || pool.address}`;
+            let cached = null;
+
+            if (redis) {
+                try {
+                    const cachedData = await redis.get(cacheKey);
+                    if (cachedData) {
+                        cached = JSON.parse(cachedData);
+                        pool.reserve_a = cached.reserve_a;
+                        pool.reserve_b = cached.reserve_b;
+                    }
+                } catch (_e) {
+                    // Cache read failed, fetch from RPC
+                }
+            }
+
+            if (!cached) {
+                uncachedBatch.push(pool);
+                uncachedIndices.push(j);
+            }
+        }
+
+        // Only fetch uncached pools from RPC
+        if (uncachedBatch.length === 0) continue;
+
+        const pubkeys = uncachedBatch.map(p => new PublicKey(p.pairAddress || p.address));
 
         try {
             const accounts = await retryRPC(() => connection.getMultipleAccountsInfo(pubkeys));
-            
-            accounts.forEach((acc, idx) => {
-                if (!acc) return;
-                const pool = batch[idx];
+
+            for (let idx = 0; idx < accounts.length; idx++) {
+                const acc = accounts[idx];
+                if (!acc) continue;
+
+                const pool = uncachedBatch[idx];
                 const owner = acc.owner.toBase58();
                 const layout = LAYOUTS[owner];
 
@@ -109,7 +150,21 @@ async function enrichPoolsWithReserves(pools) {
                         pool.reserve_b = reserveB.toBase58();
                     } catch(_e) { /* ignore */ }
                 }
-            });
+
+                // Cache the result (1 hour TTL)
+                if (redis && pool.reserve_a && pool.reserve_b) {
+                    try {
+                        const cacheKey = `pool:reserves:${pool.dexId}:${pool.pairAddress || pool.address}`;
+                        await redis.set(cacheKey, JSON.stringify({
+                            reserve_a: pool.reserve_a,
+                            reserve_b: pool.reserve_b,
+                            timestamp: Date.now()
+                        }), 'EX', 3600);
+                    } catch (_e) {
+                        // Cache write failed, not critical
+                    }
+                }
+            }
         } catch (_err) {
             // logger.warn(`Enrichment Error: ${_err.message}`);
         }
