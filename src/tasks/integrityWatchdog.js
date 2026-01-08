@@ -200,11 +200,11 @@ async function restoreFromSnapshot(db, mint, tamperedCategories) {
 
         // DEBUG: Log identity data string that will be signed
         const identityData = [snapshot.mint, snapshot.name || '', snapshot.symbol || '', snapshot.image || '', snapshot.decimals || 9].join('|');
-        logger.debug(`[Watchdog] SIGN identity for ${mint.slice(0, 8)}: "${identityData.slice(0, 80)}..."`);
+        logger.warn(`[Watchdog] SIGN identity for ${mint.slice(0, 8)}: "${identityData.slice(0, 80)}..."`);
 
         // Re-sign the snapshot data (new chaos_nonce for unpredictability)
         const signatures = signAllCategories(snapshot);
-        logger.debug(`[Watchdog] SIGNED ${mint.slice(0, 8)}: sig_identity=${signatures.sig_identity?.slice(0, 20)}...`);
+        logger.warn(`[Watchdog] SIGNED ${mint.slice(0, 8)}: sig_identity=${signatures.sig_identity?.slice(0, 20)}...`);
 
         // Restore ALL signed fields from snapshot (data + signatures)
         // CRITICAL: Must restore data fields too, not just signatures!
@@ -343,12 +343,14 @@ async function restoreFromSnapshot(db, mint, tamperedCategories) {
         `, [mint]);
         if (verifiedToken) {
             const verifyIdentityData = [verifiedToken.mint, verifiedToken.name || '', verifiedToken.symbol || '', verifiedToken.image || '', verifiedToken.decimals || 9].join('|');
-            logger.debug(`[Watchdog] VERIFY identity for ${mint.slice(0, 8)}: "${verifyIdentityData.slice(0, 80)}..."`);
-            logger.debug(`[Watchdog] DB sig_identity=${verifiedToken.sig_identity?.slice(0, 20)}...`);
+            logger.warn(`[Watchdog] VERIFY identity for ${mint.slice(0, 8)}: "${verifyIdentityData.slice(0, 80)}..."`);
+            logger.warn(`[Watchdog] DB sig_identity=${verifiedToken.sig_identity?.slice(0, 20)}...`);
 
             // Compare the signed data strings
             if (identityData !== verifyIdentityData) {
                 logger.error(`[Watchdog] DATA MISMATCH! Signed: "${identityData.slice(0, 50)}" vs DB: "${verifyIdentityData.slice(0, 50)}"`);
+            } else {
+                logger.warn(`[Watchdog] DATA MATCH confirmed for ${mint.slice(0, 8)}`);
             }
         }
 
@@ -439,7 +441,7 @@ async function scanForTampering(db) {
             // DEBUG: Log identity data being verified (only if tampered)
             if (result.tampered.includes('identity')) {
                 const identData = [token.mint, token.name || '', token.symbol || '', token.image || '', token.decimals || 9].join('|');
-                logger.debug(`[Watchdog] VERIFY FAILED identity for ${token.mint.slice(0, 8)}: data="${identData.slice(0, 60)}..." sig=${token.sig_identity?.slice(0, 20)}...`);
+                logger.warn(`[Watchdog] VERIFY FAILED identity for ${token.mint.slice(0, 8)}: data="${identData.slice(0, 60)}..." sig=${token.sig_identity?.slice(0, 20)}...`);
             }
 
             // Get snapshot for recency calculation
