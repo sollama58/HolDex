@@ -1,12 +1,14 @@
 services:
-  # Web Service - API + Frontend
+  # ============================================
+  # WEB SERVICE - API + Frontend
+  # ============================================
   - type: web
     name: holdex-api
     runtime: node
     plan: starter
     region: oregon
     repo: https://github.com/zeyxx/HolDex
-    branch: kscore-v8-rebased
+    branch: main
     buildCommand: npm install --ignore-optional
     startCommand: npm start
     envVars:
@@ -18,17 +20,28 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
+      - key: DATA_SIGNING_SECRET
+        sync: false
       - key: NODE_ENV
         value: production
+      - key: NODE_ID
+        value: api-primary
+      - key: NODE_NAME
+        value: "API Primary"
 
-  # Background Worker for K-Score calculations
+  # ============================================
+  # DISTRIBUTED CALCULATOR NODES
+  # Each node participates in φ-weighted polling
+  # ============================================
+
+  # Node: gcrtrd (Genesis/Seed Node)
   - type: worker
-    name: holdex-calculator
+    name: holdex-gcrtrd
     runtime: node
     plan: starter
     region: oregon
     repo: https://github.com/zeyxx/HolDex
-    branch: kscore-v8-rebased
+    branch: main
     buildCommand: npm install --ignore-optional
     startCommand: npm run calculator
     envVars:
@@ -36,3 +49,71 @@ services:
         sync: false
       - key: HELIUS_API_KEY
         sync: false
+      - key: DATA_SIGNING_SECRET
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: NODE_ENV
+        value: production
+      # Node Identity
+      - key: NODE_ID
+        value: gcrtrd
+      - key: NODE_NAME
+        value: "Genesis Node"
+      - key: NODE_OPERATOR
+        value: asdfasdfa
+      - key: NODE_REGION
+        value: oregon
+      - key: IS_SEED_NODE
+        value: "true"
+      - key: NODE_PRIVATE_KEY
+        sync: false
+      # Capabilities
+      - key: NODE_CAPABILITIES
+        value: polling,webhooks,verification,consensus
+      # Distributed mode
+      - key: USE_DISTRIBUTED_POLLING
+        value: "true"
+
+  # Node: beta (Secondary Node - Template)
+  # Uncomment and duplicate for additional nodes
+  # - type: worker
+  #   name: holdex-beta
+  #   runtime: node
+  #   plan: starter
+  #   region: frankfurt  # Different region for geographic distribution
+  #   repo: https://github.com/zeyxx/HolDex
+  #   branch: main
+  #   buildCommand: npm install --ignore-optional
+  #   startCommand: npm run calculator
+  #   envVars:
+  #     - key: DATABASE_URL
+  #       sync: false
+  #     - key: HELIUS_API_KEY
+  #       sync: false
+  #     - key: DATA_SIGNING_SECRET
+  #       sync: false
+  #     - key: REDIS_URL
+  #       sync: false
+  #     - key: NODE_ENV
+  #       value: production
+  #     - key: NODE_ID
+  #       value: beta
+  #     - key: NODE_NAME
+  #       value: "Beta Node"
+  #     - key: NODE_REGION
+  #       value: frankfurt
+  #     - key: NODE_PRIVATE_KEY
+  #       sync: false
+  #     - key: USE_DISTRIBUTED_POLLING
+  #       value: "true"
+
+# ============================================
+# DATABASES
+# ============================================
+databases:
+  - name: holdex-db
+    plan: starter
+    databaseName: holdex
+    user: holdex
+    region: oregon

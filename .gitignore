@@ -1,3 +1,11 @@
+# Serena memories (local dev context)
+.serena/
+
+# LLM Training data (large files, generated)
+training/raw/
+training/labeled/
+training/processed/
+
 # Dependencies
 node_modules/
 package-lock.json

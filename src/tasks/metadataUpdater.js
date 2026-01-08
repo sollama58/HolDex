@@ -1,8 +1,9 @@
 const axios = require('axios');
 const logger = require('../services/logger');
-const { broadcastTokenUpdate } = require('../services/socket'); 
+const { broadcastTokenUpdate } = require('../services/socket');
 const { getHolderCountFromRPC } = require('../services/solana');
 const config = require('../config/env');
+const { signKScore, signOrigin, signFull } = require('../utils/dataSignature');
 
 let isRunning = false;
 
@@ -211,10 +212,56 @@ async function processSingleToken(db, t, now) {
 
         updateParts.push(`updated_at = CURRENT_TIMESTAMP`);
 
+        // Track what signed categories need re-signing
+        const needsOriginResign = updateParts.some(p => p.startsWith('timestamp'));
+        const needsKscoreResign = updateParts.some(p => p.startsWith('holders ='));
+
         if (updateParts.length > 0) {
-            const finalQuery = `UPDATE tokens SET ${updateParts.join(', ')} WHERE mint = $${idx}`;
+            // Include all fields needed for re-signing in RETURNING clause
+            const returningFields = needsOriginResign || needsKscoreResign
+                ? ` RETURNING mint, k_score, conviction_score, conviction_accumulators, conviction_holders, conviction_reducers, conviction_extractors, conviction_analyzed, holders, last_k_score_update, is_pump_fun, bonding_curve_complete, timestamp, metadata, sig_identity, sig_security, sig_lp, sig_supply, sig_kscore, sig_market, sig_origin, chaos_nonce`
+                : '';
+            const finalQuery = `UPDATE tokens SET ${updateParts.join(', ')} WHERE mint = $${idx}${returningFields}`;
             finalParams.push(t.mint);
-            await db.run(finalQuery, finalParams);
+            const result = await db.run(finalQuery, finalParams);
+
+            // Re-sign affected categories to maintain data integrity
+            if (result && (needsOriginResign || needsKscoreResign) && result.chaos_nonce) {
+                const signatureUpdates = [];
+                const signatureParams = [];
+                let sigIdx = 1;
+
+                if (needsKscoreResign) {
+                    const sig_kscore = signKScore(result);
+                    signatureUpdates.push(`sig_kscore = $${sigIdx++}`);
+                    signatureParams.push(sig_kscore);
+                }
+
+                if (needsOriginResign) {
+                    const sig_origin = signOrigin(result);
+                    signatureUpdates.push(`sig_origin = $${sigIdx++}`);
+                    signatureParams.push(sig_origin);
+                }
+
+                // Recompute sig_full with updated category signatures
+                if (signatureUpdates.length > 0) {
+                    const allSigs = {
+                        sig_identity: result.sig_identity,
+                        sig_security: result.sig_security,
+                        sig_lp: result.sig_lp,
+                        sig_supply: result.sig_supply,
+                        sig_kscore: needsKscoreResign ? signKScore(result) : result.sig_kscore,
+                        sig_market: result.sig_market,
+                        sig_origin: needsOriginResign ? signOrigin(result) : result.sig_origin
+                    };
+                    const sig_full = signFull(allSigs, result.chaos_nonce);
+                    signatureUpdates.push(`sig_full = $${sigIdx++}`);
+                    signatureParams.push(sig_full);
+
+                    signatureParams.push(t.mint);
+                    await db.run(`UPDATE tokens SET ${signatureUpdates.join(', ')} WHERE mint = $${sigIdx}`, signatureParams);
+                }
+            }
         }
 
         // Broadcast (Always broadcast current state)
