@@ -1957,7 +1957,16 @@ function init(deps) {
             if (search.length > 0) {
                 if (isAddressSearch) {
                     rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
-                    if (rows.length === 0) { await indexTokenOnChain(search); rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]); }
+                    if (rows.length === 0) {
+                        try {
+                            await indexTokenOnChain(search);
+                            rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
+                        } catch (indexErr) {
+                            logger.error(`[Search] Indexing failed for ${search}: ${indexErr.message}`);
+                            // Return empty array if indexing fails
+                            rows = [];
+                        }
+                    }
                 } else {
                     // SECURITY: Escape LIKE pattern to prevent injection (M9)
                     const safeSearch = `%${escapeLikePattern(search)}%`;

@@ -27,104 +27,110 @@ async function fetchInitialMarketData(mint) {
 }
 
 async function indexTokenOnChain(mint) {
-    const db = getDB();
-    logger.info(`🔍 [Indexer] Starting indexing for ${mint.slice(0, 8)}...`);
-
-    const meta = await fetchTokenMetadata(mint);
-    logger.info(`📝 [Indexer] Metadata: ${meta?.name || 'Unknown'} (${meta?.symbol || 'UNKNOWN'})`);
-
-    let supply = '1000000000';
-    let decimals = 9;
     try {
-        const supplyInfo = await solanaConnection.getTokenSupply(new PublicKey(mint));
-        supply = supplyInfo.value.amount;
-        decimals = supplyInfo.value.decimals;
-    } catch (e) {
-        logger.warn(`⚠️ [Indexer] Failed to fetch supply for ${mint.slice(0, 8)}: ${e.message}`);
+        const db = getDB();
+        logger.info(`🔍 [Indexer] Starting indexing for ${mint.slice(0, 8)}...`);
+
+        const meta = await fetchTokenMetadata(mint);
+        logger.info(`📝 [Indexer] Metadata: ${meta?.name || 'Unknown'} (${meta?.symbol || 'UNKNOWN'})`);
+
+        let supply = '1000000000';
+        let decimals = 9;
+        try {
+            const supplyInfo = await solanaConnection.getTokenSupply(new PublicKey(mint));
+            supply = supplyInfo.value.amount;
+            decimals = supplyInfo.value.decimals;
+        } catch (e) {
+            logger.warn(`⚠️ [Indexer] Failed to fetch supply for ${mint.slice(0, 8)}: ${e.message}`);
+        }
+
+        const marketData = await fetchInitialMarketData(mint);
+        if (marketData) {
+            logger.info(`💹 [Indexer] Market data: $${marketData.priceUsd} | Vol: $${marketData.volume24h}`);
+        } else {
+            logger.warn(`⚠️ [Indexer] No market data from GeckoTerminal for ${mint.slice(0, 8)}`);
+        }
+
+        const baseData = { name: meta?.name || 'Unknown', ticker: meta?.symbol || 'UNKNOWN', image: meta?.image || null };
+        const initialPrice = marketData?.priceUsd || 0;
+        const initialVol = marketData?.volume24h || 0;
+        const initialChange = marketData?.change24h || 0;
+        const initialChange1h = marketData?.change1h || 0;
+        const initialChange5m = marketData?.change5m || 0;
+        const initialMcap = marketData?.marketCap || 0;
+
+        // 1. CREATE TOKEN RECORD
+        // FIX: Update market data on conflict, but only update identity if it's still "Unknown"
+        // Identity fields (name, symbol, image) are signed with sig_identity
+        // If already indexed with real data, preserve it. If still "Unknown", update it.
+        await db.run(`
+            INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, change1h, change5m, timestamp)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            ON CONFLICT(mint) DO UPDATE SET
+            name = CASE
+                WHEN tokens.name IN ('Unknown', 'New Discovery', '') OR tokens.name IS NULL
+                THEN EXCLUDED.name
+                ELSE tokens.name
+            END,
+            symbol = CASE
+                WHEN tokens.symbol IN ('UNKNOWN', 'UNK', 'NEW', '') OR tokens.symbol IS NULL
+                THEN EXCLUDED.symbol
+                ELSE tokens.symbol
+            END,
+            image = CASE
+                WHEN tokens.image IS NULL OR tokens.image = ''
+                THEN EXCLUDED.image
+                ELSE tokens.image
+            END,
+            priceUsd = EXCLUDED.priceUsd,
+            marketCap = EXCLUDED.marketCap,
+            volume24h = EXCLUDED.volume24h,
+            change24h = EXCLUDED.change24h,
+            change1h = EXCLUDED.change1h,
+            change5m = EXCLUDED.change5m,
+            updated_at = NOW()
+        `, [
+            mint, baseData.name, baseData.ticker, baseData.image, supply, decimals,
+            initialPrice, 0, initialMcap, initialVol, initialChange,
+            initialChange1h, initialChange5m, Date.now()
+        ]);
+
+        // 2. FIND POOLS
+        const pools = await findPoolsOnChain(mint);
+        const poolAddresses = [];
+
+        logger.info(`🏊 [Indexer] Found ${pools.length} pool(s) for ${mint.slice(0, 8)}`);
+
+        for (const pool of pools) {
+            poolAddresses.push(pool.pairAddress);
+            await enableIndexing(db, mint, {
+                pairAddress: pool.pairAddress,
+                dexId: pool.dexId,
+                liquidity: pool.liquidity || { usd: 0 },
+                volume: pool.volume || { h24: 0 },
+                priceUsd: pool.priceUsd || 0,
+                baseToken: pool.baseToken,
+                quoteToken: pool.quoteToken,
+                reserve_a: pool.reserve_a,
+                reserve_b: pool.reserve_b
+            });
+        }
+
+        await enqueueTokenUpdate(mint);
+        if (poolAddresses.length > 0) {
+            await snapshotPools(poolAddresses).catch(e => logger.error(`❌ [Indexer] Snapshot error: ${e.message}`));
+            await aggregateAndSaveToken(db, mint);
+            logger.info(`✅ [Indexer] Successfully indexed ${baseData.name} (${mint.slice(0, 8)})`);
+        } else {
+            logger.warn(`⚠️ [Indexer] No pools found for ${mint.slice(0, 8)} - token added but no price data`);
+        }
+
+        return { ...baseData, pairs: pools };
+    } catch (error) {
+        logger.error(`❌ [Indexer] CRITICAL ERROR indexing ${mint}: ${error.message}`);
+        logger.error(error.stack);
+        throw error; // Re-throw to let caller handle
     }
-
-    const marketData = await fetchInitialMarketData(mint);
-    if (marketData) {
-        logger.info(`💹 [Indexer] Market data: $${marketData.priceUsd} | Vol: $${marketData.volume24h}`);
-    } else {
-        logger.warn(`⚠️ [Indexer] No market data from GeckoTerminal for ${mint.slice(0, 8)}`);
-    }
-
-    const baseData = { name: meta?.name || 'Unknown', ticker: meta?.symbol || 'UNKNOWN', image: meta?.image || null };
-    const initialPrice = marketData?.priceUsd || 0;
-    const initialVol = marketData?.volume24h || 0;
-    const initialChange = marketData?.change24h || 0;
-    const initialChange1h = marketData?.change1h || 0;
-    const initialChange5m = marketData?.change5m || 0;
-    const initialMcap = marketData?.marketCap || 0;
-
-    // 1. CREATE TOKEN RECORD
-    // FIX: Update market data on conflict, but only update identity if it's still "Unknown"
-    // Identity fields (name, symbol, image) are signed with sig_identity
-    // If already indexed with real data, preserve it. If still "Unknown", update it.
-    await db.run(`
-        INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, change1h, change5m, timestamp)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-        ON CONFLICT(mint) DO UPDATE SET
-        name = CASE
-            WHEN tokens.name IN ('Unknown', 'New Discovery', '') OR tokens.name IS NULL
-            THEN EXCLUDED.name
-            ELSE tokens.name
-        END,
-        symbol = CASE
-            WHEN tokens.symbol IN ('UNKNOWN', 'UNK', '') OR tokens.symbol IS NULL
-            THEN EXCLUDED.symbol
-            ELSE tokens.symbol
-        END,
-        image = CASE
-            WHEN tokens.image IS NULL OR tokens.image = ''
-            THEN EXCLUDED.image
-            ELSE tokens.image
-        END,
-        priceUsd = EXCLUDED.priceUsd,
-        marketCap = EXCLUDED.marketCap,
-        volume24h = EXCLUDED.volume24h,
-        change24h = EXCLUDED.change24h,
-        change1h = EXCLUDED.change1h,
-        change5m = EXCLUDED.change5m,
-        updated_at = NOW()
-    `, [
-        mint, baseData.name, baseData.ticker, baseData.image, supply, decimals,
-        initialPrice, 0, initialMcap, initialVol, initialChange,
-        initialChange1h, initialChange5m, Date.now()
-    ]);
-
-    // 2. FIND POOLS
-    const pools = await findPoolsOnChain(mint);
-    const poolAddresses = [];
-
-    logger.info(`🏊 [Indexer] Found ${pools.length} pool(s) for ${mint.slice(0, 8)}`);
-
-    for (const pool of pools) {
-        poolAddresses.push(pool.pairAddress);
-        await enableIndexing(db, mint, {
-            pairAddress: pool.pairAddress,
-            dexId: pool.dexId,
-            liquidity: pool.liquidity || { usd: 0 },
-            volume: pool.volume || { h24: 0 },
-            priceUsd: pool.priceUsd || 0,
-            baseToken: pool.baseToken,
-            quoteToken: pool.quoteToken,
-            reserve_a: pool.reserve_a,
-            reserve_b: pool.reserve_b
-        });
-    }
-
-    await enqueueTokenUpdate(mint);
-    if (poolAddresses.length > 0) {
-        await snapshotPools(poolAddresses).catch(e => logger.error(`❌ [Indexer] Snapshot error: ${e.message}`));
-        await aggregateAndSaveToken(db, mint);
-        logger.info(`✅ [Indexer] Successfully indexed ${baseData.name} (${mint.slice(0, 8)})`);
-    } else {
-        logger.warn(`⚠️ [Indexer] No pools found for ${mint.slice(0, 8)} - token added but no price data`);
-    }
-
-    return { ...baseData, pairs: pools };
 }
 
 module.exports = { indexTokenOnChain };
