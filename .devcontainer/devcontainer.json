@@ -1,12 +1,41 @@
 {
-  "name": "HolDex Development",
-  "postStartCommand": "rm -rf ~/.claude-mem 2>/dev/null; ln -sf /workspaces/.claude-mem-data ~/.claude-mem && cd /workspaces/claude-mem && npm run worker:start",
-  "postAttachCommand": "cd /workspaces/claude-mem && npm run worker:status",
+  "name": "$asdfasdfa Ecosystem",
   "customizations": {
     "vscode": {
       "settings": {
         "terminal.integrated.defaultProfile.linux": "bash"
       }
+    },
+    "codespaces": {
+      "repositories": {
+        "zeyxx/asdf-brain": {
+          "permissions": {
+            "contents": "write",
+            "pull_requests": "write"
+          }
+        },
+        "zeyxx/GASdf": {
+          "permissions": {
+            "contents": "write",
+            "pull_requests": "write"
+          }
+        },
+        "zeyxx/claude-mem": {
+          "permissions": {
+            "contents": "write",
+            "pull_requests": "write"
+          }
+        },
+        "zeyxx/asdf-manifesto": {
+          "permissions": {
+            "contents": "write",
+            "pull_requests": "write"
+          }
+        }
+      }
     }
-  }
+  },
+  "postCreateCommand": "cd /workspaces && for repo in asdf-brain GASdf claude-mem asdf-manifesto; do [ ! -d \"$repo\" ] && gh repo clone zeyxx/$repo || true; done",
+  "postStartCommand": "rm -rf ~/.claude-mem 2>/dev/null; ln -sf /workspaces/.claude-mem-data ~/.claude-mem && cd /workspaces/claude-mem && npm install && npm run worker:start",
+  "postAttachCommand": "cd /workspaces/claude-mem && npm run worker:status"
 }
