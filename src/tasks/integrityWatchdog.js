@@ -198,13 +198,8 @@ async function restoreFromSnapshot(db, mint, tamperedCategories) {
         // All signature functions use token.mint as the first field
         snapshot.mint = mint;
 
-        // DEBUG: Log identity data string that will be signed
-        const identityData = [snapshot.mint, snapshot.name || '', snapshot.symbol || '', snapshot.image || '', snapshot.decimals || 9].join('|');
-        logger.warn(`[Watchdog] SIGN identity for ${mint.slice(0, 8)}: "${identityData.slice(0, 80)}..."`);
-
         // Re-sign the snapshot data (new chaos_nonce for unpredictability)
         const signatures = signAllCategories(snapshot);
-        logger.warn(`[Watchdog] SIGNED ${mint.slice(0, 8)}: sig_identity=${signatures.sig_identity?.slice(0, 20)}...`);
 
         // Restore ALL signed fields from snapshot (data + signatures)
         // CRITICAL: Must restore data fields too, not just signatures!
@@ -336,41 +331,11 @@ async function restoreFromSnapshot(db, mint, tamperedCategories) {
                 [sig_holders, Date.now(), mint]);
         }
 
-        // DEBUG: Immediately verify the token to confirm healing worked
-        const verifiedToken = await db.get(`
-            SELECT mint, name, symbol, image, decimals, sig_identity
-            FROM tokens WHERE mint = $1
-        `, [mint]);
-        if (verifiedToken) {
-            const verifyIdentityData = [verifiedToken.mint, verifiedToken.name || '', verifiedToken.symbol || '', verifiedToken.image || '', verifiedToken.decimals || 9].join('|');
-            logger.warn(`[Watchdog] VERIFY identity for ${mint.slice(0, 8)}: "${verifyIdentityData.slice(0, 80)}..."`);
-            logger.warn(`[Watchdog] DB sig_identity=${verifiedToken.sig_identity?.slice(0, 20)}...`);
-
-            // Compare the signed data strings
-            if (identityData !== verifyIdentityData) {
-                logger.error(`[Watchdog] DATA MISMATCH! Signed: "${identityData.slice(0, 50)}" vs DB: "${verifyIdentityData.slice(0, 50)}"`);
-            } else {
-                logger.warn(`[Watchdog] DATA MATCH confirmed for ${mint.slice(0, 8)}`);
-            }
-        }
-
         // CRITICAL FIX: Update Redis snapshot with healed data + new signatures
         // Without this, the next healing attempt reads stale snapshot with old signatures
         // which causes the infinite heal loop when kScoreUpdater is not running
         const healedSnapshot = { ...snapshot, ...signatures };
-        logger.warn(`[Watchdog] Saving snapshot with sig_identity=${healedSnapshot.sig_identity?.slice(0, 20)}...`);
-        const snapshotSaved = await saveSnapshot(mint, healedSnapshot, snapshot._holderSnapshots || []);
-        if (snapshotSaved) {
-            // Verify the save by reading back
-            const verifySnapshot = await getSnapshot(mint);
-            if (verifySnapshot && verifySnapshot.sig_identity === healedSnapshot.sig_identity) {
-                logger.warn(`[Watchdog] Snapshot VERIFIED in Redis for ${mint.slice(0, 8)}`);
-            } else {
-                logger.error(`[Watchdog] SNAPSHOT MISMATCH! Saved=${healedSnapshot.sig_identity?.slice(0, 20)} Read=${verifySnapshot?.sig_identity?.slice(0, 20)}`);
-            }
-        } else {
-            logger.error(`[Watchdog] SNAPSHOT SAVE FAILED for ${mint.slice(0, 8)}! Redis may be disconnected.`);
-        }
+        await saveSnapshot(mint, healedSnapshot, snapshot._holderSnapshots || []);
 
         logger.info(`[Watchdog] HEALED: ${mint.slice(0, 8)}... (tampered: ${tamperedCategories.join(',')})`);
         return true;
@@ -456,11 +421,6 @@ async function scanForTampering(db) {
             // Verify all 8 signatures (+ holders if snapshots exist)
             const result = verifyAllSignatures(token, { holderSnapshots });
 
-            // DEBUG: Log identity data being verified (only if tampered)
-            if (result.tampered.includes('identity')) {
-                const identData = [token.mint, token.name || '', token.symbol || '', token.image || '', token.decimals || 9].join('|');
-                logger.warn(`[Watchdog] VERIFY FAILED identity for ${token.mint.slice(0, 8)}: data="${identData.slice(0, 60)}..." sig=${token.sig_identity?.slice(0, 20)}...`);
-            }
 
             // Get snapshot for recency calculation
             const snapshot = await getSnapshot(token.mint);
