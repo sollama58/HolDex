@@ -358,8 +358,19 @@ async function restoreFromSnapshot(db, mint, tamperedCategories) {
         // Without this, the next healing attempt reads stale snapshot with old signatures
         // which causes the infinite heal loop when kScoreUpdater is not running
         const healedSnapshot = { ...snapshot, ...signatures };
-        await saveSnapshot(mint, healedSnapshot, snapshot._holderSnapshots || []);
-        logger.debug(`[Watchdog] Snapshot updated for ${mint.slice(0, 8)}...`);
+        logger.warn(`[Watchdog] Saving snapshot with sig_identity=${healedSnapshot.sig_identity?.slice(0, 20)}...`);
+        const snapshotSaved = await saveSnapshot(mint, healedSnapshot, snapshot._holderSnapshots || []);
+        if (snapshotSaved) {
+            // Verify the save by reading back
+            const verifySnapshot = await getSnapshot(mint);
+            if (verifySnapshot && verifySnapshot.sig_identity === healedSnapshot.sig_identity) {
+                logger.warn(`[Watchdog] Snapshot VERIFIED in Redis for ${mint.slice(0, 8)}`);
+            } else {
+                logger.error(`[Watchdog] SNAPSHOT MISMATCH! Saved=${healedSnapshot.sig_identity?.slice(0, 20)} Read=${verifySnapshot?.sig_identity?.slice(0, 20)}`);
+            }
+        } else {
+            logger.error(`[Watchdog] SNAPSHOT SAVE FAILED for ${mint.slice(0, 8)}! Redis may be disconnected.`);
+        }
 
         logger.info(`[Watchdog] HEALED: ${mint.slice(0, 8)}... (tampered: ${tamperedCategories.join(',')})`);
         return true;
