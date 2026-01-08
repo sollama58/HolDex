@@ -9,14 +9,14 @@ const { saveTokenData } = require('../services/database');
 
 // Configuration
 const MIN_VOLUME_24H = 5000; // Only index tokens with > $5k daily volume
-const BATCH_SIZE = 50; // DexScreener usually returns 30-50 pairs per search
+const _BATCH_SIZE = 50; // DexScreener usually returns 30-50 pairs per search
 let isRunning = false;
 
 // Search terms to find active Pump tokens on DexScreener
 // We rotate these to find "Top" tokens in different clusters
 const SEARCH_TERMS = ['pump', 'solana', 'meme', 'coin', 'moon', 'pepe', 'doge'];
 
-async function syncTopTokens(deps) {
+async function syncTopTokens(_deps) {
     if (isRunning) return;
     isRunning = true;
 

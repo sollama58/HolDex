@@ -57,7 +57,7 @@ async function updatePrices(deps) {
                 keysToFetch.push(new PublicKey(p.quote_vault));
                 poolMap.set(p.mint, p);
             }
-        } catch (e) {
+        } catch (_e) {
             logger.warn(`[Indexer] Invalid keys for ${p.mint}`);
         }
     });

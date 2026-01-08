@@ -127,7 +127,7 @@ function signApproval(data, nodeId, privateKey) {
  * @returns {Object} Verification result { valid: boolean, error?: string }
  */
 async function verifySignedWrite(signedWrite, db) {
-    const { signature, write_type, ...restOfPayload } = signedWrite;
+    const { signature, write_type: _write_type, ...restOfPayload } = signedWrite;
 
     // Extract node_id and timestamp from the payload
     const { node_id, timestamp } = restOfPayload;
@@ -192,7 +192,7 @@ async function executeSignedWrite(signedWrite, db) {
         return { success: false, error: verification.error };
     }
 
-    const { write_type, mint, node_id, signature, timestamp } = signedWrite;
+    const { write_type, mint, node_id, signature: _sig, timestamp } = signedWrite;
 
     try {
         switch (write_type) {
@@ -226,7 +226,7 @@ async function executeSignedWrite(signedWrite, db) {
  * Execute a signed K-Score update
  */
 async function executeKScoreWrite(signedWrite, db) {
-    const { mint, k_score, d_score, o_score, l_score, conviction_score, node_id, signature, timestamp } = signedWrite;
+    const { mint, k_score, d_score: _d, o_score: _o, l_score: _l, conviction_score: _c, node_id, signature, timestamp } = signedWrite;
 
     // Update token with signed K-Score
     await db.query(`
@@ -254,7 +254,7 @@ async function executeKScoreWrite(signedWrite, db) {
  * Execute a signed verification write
  */
 async function executeVerificationWrite(signedWrite, db) {
-    const { mint, k_score, verification_hash, node_id, signature, timestamp } = signedWrite;
+    const { mint, k_score, verification_hash: _hash, node_id, signature, timestamp } = signedWrite;
 
     await db.query(`
         INSERT INTO token_verifications (mint, node_id, k_score, node_signature, verified_at)

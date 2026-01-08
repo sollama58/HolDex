@@ -92,7 +92,7 @@ async function initSchema(db) {
             await db.exec(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_reducers INTEGER DEFAULT 0;`);
             await db.exec(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_extractors INTEGER DEFAULT 0;`);
             await db.exec(`ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_analyzed INTEGER DEFAULT 0;`);
-        } catch(e) { /* columns may already exist */ }
+        } catch(_e) { /* columns may already exist */ }
 
         // --- POOLS TABLE (aligned with production) ---
         await db.exec(`
@@ -154,7 +154,7 @@ async function initSchema(db) {
             await db.exec(`CREATE INDEX IF NOT EXISTS idx_pools_liquidity ON pools(liquidity_usd DESC);`);
             await db.exec(`CREATE INDEX IF NOT EXISTS idx_holder_history_mint ON holder_history(mint, date DESC);`);
             await db.exec(`CREATE INDEX IF NOT EXISTS idx_kscore_history_mint ON k_score_history(mint, date DESC);`);
-        } catch (e) { /* index may already exist */ }
+        } catch (_e) { /* index may already exist */ }
 
         await db.exec(`CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens(k_score);`);
 
@@ -170,13 +170,13 @@ async function smartCache(key, durationSeconds, fetchFunction) {
         if (redisModule && redisModule.getClient) {
             redis = redisModule.getClient();
         }
-    } catch (e) { }
-    
+    } catch (_e) { /* ignore */ }
+
     if (redis && redis.status === 'ready') {
         try {
             const cached = await redis.get(key);
             if (cached) return JSON.parse(cached);
-        } catch (e) { }
+        } catch (_e) { /* ignore */ }
     }
 
     const data = await fetchFunction();
@@ -184,7 +184,7 @@ async function smartCache(key, durationSeconds, fetchFunction) {
     if (redis && redis.status === 'ready' && data) {
         try {
             await redis.setex(key, durationSeconds, JSON.stringify(data));
-        } catch (e) { }
+        } catch (_e) { /* ignore */ }
     }
 
     return data;

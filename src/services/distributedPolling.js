@@ -410,7 +410,7 @@ async function checkAndClaimTask(deps) {
  * @param {Object} deps - Dependencies (db, broadcast)
  */
 async function executePollingTask(task, deps) {
-    const { mint, reason } = task;
+    const { mint } = task;
 
     // Import kScoreUpdater dynamically to avoid circular deps
     const kScoreUpdater = require('../tasks/kScoreUpdater');
@@ -427,7 +427,7 @@ async function executePollingTask(task, deps) {
  * @param {string} mint - Token mint
  * @param {Object} deps - Dependencies
  */
-async function recordVerification(mint, deps) {
+async function recordVerification(mint, _deps) {
     if (!db) return;
 
     // Get the K-Score we just calculated
@@ -483,7 +483,7 @@ async function checkConsensus(mint) {
     // Get active node count
     const nodeApproval = require('./nodeApproval');
     const activeNodes = await nodeApproval.getActiveNodeCount(db);
-    const requiredApprovals = genesis.CONSENSUS_RULES.getRequiredApprovals(activeNodes);
+    const _requiredApprovals = genesis.CONSENSUS_RULES.getRequiredApprovals(activeNodes);
 
     // Group by K-Score (within tolerance)
     const kScores = verifications.rows.map(v => v.k_score);
