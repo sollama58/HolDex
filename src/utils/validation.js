@@ -5,7 +5,7 @@
  * Solana addresses are base58-encoded 32-byte public keys.
  */
 
-const bs58 = require('bs58');
+const bs58 = require('bs58').default;
 
 /**
  * Validate a Solana address (wallet or mint)

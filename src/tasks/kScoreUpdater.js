@@ -27,7 +27,7 @@
 
 const config = require('../config/env');
 const { logger } = require('../services');
-const bs58 = require('bs58');
+const bs58 = require('bs58').default;
 const { getClient: getRedisClient } = require('../services/redis');
 const verification = require('../services/verificationService');
 const { signAllCategories, signHolders, signSupply, signSecurity, signLP } = require('../utils/dataSignature');
