@@ -389,7 +389,7 @@ Should show activity counter increasing every 30 seconds during market hours.
 **Q: Token was added but has no price/liquidity data**
 A: This happens if:
 1. Token has no liquidity pools (fresh launch)
-2. GeckoTerminal doesn't have data yet (try DexScreener)
+2. Jupiter/Raydium doesn't have data yet (token too new)
 3. Pool discovery failed (check `findPoolsOnChain()` logs)
 
 **Solution**: Wait 5-10 minutes and refresh, or trigger manual pool discovery:

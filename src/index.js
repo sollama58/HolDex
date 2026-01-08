@@ -63,10 +63,13 @@ app.use(helmet({
                 "'self'",
                 "wss:",
                 "ws:",
-                "https://api.dexscreener.com",
                 "https://api.helius.xyz",
                 "https://*.helius-rpc.com",
                 "https://*.solana.com",
+                "https://lite-api.jup.ag",
+                "https://api.jup.ag",
+                "https://api-v3.raydium.io",
+                "https://api.coingecko.com",
             ],
             fontSrc: ["'self'", "https://fonts.gstatic.com", "https://fonts.googleapis.com", "data:"],
             objectSrc: ["'none'"],
@@ -469,7 +472,7 @@ async function startServer() {
         // Start Background Tasks
         startSnapshotter();
 
-        // PriceWorker: Unified price service (DexScreener batch, 0 Helius credits)
+        // PriceWorker: Unified price service (Jupiter + Raydium, 0 Helius credits)
         startPriceWorker({ db: getDB(), broadcast: null });
 
         // ARCHITECTURE FIX: kScoreUpdater.start() REMOVED from API

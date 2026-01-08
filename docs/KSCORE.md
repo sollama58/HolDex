@@ -122,10 +122,15 @@ For automated acceptance (GASdf, Oracle integrations):
 - **Transfer History**: Webhook callbacks
 - **Cost**: Paginated, no per-holder RPC cost
 
-### DexScreener (Market Data)
-- Price, liquidity, volume
-- Free batch API
+### Jupiter Price API (Market Data)
+- Token prices (USD)
+- Free tier via lite-api.jup.ag
 - Not used for conviction (Helius-only)
+
+### Raydium API (Pool Data)
+- Liquidity, volume, pool info
+- Free API (api-v3.raydium.io)
+- Pool discovery and tracking
 
 ### On-chain RPC
 - Supply, decimals

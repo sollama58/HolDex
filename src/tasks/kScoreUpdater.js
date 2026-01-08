@@ -128,13 +128,14 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // PRICE SERVICE (Unified - from PriceWorker)
 // ============================================
 // K-Score = Helius (our value-add)
-// Price/MCap = PriceWorker handles DexScreener batch (free, efficient)
+// Price/MCap = PriceWorker handles Jupiter + Raydium batch (free, independent)
 const { getPrice: getPriceFromWorker, getCachedPrice } = require('./priceWorker');
 
 /**
  * Get price from unified PriceWorker (uses cache, no duplicate API calls)
+ * Sources: Jupiter Price API + Raydium pools (no DexScreener dependency)
  */
-async function getDexScreenerData(mint) {
+async function getMarketData(mint) {
     // Try cache first (instant, no API call)
     const cached = getCachedPrice(mint, 120000); // 2 min cache tolerance
     if (cached) return cached;
@@ -142,6 +143,9 @@ async function getDexScreenerData(mint) {
     // Fallback to single fetch if not in cache
     return await getPriceFromWorker(mint);
 }
+
+// Legacy alias for backward compatibility within this file
+const getDexScreenerData = getMarketData;
 
 /**
  * Parse rate limit headers from Helius response
@@ -2427,11 +2431,11 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
     try {
         const decimals = dbData?.decimals || 9;
 
-        // Get price for $1+ holder filtering (use cached or fetch from DexScreener)
+        // Get price for $1+ holder filtering (use cached or fetch from Jupiter/Raydium)
         let priceUsd = dbData?.priceusd || dbData?.priceUsd || 0;
         if (priceUsd === 0) {
-            const dexData = await getDexScreenerData(mint);
-            if (dexData) priceUsd = dexData.priceUsd;
+            const marketData = await getMarketData(mint);
+            if (marketData) priceUsd = marketData.priceUsd;
         }
 
         // ============================================
@@ -2591,7 +2595,7 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
             }
         }
 
-        // Get age from token timestamp (DexScreener creation date)
+        // Get age from token timestamp (creation date)
         if (db) {
             const tokenData = await db.get(`
                 SELECT timestamp FROM tokens WHERE mint = $1
@@ -2954,33 +2958,33 @@ async function updateSingleToken(deps, mint) {
             change1h: token.change1h || 0
         };
 
-        // Get price/mcap/liquidity from DexScreener (FREE, RELIABLE)
-        // K-Score = Helius (our value-add), Price = DexScreener (free)
+        // Get price/mcap/liquidity from Jupiter + Raydium (FREE, INDEPENDENT)
+        // K-Score = Helius (our value-add), Price = Jupiter/Raydium (free)
         const priceNeedsRefresh = !token.price_timestamp ||
                                   (Date.now() - parseInt(token.price_timestamp || 0) > 60000); // 1 min
 
         if (priceNeedsRefresh) {
             try {
-                const dexData = await getDexScreenerData(mint);
+                const priceData = await getMarketData(mint);
 
-                if (dexData && dexData.priceUsd > 0) {
-                    marketData.priceUsd = dexData.priceUsd;
-                    marketData.priceSource = 'dexscreener';
-                    marketData.priceTimestamp = dexData.timestamp;
-                    marketData.pricePool = dexData.pairAddress;
-                    marketData.mcap = dexData.mcap;
+                if (priceData && priceData.priceUsd > 0) {
+                    marketData.priceUsd = priceData.priceUsd;
+                    marketData.priceSource = priceData.source || 'jupiter';
+                    marketData.priceTimestamp = priceData.timestamp;
+                    marketData.pricePool = priceData.pairAddress;
+                    marketData.mcap = priceData.mcap;
                     marketData.mcapCalculated = true;
-                    marketData.liquidity = dexData.liquidity;
-                    marketData.liquiditySource = 'dexscreener';
-                    marketData.liquidityTimestamp = dexData.timestamp;
-                    marketData.volume24h = dexData.volume24h || 0;
-                    marketData.change24h = dexData.change24h || 0;
-                    marketData.change1h = dexData.change1h || 0;
+                    marketData.liquidity = priceData.liquidity;
+                    marketData.liquiditySource = priceData.source || 'raydium';
+                    marketData.liquidityTimestamp = priceData.timestamp;
+                    marketData.volume24h = priceData.volume24h || 0;
+                    marketData.change24h = priceData.change24h || 0;
+                    marketData.change1h = priceData.change1h || 0;
 
-                    logger.debug(`[DexScreener] ${token.symbol}: $${dexData.priceUsd.toExponential(2)}, MCap $${dexData.mcap.toLocaleString()}`);
+                    logger.debug(`[Market] ${token.symbol}: $${priceData.priceUsd.toExponential(2)}, MCap $${(priceData.mcap || 0).toLocaleString()}`);
                 }
             } catch (_e) {
-                logger.debug(`[Market] ${mint.slice(0,8)}: DexScreener failed, using cached`);
+                logger.debug(`[Market] ${mint.slice(0,8)}: Price fetch failed, using cached`);
             }
         }
 
@@ -3345,32 +3349,32 @@ async function updateKScores(deps) {
                     change1h: t.change1h || 0
                 };
 
-                // Get price/mcap/liquidity from DexScreener (FREE, RELIABLE)
+                // Get price/mcap/liquidity from Jupiter + Raydium (FREE, INDEPENDENT)
                 const batchPriceNeedsRefresh = !t.price_timestamp ||
                                               (Date.now() - parseInt(t.price_timestamp || 0) > 60000); // 1 min
 
                 if (batchPriceNeedsRefresh) {
                     try {
-                        const dexData = await getDexScreenerData(t.mint);
+                        const priceData = await getMarketData(t.mint);
 
-                        if (dexData && dexData.priceUsd > 0) {
-                            batchMarketData.priceUsd = dexData.priceUsd;
-                            batchMarketData.priceSource = 'dexscreener';
-                            batchMarketData.priceTimestamp = dexData.timestamp;
-                            batchMarketData.pricePool = dexData.pairAddress;
-                            batchMarketData.mcap = dexData.mcap;
+                        if (priceData && priceData.priceUsd > 0) {
+                            batchMarketData.priceUsd = priceData.priceUsd;
+                            batchMarketData.priceSource = priceData.source || 'jupiter';
+                            batchMarketData.priceTimestamp = priceData.timestamp;
+                            batchMarketData.pricePool = priceData.pairAddress;
+                            batchMarketData.mcap = priceData.mcap;
                             batchMarketData.mcapCalculated = true;
-                            batchMarketData.liquidity = dexData.liquidity;
-                            batchMarketData.liquiditySource = 'dexscreener';
-                            batchMarketData.liquidityTimestamp = dexData.timestamp;
-                            batchMarketData.volume24h = dexData.volume24h || 0;
-                            batchMarketData.change24h = dexData.change24h || 0;
-                            batchMarketData.change1h = dexData.change1h || 0;
+                            batchMarketData.liquidity = priceData.liquidity;
+                            batchMarketData.liquiditySource = priceData.source || 'raydium';
+                            batchMarketData.liquidityTimestamp = priceData.timestamp;
+                            batchMarketData.volume24h = priceData.volume24h || 0;
+                            batchMarketData.change24h = priceData.change24h || 0;
+                            batchMarketData.change1h = priceData.change1h || 0;
 
-                            logger.debug(`[DexScreener] ${t.symbol}: $${dexData.priceUsd.toExponential(2)}, MCap $${dexData.mcap.toLocaleString()}`);
+                            logger.debug(`[Market] ${t.symbol}: $${priceData.priceUsd.toExponential(2)}, MCap $${(priceData.mcap || 0).toLocaleString()}`);
                         }
                     } catch (_e) {
-                        logger.debug(`[Market] ${t.mint.slice(0,8)}: DexScreener failed, using cached`);
+                        logger.debug(`[Market] ${t.mint.slice(0,8)}: Price fetch failed, using cached`);
                     }
                 }
 

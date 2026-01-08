@@ -1,6 +1,5 @@
 // Usage: node src/indexer/scripts/backfill.js <mint_address>
 require('dotenv').config();
-const axios = require('axios');
 const { initDB, getDB } = require('../../services/database');
 
 const MINT = process.argv[2];
@@ -10,38 +9,137 @@ if (!MINT) {
     process.exit(1);
 }
 
+/**
+ * Fetch pool info from Raydium API (no DexScreener dependency)
+ */
+async function getRaydiumPoolInfo(mint) {
+    try {
+        const response = await fetch(
+            `https://api-v3.raydium.io/pools/info/mint?mint1=${mint}&poolType=all&poolSortField=liquidity&sortType=desc&pageSize=5&page=1`,
+            { timeout: 10000 }
+        );
+
+        if (!response.ok) return null;
+
+        const data = await response.json();
+        if (!data.success || !data.data?.data?.length) return null;
+
+        return data.data.data[0]; // Return best pool (highest liquidity)
+
+    } catch (e) {
+        console.log(`Raydium API error: ${e.message}`);
+        return null;
+    }
+}
+
+/**
+ * Fetch token metadata from Helius DAS API
+ */
+async function getTokenMetadata(mint) {
+    const config = require('../../config/env');
+    if (!config.HELIUS_API_KEY) return null;
+
+    try {
+        const response = await fetch('https://mainnet.helius-rpc.com', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${config.HELIUS_API_KEY}`
+            },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: 'metadata',
+                method: 'getAsset',
+                params: { id: mint }
+            })
+        });
+
+        const data = await response.json();
+        if (data.error || !data.result) return null;
+
+        return data.result;
+
+    } catch (e) {
+        console.log(`Helius API error: ${e.message}`);
+        return null;
+    }
+}
+
 async function backfill() {
     await initDB();
     const db = getDB();
 
-    console.log(`⏳ Backfilling data for ${MINT}...`);
+    console.log(`Backfilling data for ${MINT}...`);
 
     try {
-        // 1. Fetch from DexScreener (Temporary Dependency for Backfill)
-        const response = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${MINT}`);
-        const pairs = response.data.pairs;
+        // 1. Fetch pool info from Raydium
+        console.log('Fetching pool info from Raydium...');
+        const pool = await getRaydiumPoolInfo(MINT);
 
-        if (!pairs || pairs.length === 0) {
-            console.log("No pairs found.");
-            return;
+        if (!pool) {
+            console.log("No pool found on Raydium. Trying Helius for token metadata only...");
         }
 
-        const bestPair = pairs[0];
-        const poolAddress = bestPair.pairAddress;
-        
-        console.log(`Found Pool: ${poolAddress} on ${bestPair.dexId}`);
+        // 2. Get token metadata from Helius
+        console.log('Fetching token metadata from Helius...');
+        const asset = await getTokenMetadata(MINT);
 
-        // 2. Insert Pool
-        await db.run(`
-            INSERT INTO pools (address, mint, dex, token_a, token_b, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT(mint, dex) DO NOTHING
-        `, [poolAddress, MINT, bestPair.dexId, bestPair.baseToken.address, bestPair.quoteToken.address, Date.now()]);
+        if (!pool && !asset) {
+            console.log("Token not found in any data source.");
+            process.exit(1);
+        }
 
-        // 3. Enable Tracking
-        await db.run(`INSERT INTO active_trackers (pool_address, last_check) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [poolAddress, Date.now()]);
+        // Extract info
+        const poolAddress = pool?.id || null;
+        const dex = pool?.type || 'unknown';
 
-        console.log("✅ Backfill Complete: Pool indexed and tracking enabled.");
+        console.log(`Found Pool: ${poolAddress || 'None'} on ${dex}`);
+
+        // 3. Insert Pool if found
+        if (pool && poolAddress) {
+            const baseToken = pool.mintA?.address || MINT;
+            const quoteToken = pool.mintB?.address || 'So11111111111111111111111111111111111111112';
+
+            await db.run(`
+                INSERT INTO pools (address, mint, dex, token_a, token_b, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT(mint, dex) DO NOTHING
+            `, [poolAddress, MINT, dex, baseToken, quoteToken, Date.now()]);
+
+            // 4. Enable Tracking
+            await db.run(`
+                INSERT INTO active_trackers (pool_address, last_check)
+                VALUES ($1, $2) ON CONFLICT DO NOTHING
+            `, [poolAddress, Date.now()]);
+
+            console.log("Pool indexed and tracking enabled.");
+        }
+
+        // 5. Insert/Update Token metadata if we have Helius data
+        if (asset) {
+            const content = asset.content || {};
+            const metadata = content.metadata || {};
+            const links = content.links || {};
+
+            await db.run(`
+                INSERT INTO tokens (mint, name, symbol, image, timestamp)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT(mint) DO UPDATE SET
+                    name = COALESCE(EXCLUDED.name, tokens.name),
+                    symbol = COALESCE(EXCLUDED.symbol, tokens.symbol),
+                    image = COALESCE(EXCLUDED.image, tokens.image)
+            `, [
+                MINT,
+                metadata.name || asset.name || 'Unknown',
+                metadata.symbol || asset.symbol || 'UNKNOWN',
+                content.files?.[0]?.uri || links.image || null,
+                Date.now()
+            ]);
+
+            console.log(`Token metadata updated: ${metadata.symbol || asset.symbol}`);
+        }
+
+        console.log("Backfill Complete.");
         console.log("   (Note: Historical candles are not backfilled, but tracking starts NOW.)");
 
     } catch (err) {

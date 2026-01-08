@@ -32,7 +32,7 @@ const KSCORE_INTERVAL = 12 * 60 * 60 * 1000; // 12 hours
 **Why it works**:
 - K-Scores are reputation metrics that don't change rapidly
 - Holder conviction patterns evolve over hours/days, not minutes
-- Price updates still happen every 30s via DexScreener (free)
+- Price updates still happen every 30s via Jupiter + Raydium (free)
 - On-demand refresh still available for new tokens and admin panel
 
 **Refresh Triggers**:
