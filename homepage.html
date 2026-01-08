@@ -698,31 +698,18 @@
         .search-spinner.active { display: block; }
         .search-spinner i { animation: spin 1s linear infinite; color: #ea580c; }
 
-        /* K-Score Metal Rank Badges (aligned with Credit Grades) */
+        /* K-Score Tier Badges */
         .k-rank { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono'; }
-        .k-rank-rust { background: rgba(139, 69, 19, 0.3); color: #cd853f; border: 1px solid rgba(139, 69, 19, 0.5); }        /* D  [0-19] */
-        .k-rank-iron { background: rgba(68, 68, 68, 0.3); color: #888888; border: 1px solid rgba(68, 68, 68, 0.5); }          /* C  [20-39] */
-        .k-rank-copper { background: rgba(184, 115, 51, 0.25); color: #b87333; border: 1px solid rgba(184, 115, 51, 0.5); }   /* B3 [40-49] */
-        .k-rank-bronze { background: rgba(205, 127, 50, 0.2); color: #cd7f32; border: 1px solid rgba(205, 127, 50, 0.4); }    /* B2 [50-59] */
-        .k-rank-silver { background: rgba(192, 192, 192, 0.2); color: #c0c0c0; border: 1px solid rgba(192, 192, 192, 0.4); }  /* B1 [60-69] */
-        .k-rank-gold { background: rgba(255, 215, 0, 0.2); color: #ffd700; border: 1px solid rgba(255, 215, 0, 0.4); text-shadow: 0 0 8px rgba(255, 215, 0, 0.3); }  /* A3 [70-79] */
-        .k-rank-platinum { background: rgba(229, 228, 226, 0.2); color: #e5e4e2; border: 1px solid rgba(229, 228, 226, 0.5); text-shadow: 0 0 10px rgba(229, 228, 226, 0.4); }  /* A2 [80-89] */
-        .k-rank-diamond { background: rgba(185, 242, 255, 0.15); color: #b9f2ff; border: 1px solid rgba(185, 242, 255, 0.5); text-shadow: 0 0 12px rgba(185, 242, 255, 0.5); animation: diamond-glow 2s ease-in-out infinite; }  /* A1 [90-99] */
-        .k-rank-native { background: rgba(99, 102, 241, 0.2); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.5); text-shadow: 0 0 10px rgba(99, 102, 241, 0.4); }  /* Infrastructure - SOL, USDC, etc. */
+        .k-rank-rust { background: rgba(139, 69, 19, 0.3); color: #cd853f; border: 1px solid rgba(139, 69, 19, 0.5); }
+        .k-rank-iron { background: rgba(68, 68, 68, 0.3); color: #888888; border: 1px solid rgba(68, 68, 68, 0.5); }
+        .k-rank-copper { background: rgba(184, 115, 51, 0.25); color: #b87333; border: 1px solid rgba(184, 115, 51, 0.5); }
+        .k-rank-bronze { background: rgba(205, 127, 50, 0.2); color: #cd7f32; border: 1px solid rgba(205, 127, 50, 0.4); }
+        .k-rank-silver { background: rgba(192, 192, 192, 0.2); color: #c0c0c0; border: 1px solid rgba(192, 192, 192, 0.4); }
+        .k-rank-gold { background: rgba(255, 215, 0, 0.2); color: #ffd700; border: 1px solid rgba(255, 215, 0, 0.4); text-shadow: 0 0 8px rgba(255, 215, 0, 0.3); }
+        .k-rank-platinum { background: rgba(229, 228, 226, 0.2); color: #e5e4e2; border: 1px solid rgba(229, 228, 226, 0.5); text-shadow: 0 0 10px rgba(229, 228, 226, 0.4); }
+        .k-rank-diamond { background: rgba(185, 242, 255, 0.15); color: #b9f2ff; border: 1px solid rgba(185, 242, 255, 0.5); text-shadow: 0 0 12px rgba(185, 242, 255, 0.5); animation: diamond-glow 2s ease-in-out infinite; }
+        .k-rank-native { background: rgba(99, 102, 241, 0.2); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.5); text-shadow: 0 0 10px rgba(99, 102, 241, 0.4); }
         @keyframes diamond-glow { 0%, 100% { box-shadow: 0 0 5px rgba(185, 242, 255, 0.3); } 50% { box-shadow: 0 0 15px rgba(185, 242, 255, 0.6); } }
-
-        /* Credit Rating Badges - "Moody's for Memecoins" */
-        .credit-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 800; font-family: 'JetBrains Mono'; letter-spacing: 0.5px; }
-        .credit-a1 { background: linear-gradient(135deg, rgba(34, 197, 94, 0.25), rgba(16, 185, 129, 0.25)); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.6); text-shadow: 0 0 8px rgba(34, 197, 94, 0.4); }
-        .credit-a2 { background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.5); }
-        .credit-a3 { background: rgba(134, 239, 172, 0.15); color: #86efac; border: 1px solid rgba(134, 239, 172, 0.4); }
-        .credit-b1 { background: rgba(250, 204, 21, 0.2); color: #fde047; border: 1px solid rgba(250, 204, 21, 0.5); }
-        .credit-b2 { background: rgba(251, 146, 60, 0.2); color: #fb923c; border: 1px solid rgba(251, 146, 60, 0.5); }
-        .credit-b3 { background: rgba(249, 115, 22, 0.2); color: #f97316; border: 1px solid rgba(249, 115, 22, 0.5); }
-        .credit-c { background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.5); }
-        .credit-d { background: rgba(127, 29, 29, 0.3); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.4); animation: danger-pulse 1.5s ease-in-out infinite; }
-        .credit-native { background: rgba(99, 102, 241, 0.2); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.5); }  /* Infrastructure */
-        @keyframes danger-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
 
         /* Conviction Class Colors (Metal Ranks) */
         .conviction-accumulator { color: #b9f2ff; background: rgba(185, 242, 255, 0.15); border: 1px solid rgba(185, 242, 255, 0.4); text-shadow: 0 0 8px rgba(185, 242, 255, 0.4); } /* Diamond */
@@ -983,7 +970,7 @@
                 </div>
             </div>
             <div class="grid md:grid-cols-3 gap-6">
-                <div class="feature-box"><div class="text-[#fb923c] mb-2"><i data-lucide="shield-check" width="24"></i></div><h4 class="font-bold text-white text-lg">Credit Rating</h4><p class="text-sm text-[#737373]">A1 to D. Like Moody's, but for memecoins. K = 100 × ∛(D × O × L) — geometric mean of Diamond Hands, Organic Growth & Longevity.</p></div>
+                <div class="feature-box"><div class="text-[#fb923c] mb-2"><i data-lucide="shield-check" width="24"></i></div><h4 class="font-bold text-white text-lg">K-Score Rating</h4><p class="text-sm text-[#737373]">Diamond to Rust quality tiers. K = 100 × ∛(D × O × L) — geometric mean of Diamond Hands, Organic Growth & Longevity.</p></div>
                 <div class="feature-box"><div class="text-[#22c55e] mb-2"><i data-lucide="filter" width="24"></i></div><h4 class="font-bold text-white text-lg">On-Chain Pure</h4><p class="text-sm text-[#737373]">ALL on-chain holders count. No arbitrary thresholds. Log normalization handles scale, top-20 distribution handles quality.</p></div>
                 <div class="feature-box"><div class="text-[#a855f7] mb-2"><i data-lucide="badge-check" width="24"></i></div><h4 class="font-bold text-white text-lg">Verify to Unlock</h4><p class="text-sm text-[#737373]">K-Score locked until devs verify. No free alpha for anonymous rugs. Transparency earns trust.</p></div>
             </div>
@@ -1614,19 +1601,19 @@
 <div id="kscore-modal" class="modal-overlay hidden">
     <div class="modal-content bg-[#0a0a0a] border-2 border-[#252525] p-6 shadow-2xl relative w-full max-w-lg">
         <button class="absolute top-4 right-4 text-[#737373]" onclick="toggleKScoreModal()"><i data-lucide="x" width="24"></i></button>
-        <h3 class="text-xl font-bold text-white mb-2">K-Score: Credit Rating for Tokens</h3>
-        <p class="text-sm text-[#737373] mb-4">"Moody's for Memecoins" - Wallets don't lie.</p>
+        <h3 class="text-xl font-bold text-white mb-2">K-Score: Quality Rating for Tokens</h3>
+        <p class="text-sm text-[#737373] mb-4">Simple on-chain quality metrics - Wallets don't lie.</p>
 
-        <!-- Credit Ratings -->
+        <!-- K-Score Tiers -->
         <div class="grid grid-cols-2 gap-2 mb-4 text-xs font-mono">
-            <div class="flex items-center gap-2"><span class="credit-badge credit-a1">A1</span> 💎 Diamond (90+)</div>
-            <div class="flex items-center gap-2"><span class="credit-badge credit-a2">A2</span> 💠 Platinum (80-89)</div>
-            <div class="flex items-center gap-2"><span class="credit-badge credit-a3">A3</span> 🥇 Gold (70-79)</div>
-            <div class="flex items-center gap-2"><span class="credit-badge credit-b1">B1</span> 🥈 Silver (60-69)</div>
-            <div class="flex items-center gap-2"><span class="credit-badge credit-b2">B2</span> 🥉 Bronze (50-59)</div>
-            <div class="flex items-center gap-2"><span class="credit-badge credit-b3">B3</span> 🟤 Copper (40-49)</div>
-            <div class="flex items-center gap-2"><span class="credit-badge credit-c">C</span> ⚫ Iron (20-39)</div>
-            <div class="flex items-center gap-2"><span class="credit-badge credit-d">D</span> 🔩 Rust (&lt;20)</div>
+            <div class="flex items-center gap-2"><span class="k-rank k-rank-diamond">💎</span> Diamond (90+)</div>
+            <div class="flex items-center gap-2"><span class="k-rank k-rank-platinum">💠</span> Platinum (80-89)</div>
+            <div class="flex items-center gap-2"><span class="k-rank k-rank-gold">🥇</span> Gold (70-79)</div>
+            <div class="flex items-center gap-2"><span class="k-rank k-rank-silver">🥈</span> Silver (60-69)</div>
+            <div class="flex items-center gap-2"><span class="k-rank k-rank-bronze">🥉</span> Bronze (50-59)</div>
+            <div class="flex items-center gap-2"><span class="k-rank k-rank-copper">🟤</span> Copper (40-49)</div>
+            <div class="flex items-center gap-2"><span class="k-rank k-rank-iron">⚫</span> Iron (20-39)</div>
+            <div class="flex items-center gap-2"><span class="k-rank k-rank-rust">🔩</span> Rust (&lt;20)</div>
         </div>
 
         <!-- Holder Role Metals -->
@@ -1837,29 +1824,22 @@
     // K-Score Metal Ranks
     function getKRank(score, mint = null) {
         // Native tokens are infrastructure - not rated
-        if (mint && isNativeToken(mint)) return { rank: 'Native', icon: '🏛️', class: 'k-rank-native', tier: 9, isNative: true };
-        if (score >= 90) return { rank: 'Diamond', icon: '💎', class: 'k-rank-diamond', tier: 8 };   // A1 [90-99]
-        if (score >= 80) return { rank: 'Platinum', icon: '💠', class: 'k-rank-platinum', tier: 7 }; // A2 [80-89]
-        if (score >= 70) return { rank: 'Gold', icon: '🥇', class: 'k-rank-gold', tier: 6 };         // A3 [70-79]
-        if (score >= 60) return { rank: 'Silver', icon: '🥈', class: 'k-rank-silver', tier: 5 };     // B1 [60-69]
-        if (score >= 50) return { rank: 'Bronze', icon: '🥉', class: 'k-rank-bronze', tier: 4 };     // B2 [50-59]
-        if (score >= 40) return { rank: 'Copper', icon: '🟤', class: 'k-rank-copper', tier: 3 };     // B3 [40-49]
-        if (score >= 20) return { rank: 'Iron', icon: '⚫', class: 'k-rank-iron', tier: 2 };         // C  [20-39]
-        return { rank: 'Rust', icon: '🔩', class: 'k-rank-rust', tier: 1 };                          // D  [0-19]
+        if (mint && isNativeToken(mint)) return { rank: 'Native', icon: '🏛️', class: 'k-rank-native', label: 'Infrastructure', tier: 9, isNative: true };
+        if (score >= 90) return { rank: 'Diamond', icon: '💎', class: 'k-rank-diamond', label: 'Exceptional Quality', tier: 8 };
+        if (score >= 80) return { rank: 'Platinum', icon: '💠', class: 'k-rank-platinum', label: 'High Quality', tier: 7 };
+        if (score >= 70) return { rank: 'Gold', icon: '🥇', class: 'k-rank-gold', label: 'Good Quality', tier: 6 };
+        if (score >= 60) return { rank: 'Silver', icon: '🥈', class: 'k-rank-silver', label: 'Fair Quality', tier: 5 };
+        if (score >= 50) return { rank: 'Bronze', icon: '🥉', class: 'k-rank-bronze', label: 'Speculative', tier: 4 };
+        if (score >= 40) return { rank: 'Copper', icon: '🟤', class: 'k-rank-copper', label: 'High Risk', tier: 3 };
+        if (score >= 20) return { rank: 'Iron', icon: '⚫', class: 'k-rank-iron', label: 'Very High Risk', tier: 2 };
+        return { rank: 'Rust', icon: '🔩', class: 'k-rank-rust', label: 'Distressed', tier: 1 };
     }
 
-    // Credit Rating System - "Moody's for Memecoins"
+    // Simplified K-Score Tier System
+    // Uses same tier names for consistency (no more A1, A2, B1, B2)
     function getCreditRating(score, mint = null) {
-        // Native tokens are infrastructure - not rated
-        if (mint && isNativeToken(mint)) return { grade: '—', label: 'Infrastructure', class: 'credit-native', isNative: true };
-        if (score >= 90) return { grade: 'A1', label: 'Prime', class: 'credit-a1' };
-        if (score >= 80) return { grade: 'A2', label: 'Excellent', class: 'credit-a2' };
-        if (score >= 70) return { grade: 'A3', label: 'Good', class: 'credit-a3' };
-        if (score >= 60) return { grade: 'B1', label: 'Fair', class: 'credit-b1' };
-        if (score >= 50) return { grade: 'B2', label: 'Speculative', class: 'credit-b2' };
-        if (score >= 40) return { grade: 'B3', label: 'V.Speculative', class: 'credit-b3' };
-        if (score >= 20) return { grade: 'C', label: 'High Risk', class: 'credit-c' };
-        return { grade: 'D', label: 'Default', class: 'credit-d' };
+        // Just return the same tier information for consistency
+        return getKRank(score, mint);
     }
 
     // ============================================

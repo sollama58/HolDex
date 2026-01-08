@@ -106,21 +106,22 @@ function getKRank(score, mint = null) {
 }
 
 /**
- * Credit Rating System - "Moody's for Memecoins"
+ * Credit Rating System - Simplified K-Score Tiers
+ * Uses same tier names as getKRank for consistency
  */
 function getCreditRating(score, mint = null) {
     // Native tokens are infrastructure - not rated
     if (mint && isNativeToken(mint)) {
-        return { grade: '—', label: 'Infrastructure', color: '#6366f1', isNative: true };
+        return { grade: 'Native', label: 'Infrastructure', color: '#6366f1', isNative: true };
     }
-    if (score >= 90) return { grade: 'A1', label: 'Prime', color: '#00ff88' };
-    if (score >= 80) return { grade: 'A2', label: 'Excellent', color: '#00dd77' };
-    if (score >= 70) return { grade: 'A3', label: 'Good', color: '#00bb66' };
-    if (score >= 60) return { grade: 'B1', label: 'Fair', color: '#ffcc00' };
-    if (score >= 50) return { grade: 'B2', label: 'Speculative', color: '#ffaa00' };
-    if (score >= 40) return { grade: 'B3', label: 'Risky', color: '#ff8800' };
-    if (score >= 20) return { grade: 'C', label: 'High Risk', color: '#ff4400' };
-    return { grade: 'D', label: 'Junk', color: '#ff0000' };
+    if (score >= 90) return { grade: 'Diamond', label: 'Exceptional Quality', color: '#b9f2ff' };
+    if (score >= 80) return { grade: 'Platinum', label: 'High Quality', color: '#e5e4e2' };
+    if (score >= 70) return { grade: 'Gold', label: 'Good Quality', color: '#ffd700' };
+    if (score >= 60) return { grade: 'Silver', label: 'Fair Quality', color: '#c0c0c0' };
+    if (score >= 50) return { grade: 'Bronze', label: 'Speculative', color: '#cd7f32' };
+    if (score >= 40) return { grade: 'Copper', label: 'High Risk', color: '#b87333' };
+    if (score >= 20) return { grade: 'Iron', label: 'Very High Risk', color: '#707070' };
+    return { grade: 'Rust', label: 'Distressed', color: '#8b4513' };
 }
 
 /**

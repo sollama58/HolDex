@@ -771,14 +771,14 @@ function init(deps) {
 // ═══════════════════════════════════════════════════════════════
 
 function getKRank(score) {
-    if (score >= 90) return { tier: 'Diamond', icon: '💎', level: 8 };
-    if (score >= 80) return { tier: 'Platinum', icon: '💠', level: 7 };
-    if (score >= 70) return { tier: 'Gold', icon: '🥇', level: 6 };
-    if (score >= 60) return { tier: 'Silver', icon: '🥈', level: 5 };
-    if (score >= 50) return { tier: 'Bronze', icon: '🥉', level: 4 };
-    if (score >= 40) return { tier: 'Copper', icon: '🟤', level: 3 };
-    if (score >= 20) return { tier: 'Iron', icon: '⚫', level: 2 };
-    return { tier: 'Rust', icon: '🔩', level: 1 };
+    if (score >= 90) return { tier: 'Diamond', icon: '💎', level: 8, label: 'Exceptional Quality' };
+    if (score >= 80) return { tier: 'Platinum', icon: '💠', level: 7, label: 'High Quality' };
+    if (score >= 70) return { tier: 'Gold', icon: '🥇', level: 6, label: 'Good Quality' };
+    if (score >= 60) return { tier: 'Silver', icon: '🥈', level: 5, label: 'Fair Quality' };
+    if (score >= 50) return { tier: 'Bronze', icon: '🥉', level: 4, label: 'Speculative' };
+    if (score >= 40) return { tier: 'Copper', icon: '🟤', level: 3, label: 'High Risk' };
+    if (score >= 20) return { tier: 'Iron', icon: '⚫', level: 2, label: 'Very High Risk' };
+    return { tier: 'Rust', icon: '🔩', level: 1, label: 'Distressed' };
 }
 
 module.exports = { init };

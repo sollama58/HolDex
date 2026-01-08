@@ -142,7 +142,7 @@ async function getHolderCountFromRPC(mintAddress) {
 
     // Check Redis cache first (5 min TTL)
     try {
-        const redis = await getRedis();
+        const redis = getRedis();
         if (redis) {
             const cacheKey = `holders:count:${cleanMint}`;
             const cached = await redis.get(cacheKey);
@@ -226,7 +226,7 @@ async function getHolderCountFromRPC(mintAddress) {
 
     // Cache the result (5 min TTL)
     try {
-        const redis = await getRedis();
+        const redis = getRedis();
         if (redis && finalCount > 0) {
             const cacheKey = `holders:count:${cleanMint}`;
             await redis.set(cacheKey, finalCount.toString(), 'EX', 300);
