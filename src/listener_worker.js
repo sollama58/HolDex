@@ -8,7 +8,15 @@ const logger = require('./services/logger');
 // --- TASKS ---
 const { updateSingleToken } = require('./tasks/kScoreUpdater');
 const growerScanner = require('./tasks/growerScanner');
-const newTokenListener = require('./tasks/newTokenListener');
+
+// --- TOKEN DISCOVERY ---
+// DISABLED: New token discovery is now handled by Helius webhooks
+// See: POST /webhook/new-tokens (receives CREATE_POOL, TOKEN_MINT, SWAP events)
+// Cost reduction: ~98% (from ~5000 credits/hour to ~50-100)
+// Webhook ID: 4a1ca70b-5932-4adf-b1f3-5e456b6cc913
+const USE_WEBSOCKET = false; // Legacy - kept for reference
+const newTokenListener = null;
+const tokenPoller = null;
 
 // GLOBAL ERROR HANDLERS
 process.on('uncaughtException', (err) => {
@@ -97,15 +105,12 @@ async function startListenerWorker() {
             indexerService.start();
         }
 
-        // 3. Start New Token Listener (With Delay to let Redis settle)
-        if (newTokenListener && typeof newTokenListener.startNewTokenListener === 'function') {
-            logger.info("🛰️ LISTENER: Starting New Token Discovery...");
-            setTimeout(() => {
-                newTokenListener.startNewTokenListener();
-            }, 1000);
-        } else {
-            logger.warn("⚠️ LISTENER: newTokenListener module missing startNewTokenListener function.");
-        }
+        // 3. Token Discovery - NOW HANDLED BY HELIUS WEBHOOKS
+        // No local polling or WebSocket needed - Helius pushes events to us
+        logger.info("📡 LISTENER: Token discovery via Helius webhooks (passive mode)");
+        logger.info("   → Endpoint: POST /webhook/new-tokens");
+        logger.info("   → Events: CREATE_POOL, TOKEN_MINT, SWAP");
+        logger.info("   → Stats: GET /webhook/new-tokens/stats");
 
         // 4. Start Grower Scanner (Market Cap Check)
         if (growerScanner && typeof growerScanner.start === 'function') {
