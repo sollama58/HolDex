@@ -507,21 +507,31 @@ async function fetchBatchPrices(mints) {
         }
     }
 
-    // 3. Combine results
+    // 3. Combine results - use null for missing data to distinguish from actual 0 values
     for (const mint of mints) {
         const jupiter = jupiterPrices.get(mint);
         const raydium = raydiumResults.get(mint);
 
         if (!jupiter && !raydium) continue;
 
+        // Use null for fields where we don't have valid data
+        // This allows the database update to preserve existing values
+        const priceUsd = jupiter?.priceUsd || raydium?.price || null;
+        const liquidity = raydium?.liquidity || null;
+        const volume24h = raydium?.volume24h || null; // Jupiter V3 doesn't provide volume
+        const change24h = jupiter?.change24h ?? null;
+
+        // Skip if we have no price data at all
+        if (!priceUsd || priceUsd <= 0) continue;
+
         results.set(mint, {
-            priceUsd: clampValue(jupiter?.priceUsd || raydium?.price || 0, PRICE_BOUNDS.MIN_PRICE, PRICE_BOUNDS.MAX_PRICE),
+            priceUsd: clampValue(priceUsd, PRICE_BOUNDS.MIN_PRICE, PRICE_BOUNDS.MAX_PRICE),
             mcap: 0, // Calculated separately with supply
-            liquidity: clampValue(raydium?.liquidity || 0, PRICE_BOUNDS.MIN_LIQUIDITY, PRICE_BOUNDS.MAX_LIQUIDITY),
-            volume24h: clampValue(jupiter?.volume24h || raydium?.volume24h || 0, PRICE_BOUNDS.MIN_VOLUME, PRICE_BOUNDS.MAX_VOLUME),
-            change24h: clampValue(jupiter?.change24h || 0, PRICE_BOUNDS.MIN_CHANGE_PCT, PRICE_BOUNDS.MAX_CHANGE_PCT),
-            change1h: 0,
-            change5m: 0,
+            liquidity: liquidity !== null ? clampValue(liquidity, PRICE_BOUNDS.MIN_LIQUIDITY, PRICE_BOUNDS.MAX_LIQUIDITY) : null,
+            volume24h: volume24h !== null ? clampValue(volume24h, PRICE_BOUNDS.MIN_VOLUME, PRICE_BOUNDS.MAX_VOLUME) : null,
+            change24h: change24h !== null ? clampValue(change24h, PRICE_BOUNDS.MIN_CHANGE_PCT, PRICE_BOUNDS.MAX_CHANGE_PCT) : null,
+            change1h: null, // Not available from Jupiter free tier
+            change5m: null, // Not available from Jupiter free tier
             pairAddress: raydium?.poolAddress || null,
             dex: raydium?.dex || 'unknown',
             source: jupiter ? 'jupiter' : 'raydium',

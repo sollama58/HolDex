@@ -705,16 +705,17 @@ async function smartCache(key, ttlSeconds, fetchFn) {
 async function enableIndexing(db, mint, poolData) {
     if (!poolData || !poolData.pairAddress) return;
     try {
+        // Only update pool data if we have valid (non-zero) values, otherwise preserve existing
         await db.run(`
             INSERT INTO pools (
                 address, mint, dex, price_usd, liquidity_usd, volume_24h, created_at, token_a, token_b, reserve_a, reserve_b
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             ON CONFLICT(address) DO UPDATE SET
-                price_usd = EXCLUDED.price_usd,
-                liquidity_usd = EXCLUDED.liquidity_usd,
-                volume_24h = EXCLUDED.volume_24h,
-                reserve_a = EXCLUDED.reserve_a,
-                reserve_b = EXCLUDED.reserve_b
+                price_usd = CASE WHEN EXCLUDED.price_usd > 0 THEN EXCLUDED.price_usd ELSE pools.price_usd END,
+                liquidity_usd = CASE WHEN EXCLUDED.liquidity_usd > 0 THEN EXCLUDED.liquidity_usd ELSE pools.liquidity_usd END,
+                volume_24h = CASE WHEN EXCLUDED.volume_24h > 0 THEN EXCLUDED.volume_24h ELSE pools.volume_24h END,
+                reserve_a = COALESCE(EXCLUDED.reserve_a, pools.reserve_a),
+                reserve_b = COALESCE(EXCLUDED.reserve_b, pools.reserve_b)
         `, [
             poolData.pairAddress, mint, poolData.dexId, poolData.priceUsd || 0, poolData.liquidity?.usd || 0,
             poolData.volume?.h24 || 0, Date.now(), poolData.baseToken, poolData.quoteToken,
@@ -795,9 +796,15 @@ async function aggregateAndSaveToken(db, mint) {
         // Build Update Query
         // FIX: Removed `timestamp` column update to preserve original creation time.
         // FIX: Added `updated_at = NOW()` to track recent updates properly.
-        const params = [totalLiq, totalVol, price, mint]; 
-        let query = `UPDATE tokens SET liquidity = $1, volume24h = $2, priceUsd = $3, updated_at = NOW(), marketCap = ($3 * CAST(supply AS DOUBLE PRECISION) / POWER(10, COALESCE(decimals, 9)))`;
-        
+        // FIX: Only update liquidity/volume/price if we have valid data (> 0), otherwise preserve existing
+        const params = [totalLiq, totalVol, price, mint];
+        let query = `UPDATE tokens SET
+            liquidity = CASE WHEN $1 > 0 THEN $1 ELSE liquidity END,
+            volume24h = CASE WHEN $2 > 0 THEN $2 ELSE volume24h END,
+            priceUsd = CASE WHEN $3 > 0 THEN $3 ELSE priceUsd END,
+            updated_at = NOW(),
+            marketCap = CASE WHEN $3 > 0 THEN ($3 * CAST(supply AS DOUBLE PRECISION) / POWER(10, COALESCE(decimals, 9))) ELSE marketCap END`;
+
         let idx = 5; // Start at 5 since we use $1-$4 above
         if (change24h !== null) { query += `, change24h = $${idx++}`; params.push(change24h); }
         if (change1h !== null) { query += `, change1h = $${idx++}`; params.push(change1h); }

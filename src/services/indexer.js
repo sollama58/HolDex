@@ -74,6 +74,7 @@ async function indexTokenOnChain(mint, retryCount = 0) {
         // FIX: Update market data on conflict, but only update identity if it's still "Unknown"
         // Identity fields (name, symbol, image) are signed with sig_identity
         // If already indexed with real data, preserve it. If still "Unknown", update it.
+        // FIX: Only update market data if we have valid values (> 0), otherwise preserve existing
         try {
             await db.run(`
                 INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, change1h, change5m, timestamp)
@@ -94,12 +95,12 @@ async function indexTokenOnChain(mint, retryCount = 0) {
                     THEN EXCLUDED.image
                     ELSE tokens.image
                 END,
-                priceUsd = EXCLUDED.priceUsd,
-                marketCap = EXCLUDED.marketCap,
-                volume24h = EXCLUDED.volume24h,
-                change24h = EXCLUDED.change24h,
-                change1h = EXCLUDED.change1h,
-                change5m = EXCLUDED.change5m,
+                priceUsd = CASE WHEN EXCLUDED.priceUsd > 0 THEN EXCLUDED.priceUsd ELSE tokens.priceUsd END,
+                marketCap = CASE WHEN EXCLUDED.marketCap > 0 THEN EXCLUDED.marketCap ELSE tokens.marketCap END,
+                volume24h = CASE WHEN EXCLUDED.volume24h > 0 THEN EXCLUDED.volume24h ELSE tokens.volume24h END,
+                change24h = CASE WHEN EXCLUDED.priceUsd > 0 THEN EXCLUDED.change24h ELSE tokens.change24h END,
+                change1h = CASE WHEN EXCLUDED.priceUsd > 0 THEN EXCLUDED.change1h ELSE tokens.change1h END,
+                change5m = CASE WHEN EXCLUDED.priceUsd > 0 THEN EXCLUDED.change5m ELSE tokens.change5m END,
                 updated_at = NOW()
             `, [
                 mint, baseData.name, baseData.ticker, baseData.image, supply, decimals,

@@ -107,21 +107,23 @@ async function runPriceUpdateCycle(db, broadcast) {
             // Update database
             for (const [mint, priceData] of prices) {
                 try {
-                    // Update prices and return fields needed for sig_market
+                    // Only update fields that have valid data (not null and greater than 0)
+                    // This preserves existing good data when API fetch fails or returns null/0
+                    // Uses COALESCE to preserve existing values when new value is null
                     const result = await db.get(`
                         UPDATE tokens SET
-                            priceusd = $1,
-                            marketcap = $2,
-                            liquidity = $3,
-                            volume24h = $4,
-                            change24h = $5,
-                            change1h = $6,
-                            change5m = $7,
-                            price_source = $8,
-                            price_timestamp = $9,
-                            price_pool = $10,
-                            liquidity_source = $8,
-                            liquidity_timestamp = $9
+                            priceusd = CASE WHEN $1::numeric IS NOT NULL AND $1::numeric > 0 THEN $1 ELSE priceusd END,
+                            marketcap = CASE WHEN $2::numeric IS NOT NULL AND $2::numeric > 0 THEN $2 ELSE marketcap END,
+                            liquidity = CASE WHEN $3::numeric IS NOT NULL AND $3::numeric > 0 THEN $3 ELSE liquidity END,
+                            volume24h = CASE WHEN $4::numeric IS NOT NULL AND $4::numeric > 0 THEN $4 ELSE volume24h END,
+                            change24h = CASE WHEN $1::numeric IS NOT NULL AND $1::numeric > 0 THEN COALESCE($5, change24h) ELSE change24h END,
+                            change1h = CASE WHEN $1::numeric IS NOT NULL AND $1::numeric > 0 THEN COALESCE($6, change1h) ELSE change1h END,
+                            change5m = CASE WHEN $1::numeric IS NOT NULL AND $1::numeric > 0 THEN COALESCE($7, change5m) ELSE change5m END,
+                            price_source = CASE WHEN $1::numeric IS NOT NULL AND $1::numeric > 0 THEN $8 ELSE price_source END,
+                            price_timestamp = CASE WHEN $1::numeric IS NOT NULL AND $1::numeric > 0 THEN $9 ELSE price_timestamp END,
+                            price_pool = CASE WHEN $1::numeric IS NOT NULL AND $1::numeric > 0 THEN COALESCE($10, price_pool) ELSE price_pool END,
+                            liquidity_source = CASE WHEN $3::numeric IS NOT NULL AND $3::numeric > 0 THEN $8 ELSE liquidity_source END,
+                            liquidity_timestamp = CASE WHEN $3::numeric IS NOT NULL AND $3::numeric > 0 THEN $9 ELSE liquidity_timestamp END
                         WHERE mint = $11
                         RETURNING mint, priceusd, marketcap, liquidity,
                                   price_source, price_timestamp, price_pool,
