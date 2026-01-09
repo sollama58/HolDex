@@ -600,8 +600,12 @@ async function initDB() {
             for (const sql of migrations) {
                 try {
                     await primaryPool.query(sql);
-                } catch (_e) {
-                    // Column might already exist, ignore
+                } catch (e) {
+                    // Column might already exist or type already correct - that's fine
+                    // But log ALTER COLUMN failures that aren't "already exists" for debugging
+                    if (sql.includes('ALTER COLUMN') && !e.message?.includes('already')) {
+                        logger.warn(`Migration warning (${sql.slice(0, 60)}...): ${e.message}`);
+                    }
                 }
             }
 
@@ -721,14 +725,15 @@ async function enableIndexing(db, mint, poolData) {
     if (!poolData || !poolData.pairAddress) return;
     try {
         // Only update pool data if we have valid (non-zero) values, otherwise preserve existing
+        // FIX: Cast numeric values explicitly to avoid type mismatch with old INTEGER columns
         await db.run(`
             INSERT INTO pools (
                 address, mint, dex, price_usd, liquidity_usd, volume_24h, created_at, token_a, token_b, reserve_a, reserve_b
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ) VALUES ($1, $2, $3, $4::DOUBLE PRECISION, $5::DOUBLE PRECISION, $6::DOUBLE PRECISION, $7, $8, $9, $10, $11)
             ON CONFLICT(address) DO UPDATE SET
-                price_usd = CASE WHEN EXCLUDED.price_usd > 0 THEN EXCLUDED.price_usd ELSE pools.price_usd END,
-                liquidity_usd = CASE WHEN EXCLUDED.liquidity_usd > 0 THEN EXCLUDED.liquidity_usd ELSE pools.liquidity_usd END,
-                volume_24h = CASE WHEN EXCLUDED.volume_24h > 0 THEN EXCLUDED.volume_24h ELSE pools.volume_24h END,
+                price_usd = CASE WHEN EXCLUDED.price_usd::DOUBLE PRECISION > 0 THEN EXCLUDED.price_usd ELSE pools.price_usd END,
+                liquidity_usd = CASE WHEN EXCLUDED.liquidity_usd::DOUBLE PRECISION > 0 THEN EXCLUDED.liquidity_usd ELSE pools.liquidity_usd END,
+                volume_24h = CASE WHEN EXCLUDED.volume_24h::DOUBLE PRECISION > 0 THEN EXCLUDED.volume_24h ELSE pools.volume_24h END,
                 reserve_a = COALESCE(EXCLUDED.reserve_a, pools.reserve_a),
                 reserve_b = COALESCE(EXCLUDED.reserve_b, pools.reserve_b)
         `, [
@@ -822,12 +827,14 @@ async function aggregateAndSaveToken(db, mint) {
         const safeTotalVol = Number.isFinite(totalVol) ? Math.floor(totalVol) : 0;
         const safePrice = Number.isFinite(price) ? price : 0;  // Keep decimals for price
         const params = [safeTotalLiq, safeTotalVol, safePrice, mint];
+        // FIX: Cast all numeric parameters explicitly to avoid type mismatch errors
+        // (e.g., if column is still INTEGER in old DB but we're passing DOUBLE PRECISION)
         let query = `UPDATE tokens SET
-            liquidity = CASE WHEN $1 > 0 THEN FLOOR($1)::DOUBLE PRECISION ELSE liquidity END,
-            volume24h = CASE WHEN $2 > 0 THEN FLOOR($2)::DOUBLE PRECISION ELSE volume24h END,
-            priceUsd = CASE WHEN $3 > 0 THEN $3::DOUBLE PRECISION ELSE priceUsd END,
+            liquidity = CASE WHEN $1::DOUBLE PRECISION > 0 THEN FLOOR($1::DOUBLE PRECISION)::DOUBLE PRECISION ELSE liquidity END,
+            volume24h = CASE WHEN $2::DOUBLE PRECISION > 0 THEN FLOOR($2::DOUBLE PRECISION)::DOUBLE PRECISION ELSE volume24h END,
+            priceUsd = CASE WHEN $3::DOUBLE PRECISION > 0 THEN $3::DOUBLE PRECISION ELSE priceUsd END,
             updated_at = NOW(),
-            marketCap = CASE WHEN $3 > 0 THEN FLOOR($3::DOUBLE PRECISION * CAST(supply AS DOUBLE PRECISION) / POWER(10, COALESCE(decimals, 9)))::DOUBLE PRECISION ELSE marketCap END`;
+            marketCap = CASE WHEN $3::DOUBLE PRECISION > 0 THEN FLOOR($3::DOUBLE PRECISION * CAST(supply AS DOUBLE PRECISION) / POWER(10, COALESCE(decimals, 9)))::DOUBLE PRECISION ELSE marketCap END`;
 
         let idx = 5; // Start at 5 since we use $1-$4 above
         if (change24h !== null) { query += `, change24h = $${idx++}::DOUBLE PRECISION`; params.push(Number.isFinite(change24h) ? change24h : 0); }
