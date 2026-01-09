@@ -980,11 +980,11 @@
             <div class="bg-[#000000] border border-[#252525] rounded-xl p-8 relative overflow-hidden group hover:border-[#ea580c] transition-colors">
                 <div class="absolute top-4 right-4 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><i data-lucide="code" width="100" class="text-[#ea580c]"></i></div>
                 <h3 class="text-2xl font-bold text-white mb-2">Build on $ASDFASDFA</h3>
-                <p class="text-[#737373] mb-6 max-w-2xl text-sm">HolDex API is open. Build bots. Build dashboards. Integrate K-Score into your dApp. <strong class="text-[#ea580c]">Hold $ASDFASDFA to access. Burn to unlock unlimited calls.</strong></p>
+                <p class="text-[#737373] mb-6 max-w-2xl text-sm">HolDex API is open. Build bots. Build dashboards. Integrate K-Score into your dApp. <strong class="text-[#ea580c]">API keys available upon request.</strong></p>
                 
                 <div id="api-section-unconnected">
                     <div class="flex flex-col md:flex-row gap-4">
-                        <button onclick="toggleApiModal()" class="action-btn flex items-center justify-center gap-2"><i data-lucide="file-text" width="16"></i> Documentation</button>
+                        <button onclick="navigateTo('dev')" class="action-btn flex items-center justify-center gap-2"><i data-lucide="file-text" width="16"></i> Documentation</button>
                         <button onclick="openWalletModal()" class="action-btn flex items-center justify-center gap-2 bg-[#0a0a0a] border-[#22c55e] text-[#22c55e] hover:bg-green-900/20"><i data-lucide="wallet" width="16"></i> Connect to Manage Keys</button>
                     </div>
                 </div>
@@ -993,53 +993,8 @@
                     <div class="flex justify-between items-center mb-4">
                         <h4 class="text-[#fb923c] font-bold text-sm uppercase">Your API Keys</h4>
                         <div class="flex gap-2">
-                            <button onclick="toggleApiModal()" class="text-xs text-[#737373] hover:text-[#fb923c] flex items-center gap-1 border border-[#252525] px-2 py-1 rounded bg-[#0a0a0a]"><i data-lucide="file-text" width="12"></i> Docs</button>
+                            <button onclick="navigateTo('dev')" class="text-xs text-[#737373] hover:text-[#fb923c] flex items-center gap-1 border border-[#252525] px-2 py-1 rounded bg-[#0a0a0a]"><i data-lucide="file-text" width="12"></i> Docs</button>
                             <button onclick="requestApiKey()" class="text-xs text-[#22c55e] border border-[#22c55e] px-2 py-1 rounded bg-[#0a0a0a] hover:bg-green-900/20 flex items-center gap-1"><i data-lucide="plus" width="12"></i> New Key</button>
-                        </div>
-                    </div>
-
-                    <!-- Burn Credits Banner -->
-                    <div class="bg-gradient-to-r from-[#141414] to-[#0a0a0a] border border-[#252525] rounded-lg p-3">
-                        <div class="flex items-center gap-2 mb-2">
-                            <span class="text-[#fb923c] font-bold text-xs uppercase">Burn = API Calls</span>
-                            <span class="text-[#737373] text-xs">Hold to enter. Burn to use.</span>
-                        </div>
-                        <div class="grid grid-cols-2 gap-2 text-center text-xs">
-                            <div class="bg-black/50 rounded p-2 border border-[#fb923c]/30">
-                                <div class="text-[#737373]">Eligibility</div>
-                                <div class="text-[#fb923c] font-bold">Hold 10K+</div>
-                                <div class="text-[#666]">$ASDFASDFA</div>
-                            </div>
-                            <div class="bg-black/50 rounded p-2 border border-[#22c55e]/30">
-                                <div class="text-[#737373]">Pricing</div>
-                                <div class="text-[#22c55e] font-bold">1:1</div>
-                                <div class="text-[#22c55e]">1 burn = 1 call</div>
-                            </div>
-                        </div>
-                        <div class="text-center text-[10px] text-[#737373] mt-2 italic">
-                            Burn $ASDFASDFA → Earn API calls forever. Power users rewarded.
-                        </div>
-                    </div>
-
-                    <!-- My Credits -->
-                    <div id="my-credits" class="hidden bg-black/50 rounded-lg p-3 border border-[#22c55e]/30">
-                        <div class="flex justify-between items-center mb-2">
-                            <span class="text-[#22c55e] font-bold text-xs uppercase">Your Credits</span>
-                            <button onclick="refreshCredits()" class="text-[10px] text-[#737373] hover:text-[#fb923c]"><i data-lucide="refresh-cw" width="10"></i></button>
-                        </div>
-                        <div class="grid grid-cols-3 gap-2 text-center text-xs">
-                            <div>
-                                <div class="text-[#737373]">Holdings</div>
-                                <div id="credits-holdings" class="text-[#fb923c] font-bold">-</div>
-                            </div>
-                            <div>
-                                <div class="text-[#737373]">Burned</div>
-                                <div id="credits-burned" class="text-[#22c55e] font-bold">-</div>
-                            </div>
-                            <div>
-                                <div class="text-[#737373]">Remaining</div>
-                                <div id="credits-remaining" class="text-[#22c55e] font-bold">-</div>
-                            </div>
                         </div>
                     </div>
 
@@ -1402,6 +1357,260 @@
         </div>
     </div>
 
+    <!-- DEV / API DOCUMENTATION VIEW -->
+    <div id="view-dev" class="view-section px-4 md:px-0 hidden">
+        <div class="bg-[#0a0a0a] border-2 border-[#252525] rounded-2xl p-6 md:p-8 shadow-2xl max-w-4xl mx-auto">
+            <div class="flex items-center gap-4 border-b-2 border-[#252525] pb-6 mb-6">
+                <div class="w-14 h-14 rounded-xl flex items-center justify-center bg-[#141414] text-[#ea580c] border-2 border-[#252525]">
+                    <i data-lucide="terminal" width="28"></i>
+                </div>
+                <div>
+                    <h2 class="text-2xl md:text-3xl font-bold text-white">API Documentation</h2>
+                    <p class="text-[#737373] text-sm">HolDex REST API v1.0</p>
+                </div>
+            </div>
+
+            <!-- Authentication Section -->
+            <div class="bg-[#141414] border border-[#252525] p-4 rounded-lg mb-6">
+                <h4 class="text-[#ea580c] font-bold mb-3 text-sm uppercase flex items-center gap-2">
+                    <i data-lucide="key" width="14"></i> Authentication
+                </h4>
+                <p class="text-sm text-[#e0e0e0] mb-3">API keys are issued by admin. Include your key in the request header:</p>
+                <div class="bg-[#0a0a0a] border border-[#252525] rounded p-3 font-mono text-xs text-[#fb923c]">
+                    x-api-key: YOUR_API_KEY
+                </div>
+                <div class="mt-3 text-xs text-[#737373]">
+                    <span class="text-[#22c55e]">Public endpoints</span> (marked below) don't require authentication but have stricter rate limits.
+                </div>
+            </div>
+
+            <!-- Base URL -->
+            <div class="bg-[#141414] border border-[#252525] p-4 rounded-lg mb-6">
+                <h4 class="text-[#737373] font-bold mb-2 text-xs uppercase">Base URL</h4>
+                <div class="bg-[#0a0a0a] border border-[#252525] rounded p-3 font-mono text-sm text-[#fb923c]">
+                    https://asdev-backend.onrender.com/api
+                </div>
+            </div>
+
+            <!-- Endpoints -->
+            <div class="space-y-6">
+                <h3 class="text-lg font-bold text-white border-b border-[#252525] pb-2">Public Endpoints</h3>
+
+                <!-- GET /tokens/public -->
+                <div class="bg-[#141414] border border-[#252525] p-4 rounded-lg">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span>
+                        <span class="text-[#fb923c] font-mono font-bold text-sm">/tokens/public</span>
+                        <span class="text-[10px] text-[#22c55e] border border-[#22c55e]/30 px-2 py-0.5 rounded">No Auth</span>
+                    </div>
+                    <p class="text-sm text-[#e0e0e0] mb-3">Paginated list of all tokens with K-Score data.</p>
+                    <div class="text-xs text-[#737373] mb-2">Query Parameters:</div>
+                    <div class="grid grid-cols-2 gap-2 text-xs mb-3">
+                        <div><code class="text-[#ea580c]">page</code> - Page number (default: 1)</div>
+                        <div><code class="text-[#ea580c]">limit</code> - Results per page (max: 100)</div>
+                        <div><code class="text-[#ea580c]">sort</code> - kscore, mcap, volume, price, holders</div>
+                        <div><code class="text-[#ea580c]">order</code> - asc or desc</div>
+                        <div><code class="text-[#ea580c]">filter</code> - verified (only verified tokens)</div>
+                        <div><code class="text-[#ea580c]">search</code> - Search by name/symbol/mint</div>
+                    </div>
+                </div>
+
+                <!-- GET /token/:mint/public -->
+                <div class="bg-[#141414] border border-[#252525] p-4 rounded-lg">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span>
+                        <span class="text-[#fb923c] font-mono font-bold text-sm">/token/:mint/public</span>
+                        <span class="text-[10px] text-[#22c55e] border border-[#22c55e]/30 px-2 py-0.5 rounded">No Auth</span>
+                    </div>
+                    <p class="text-sm text-[#e0e0e0] mb-3">Full token data including K-Score, conviction breakdown, and market data.</p>
+                    <div class="bg-[#0a0a0a] border border-[#252525] rounded p-3 font-mono text-[10px] text-[#e0e0e0] overflow-x-auto">
+<pre class="whitespace-pre">{
+  "mint": "...",
+  "name": "Token Name",
+  "symbol": "TKN",
+  "priceUsd": 0.001234,
+  "marketCap": 1234567,
+  "holders": 500,
+  "kScore": 72,
+  "creditRating": "BB+",
+  "conviction": {
+    "score": 75,
+    "accumulators": 8,
+    "holders": 6,
+    "reducers": 4,
+    "extractors": 2
+  }
+}</pre>
+                    </div>
+                </div>
+
+                <!-- GET /token/:mint/top-holders/public -->
+                <div class="bg-[#141414] border border-[#252525] p-4 rounded-lg">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span>
+                        <span class="text-[#fb923c] font-mono font-bold text-sm">/token/:mint/top-holders/public</span>
+                        <span class="text-[10px] text-[#22c55e] border border-[#22c55e]/30 px-2 py-0.5 rounded">No Auth</span>
+                    </div>
+                    <p class="text-sm text-[#e0e0e0] mb-3">Top 20 holders with conviction role classification.</p>
+                    <div class="bg-[#0a0a0a] border border-[#252525] rounded p-3 font-mono text-[10px] text-[#e0e0e0] overflow-x-auto">
+<pre class="whitespace-pre">{
+  "holders": [{
+    "address": "5yBE...",
+    "balance": 1000000,
+    "percentage": 5.2,
+    "role": {
+      "class": "accumulator",
+      "icon": "💎",
+      "metal": "Diamond",
+      "impact": "bullish"
+    }
+  }]
+}</pre>
+                    </div>
+                </div>
+
+                <!-- GET /token/:mint/candles/public -->
+                <div class="bg-[#141414] border border-[#252525] p-4 rounded-lg">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span>
+                        <span class="text-[#fb923c] font-mono font-bold text-sm">/token/:mint/candles/public</span>
+                        <span class="text-[10px] text-[#22c55e] border border-[#22c55e]/30 px-2 py-0.5 rounded">No Auth</span>
+                    </div>
+                    <p class="text-sm text-[#e0e0e0] mb-3">OHLCV candlestick data for charting.</p>
+                    <div class="text-xs text-[#737373] mb-2">Query Parameters:</div>
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div><code class="text-[#ea580c]">resolution</code> - 5, 60, or D (5min, 1hr, daily)</div>
+                        <div><code class="text-[#ea580c]">from</code> - Start timestamp (unix ms)</div>
+                        <div><code class="text-[#ea580c]">to</code> - End timestamp (unix ms)</div>
+                    </div>
+                </div>
+
+                <h3 class="text-lg font-bold text-white border-b border-[#252525] pb-2 mt-8">Authenticated Endpoints</h3>
+                <p class="text-xs text-[#737373] mb-4">These endpoints require an API key. Higher rate limits and additional data.</p>
+
+                <!-- GET /tokens -->
+                <div class="bg-[#141414] border border-[#252525] p-4 rounded-lg">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span>
+                        <span class="text-[#fb923c] font-mono font-bold text-sm">/tokens</span>
+                        <span class="text-[10px] text-[#ea580c] border border-[#ea580c]/30 px-2 py-0.5 rounded">API Key</span>
+                    </div>
+                    <p class="text-sm text-[#e0e0e0]">Same as /tokens/public but with higher rate limits and full data access.</p>
+                </div>
+
+                <!-- GET /token/:mint -->
+                <div class="bg-[#141414] border border-[#252525] p-4 rounded-lg">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span>
+                        <span class="text-[#fb923c] font-mono font-bold text-sm">/token/:mint</span>
+                        <span class="text-[10px] text-[#ea580c] border border-[#ea580c]/30 px-2 py-0.5 rounded">API Key</span>
+                    </div>
+                    <p class="text-sm text-[#e0e0e0]">Full token details with integrity verification data.</p>
+                </div>
+
+                <!-- GET /token/:mint/evolution -->
+                <div class="bg-[#141414] border border-[#252525] p-4 rounded-lg">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span>
+                        <span class="text-[#fb923c] font-mono font-bold text-sm">/token/:mint/evolution</span>
+                        <span class="text-[10px] text-[#ea580c] border border-[#ea580c]/30 px-2 py-0.5 rounded">API Key</span>
+                    </div>
+                    <p class="text-sm text-[#e0e0e0] mb-3">K-Score history over time for trajectory analysis. Only available for verified tokens.</p>
+                    <div class="text-xs text-[#737373]">Query: <code class="text-[#ea580c]">days</code> - 30, 60, or 90 (default: 30)</div>
+                </div>
+
+                <!-- GET /token/:mint/verify -->
+                <div class="bg-[#141414] border border-[#252525] p-4 rounded-lg">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span>
+                        <span class="text-[#fb923c] font-mono font-bold text-sm">/token/:mint/verify</span>
+                        <span class="text-[10px] text-[#ea580c] border border-[#ea580c]/30 px-2 py-0.5 rounded">API Key</span>
+                    </div>
+                    <p class="text-sm text-[#e0e0e0]">Cryptographic integrity verification. Returns signature validation status.</p>
+                </div>
+
+                <!-- GET /token/:mint/card.png -->
+                <div class="bg-[#141414] border border-[#252525] p-4 rounded-lg">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span>
+                        <span class="text-[#fb923c] font-mono font-bold text-sm">/token/:mint/card.png</span>
+                        <span class="text-[10px] text-[#22c55e] border border-[#22c55e]/30 px-2 py-0.5 rounded">No Auth</span>
+                    </div>
+                    <p class="text-sm text-[#e0e0e0]">Generated K-Score card image (PNG). Perfect for social sharing.</p>
+                </div>
+
+                <!-- Health -->
+                <div class="bg-[#141414] border border-[#252525] p-4 rounded-lg">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span>
+                        <span class="text-[#fb923c] font-mono font-bold text-sm">/health</span>
+                        <span class="text-[10px] text-[#22c55e] border border-[#22c55e]/30 px-2 py-0.5 rounded">No Auth</span>
+                    </div>
+                    <p class="text-sm text-[#e0e0e0]">API health check. Returns service status, uptime, and memory usage.</p>
+                </div>
+            </div>
+
+            <!-- Holder Role Reference -->
+            <div class="bg-[#141414] border border-[#252525] p-4 rounded-lg mt-6">
+                <h4 class="text-[#ea580c] font-bold mb-3 text-sm uppercase">Holder Conviction Roles</h4>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div class="flex items-center gap-2">
+                        <span class="text-cyan-300 text-lg">💎</span>
+                        <div>
+                            <div class="text-[#e0e0e0] font-bold">Diamond</div>
+                            <div class="text-[10px] text-[#737373]">Accumulator</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-yellow-400 text-lg">🥇</span>
+                        <div>
+                            <div class="text-[#e0e0e0] font-bold">Gold</div>
+                            <div class="text-[10px] text-[#737373]">Holder</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-gray-400 text-lg">🥈</span>
+                        <div>
+                            <div class="text-[#e0e0e0] font-bold">Silver</div>
+                            <div class="text-[10px] text-[#737373]">Reducer</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-[#ea580c] text-lg">🔩</span>
+                        <div>
+                            <div class="text-[#e0e0e0] font-bold">Rust</div>
+                            <div class="text-[10px] text-[#737373]">Extractor</div>
+                        </div>
+                    </div>
+                </div>
+                <p class="text-[10px] text-[#737373] mt-3">Diamond + Gold holders at 50%+ indicates strong conviction. Below 50% suggests exit liquidity risk.</p>
+            </div>
+
+            <!-- Rate Limits -->
+            <div class="bg-[#141414] border border-[#252525] p-4 rounded-lg mt-6">
+                <h4 class="text-[#ea580c] font-bold mb-3 text-sm uppercase flex items-center gap-2">
+                    <i data-lucide="gauge" width="14"></i> Rate Limits
+                </h4>
+                <div class="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <div class="text-[#737373] text-xs uppercase mb-1">Public Endpoints</div>
+                        <div class="text-[#e0e0e0]">60 requests/minute</div>
+                    </div>
+                    <div>
+                        <div class="text-[#737373] text-xs uppercase mb-1">With API Key</div>
+                        <div class="text-[#22c55e]">Based on tier (1K - 100K+ /day)</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Contact -->
+            <div class="text-center mt-8 pt-6 border-t border-[#252525]">
+                <p class="text-[#737373] text-sm">Need an API key or have questions?</p>
+                <p class="text-[#fb923c] text-sm mt-1">Contact admin via The Space or Twitter</p>
+            </div>
+        </div>
+    </div>
+
 </main>
 
 <!-- BOTTOM NAVIGATION -->
@@ -1418,19 +1627,11 @@
         <i data-lucide="bar-chart-2" width="20"></i>
         <span>K-Score</span>
     </a>
-    <button class="bottom-nav-item" onclick="navigateTo('wallet')" id="nav-wallet">
-        <i data-lucide="wallet" width="20"></i>
-        <span>PnL</span>
-    </button>
-    <a href="/cult-space" class="bottom-nav-item" id="nav-space">
-        <i data-lucide="users" width="20"></i>
-        <span>Space</span>
-    </a>
     <button class="bottom-nav-item" onclick="toggleAppsModal()" id="nav-apps">
         <i data-lucide="grid" width="20"></i>
         <span>Apps</span>
     </button>
-    <button class="bottom-nav-item" onclick="toggleApiModal()">
+    <button class="bottom-nav-item" onclick="navigateTo('dev')" id="nav-dev">
         <i data-lucide="code-2" width="20"></i>
         <span>Dev</span>
     </button>
@@ -1453,119 +1654,6 @@
                 <span class="text-white font-bold">Solflare</span>
             </button>
         </div>
-    </div>
-</div>
-
-<div id="api-docs-modal" class="modal-overlay hidden">
-    <div class="modal-content bg-[#0a0a0a] border-2 border-[#252525] p-6 shadow-2xl relative w-full max-w-3xl">
-        <button class="absolute top-4 right-4 text-[#737373]" onclick="toggleApiModal()"><i data-lucide="x" width="24"></i></button>
-        <div class="flex items-center gap-3 mb-6">
-            <div class="p-2 bg-[#141414] rounded-lg border border-[#252525] text-[#ea580c]"><i data-lucide="terminal" width="24"></i></div>
-            <div>
-                <h3 class="text-xl font-bold text-white font-sans">HolDex API Documentation</h3>
-                <p class="text-xs text-[#737373] font-mono">v1.0 Public Endpoint</p>
-            </div>
-        </div>
-        
-        <div class="bg-[#000000] border border-[#252525] p-4 rounded-lg mb-6">
-            <h4 class="text-[#ea580c] font-bold mb-2 text-sm uppercase">Burn Credits Access</h4>
-            <p class="text-sm text-[#e0e0e0] mb-2">HolDex uses a burn-based access system. Include your wallet in requests:</p>
-            <div class="code-block text-xs py-2 px-3">x-wallet: YOUR_WALLET_ADDRESS</div>
-            <div class="mt-3 text-xs">
-                <span class="text-[#737373]">Eligibility:</span> <span class="text-[#fb923c]">Hold 10K+ $ASDFASDFA</span>
-                <span class="mx-2 text-[#666]">|</span>
-                <span class="text-[#737373]">Pricing:</span> <span class="text-[#22c55e]">1 burn = 1 call (forever)</span>
-            </div>
-            <p class="text-[10px] text-[#737373] mt-2 italic">Power users who burned tokens = lifetime API access. Value creation rewarded.</p>
-        </div>
-
-        <div class="space-y-6 overflow-y-auto max-h-[50vh] pr-2 custom-scrollbar">
-             <!-- Endpoint 1 -->
-             <div>
-                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/tokens</span></div>
-                 <p class="text-sm text-[#e0e0e0] mb-2">Fetch paginated token list. Params: <code class="text-[#ea580c]">filter=verified</code>, <code class="text-[#ea580c]">sort=kscore</code></p>
-             </div>
-
-             <!-- Endpoint 2 -->
-             <div>
-                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/token/:mint</span></div>
-                 <p class="text-sm text-[#e0e0e0] mb-2">Full token data with K-Score, Credit Rating, Conviction Breakdown (verified only).</p>
-                 <div class="code-block text-[10px]">
-<span class="text-[#737373]">// conviction object (verified tokens)</span>
-"conviction": {
-  "score": 75,
-  "accumulators": 8, "holders": 6,
-  "reducers": 4, "extractors": 2,
-  "roles": {
-    "accumulator": { "icon": "💎", "metal": "Diamond" },
-    "holder": { "icon": "🥇", "metal": "Gold" },
-    "reducer": { "icon": "🥈", "metal": "Silver" },
-    "extractor": { "icon": "🔩", "metal": "Rust" }
-  }
-}
-                 </div>
-             </div>
-
-             <!-- Endpoint 3: Holders -->
-             <div>
-                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/token/:mint/holders</span></div>
-                 <p class="text-sm text-[#e0e0e0] mb-2">Top 20 holders with role classification (Diamond/Gold/Silver/Rust).</p>
-                 <div class="code-block text-[10px]">
-<span class="text-[#737373]">// Each holder includes role metal</span>
-"holders": [{
-  "address": "5yBE...",
-  "class": "accumulator",
-  "role": { "icon": "💎", "metal": "Diamond", "impact": "bullish" },
-  "buys": 12, "sells": 3
-}]
-                 </div>
-             </div>
-
-             <!-- Endpoint 4: Evolution -->
-             <div>
-                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/token/:mint/evolution</span></div>
-                 <p class="text-sm text-[#e0e0e0] mb-2">K-Score history for trajectory analysis (30/60/90 days).</p>
-             </div>
-
-             <!-- Endpoint 5: Candles -->
-             <div>
-                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/token/:mint/candles</span></div>
-                 <p class="text-sm text-[#e0e0e0] mb-2">OHLCV data. Params: <code class="text-[#ea580c]">resolution</code> (5, 60, D), <code class="text-[#ea580c]">from</code>, <code class="text-[#ea580c]">to</code></p>
-             </div>
-
-             <!-- Burn Credits System -->
-             <div class="bg-gradient-to-r from-[#22c55e]/10 to-transparent p-4 rounded-lg border border-[#22c55e]/30">
-                 <h4 class="text-[#22c55e] font-bold mb-3 text-sm uppercase flex items-center gap-2"><i data-lucide="flame" width="14"></i> Burn Credits System</h4>
-                 <p class="text-sm text-[#e0e0e0] mb-3">Hold to enter. Burn to use. 1 token burned = 1 API call forever.</p>
-                 <div class="grid grid-cols-2 gap-2 text-center text-xs mb-3">
-                     <div class="bg-black/50 rounded p-2"><div class="text-[#737373]">Eligibility</div><div class="text-[#fb923c] font-bold">Hold 10K+</div><div class="text-[#666]">$ASDFASDFA</div></div>
-                     <div class="bg-black/50 rounded p-2"><div class="text-[#737373]">Pricing</div><div class="text-[#22c55e] font-bold">1:1</div><div class="text-[#22c55e]">1 burn = 1 call</div></div>
-                 </div>
-                 <div class="flex items-center gap-2 mb-2"><span class="px-2 py-1 rounded bg-green-900/30 text-green-500 text-xs font-bold font-mono border border-green-500/30">GET</span> <span class="text-[#fb923c] font-mono font-bold text-sm">/api/credits/:wallet</span></div>
-                 <div class="code-block text-[10px]">
-<span class="text-[#737373]">// Response</span>
-{
-  "holdings": 50000,
-  "burned": 10000,
-  "usedCalls": 2500,
-  "remainingCalls": 7500
-}
-                 </div>
-             </div>
-
-             <!-- Holder Role Metals -->
-             <div class="bg-[#141414] p-4 rounded-lg border border-[#252525]">
-                 <h4 class="text-[#ea580c] font-bold mb-3 text-sm uppercase">Holder Role Metals</h4>
-                 <div class="grid grid-cols-2 gap-2 text-xs">
-                     <div class="flex items-center gap-2"><span class="text-cyan-300">💎</span> <span class="text-[#e0e0e0]">Diamond</span> <span class="text-[#737373]">Accumulator</span></div>
-                     <div class="flex items-center gap-2"><span class="text-yellow-400">🥇</span> <span class="text-[#e0e0e0]">Gold</span> <span class="text-[#737373]">Holder</span></div>
-                     <div class="flex items-center gap-2"><span class="text-gray-400">🥈</span> <span class="text-[#e0e0e0]">Silver</span> <span class="text-[#737373]">Reducer</span></div>
-                     <div class="flex items-center gap-2"><span class="text-[#ea580c]">🔩</span> <span class="text-[#e0e0e0]">Rust</span> <span class="text-[#737373]">Extractor</span></div>
-                 </div>
-                 <p class="text-[10px] text-[#737373] mt-3">Diamond+Gold ≥ 50% = Strong conviction. Below 50% = Exit liquidity risk.</p>
-             </div>
-        </div>
-        <button onclick="toggleApiModal()" class="w-full bg-[#141414] text-[#fb923c] py-3 rounded-lg font-bold text-sm mt-4">Close Documentation</button>
     </div>
 </div>
 
@@ -2098,9 +2186,12 @@
             document.getElementById('view-wallet').classList.remove('hidden');
             document.getElementById('nav-wallet').classList.add('active');
             lucide.createIcons();
-        } else if (hash.startsWith('#token/')) { 
-            showDetailView(hash.split('/')[1]); 
-        } 
+        } else if (hash === '#dev') {
+            document.getElementById('view-dev').classList.remove('hidden');
+            document.getElementById('nav-dev').classList.add('active');
+        } else if (hash.startsWith('#token/')) {
+            showDetailView(hash.split('/')[1]);
+        }
     }
 
     // --- FETCH LIST ---
@@ -3123,60 +3214,6 @@
         } catch (e) { console.error('fetchMyKeys error:', e); }
     }
 
-    // Burn Credits System
-    async function fetchCredits() {
-        if (!walletAddress) return;
-
-        try {
-            const res = await fetch(`${API_URL}/api/credits/${walletAddress}`);
-            const data = await res.json();
-
-            if (data.success) {
-                const credits = data.credits;
-                document.getElementById('my-credits').classList.remove('hidden');
-                document.getElementById('credits-holdings').textContent = credits.holdings.toLocaleString();
-                document.getElementById('credits-burned').textContent = credits.burned.toLocaleString();
-                document.getElementById('credits-remaining').textContent = credits.remainingCalls.toLocaleString();
-
-                // Color code based on status
-                const holdingsEl = document.getElementById('credits-holdings');
-                const remainingEl = document.getElementById('credits-remaining');
-
-                if (credits.holdings < 10000) {
-                    holdingsEl.classList.add('text-red-500');
-                    holdingsEl.classList.remove('text-[#fb923c]');
-                } else {
-                    holdingsEl.classList.remove('text-red-500');
-                    holdingsEl.classList.add('text-[#fb923c]');
-                }
-
-                if (credits.remainingCalls === 0) {
-                    remainingEl.classList.add('text-red-500');
-                    remainingEl.classList.remove('text-[#22c55e]');
-                } else {
-                    remainingEl.classList.remove('text-red-500');
-                    remainingEl.classList.add('text-[#22c55e]');
-                }
-            }
-        } catch (e) {
-            console.error('fetchCredits error:', e);
-        }
-    }
-
-    async function refreshCredits() {
-        if (!walletAddress) return;
-
-        try {
-            await fetch(`${API_URL}/api/credits/${walletAddress}/refresh`, { method: 'POST' });
-            await fetchCredits();
-        } catch (e) {
-            console.error('refreshCredits error:', e);
-        }
-    }
-
-    window.fetchCredits = fetchCredits;
-    window.refreshCredits = refreshCredits;
-
     window.requestApiKey = requestApiKey; window.fetchMyKeys = fetchMyKeys; window.closeKeyModal = () => toggleModal('key-modal');
     window.copyKey = () => { navigator.clipboard.writeText(document.getElementById('generated-key-display').innerText); alert('Copied'); };
 
@@ -3246,7 +3283,7 @@
     };
     
     window.openWalletModal = () => toggleModal('wallet-modal'); window.closeWalletModal = () => toggleModal('wallet-modal');
-    window.toggleApiModal = () => toggleModal('api-docs-modal'); window.toggleLpModal = () => toggleModal('lp-modal');
+    window.toggleLpModal = () => toggleModal('lp-modal');
     window.toggleHowItWorksModal = () => toggleModal('how-it-works-modal'); window.closePreview = () => toggleModal('preview-modal');
     window.toggleKScoreModal = () => toggleModal('kscore-modal'); window.toggleInfoModal = () => toggleModal('info-modal');
     
@@ -3276,7 +3313,6 @@
             updateWalletUI(true);
             closeWalletModal();
             checkBalances(); // Check balances on connect
-            fetchCredits(); // Fetch burn credits
         } catch (e) { console.error(e); }
     };
     
