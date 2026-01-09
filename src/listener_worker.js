@@ -8,7 +8,8 @@ const logger = require('./services/logger');
 // --- TASKS ---
 const { updateSingleToken } = require('./tasks/kScoreUpdater');
 const growerScanner = require('./tasks/growerScanner');
-const newTokenListener = require('./tasks/newTokenListener');
+// DISABLED: New token listener removed - tokens are now only added when CA is searched
+// const newTokenListener = require('./tasks/newTokenListener');
 const { startQueueProcessor, stopQueueProcessor } = require('./services/tokenQueue');
 
 // GLOBAL ERROR HANDLERS
@@ -102,15 +103,15 @@ async function startListenerWorker() {
         logger.info("📥 LISTENER: Starting Token Queue Processor...");
         startQueueProcessor();
 
-        // 4. Start New Token Listener (With Delay to let Redis settle)
-        if (newTokenListener && typeof newTokenListener.startNewTokenListener === 'function') {
-            logger.info("🛰️ LISTENER: Starting New Token Discovery...");
-            setTimeout(() => {
-                newTokenListener.startNewTokenListener();
-            }, 1000);
-        } else {
-            logger.warn("⚠️ LISTENER: newTokenListener module missing startNewTokenListener function.");
-        }
+        // DISABLED: New token listener removed - tokens are now only added when CA is searched
+        // if (newTokenListener && typeof newTokenListener.startNewTokenListener === 'function') {
+        //     logger.info("🛰️ LISTENER: Starting New Token Discovery...");
+        //     setTimeout(() => {
+        //         newTokenListener.startNewTokenListener();
+        //     }, 1000);
+        // } else {
+        //     logger.warn("⚠️ LISTENER: newTokenListener module missing startNewTokenListener function.");
+        // }
 
         // 4. Start Grower Scanner (Market Cap Check)
         if (growerScanner && typeof growerScanner.start === 'function') {

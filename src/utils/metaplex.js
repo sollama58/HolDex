@@ -22,6 +22,8 @@ function isValidMetadata(meta) {
 }
 
 async function fetchTokenMetadata(mintAddress) {
+    console.log(`[Metaplex] Fetching metadata for ${mintAddress.slice(0,8)}...`);
+
     // 1. Primary: GeckoTerminal API (free, no key required)
     try {
         const geckoRes = await axios.get(
@@ -36,13 +38,18 @@ async function fetchTokenMetadata(mintAddress) {
                 image: attrs.image_url || (attrs.coingecko_coin_id ? `https://assets.coingecko.com/coins/images/${attrs.coingecko_coin_id}/small` : null),
                 description: attrs.description || ''
             };
+            console.log(`[Metaplex] GeckoTerminal raw response for ${mintAddress.slice(0,8)}: name=${attrs.name}, symbol=${attrs.symbol}`);
             if (isValidMetadata(geckoMeta)) {
                 console.log(`[Metaplex] Found metadata via GeckoTerminal for ${mintAddress.slice(0,8)}`);
                 return geckoMeta;
+            } else {
+                console.log(`[Metaplex] GeckoTerminal returned invalid metadata for ${mintAddress.slice(0,8)}: name=${geckoMeta.name}, symbol=${geckoMeta.symbol}`);
             }
+        } else {
+            console.log(`[Metaplex] GeckoTerminal returned no data for ${mintAddress.slice(0,8)}`);
         }
-    } catch (_e) {
-        // GeckoTerminal failed - try next source
+    } catch (e) {
+        console.log(`[Metaplex] GeckoTerminal failed for ${mintAddress.slice(0,8)}: ${e.message}`);
     }
 
     // 2. Fallback: Solscan Pro API (if API key is set)
@@ -81,6 +88,7 @@ async function fetchTokenMetadata(mintAddress) {
             `https://api.solscan.io/token/meta?token=${mintAddress}`,
             { timeout: 5000 }
         );
+        console.log(`[Metaplex] Solscan Public raw response for ${mintAddress.slice(0,8)}:`, JSON.stringify(solscanPublicRes.data).slice(0, 200));
         if (solscanPublicRes.data?.success !== false && solscanPublicRes.data) {
             const d = solscanPublicRes.data;
             const solscanPublicMeta = {
@@ -92,10 +100,12 @@ async function fetchTokenMetadata(mintAddress) {
             if (isValidMetadata(solscanPublicMeta)) {
                 console.log(`[Metaplex] Found metadata via Solscan Public API for ${mintAddress.slice(0,8)}`);
                 return solscanPublicMeta;
+            } else {
+                console.log(`[Metaplex] Solscan Public returned invalid metadata for ${mintAddress.slice(0,8)}: name=${solscanPublicMeta.name}, symbol=${solscanPublicMeta.symbol}`);
             }
         }
-    } catch (_e) {
-        // Solscan public API failed - try next source
+    } catch (e) {
+        console.log(`[Metaplex] Solscan Public failed for ${mintAddress.slice(0,8)}: ${e.message}`);
     }
 
     // 4. Last resort: On-Chain Metaplex Parse
@@ -149,16 +159,21 @@ async function fetchTokenMetadata(mintAddress) {
                 }
             }
 
+            console.log(`[Metaplex] On-chain parsed for ${mintAddress.slice(0,8)}: name=${onChainMeta.name}, symbol=${onChainMeta.symbol}`);
             if (isValidMetadata(onChainMeta)) {
                 console.log(`[Metaplex] Found metadata via on-chain parse for ${mintAddress.slice(0,8)}`);
                 return onChainMeta;
+            } else {
+                console.log(`[Metaplex] On-chain returned invalid metadata for ${mintAddress.slice(0,8)}: name=${onChainMeta.name}, symbol=${onChainMeta.symbol}`);
             }
+        } else {
+            console.log(`[Metaplex] No on-chain metadata account found for ${mintAddress.slice(0,8)}`);
         }
     } catch (e) {
         console.warn(`[Metaplex] On-chain parse failed for ${mintAddress.slice(0,8)}: ${e.message}`);
     }
 
-    console.warn(`[Metaplex] All metadata fetches failed for ${mintAddress.slice(0,8)}`);
+    console.warn(`[Metaplex] ALL SOURCES FAILED for ${mintAddress.slice(0,8)} - returning null`);
     return null; // Truly failed
 }
 
