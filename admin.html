@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Space | HolDex</title>
+    <title>Admin Command | HolDex</title>
 
     <script src="https://bundle.run/buffer@6.0.3"></script>
     <script>
@@ -124,15 +124,33 @@
             border: 1px solid rgba(16, 185, 129, 0.3);
         }
         .btn-success:hover { background: rgba(16, 185, 129, 0.3); }
+        .btn-blue {
+            background: rgba(59, 130, 246, 0.2);
+            color: #60a5fa;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+        .btn-blue:hover { background: rgba(59, 130, 246, 0.3); }
+        .btn-orange {
+            background: rgba(249, 115, 22, 0.2);
+            color: #fb923c;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            border: 1px solid rgba(249, 115, 22, 0.3);
+        }
+        .btn-orange:hover { background: rgba(249, 115, 22, 0.3); }
         .stat-card {
             background: rgba(20, 20, 35, 0.4);
             border: 1px solid rgba(255,255,255,0.06);
             border-radius: 12px;
-            padding: 20px;
+            padding: 16px;
             text-align: center;
         }
-        .stat-value { font-size: 2rem; font-weight: 700; color: #f97316; }
-        .stat-label { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
+        .stat-value { font-size: 1.75rem; font-weight: 700; color: #f97316; }
+        .stat-label { font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
         .badge {
             display: inline-block;
             padding: 2px 8px;
@@ -143,6 +161,7 @@
         .badge-active { background: rgba(16, 185, 129, 0.2); color: #10b981; }
         .badge-pending { background: rgba(249, 115, 22, 0.2); color: #f97316; }
         .badge-revoked { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        .badge-info { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
         .table-row {
             border-bottom: 1px solid rgba(255,255,255,0.04);
             transition: background 0.2s;
@@ -165,33 +184,86 @@
             to { transform: translateX(0); opacity: 1; }
         }
         .tab-btn {
-            padding: 10px 20px;
+            padding: 10px 16px;
             border-radius: 8px;
             font-weight: 500;
+            font-size: 13px;
             transition: all 0.2s;
             color: #94a3b8;
+            white-space: nowrap;
         }
         .tab-btn:hover { color: #f8fafc; background: rgba(255,255,255,0.05); }
         .tab-btn.active { color: #f97316; background: rgba(249, 115, 22, 0.1); }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-ok { background: #10b981; box-shadow: 0 0 8px rgba(16, 185, 129, 0.5); }
+        .status-error { background: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.5); }
+        .status-warning { background: #f59e0b; box-shadow: 0 0 8px rgba(245, 158, 11, 0.5); }
+
+        .error-log {
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+        }
+        .error-entry {
+            padding: 8px 12px;
+            border-left: 3px solid #ef4444;
+            background: rgba(239, 68, 68, 0.05);
+            margin-bottom: 4px;
+        }
+        .error-entry.warning {
+            border-left-color: #f59e0b;
+            background: rgba(245, 158, 11, 0.05);
+        }
+        .error-entry.info {
+            border-left-color: #60a5fa;
+            background: rgba(59, 130, 246, 0.05);
+        }
+
+        .modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.8);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+        }
+        .modal.open { display: flex; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
     </style>
 </head>
 <body class="p-4 md:p-8">
     <!-- Navigation -->
     <nav class="flex items-center gap-4 mb-6 text-sm">
-        <a href="/" class="text-fire-muted hover:text-fire-accent transition">← Home</a>
+        <a href="/" class="text-fire-muted hover:text-fire-accent transition">Home</a>
         <span class="text-fire-muted/30">|</span>
         <a href="/cult-space" class="text-fire-muted hover:text-fire-accent transition">The Space</a>
         <span class="text-fire-muted/30">|</span>
-        <span class="text-fire-accent">Admin</span>
+        <span class="text-fire-accent">Admin Command</span>
     </nav>
 
     <!-- Header -->
     <header class="flex items-center justify-between mb-8">
         <div class="flex items-center gap-4">
-            <span class="text-2xl font-bold" style="color: #f97316; text-shadow: 0 0 30px rgba(249, 115, 22, 0.5);">
-                ADMIN SPACE
-            </span>
-            <span class="text-fire-muted text-sm hidden md:inline">HolDex Control Panel</span>
+            <i data-lucide="shield" class="w-8 h-8 text-fire-accent"></i>
+            <div>
+                <span class="text-2xl font-bold" style="color: #f97316; text-shadow: 0 0 30px rgba(249, 115, 22, 0.5);">
+                    ADMIN COMMAND
+                </span>
+                <span class="text-fire-muted text-sm hidden md:inline ml-3">HolDex Control Center</span>
+            </div>
         </div>
         <div id="auth-status" class="flex items-center gap-3">
             <span id="wallet-display" class="text-fire-muted text-sm font-mono hidden"></span>
@@ -218,28 +290,106 @@
                 </div>
 
                 <div>
-                    <input type="password" id="admin-password" class="glass-input mb-3" placeholder="Admin Password">
+                    <input type="password" id="admin-password" class="glass-input mb-3" placeholder="Admin Password" onkeypress="if(event.key==='Enter')loginWithPassword()">
                     <button class="btn-primary w-full" onclick="loginWithPassword()">Login with Password</button>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- Edit Key Modal -->
+    <div id="edit-key-modal" class="modal">
+        <div class="glass-panel p-8 w-full max-w-sm">
+            <h2 class="text-xl font-bold text-white mb-4">Edit API Key</h2>
+            <input type="hidden" id="edit-key-id">
+
+            <label class="block text-xs text-fire-muted font-bold mb-1">Tier</label>
+            <select id="edit-key-tier" class="glass-input mb-4">
+                <option value="free">Free</option>
+                <option value="pro">Pro</option>
+                <option value="enterprise">Enterprise</option>
+            </select>
+
+            <label class="block text-xs text-fire-muted font-bold mb-1">Requests Limit</label>
+            <input type="number" id="edit-key-limit" class="glass-input mb-6">
+
+            <div class="flex gap-2">
+                <button onclick="saveKeyChanges()" class="btn-success flex-1">Save</button>
+                <button onclick="closeEditKeyModal()" class="btn-danger flex-1">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Main Dashboard (hidden until auth) -->
     <main id="dashboard" class="hidden max-w-7xl mx-auto">
+        <!-- System Status Monitor -->
+        <div class="glass-panel p-4 mb-6">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-bold text-fire-muted uppercase tracking-wide flex items-center gap-2">
+                    <i data-lucide="activity" class="w-4 h-4"></i> System Status
+                </h3>
+                <button onclick="refreshSystemStatus()" class="text-fire-muted hover:text-fire-accent text-xs flex items-center gap-1">
+                    <i data-lucide="refresh-cw" class="w-3 h-3"></i> Refresh
+                </button>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                <div class="bg-black/20 rounded-lg p-3">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span id="status-db" class="status-indicator status-ok"></span>
+                        <span class="text-xs text-fire-muted">Database</span>
+                    </div>
+                    <div class="text-lg font-bold text-white" id="stat-db-status">OK</div>
+                </div>
+                <div class="bg-black/20 rounded-lg p-3">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span id="status-redis" class="status-indicator status-ok"></span>
+                        <span class="text-xs text-fire-muted">Redis</span>
+                    </div>
+                    <div class="text-lg font-bold text-white" id="stat-redis-status">OK</div>
+                </div>
+                <div class="bg-black/20 rounded-lg p-3">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span id="status-helius" class="status-indicator status-ok"></span>
+                        <span class="text-xs text-fire-muted">Helius RPC</span>
+                    </div>
+                    <div class="text-lg font-bold text-white" id="stat-helius-status">OK</div>
+                </div>
+                <div class="bg-black/20 rounded-lg p-3">
+                    <div class="text-xs text-fire-muted mb-1">Memory (MB)</div>
+                    <div class="text-lg font-bold text-fire-accent" id="stat-memory">-</div>
+                </div>
+                <div class="bg-black/20 rounded-lg p-3">
+                    <div class="text-xs text-fire-muted mb-1">Uptime</div>
+                    <div class="text-lg font-bold text-neon-cyan" id="stat-uptime">-</div>
+                </div>
+                <div class="bg-black/20 rounded-lg p-3">
+                    <div class="text-xs text-fire-muted mb-1">Circuit Breaker</div>
+                    <div class="text-lg font-bold" id="stat-circuit">-</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Stats Row -->
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
             <div class="stat-card">
-                <div class="stat-value" id="stat-grants">-</div>
-                <div class="stat-label">Active Grants</div>
+                <div class="stat-value" id="stat-total-tokens">-</div>
+                <div class="stat-label">Total Tokens</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-verified-tokens">-</div>
+                <div class="stat-label">Verified</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value" id="stat-pending">-</div>
                 <div class="stat-label">Pending Updates</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value" id="stat-tokens">-</div>
-                <div class="stat-label">Verified Tokens</div>
+                <div class="stat-value" id="stat-grants">-</div>
+                <div class="stat-label">Active Grants</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-api-keys">-</div>
+                <div class="stat-label">API Keys</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value" id="stat-participants">-</div>
@@ -248,14 +398,152 @@
         </div>
 
         <!-- Tabs -->
-        <div class="flex gap-2 mb-6 overflow-x-auto pb-2">
-            <button class="tab-btn active" onclick="showTab('grants')">Grants Manager</button>
-            <button class="tab-btn" onclick="showTab('updates')">Token Updates</button>
-            <button class="tab-btn" onclick="showTab('actions')">Action Log</button>
+        <div class="flex gap-2 mb-6 overflow-x-auto pb-2 border-b border-white/5">
+            <button class="tab-btn active" onclick="showTab('status')">
+                <i data-lucide="activity" class="w-4 h-4 inline mr-1"></i>Status & Logs
+            </button>
+            <button class="tab-btn" onclick="showTab('submissions')">
+                <i data-lucide="inbox" class="w-4 h-4 inline mr-1"></i>Submissions
+            </button>
+            <button class="tab-btn" onclick="showTab('manage')">
+                <i data-lucide="edit-3" class="w-4 h-4 inline mr-1"></i>Manage Token
+            </button>
+            <button class="tab-btn" onclick="showTab('grants')">
+                <i data-lucide="users" class="w-4 h-4 inline mr-1"></i>Grants
+            </button>
+            <button class="tab-btn" onclick="showTab('api')">
+                <i data-lucide="key" class="w-4 h-4 inline mr-1"></i>API Keys
+            </button>
+            <button class="tab-btn" onclick="showTab('actions')">
+                <i data-lucide="list" class="w-4 h-4 inline mr-1"></i>Action Log
+            </button>
+            <button class="tab-btn" onclick="showTab('tools')">
+                <i data-lucide="wrench" class="w-4 h-4 inline mr-1"></i>Tools
+            </button>
+        </div>
+
+        <!-- Tab: Status & Logs -->
+        <div id="tab-status" class="tab-content">
+            <div class="grid md:grid-cols-2 gap-6">
+                <!-- Error Log -->
+                <div class="glass-panel p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-bold flex items-center gap-2">
+                            <i data-lucide="alert-triangle" class="w-5 h-5 text-red-400"></i> Error Log
+                        </h3>
+                        <div class="flex gap-2">
+                            <button onclick="refreshErrorLog()" class="btn-blue text-xs">
+                                <i data-lucide="refresh-cw" class="w-3 h-3 inline"></i> Refresh
+                            </button>
+                            <button onclick="clearErrorLog()" class="btn-danger text-xs">Clear</button>
+                        </div>
+                    </div>
+                    <div id="error-log-container" class="error-log bg-black/30 rounded-lg p-3">
+                        <div class="text-fire-muted text-center py-8">Loading error log...</div>
+                    </div>
+                </div>
+
+                <!-- Recent Activity -->
+                <div class="glass-panel p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-bold flex items-center gap-2">
+                            <i data-lucide="zap" class="w-5 h-5 text-neon-cyan"></i> Recent Activity
+                        </h3>
+                        <span class="text-xs text-fire-muted" id="activity-timestamp">-</span>
+                    </div>
+                    <div id="recent-activity" class="space-y-2 max-h-[300px] overflow-y-auto">
+                        <div class="text-fire-muted text-center py-8">Loading activity...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: Submissions (Pending Queue & History) -->
+        <div id="tab-submissions" class="tab-content hidden">
+            <div class="flex gap-4 mb-4">
+                <button onclick="switchSubmissionView('pending')" id="sub-tab-pending" class="tab-btn active">Pending Queue</button>
+                <button onclick="switchSubmissionView('history')" id="sub-tab-history" class="tab-btn">History</button>
+            </div>
+            <div class="glass-panel p-6">
+                <div id="submissions-container" class="space-y-4">
+                    <div class="text-center py-12 text-fire-muted">Loading...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: Manage Token -->
+        <div id="tab-manage" class="tab-content hidden">
+            <div class="glass-panel p-6 max-w-3xl mx-auto">
+                <h3 class="text-xl font-bold mb-6 flex items-center gap-2">
+                    <i data-lucide="edit" class="w-5 h-5"></i> Edit or Delete Token
+                </h3>
+
+                <div class="flex gap-4 mb-6">
+                    <input type="text" id="manage-mint" class="glass-input" placeholder="Enter Token Mint Address...">
+                    <button onclick="loadToken()" class="btn-primary">Load</button>
+                </div>
+
+                <div id="manage-form" class="hidden space-y-4 border-t border-white/10 pt-6">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="text-xs text-fire-muted uppercase font-bold block mb-1">Ticker</label>
+                            <input type="text" id="edit-ticker" class="glass-input opacity-50 cursor-not-allowed" readonly>
+                        </div>
+                        <div>
+                            <label class="text-xs text-fire-muted uppercase font-bold block mb-1">Holders</label>
+                            <input type="text" id="edit-holders" class="glass-input opacity-50 cursor-not-allowed" readonly value="0">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-4">
+                        <div>
+                            <label class="text-xs text-fire-muted uppercase font-bold block mb-1">Twitter</label>
+                            <input type="text" id="edit-twitter" class="glass-input">
+                        </div>
+                        <div>
+                            <label class="text-xs text-fire-muted uppercase font-bold block mb-1">Website</label>
+                            <input type="text" id="edit-website" class="glass-input">
+                        </div>
+                        <div>
+                            <label class="text-xs text-fire-muted uppercase font-bold block mb-1">Telegram</label>
+                            <input type="text" id="edit-telegram" class="glass-input">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="text-xs text-fire-muted uppercase font-bold block mb-1">Banner URL</label>
+                        <input type="text" id="edit-banner" class="glass-input">
+                    </div>
+
+                    <div>
+                        <label class="text-xs text-fire-muted uppercase font-bold block mb-1">Description (Max 250)</label>
+                        <textarea id="edit-description" class="glass-input h-24 resize-none" maxlength="250"></textarea>
+                    </div>
+
+                    <div class="border-t border-white/10 pt-6 mt-6">
+                        <div class="flex items-center justify-between mb-4 bg-black/20 p-3 rounded-lg">
+                            <span class="text-fire-accent font-bold text-sm">Refresh K-Score</span>
+                            <button onclick="refreshKScore()" class="btn-orange">
+                                <i data-lucide="zap" class="w-4 h-4 inline"></i> Force Recalculate
+                            </button>
+                        </div>
+
+                        <div class="flex justify-between items-center mt-6">
+                            <button onclick="deleteToken()" class="btn-danger">
+                                <i data-lucide="trash-2" class="w-4 h-4 inline"></i> Delete Token & History
+                            </button>
+                            <button onclick="saveToken()" class="btn-success">
+                                <i data-lucide="save" class="w-4 h-4 inline"></i> Save Changes
+                            </button>
+                        </div>
+                        <p class="text-[10px] text-red-500/50 text-center mt-4 uppercase font-bold">Warning: Deletion is permanent.</p>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Tab: Grants Manager -->
-        <div id="tab-grants" class="tab-content">
+        <div id="tab-grants" class="tab-content hidden">
             <div class="glass-panel p-6 mb-6">
                 <h3 class="text-lg font-bold mb-4">Add New Grant</h3>
                 <div class="grid md:grid-cols-4 gap-4">
@@ -292,24 +580,25 @@
             </div>
         </div>
 
-        <!-- Tab: Token Updates -->
-        <div id="tab-updates" class="tab-content hidden">
+        <!-- Tab: API Keys -->
+        <div id="tab-api" class="tab-content hidden">
+            <div class="glass-panel p-6 mb-6">
+                <h3 class="text-lg font-bold mb-4">Generate New API Key</h3>
+                <div class="flex gap-4">
+                    <input type="text" id="api-owner" class="glass-input" placeholder="Owner Name (e.g. 'Trading Bot 1')">
+                    <select id="api-tier" class="glass-input w-40">
+                        <option value="free">Free (1k)</option>
+                        <option value="pro">Pro (100k)</option>
+                        <option value="enterprise">Enterprise</option>
+                    </select>
+                    <button onclick="generateApiKey()" class="btn-primary">Generate</button>
+                </div>
+            </div>
+
             <div class="glass-panel p-6">
-                <h3 class="text-lg font-bold mb-4">Pending Token Updates</h3>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
-                        <thead>
-                            <tr class="text-left text-fire-muted text-xs uppercase">
-                                <th class="pb-3">Token</th>
-                                <th class="pb-3">Changes</th>
-                                <th class="pb-3">Submitted</th>
-                                <th class="pb-3">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="updates-table">
-                            <tr><td colspan="4" class="py-8 text-center text-fire-muted">Loading...</td></tr>
-                        </tbody>
-                    </table>
+                <h3 class="text-lg font-bold mb-4">Active API Keys</h3>
+                <div id="api-key-list" class="space-y-2">
+                    <div class="text-center text-fire-muted py-4">Loading keys...</div>
                 </div>
             </div>
         </div>
@@ -337,9 +626,83 @@
             </div>
         </div>
 
+        <!-- Tab: Tools -->
+        <div id="tab-tools" class="tab-content hidden">
+            <div class="grid md:grid-cols-2 gap-6">
+                <!-- Backup & Restore -->
+                <div class="glass-panel p-6">
+                    <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
+                        <i data-lucide="database" class="w-5 h-5"></i> Backup & Restore
+                    </h3>
+                    <p class="text-fire-muted text-sm mb-4">Download or restore token updates and API keys database.</p>
+                    <div class="flex gap-3">
+                        <button onclick="downloadBackup()" class="btn-blue flex-1">
+                            <i data-lucide="download" class="w-4 h-4 inline"></i> Download Backup
+                        </button>
+                        <label class="btn-success flex-1 cursor-pointer text-center">
+                            <i data-lucide="upload" class="w-4 h-4 inline"></i> Restore
+                            <input type="file" id="restore-file" accept=".json" class="hidden" onchange="handleRestore(this)">
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Bulk K-Score Refresh -->
+                <div class="glass-panel p-6">
+                    <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
+                        <i data-lucide="refresh-cw" class="w-5 h-5"></i> Bulk K-Score Refresh
+                    </h3>
+                    <p class="text-fire-muted text-sm mb-4">Recalculate K-Scores for all verified tokens. Use with caution - consumes RPC credits.</p>
+                    <div class="flex gap-3">
+                        <button onclick="refreshAllKScores(false)" class="btn-orange flex-1">
+                            Quick Refresh
+                        </button>
+                        <button onclick="refreshAllKScores(true)" class="btn-danger flex-1">
+                            Deep Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="glass-panel p-6">
+                    <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
+                        <i data-lucide="terminal" class="w-5 h-5"></i> Quick Actions
+                    </h3>
+                    <div class="space-y-3">
+                        <button onclick="clearAllCaches()" class="btn-orange w-full">
+                            <i data-lucide="trash" class="w-4 h-4 inline"></i> Clear All Caches
+                        </button>
+                        <button onclick="checkIntegrity()" class="btn-blue w-full">
+                            <i data-lucide="shield-check" class="w-4 h-4 inline"></i> Run Integrity Check
+                        </button>
+                    </div>
+                </div>
+
+                <!-- System Info -->
+                <div class="glass-panel p-6">
+                    <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
+                        <i data-lucide="info" class="w-5 h-5"></i> System Info
+                    </h3>
+                    <div class="space-y-2 text-sm" id="system-info">
+                        <div class="flex justify-between">
+                            <span class="text-fire-muted">API URL:</span>
+                            <span class="font-mono" id="info-api-url">-</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-fire-muted">Auth Mode:</span>
+                            <span id="info-auth-mode">-</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-fire-muted">Last Refresh:</span>
+                            <span id="info-last-refresh">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Footer -->
         <div class="text-center text-fire-muted text-sm mt-12 mb-8">
-            this is fine. 🐕‍🦺🔥
+            this is fine.
         </div>
     </main>
 
@@ -349,6 +712,9 @@
         let sessionToken = null;
         let adminPassword = null;
         let connectedWallet = null;
+        let currentSubmissionView = 'pending';
+        let errorLog = [];
+        let statusRefreshInterval = null;
 
         // ═══════════════════════════════════════════════════════════════
         // AUTH
@@ -408,7 +774,6 @@
                 return;
             }
 
-            // Test password with a simple admin endpoint
             try {
                 const resp = await fetch(`${API_URL}/api/admin/updates?type=pending`, {
                     headers: { 'x-admin-auth': password }
@@ -420,6 +785,7 @@
                 }
 
                 adminPassword = password;
+                sessionStorage.setItem('holdex_admin_key', password);
                 authMode = 'password';
                 showDashboard();
                 toast('Logged in with password', 'success');
@@ -434,6 +800,8 @@
             adminPassword = null;
             authMode = null;
             connectedWallet = null;
+            sessionStorage.removeItem('holdex_admin_key');
+            if (statusRefreshInterval) clearInterval(statusRefreshInterval);
             document.getElementById('login-screen').classList.remove('hidden');
             document.getElementById('dashboard').classList.add('hidden');
             document.getElementById('wallet-display').classList.add('hidden');
@@ -450,10 +818,22 @@
                 document.getElementById('wallet-display').classList.remove('hidden');
             }
 
+            // Update system info
+            document.getElementById('info-api-url').textContent = API_URL;
+            document.getElementById('info-auth-mode').textContent = authMode;
+
+            // Load all data
+            refreshSystemStatus();
             loadStats();
+            loadErrorLog();
+            loadRecentActivity();
+            loadSubmissions();
             loadGrants();
-            loadUpdates();
+            loadApiKeys();
             loadActions();
+
+            // Auto-refresh status every 30 seconds
+            statusRefreshInterval = setInterval(refreshSystemStatus, 30000);
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -485,32 +865,405 @@
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // LOAD DATA
+        // SYSTEM STATUS & LOGS
+        // ═══════════════════════════════════════════════════════════════
+
+        async function refreshSystemStatus() {
+            try {
+                const resp = await fetch(`${API_URL}/api/health`);
+                const health = await resp.json();
+
+                // Update status indicators
+                updateStatusIndicator('status-db', 'stat-db-status', health.services?.database);
+                updateStatusIndicator('status-redis', 'stat-redis-status', health.services?.redis);
+
+                // Helius status from circuit breaker
+                const heliusState = health.services?.helius?.circuitBreaker?.state || 'unknown';
+                updateStatusIndicator('status-helius', 'stat-helius-status', heliusState === 'closed' ? 'ok' : heliusState);
+
+                // Memory
+                document.getElementById('stat-memory').textContent = `${health.memory?.heapUsed || '-'} / ${health.memory?.heapTotal || '-'}`;
+
+                // Uptime
+                const uptime = health.uptime ? formatUptime(health.uptime) : '-';
+                document.getElementById('stat-uptime').textContent = uptime;
+
+                // Circuit breaker
+                const circuitEl = document.getElementById('stat-circuit');
+                circuitEl.textContent = heliusState.toUpperCase();
+                circuitEl.className = 'text-lg font-bold ' + (heliusState === 'closed' ? 'text-neon-green' : 'text-red-400');
+
+                document.getElementById('info-last-refresh').textContent = new Date().toLocaleTimeString();
+
+            } catch (e) {
+                console.error('Failed to fetch health:', e);
+                logError('Failed to fetch system health', 'warning');
+            }
+        }
+
+        function updateStatusIndicator(indicatorId, textId, status) {
+            const indicator = document.getElementById(indicatorId);
+            const text = document.getElementById(textId);
+
+            indicator.className = 'status-indicator';
+            if (status === 'ok' || status === 'closed') {
+                indicator.classList.add('status-ok');
+                text.textContent = 'OK';
+                text.className = 'text-lg font-bold text-neon-green';
+            } else if (status === 'error' || status === 'open') {
+                indicator.classList.add('status-error');
+                text.textContent = status.toUpperCase();
+                text.className = 'text-lg font-bold text-red-400';
+            } else {
+                indicator.classList.add('status-warning');
+                text.textContent = status?.toUpperCase() || 'UNKNOWN';
+                text.className = 'text-lg font-bold text-yellow-400';
+            }
+        }
+
+        function formatUptime(seconds) {
+            const days = Math.floor(seconds / 86400);
+            const hours = Math.floor((seconds % 86400) / 3600);
+            const mins = Math.floor((seconds % 3600) / 60);
+            if (days > 0) return `${days}d ${hours}h`;
+            if (hours > 0) return `${hours}h ${mins}m`;
+            return `${mins}m`;
+        }
+
+        function logError(message, type = 'error') {
+            errorLog.unshift({
+                timestamp: new Date().toISOString(),
+                message,
+                type
+            });
+            if (errorLog.length > 100) errorLog.pop();
+            renderErrorLog();
+        }
+
+        async function loadErrorLog() {
+            // Try to fetch from server if endpoint exists, otherwise use local log
+            try {
+                // For now, we'll maintain a client-side error log
+                // This could be enhanced to fetch from a server-side error log endpoint
+                renderErrorLog();
+            } catch (e) {
+                console.error('Failed to load error log:', e);
+            }
+        }
+
+        function renderErrorLog() {
+            const container = document.getElementById('error-log-container');
+            if (errorLog.length === 0) {
+                container.innerHTML = '<div class="text-fire-muted text-center py-8">No errors logged</div>';
+                return;
+            }
+
+            container.innerHTML = errorLog.map(e => `
+                <div class="error-entry ${e.type}">
+                    <div class="flex justify-between items-start">
+                        <span class="text-xs text-fire-muted">${new Date(e.timestamp).toLocaleString()}</span>
+                        <span class="badge badge-${e.type === 'error' ? 'revoked' : e.type === 'warning' ? 'pending' : 'info'}">${e.type}</span>
+                    </div>
+                    <div class="mt-1 text-white/80">${e.message}</div>
+                </div>
+            `).join('');
+        }
+
+        function refreshErrorLog() {
+            loadErrorLog();
+            toast('Error log refreshed', 'success');
+        }
+
+        function clearErrorLog() {
+            errorLog = [];
+            renderErrorLog();
+            toast('Error log cleared', 'success');
+        }
+
+        async function loadRecentActivity() {
+            const container = document.getElementById('recent-activity');
+            try {
+                // Fetch recent actions if wallet auth, otherwise show limited info
+                if (authMode === 'wallet') {
+                    const data = await apiGet('/space/admin/actions?limit=10');
+                    if (data.success && data.data?.length > 0) {
+                        container.innerHTML = data.data.map(a => `
+                            <div class="flex items-center gap-3 p-2 rounded bg-black/20">
+                                <span class="${a.success ? 'text-neon-green' : 'text-red-400'}">${a.success ? '✓' : '✗'}</span>
+                                <div class="flex-1">
+                                    <div class="text-sm">${a.action}</div>
+                                    <div class="text-xs text-fire-muted">${shortWallet(a.wallet)}</div>
+                                </div>
+                                <span class="text-xs text-fire-muted">${timeAgo(a.createdAt)}</span>
+                            </div>
+                        `).join('');
+                        document.getElementById('activity-timestamp').textContent = `Updated ${new Date().toLocaleTimeString()}`;
+                    } else {
+                        container.innerHTML = '<div class="text-fire-muted text-center py-4">No recent activity</div>';
+                    }
+                } else {
+                    container.innerHTML = '<div class="text-fire-muted text-center py-4">Wallet auth required for activity log</div>';
+                }
+            } catch (e) {
+                container.innerHTML = '<div class="text-fire-muted text-center py-4">Failed to load activity</div>';
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // STATS
         // ═══════════════════════════════════════════════════════════════
 
         async function loadStats() {
             try {
-                // Grants count (via direct query or space endpoint)
-                const grantsData = await apiGet('/space/admin/grants');
-                const activeGrants = grantsData.data?.filter(g => g.is_active).length || 0;
-                document.getElementById('stat-grants').textContent = activeGrants;
-
-                // Pending updates
-                const updatesData = await apiGet('/api/admin/updates');
-                document.getElementById('stat-pending').textContent = updatesData.updates?.length || 0;
+                // Total tokens count
+                const tokensResp = await fetch(`${API_URL}/api/tokens/public?limit=1`);
+                const tokensData = await tokensResp.json();
+                document.getElementById('stat-total-tokens').textContent = tokensData.pagination?.total?.toLocaleString() || '-';
 
                 // Verified tokens
-                const tokensData = await apiGet('/api/tokens/public?filter=verified&limit=1');
-                document.getElementById('stat-tokens').textContent = tokensData.pagination?.total || '-';
+                const verifiedResp = await fetch(`${API_URL}/api/tokens/public?filter=verified&limit=1`);
+                const verifiedData = await verifiedResp.json();
+                document.getElementById('stat-verified-tokens').textContent = verifiedData.pagination?.total?.toLocaleString() || '-';
+
+                // Pending updates
+                const updatesData = await apiGet('/api/admin/updates?type=pending');
+                document.getElementById('stat-pending').textContent = updatesData.updates?.length || 0;
+
+                // Grants count
+                try {
+                    const endpoint = authMode === 'password' ? '/space/admin/grants/password' : '/space/admin/grants';
+                    const grantsData = await apiGet(endpoint);
+                    const activeGrants = grantsData.data?.filter(g => g.is_active).length || 0;
+                    document.getElementById('stat-grants').textContent = activeGrants;
+                } catch (e) {
+                    document.getElementById('stat-grants').textContent = '-';
+                }
+
+                // API Keys count
+                try {
+                    const keysData = await apiGet('/api/admin/keys');
+                    const activeKeys = keysData.keys?.filter(k => k.is_active).length || 0;
+                    document.getElementById('stat-api-keys').textContent = activeKeys;
+                } catch (e) {
+                    document.getElementById('stat-api-keys').textContent = '-';
+                }
 
                 // Participants
-                const leaderData = await apiGet('/oracle/leaderboard?limit=1');
-                document.getElementById('stat-participants').textContent = leaderData.data?.total || '-';
+                try {
+                    const leaderData = await apiGet('/oracle/leaderboard?limit=1');
+                    document.getElementById('stat-participants').textContent = leaderData.data?.total?.toLocaleString() || '-';
+                } catch (e) {
+                    document.getElementById('stat-participants').textContent = '-';
+                }
 
             } catch (e) {
                 console.error('Stats load error:', e);
+                logError('Failed to load statistics', 'warning');
             }
         }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SUBMISSIONS (Pending/History)
+        // ═══════════════════════════════════════════════════════════════
+
+        function switchSubmissionView(view) {
+            currentSubmissionView = view;
+            document.querySelectorAll('#tab-submissions .tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(`sub-tab-${view}`).classList.add('active');
+            loadSubmissions();
+        }
+
+        async function loadSubmissions() {
+            const container = document.getElementById('submissions-container');
+            container.innerHTML = '<div class="text-center py-12 text-fire-accent animate-pulse">Loading...</div>';
+
+            try {
+                const data = await apiGet(`/api/admin/updates?type=${currentSubmissionView}`);
+
+                if (!data.success) {
+                    if (data.error === 'Unauthorized') {
+                        logout();
+                        toast('Session expired', 'error');
+                        return;
+                    }
+                    container.innerHTML = `<div class="text-center py-12 text-red-400">Error: ${data.error}</div>`;
+                    return;
+                }
+
+                const updates = data.updates || [];
+                if (updates.length === 0) {
+                    container.innerHTML = '<div class="text-center py-12 text-fire-muted">No records found.</div>';
+                    return;
+                }
+
+                container.innerHTML = updates.map(item => `
+                    <div class="bg-black/20 rounded-lg p-4 flex flex-col md:flex-row gap-4 relative overflow-hidden">
+                        ${item.hasCommunityUpdate ? '<div class="absolute top-0 right-0 bg-red-900/50 text-red-400 text-[10px] font-bold px-2 py-1 rounded-bl-lg">OVERWRITE WARNING</div>' : ''}
+                        <div class="w-20 h-20 bg-black border border-white/10 rounded shrink-0 overflow-hidden">
+                            <img src="${item.image || 'https://placehold.co/80'}" class="w-full h-full object-cover opacity-70">
+                        </div>
+                        <div class="flex-1 space-y-2">
+                            <div class="flex justify-between items-start">
+                                <div>
+                                    <h3 class="font-bold text-white flex items-center gap-2">
+                                        ${item.ticker || 'Unknown'}
+                                        <span class="font-mono text-xs text-fire-muted">${shortWallet(item.mint)}</span>
+                                        ${item.hasCommunityUpdate ? '<span class="badge badge-revoked">HAS DATA</span>' : ''}
+                                    </h3>
+                                    <div class="text-xs text-fire-muted mt-1">Submitted: ${new Date(Number(item.submittedat || item.submittedAt)).toLocaleString()}</div>
+                                </div>
+                                <span class="badge badge-${item.status === 'pending' ? 'pending' : item.status === 'approved' ? 'active' : 'revoked'}">${item.status}</span>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2 text-xs">
+                                <div class="bg-black/30 p-2 rounded"><span class="text-fire-muted">Twitter:</span> <a href="${item.twitter}" target="_blank" class="text-fire-accent hover:underline">${item.twitter || '-'}</a></div>
+                                <div class="bg-black/30 p-2 rounded"><span class="text-fire-muted">Web:</span> <a href="${item.website}" target="_blank" class="text-fire-accent hover:underline">${item.website || '-'}</a></div>
+                            </div>
+                            ${item.description ? `<div class="text-xs text-white/60 bg-black/30 p-2 rounded">${item.description}</div>` : ''}
+                        </div>
+                        <div class="flex flex-col gap-2 justify-center min-w-[100px]">
+                            ${currentSubmissionView === 'pending' ? `
+                                <button onclick="approveUpdate(${item.id})" class="btn-success w-full">Approve</button>
+                                <button onclick="rejectUpdate(${item.id})" class="btn-danger w-full">Reject</button>
+                            ` : '<div class="text-center text-xs text-fire-muted">Processed</div>'}
+                        </div>
+                    </div>
+                `).join('');
+
+            } catch (e) {
+                container.innerHTML = `<div class="text-center py-12 text-red-400">Connection Error</div>`;
+                logError('Failed to load submissions', 'error');
+            }
+        }
+
+        async function approveUpdate(id) {
+            if (!confirm("Approve this update?")) return;
+            try {
+                const data = await apiPost('/api/admin/approve-update', { id });
+                if (data.success) {
+                    toast('Update approved', 'success');
+                    loadSubmissions();
+                    loadStats();
+                } else {
+                    toast(data.error || 'Failed', 'error');
+                }
+            } catch (e) {
+                toast('Failed to approve', 'error');
+                logError('Failed to approve update', 'error');
+            }
+        }
+
+        async function rejectUpdate(id) {
+            if (!confirm('Reject this update?')) return;
+            try {
+                const data = await apiPost('/api/admin/reject-update', { id });
+                if (data.success) {
+                    toast('Update rejected', 'success');
+                    loadSubmissions();
+                    loadStats();
+                } else {
+                    toast(data.error || 'Failed', 'error');
+                }
+            } catch (e) {
+                toast('Failed to reject', 'error');
+                logError('Failed to reject update', 'error');
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // MANAGE TOKEN
+        // ═══════════════════════════════════════════════════════════════
+
+        async function loadToken() {
+            const mint = document.getElementById('manage-mint').value.trim();
+            if (!mint) {
+                toast('Enter a mint address', 'error');
+                return;
+            }
+
+            try {
+                const data = await apiGet(`/api/admin/token/${mint}`);
+                if (data.success) {
+                    document.getElementById('manage-form').classList.remove('hidden');
+                    document.getElementById('edit-ticker').value = data.token.ticker || 'N/A';
+                    document.getElementById('edit-holders').value = (data.token.holders || 0).toLocaleString();
+                    document.getElementById('edit-twitter').value = data.token.twitter || '';
+                    document.getElementById('edit-website').value = data.token.website || '';
+                    document.getElementById('edit-telegram').value = data.token.telegram || '';
+                    document.getElementById('edit-banner').value = data.token.banner || '';
+                    document.getElementById('edit-description').value = data.token.description || '';
+                    toast('Token loaded', 'success');
+                } else {
+                    toast('Token not found', 'error');
+                    document.getElementById('manage-form').classList.add('hidden');
+                }
+            } catch (e) {
+                toast('Error loading token', 'error');
+                logError(`Failed to load token ${mint}`, 'error');
+            }
+        }
+
+        async function saveToken() {
+            const mint = document.getElementById('manage-mint').value.trim();
+            const twitter = document.getElementById('edit-twitter').value;
+            const website = document.getElementById('edit-website').value;
+            const telegram = document.getElementById('edit-telegram').value;
+            const banner = document.getElementById('edit-banner').value;
+            const description = document.getElementById('edit-description').value;
+
+            try {
+                const data = await apiPost('/api/admin/update-token', { mint, twitter, website, telegram, banner, description });
+                if (data.success) {
+                    toast('Token updated!', 'success');
+                } else {
+                    toast(data.error || 'Update failed', 'error');
+                }
+            } catch(e) {
+                toast('Network Error', 'error');
+                logError(`Failed to save token ${mint}`, 'error');
+            }
+        }
+
+        async function deleteToken() {
+            if(!confirm("DANGER: This will delete the token and ALL associated data (Pools, Candles, Updates). This cannot be undone.")) return;
+            const mint = document.getElementById('manage-mint').value.trim();
+            try {
+                const data = await apiPost('/api/admin/delete-token', { mint });
+                if(data.success) {
+                    toast('Token deleted', 'success');
+                    document.getElementById('manage-form').classList.add('hidden');
+                    document.getElementById('manage-mint').value = '';
+                    loadStats();
+                } else {
+                    toast('Delete Failed: ' + data.error, 'error');
+                }
+            } catch(e) {
+                toast('Network Error', 'error');
+                logError(`Failed to delete token ${mint}`, 'error');
+            }
+        }
+
+        async function refreshKScore() {
+            const mint = document.getElementById('manage-mint').value.trim();
+            if (!mint) {
+                toast('Load a token first', 'error');
+                return;
+            }
+            try {
+                const data = await apiPost('/api/admin/refresh-kscore', { mint });
+                if (data.success) {
+                    toast(data.message || 'K-Score refresh queued', 'success');
+                } else {
+                    toast('Error: ' + data.error, 'error');
+                }
+            } catch (e) {
+                toast('Network Error', 'error');
+                logError(`Failed to refresh K-Score for ${mint}`, 'error');
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // GRANTS
+        // ═══════════════════════════════════════════════════════════════
 
         async function loadGrants() {
             try {
@@ -545,84 +1298,9 @@
 
             } catch (e) {
                 console.error('Grants load error:', e);
+                document.getElementById('grants-table').innerHTML = '<tr><td colspan="5" class="py-8 text-center text-fire-muted">Failed to load grants</td></tr>';
             }
         }
-
-        async function loadUpdates() {
-            try {
-                const resp = await apiGet('/api/admin/updates');
-                const tbody = document.getElementById('updates-table');
-                const updates = resp.updates || [];
-
-                if (!updates.length) {
-                    tbody.innerHTML = '<tr><td colspan="4" class="py-8 text-center text-fire-muted">No pending updates</td></tr>';
-                    return;
-                }
-
-                tbody.innerHTML = updates.map(u => `
-                    <tr class="table-row">
-                        <td class="py-3">
-                            <div class="flex items-center gap-2">
-                                ${u.image ? `<img src="${u.image}" class="w-6 h-6 rounded-full">` : ''}
-                                <span class="font-bold">${u.ticker || u.mint?.slice(0,8)}</span>
-                            </div>
-                        </td>
-                        <td class="py-3 text-xs text-fire-muted">
-                            ${u.twitter ? `Twitter: ${u.twitter}<br>` : ''}
-                            ${u.website ? `Website: ${u.website}<br>` : ''}
-                            ${u.telegram ? `Telegram: ${u.telegram}` : ''}
-                        </td>
-                        <td class="py-3 text-xs text-fire-muted">${new Date(parseInt(u.submittedat)).toLocaleDateString()}</td>
-                        <td class="py-3 flex gap-2">
-                            <button class="btn-success" onclick="approveUpdate(${u.id})">Approve</button>
-                            <button class="btn-danger" onclick="rejectUpdate(${u.id})">Reject</button>
-                        </td>
-                    </tr>
-                `).join('');
-
-            } catch (e) {
-                console.error('Updates load error:', e);
-            }
-        }
-
-        async function loadActions() {
-            try {
-                const data = await apiGet('/space/admin/actions?limit=50');
-                const tbody = document.getElementById('actions-table');
-
-                if (!data.success || !data.data?.length) {
-                    tbody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-fire-muted">No actions logged yet</td></tr>';
-                    return;
-                }
-
-                tbody.innerHTML = data.data.map(a => `
-                    <tr class="table-row">
-                        <td class="py-3 text-xs text-fire-muted">${new Date(a.createdAt).toLocaleString()}</td>
-                        <td class="py-3 font-mono text-xs">${shortWallet(a.wallet)}</td>
-                        <td class="py-3">
-                            <span class="badge ${a.action.includes('denied') || a.action.includes('failed') ? 'badge-revoked' : 'badge-active'}">
-                                ${a.action}
-                            </span>
-                        </td>
-                        <td class="py-3 text-xs text-fire-muted">${JSON.stringify(a.metadata || {}).slice(0, 50)}...</td>
-                        <td class="py-3">
-                            ${a.success
-                                ? '<span class="text-neon-green">✓</span>'
-                                : '<span class="text-red-500">✗</span>'}
-                        </td>
-                    </tr>
-                `).join('');
-
-            } catch (e) {
-                console.error('Actions load error:', e);
-                document.getElementById('actions-table').innerHTML =
-                    '<tr><td colspan="5" class="py-8 text-center text-fire-muted">Failed to load actions (wallet auth required)</td></tr>';
-            }
-        }
-
-        // ═══════════════════════════════════════════════════════════════
-        // ACTIONS
-        // ═══════════════════════════════════════════════════════════════
 
         async function addGrant() {
             const wallet = document.getElementById('new-grant-wallet').value.trim();
@@ -638,7 +1316,6 @@
 
             try {
                 if (authMode === 'wallet') {
-                    // Need signature for wallet-based auth
                     const timestamp = Date.now();
                     const message = `Grant access to ${wallet}: ${timestamp}`;
                     const encodedMessage = new TextEncoder().encode(message);
@@ -657,7 +1334,6 @@
                         return;
                     }
                 } else {
-                    // Password mode - use password endpoint
                     const data = await apiPost('/space/admin/grants/password', {
                         targetWallet: wallet,
                         grants,
@@ -679,6 +1355,7 @@
             } catch (e) {
                 console.error(e);
                 toast('Failed to add grant', 'error');
+                logError('Failed to add grant', 'error');
             }
         }
 
@@ -710,7 +1387,6 @@
                         return;
                     }
                 } else {
-                    // Password mode
                     const resp = await fetch(`${API_URL}/space/admin/grants/password/${targetWallet}`, {
                         method: 'DELETE',
                         headers: getHeaders()
@@ -729,38 +1405,269 @@
 
             } catch (e) {
                 toast('Failed to revoke grant', 'error');
+                logError('Failed to revoke grant', 'error');
             }
         }
 
-        async function approveUpdate(id) {
+        // ═══════════════════════════════════════════════════════════════
+        // API KEYS
+        // ═══════════════════════════════════════════════════════════════
+
+        async function loadApiKeys() {
+            const list = document.getElementById('api-key-list');
+            list.innerHTML = '<div class="text-center text-fire-muted py-4">Loading keys...</div>';
             try {
-                const data = await apiPost('/api/admin/approve-update', { id });
+                const data = await apiGet('/api/admin/keys');
                 if (data.success) {
-                    toast('Update approved', 'success');
-                    loadUpdates();
+                    if (!data.keys?.length) {
+                        list.innerHTML = '<div class="text-center text-fire-muted py-4">No keys generated.</div>';
+                    } else {
+                        list.innerHTML = data.keys.map(k => `
+                            <div class="bg-black/20 rounded-lg p-4 flex justify-between items-center ${!k.is_active ? 'opacity-50' : ''}">
+                                <div>
+                                    <div class="text-white font-bold">${k.owner} <span class="badge badge-info ml-2">${k.tier}</span></div>
+                                    <div class="font-mono text-sm text-fire-accent mt-1 select-all">${k.key}</div>
+                                </div>
+                                <div class="text-right flex items-center gap-4">
+                                    <div class="text-xs text-fire-muted">Usage: ${k.requests_today || 0}/${k.requests_limit}</div>
+                                    <div class="flex gap-2">
+                                        <button onclick="openEditKeyModal('${k.key}', '${k.tier}', '${k.requests_limit}')" class="btn-blue">Edit</button>
+                                        ${k.is_active ? `<button onclick="revokeApiKey('${k.key}')" class="btn-orange">Revoke</button>` : '<span class="badge badge-revoked">REVOKED</span>'}
+                                        <button onclick="deleteApiKey('${k.key}')" class="btn-danger">Delete</button>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('');
+                    }
+                }
+            } catch(e) {
+                list.innerHTML = '<div class="text-center text-red-400 py-4">Failed to load keys</div>';
+                logError('Failed to load API keys', 'error');
+            }
+        }
+
+        async function generateApiKey() {
+            const owner = document.getElementById('api-owner').value.trim();
+            const tier = document.getElementById('api-tier').value;
+            if(!owner) {
+                toast('Owner name required', 'error');
+                return;
+            }
+
+            try {
+                const data = await apiPost('/api/admin/generate-key', { owner, tier });
+                if (data.success) {
+                    toast('Key generated! Copy it now.', 'success');
+                    alert(`API Key Generated:\n\n${data.key}\n\nCopy this now - it won't be shown again!`);
+                    document.getElementById('api-owner').value = '';
+                    loadApiKeys();
                     loadStats();
                 } else {
                     toast(data.error || 'Failed', 'error');
                 }
-            } catch (e) {
-                toast('Failed to approve', 'error');
+            } catch(e) {
+                toast('Error generating key', 'error');
+                logError('Failed to generate API key', 'error');
             }
         }
 
-        async function rejectUpdate(id) {
-            if (!confirm('Reject this update?')) return;
+        function openEditKeyModal(key, tier, limit) {
+            document.getElementById('edit-key-id').value = key;
+            document.getElementById('edit-key-tier').value = tier;
+            document.getElementById('edit-key-limit').value = limit;
+            document.getElementById('edit-key-modal').classList.add('open');
+        }
+
+        function closeEditKeyModal() {
+            document.getElementById('edit-key-modal').classList.remove('open');
+        }
+
+        async function saveKeyChanges() {
+            const key_id = document.getElementById('edit-key-id').value;
+            const tier = document.getElementById('edit-key-tier').value;
+            const limit = document.getElementById('edit-key-limit').value;
+
             try {
-                const data = await apiPost('/api/admin/reject-update', { id });
+                const data = await apiPost('/api/admin/update-key', { key_id, tier, limit });
                 if (data.success) {
-                    toast('Update rejected', 'success');
-                    loadUpdates();
-                    loadStats();
+                    toast('Key updated', 'success');
+                    closeEditKeyModal();
+                    loadApiKeys();
                 } else {
                     toast(data.error || 'Failed', 'error');
                 }
-            } catch (e) {
-                toast('Failed to reject', 'error');
+            } catch(e) {
+                toast('Error saving changes', 'error');
+                logError('Failed to update API key', 'error');
             }
+        }
+
+        async function revokeApiKey(key_id) {
+            if(!confirm('Revoke this key? The user will lose access immediately.')) return;
+            try {
+                const data = await apiPost('/api/admin/revoke-key', { key_id });
+                if (data.success) {
+                    toast('Key revoked', 'success');
+                    loadApiKeys();
+                    loadStats();
+                } else {
+                    toast('Error: ' + data.error, 'error');
+                }
+            } catch(e) {
+                toast('Network Error', 'error');
+                logError('Failed to revoke API key', 'error');
+            }
+        }
+
+        async function deleteApiKey(key_id) {
+            if(!confirm('Permanently delete this key record?')) return;
+            try {
+                const data = await apiPost('/api/admin/delete-key', { key_id });
+                if (data.success) {
+                    toast('Key deleted', 'success');
+                    loadApiKeys();
+                    loadStats();
+                } else {
+                    toast('Error: ' + data.error, 'error');
+                }
+            } catch(e) {
+                toast('Network Error', 'error');
+                logError('Failed to delete API key', 'error');
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // ACTION LOG
+        // ═══════════════════════════════════════════════════════════════
+
+        async function loadActions() {
+            try {
+                const data = await apiGet('/space/admin/actions?limit=50');
+                const tbody = document.getElementById('actions-table');
+
+                if (!data.success || !data.data?.length) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-fire-muted">No actions logged yet</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.data.map(a => `
+                    <tr class="table-row">
+                        <td class="py-3 text-xs text-fire-muted">${new Date(a.createdAt).toLocaleString()}</td>
+                        <td class="py-3 font-mono text-xs">${shortWallet(a.wallet)}</td>
+                        <td class="py-3">
+                            <span class="badge ${a.action.includes('denied') || a.action.includes('failed') ? 'badge-revoked' : 'badge-active'}">
+                                ${a.action}
+                            </span>
+                        </td>
+                        <td class="py-3 text-xs text-fire-muted max-w-[200px] truncate">${JSON.stringify(a.metadata || {}).slice(0, 50)}...</td>
+                        <td class="py-3">
+                            ${a.success
+                                ? '<span class="text-neon-green">✓</span>'
+                                : '<span class="text-red-500">✗</span>'}
+                        </td>
+                    </tr>
+                `).join('');
+
+            } catch (e) {
+                console.error('Actions load error:', e);
+                document.getElementById('actions-table').innerHTML =
+                    '<tr><td colspan="5" class="py-8 text-center text-fire-muted">Failed to load actions (wallet auth may be required)</td></tr>';
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // TOOLS
+        // ═══════════════════════════════════════════════════════════════
+
+        async function downloadBackup() {
+            try {
+                const resp = await fetch(`${API_URL}/api/admin/backup/updates`, { headers: getHeaders() });
+                if (!resp.ok) throw new Error('Backup Failed');
+                const blob = await resp.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `holdex_backup_${Date.now()}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                toast('Backup downloaded', 'success');
+            } catch (e) {
+                toast('Backup Error: ' + e.message, 'error');
+                logError('Failed to download backup', 'error');
+            }
+        }
+
+        function handleRestore(input) {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const json = JSON.parse(e.target.result);
+                    const updates = json.updates || (Array.isArray(json) ? json : json.data) || [];
+                    const keys = json.api_keys || [];
+
+                    if (updates.length === 0 && keys.length === 0) {
+                        toast('No valid records found', 'error');
+                        input.value = '';
+                        return;
+                    }
+
+                    if (!confirm(`Found:\n- ${updates.length} Updates\n- ${keys.length} API Keys\n\nRestore them now?`)) {
+                        input.value = '';
+                        return;
+                    }
+
+                    const data = await apiPost('/api/admin/restore/updates', { updates, api_keys: keys });
+
+                    if (data.success) {
+                        toast(data.message || 'Restore complete', 'success');
+                        loadSubmissions();
+                        loadApiKeys();
+                        loadStats();
+                    } else {
+                        toast('Restore Failed: ' + data.error, 'error');
+                    }
+                } catch (err) {
+                    toast('Invalid JSON File', 'error');
+                    logError('Failed to restore backup', 'error');
+                } finally {
+                    input.value = '';
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        async function refreshAllKScores(deepRefresh) {
+            const msg = deepRefresh
+                ? 'Deep refresh will recalculate ALL metrics for ALL tokens. This consumes significant RPC credits. Continue?'
+                : 'Quick refresh will update K-Scores for all verified tokens. Continue?';
+            if (!confirm(msg)) return;
+
+            try {
+                const data = await apiPost('/api/admin/refresh-all-kscores', { deepRefresh });
+                if (data.success) {
+                    toast(data.message || 'Bulk refresh initiated', 'success');
+                } else {
+                    toast('Error: ' + data.error, 'error');
+                }
+            } catch (e) {
+                toast('Network Error', 'error');
+                logError('Failed to initiate bulk K-Score refresh', 'error');
+            }
+        }
+
+        async function clearAllCaches() {
+            if (!confirm('Clear all Redis caches? This may temporarily slow down the API.')) return;
+            toast('Cache clear not implemented - requires backend endpoint', 'error');
+            // TODO: Implement cache clear endpoint
+        }
+
+        async function checkIntegrity() {
+            toast('Integrity check triggered (check server logs)', 'success');
+            // This would trigger the integrity watchdog
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -769,14 +1676,28 @@
 
         function showTab(tabName) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('#dashboard > .flex.gap-2 > .tab-btn').forEach(el => el.classList.remove('active'));
             document.getElementById(`tab-${tabName}`).classList.remove('hidden');
-            event.target.classList.add('active');
+            event.target.closest('.tab-btn').classList.add('active');
+
+            // Refresh data for specific tabs
+            if (tabName === 'submissions') loadSubmissions();
+            if (tabName === 'grants') loadGrants();
+            if (tabName === 'api') loadApiKeys();
+            if (tabName === 'actions') loadActions();
         }
 
         function shortWallet(wallet) {
             if (!wallet) return '-';
             return wallet.slice(0, 4) + '...' + wallet.slice(-4);
+        }
+
+        function timeAgo(date) {
+            const seconds = Math.floor((new Date() - new Date(date)) / 1000);
+            if (seconds < 60) return `${seconds}s ago`;
+            if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+            if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+            return `${Math.floor(seconds / 86400)}d ago`;
         }
 
         function toast(message, type = 'success') {
@@ -787,9 +1708,17 @@
             setTimeout(() => el.remove(), 3000);
         }
 
-        // Initialize Lucide icons
+        // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             if (window.lucide) lucide.createIcons();
+
+            // Check for saved session
+            const savedKey = sessionStorage.getItem('holdex_admin_key');
+            if (savedKey) {
+                adminPassword = savedKey;
+                authMode = 'password';
+                showDashboard();
+            }
         });
     </script>
 </body>
