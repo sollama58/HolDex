@@ -37,7 +37,7 @@ const { snapshotPools } = require('../indexer/tasks/snapshotter');
 const logger = require('../services/logger');
 const cacheControl = require('../middleware/httpCache');
 const unifiedRateLimiter = require('../middleware/unifiedRateLimiter');
-const { indexTokenOnChain } = require('../services/indexer');
+const { indexTokenOnChain, searchGeckoTerminal, quickIndexFromGecko } = require('../services/indexer');
 const { addTokenToMasterWebhook } = require('../services/heliusWebhook');
 const verification = require('../services/verificationService');
 const dataVerification = require('../services/dataVerification');
@@ -1978,7 +1978,10 @@ function init(deps) {
             let rows = [];
 
             if (search.length > 0) {
+                const MIN_RESULTS = 5; // Minimum results to show user
+
                 if (isAddressSearch) {
+                    // Contract address search - index if not found
                     rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
                     if (rows.length === 0) {
                         try {
@@ -1986,14 +1989,41 @@ function init(deps) {
                             rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
                         } catch (indexErr) {
                             logger.error(`[Search] Indexing failed for ${search}: ${indexErr.message}`);
-                            // Return empty array if indexing fails
                             rows = [];
                         }
                     }
                 } else {
-                    // SECURITY: Escape LIKE pattern to prevent injection (M9)
+                    // Name/symbol search - check local DB first
                     const safeSearch = `%${escapeLikePattern(search)}%`;
-                    rows = await db.all(`SELECT * FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) LIMIT $2`, [safeSearch, limit]);
+                    rows = await db.all(`SELECT * FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) ORDER BY volume24h DESC NULLS LAST LIMIT $2`, [safeSearch, limit]);
+
+                    // Backfill from GeckoTerminal if not enough results
+                    if (rows.length < MIN_RESULTS && search.length >= 2) {
+                        try {
+                            const existingMints = new Set(rows.map(r => r.mint));
+                            const needed = MIN_RESULTS - rows.length;
+
+                            // Search GeckoTerminal for more results
+                            const geckoResults = await searchGeckoTerminal(search, needed + 5);
+
+                            // Filter out tokens we already have
+                            const newTokens = geckoResults.filter(t => !existingMints.has(t.mint));
+
+                            // Quick index new tokens (fast insert, background full indexing)
+                            const indexPromises = newTokens.slice(0, needed).map(token =>
+                                quickIndexFromGecko(token).catch(() => false)
+                            );
+                            await Promise.all(indexPromises);
+
+                            // Re-query to get freshly indexed tokens
+                            rows = await db.all(`SELECT * FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) ORDER BY volume24h DESC NULLS LAST LIMIT $2`, [safeSearch, limit]);
+
+                            logger.info(`[Search] Backfilled "${search}": ${rows.length} results (${newTokens.length} from GeckoTerminal)`);
+                        } catch (geckoErr) {
+                            logger.warn(`[Search] GeckoTerminal backfill failed for "${search}": ${geckoErr.message}`);
+                            // Continue with existing results
+                        }
+                    }
                 }
             } else {
                 const dir = direction.toLowerCase() === 'asc' ? 'ASC' : 'DESC';

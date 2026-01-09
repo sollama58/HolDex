@@ -26,6 +26,102 @@ async function fetchInitialMarketData(mint) {
     } catch (_e) { return null; }
 }
 
+/**
+ * Search GeckoTerminal for tokens matching a query string
+ * Returns token mints that can be indexed
+ * @param {string} query - Search term (name or symbol)
+ * @param {number} limit - Max results to return
+ * @returns {Promise<Array<{mint: string, name: string, symbol: string, image: string, priceUsd: number, volume24h: number, marketCap: number}>>}
+ */
+async function searchGeckoTerminal(query, limit = 10) {
+    try {
+        // GeckoTerminal search endpoint
+        const url = `https://api.geckoterminal.com/api/v2/search/pools?query=${encodeURIComponent(query)}&network=solana&page=1`;
+        const res = await axios.get(url, { timeout: 5000 });
+
+        const results = [];
+        const seenMints = new Set();
+
+        if (res.data?.data && Array.isArray(res.data.data)) {
+            for (const pool of res.data.data) {
+                if (results.length >= limit) break;
+
+                const attrs = pool.attributes;
+                const relationships = pool.relationships;
+
+                // Get base token info (the non-SOL/USDC token)
+                let baseTokenId = relationships?.base_token?.data?.id;
+                if (!baseTokenId) continue;
+
+                // Extract mint from token ID (format: "solana_<mint>")
+                const mint = baseTokenId.replace('solana_', '');
+
+                // Skip if already seen or invalid
+                if (seenMints.has(mint) || mint.length < 30) continue;
+                seenMints.add(mint);
+
+                // Get token details from included data
+                const includedTokens = res.data.included || [];
+                const tokenData = includedTokens.find(t => t.id === baseTokenId);
+
+                if (tokenData) {
+                    const tokenAttrs = tokenData.attributes;
+                    results.push({
+                        mint,
+                        name: tokenAttrs.name || `Token ${mint.slice(0, 6)}`,
+                        symbol: tokenAttrs.symbol || mint.slice(0, 4).toUpperCase(),
+                        image: tokenAttrs.image_url || null,
+                        priceUsd: parseFloat(tokenAttrs.price_usd || attrs.base_token_price_usd || 0),
+                        volume24h: parseFloat(attrs.volume_usd?.h24 || 0),
+                        marketCap: parseFloat(tokenAttrs.fdv_usd || attrs.fdv_usd || 0),
+                        liquidity: parseFloat(attrs.reserve_in_usd || 0)
+                    });
+                }
+            }
+        }
+
+        logger.info(`🔍 [GeckoSearch] Found ${results.length} results for "${query}"`);
+        return results;
+    } catch (e) {
+        logger.warn(`⚠️ [GeckoSearch] Search failed for "${query}": ${e.message}`);
+        return [];
+    }
+}
+
+/**
+ * Quick index a token from GeckoTerminal search results (lighter than full indexTokenOnChain)
+ * Used when backfilling search results - skips pool discovery for speed
+ * @param {object} tokenData - Token data from GeckoTerminal search
+ * @returns {Promise<boolean>} - Success status
+ */
+async function quickIndexFromGecko(tokenData) {
+    const db = getDB();
+    const { mint, name, symbol, image, priceUsd, volume24h, marketCap, liquidity } = tokenData;
+
+    try {
+        // Check if already exists
+        const exists = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
+        if (exists) return false; // Already indexed
+
+        // Insert with data from GeckoTerminal
+        await db.run(`
+            INSERT INTO tokens (mint, name, symbol, image, priceUsd, volume24h, marketCap, liquidity, timestamp, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            ON CONFLICT(mint) DO NOTHING
+        `, [mint, name, symbol, image, priceUsd, volume24h, marketCap, liquidity || 0, Date.now()]);
+
+        logger.info(`⚡ [QuickIndex] Added ${symbol} (${mint.slice(0, 8)}) from GeckoTerminal`);
+
+        // Queue for full indexing in background (pools, supply, etc.)
+        enqueueTokenUpdate(mint).catch(() => {});
+
+        return true;
+    } catch (e) {
+        logger.warn(`⚠️ [QuickIndex] Failed for ${mint.slice(0, 8)}: ${e.message}`);
+        return false;
+    }
+}
+
 async function indexTokenOnChain(mint, retryCount = 0) {
     try {
         const db = getDB();
@@ -173,4 +269,4 @@ async function indexTokenOnChain(mint, retryCount = 0) {
     }
 }
 
-module.exports = { indexTokenOnChain };
+module.exports = { indexTokenOnChain, searchGeckoTerminal, quickIndexFromGecko };
