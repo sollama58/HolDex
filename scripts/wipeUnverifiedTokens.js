@@ -49,7 +49,6 @@ async function main() {
 
         if (unverifiedCount === 0) {
             console.log('✅ No unverified tokens to delete. Database is clean!');
-            await pool.end();
             return;
         }
 
@@ -87,7 +86,6 @@ async function main() {
             console.log('   - webhooks (Helius webhook subscriptions)');
             console.log('   - wallet_tx_cache (wallet transaction cache)');
             console.log('   - candles_1m (price candle data via pools)');
-            await pool.end();
             return;
         }
 
