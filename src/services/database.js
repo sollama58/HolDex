@@ -423,6 +423,47 @@ async function initDB() {
                     -- Simple unique: one verification per node per token
                     UNIQUE(mint, node_id)
                 );
+
+                -- Polling Tasks: Distributed task queue for K-Score calculations
+                -- PostgreSQL as coordination layer for multi-node consensus
+                CREATE TABLE IF NOT EXISTS polling_tasks (
+                    task_id SERIAL PRIMARY KEY,
+                    mint TEXT NOT NULL,
+                    priority INTEGER DEFAULT 100,
+                    reason TEXT NOT NULL DEFAULT 'scheduled',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at BIGINT NOT NULL,
+                    created_by TEXT,
+                    claimed_by TEXT,
+                    claimed_at BIGINT,
+                    completed_at BIGINT,
+                    attempts INTEGER DEFAULT 0,
+                    last_error TEXT,
+                    k_score_result DOUBLE PRECISION
+                );
+
+                -- Consensus Snapshots: K-Score consensus records when nodes agree
+                CREATE TABLE IF NOT EXISTS consensus_snapshots (
+                    mint TEXT PRIMARY KEY,
+                    k_score_consensus DOUBLE PRECISION,
+                    agreeing_nodes INTEGER DEFAULT 0,
+                    total_nodes INTEGER DEFAULT 0,
+                    consensus_at BIGINT,
+                    confidence DECIMAL(5,4)
+                );
+
+                -- Node Work History: Analytics for node contributions
+                CREATE TABLE IF NOT EXISTS node_work_history (
+                    id SERIAL PRIMARY KEY,
+                    node_id TEXT NOT NULL,
+                    task_type TEXT NOT NULL DEFAULT 'polling',
+                    mint TEXT NOT NULL,
+                    completed_at BIGINT NOT NULL,
+                    duration_ms INTEGER,
+                    rpc_calls INTEGER DEFAULT 0,
+                    k_score_calculated BOOLEAN DEFAULT FALSE,
+                    error_message TEXT
+                );
             `);
 
             // Add new columns if they don't exist (migration-safe)
@@ -613,6 +654,23 @@ async function initDB() {
                 `CREATE INDEX IF NOT EXISTS idx_token_verifications_node ON token_verifications (node_id, verified_at DESC)`,
                 // Node key fingerprint lookup (for signature verification)
                 `CREATE INDEX IF NOT EXISTS idx_nodes_key_fingerprint ON nodes (node_key_fingerprint) WHERE node_key_fingerprint IS NOT NULL`,
+                // ═══════════════════════════════════════════════════════════
+                // DISTRIBUTED POLLING INDEXES
+                // ═══════════════════════════════════════════════════════════
+                // Partial unique index: only one pending task per mint
+                `CREATE UNIQUE INDEX IF NOT EXISTS idx_polling_tasks_unique_pending ON polling_tasks (mint) WHERE status = 'pending'`,
+                // Index for efficient task claiming (SELECT FOR UPDATE SKIP LOCKED)
+                `CREATE INDEX IF NOT EXISTS idx_polling_tasks_pending_priority ON polling_tasks (priority ASC, created_at ASC) WHERE status = 'pending'`,
+                // Status filtering
+                `CREATE INDEX IF NOT EXISTS idx_polling_tasks_status ON polling_tasks (status)`,
+                // Mint lookup
+                `CREATE INDEX IF NOT EXISTS idx_polling_tasks_mint ON polling_tasks (mint, created_at DESC)`,
+                // Consensus snapshots by time
+                `CREATE INDEX IF NOT EXISTS idx_consensus_snapshots_time ON consensus_snapshots (consensus_at DESC)`,
+                // Node work history by node
+                `CREATE INDEX IF NOT EXISTS idx_node_work_history_node ON node_work_history (node_id, completed_at DESC)`,
+                // Node work history by mint
+                `CREATE INDEX IF NOT EXISTS idx_node_work_history_mint ON node_work_history (mint, completed_at DESC)`,
             ];
 
             for (const sql of migrations) {
