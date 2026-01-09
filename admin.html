@@ -5,16 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Command | HolDex</title>
 
-    <script src="https://bundle.run/buffer@6.0.3"></script>
-    <script>
-        if (typeof window.buffer !== 'undefined') {
-            window.Buffer = window.buffer.Buffer;
-        }
-    </script>
-    <script src="https://unpkg.com/@solana/web3.js@1.91.0/lib/index.iife.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <script src="https://unpkg.com/tweetnacl@1.0.3/nacl-fast.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 
     <script>
@@ -266,7 +258,6 @@
             </div>
         </div>
         <div id="auth-status" class="flex items-center gap-3">
-            <span id="wallet-display" class="text-fire-muted text-sm font-mono hidden"></span>
             <button id="btn-logout" class="btn-danger hidden" onclick="logout()">Logout</button>
         </div>
     </header>
@@ -276,23 +267,14 @@
         <div class="glass-panel p-8 text-center">
             <div class="text-4xl mb-4">🔐</div>
             <h2 class="text-xl font-bold mb-2">Admin Access Required</h2>
-            <p class="text-fire-muted text-sm mb-6">Connect wallet with grants_admin permission or enter admin password</p>
+            <p class="text-fire-muted text-sm mb-6">Enter admin password to access the control panel</p>
 
             <div class="space-y-4">
-                <button id="btn-connect-wallet" class="btn-primary w-full" onclick="connectWallet()">
-                    Connect Wallet
-                </button>
-
-                <div class="flex items-center gap-4 text-fire-muted text-sm">
-                    <div class="flex-1 h-px bg-white/10"></div>
-                    <span>or</span>
-                    <div class="flex-1 h-px bg-white/10"></div>
-                </div>
-
                 <div>
                     <input type="password" id="admin-password" class="glass-input mb-3" placeholder="Admin Password" onkeypress="if(event.key==='Enter')loginWithPassword()">
-                    <button class="btn-primary w-full" onclick="loginWithPassword()">Login with Password</button>
+                    <button class="btn-primary w-full" onclick="loginWithPassword()">Login</button>
                 </div>
+                <div id="login-error" class="text-red-400 text-sm hidden"></div>
             </div>
         </div>
     </div>
@@ -708,10 +690,8 @@
 
     <script>
         const API_URL = window.location.origin;
-        let authMode = null; // 'wallet' or 'password'
-        let sessionToken = null;
+        let authMode = null; // 'password'
         let adminPassword = null;
-        let connectedWallet = null;
         let currentSubmissionView = 'pending';
         let errorLog = [];
         let statusRefreshInterval = null;
@@ -720,92 +700,68 @@
         // AUTH
         // ═══════════════════════════════════════════════════════════════
 
-        async function connectWallet() {
-            try {
-                if (!window.solana?.isPhantom) {
-                    toast('Please install Phantom wallet', 'error');
-                    return;
-                }
-
-                const resp = await window.solana.connect();
-                connectedWallet = resp.publicKey.toString();
-
-                // Sign message for session
-                const timestamp = Date.now();
-                const message = `Access HolDex Space: ${timestamp}`;
-                const encodedMessage = new TextEncoder().encode(message);
-                const signedMessage = await window.solana.signMessage(encodedMessage, 'utf8');
-                const signature = btoa(String.fromCharCode(...signedMessage.signature));
-
-                // Login to space
-                const loginResp = await fetch(`${API_URL}/space/auth/login`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ wallet: connectedWallet, message, signature })
-                });
-
-                const data = await loginResp.json();
-                if (!data.success) {
-                    toast(data.error || 'Login failed', 'error');
-                    return;
-                }
-
-                // Check for grants_admin
-                if (!data.data.grants.includes('grants_admin')) {
-                    toast('You need grants_admin permission', 'error');
-                    return;
-                }
-
-                sessionToken = data.data.sessionToken;
-                authMode = 'wallet';
-                showDashboard();
-                toast('Connected as ' + shortWallet(connectedWallet), 'success');
-
-            } catch (e) {
-                console.error(e);
-                toast('Wallet connection failed', 'error');
-            }
-        }
-
         async function loginWithPassword() {
-            const password = document.getElementById('admin-password').value;
+            const password = document.getElementById('admin-password').value.trim();
+            const errorDiv = document.getElementById('login-error');
+            errorDiv.classList.add('hidden');
+
             if (!password) {
-                toast('Enter password', 'error');
+                errorDiv.textContent = 'Please enter a password';
+                errorDiv.classList.remove('hidden');
                 return;
             }
 
             try {
                 const resp = await fetch(`${API_URL}/api/admin/updates?type=pending`, {
-                    headers: { 'x-admin-auth': password }
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-admin-auth': password
+                    }
                 });
 
-                if (resp.status === 403) {
-                    toast('Invalid password', 'error');
+                const data = await resp.json();
+
+                if (!resp.ok) {
+                    // Show specific error from server
+                    let errorMsg = 'Login failed';
+                    if (resp.status === 403) {
+                        errorMsg = 'Invalid password';
+                    } else if (resp.status === 503) {
+                        errorMsg = data.error || 'Admin not configured on server';
+                    } else if (data.error) {
+                        errorMsg = data.error;
+                    }
+                    errorDiv.textContent = errorMsg;
+                    errorDiv.classList.remove('hidden');
+                    console.error('Login error:', resp.status, data);
                     return;
                 }
 
+                // Success
                 adminPassword = password;
                 sessionStorage.setItem('holdex_admin_key', password);
                 authMode = 'password';
                 showDashboard();
-                toast('Logged in with password', 'success');
+                toast('Logged in successfully', 'success');
 
             } catch (e) {
-                toast('Login failed', 'error');
+                console.error('Login exception:', e);
+                errorDiv.textContent = 'Connection failed - check if server is running';
+                errorDiv.classList.remove('hidden');
             }
         }
 
         function logout() {
-            sessionToken = null;
             adminPassword = null;
             authMode = null;
-            connectedWallet = null;
             sessionStorage.removeItem('holdex_admin_key');
             if (statusRefreshInterval) clearInterval(statusRefreshInterval);
             document.getElementById('login-screen').classList.remove('hidden');
             document.getElementById('dashboard').classList.add('hidden');
-            document.getElementById('wallet-display').classList.add('hidden');
             document.getElementById('btn-logout').classList.add('hidden');
+            document.getElementById('login-error').classList.add('hidden');
+            document.getElementById('admin-password').value = '';
         }
 
         function showDashboard() {
@@ -813,14 +769,9 @@
             document.getElementById('dashboard').classList.remove('hidden');
             document.getElementById('btn-logout').classList.remove('hidden');
 
-            if (connectedWallet) {
-                document.getElementById('wallet-display').textContent = shortWallet(connectedWallet);
-                document.getElementById('wallet-display').classList.remove('hidden');
-            }
-
             // Update system info
             document.getElementById('info-api-url').textContent = API_URL;
-            document.getElementById('info-auth-mode').textContent = authMode;
+            document.getElementById('info-auth-mode').textContent = 'Password';
 
             // Load all data
             refreshSystemStatus();
@@ -841,13 +792,10 @@
         // ═══════════════════════════════════════════════════════════════
 
         function getHeaders() {
-            const headers = { 'Content-Type': 'application/json' };
-            if (authMode === 'password') {
-                headers['x-admin-auth'] = adminPassword;
-            } else if (authMode === 'wallet') {
-                headers['x-session-token'] = sessionToken;
-            }
-            return headers;
+            return {
+                'Content-Type': 'application/json',
+                'x-admin-auth': adminPassword
+            };
         }
 
         async function apiGet(endpoint) {
@@ -983,26 +931,24 @@
         async function loadRecentActivity() {
             const container = document.getElementById('recent-activity');
             try {
-                // Fetch recent actions if wallet auth, otherwise show limited info
-                if (authMode === 'wallet') {
-                    const data = await apiGet('/space/admin/actions?limit=10');
-                    if (data.success && data.data?.length > 0) {
-                        container.innerHTML = data.data.map(a => `
-                            <div class="flex items-center gap-3 p-2 rounded bg-black/20">
-                                <span class="${a.success ? 'text-neon-green' : 'text-red-400'}">${a.success ? '✓' : '✗'}</span>
-                                <div class="flex-1">
-                                    <div class="text-sm">${a.action}</div>
-                                    <div class="text-xs text-fire-muted">${shortWallet(a.wallet)}</div>
-                                </div>
-                                <span class="text-xs text-fire-muted">${timeAgo(a.createdAt)}</span>
+                // Try to fetch recent submissions as activity
+                const data = await apiGet('/api/admin/updates?type=history');
+                if (data.success !== false && data.updates?.length > 0) {
+                    container.innerHTML = data.updates.slice(0, 10).map(u => `
+                        <div class="flex items-center gap-3 p-2 rounded bg-black/20">
+                            <span class="${u.status === 'approved' ? 'text-neon-green' : u.status === 'rejected' ? 'text-red-400' : 'text-yellow-400'}">
+                                ${u.status === 'approved' ? '✓' : u.status === 'rejected' ? '✗' : '○'}
+                            </span>
+                            <div class="flex-1">
+                                <div class="text-sm">${u.ticker || 'Token'} - ${u.status}</div>
+                                <div class="text-xs text-fire-muted font-mono">${shortWallet(u.mint)}</div>
                             </div>
-                        `).join('');
-                        document.getElementById('activity-timestamp').textContent = `Updated ${new Date().toLocaleTimeString()}`;
-                    } else {
-                        container.innerHTML = '<div class="text-fire-muted text-center py-4">No recent activity</div>';
-                    }
+                            <span class="text-xs text-fire-muted">${timeAgo(u.submittedat || u.submittedAt)}</span>
+                        </div>
+                    `).join('');
+                    document.getElementById('activity-timestamp').textContent = `Updated ${new Date().toLocaleTimeString()}`;
                 } else {
-                    container.innerHTML = '<div class="text-fire-muted text-center py-4">Wallet auth required for activity log</div>';
+                    container.innerHTML = '<div class="text-fire-muted text-center py-4">No recent activity</div>';
                 }
             } catch (e) {
                 container.innerHTML = '<div class="text-fire-muted text-center py-4">Failed to load activity</div>';
@@ -1031,8 +977,7 @@
 
                 // Grants count
                 try {
-                    const endpoint = authMode === 'password' ? '/space/admin/grants/password' : '/space/admin/grants';
-                    const grantsData = await apiGet(endpoint);
+                    const grantsData = await apiGet('/space/admin/grants/password');
                     const activeGrants = grantsData.data?.filter(g => g.is_active).length || 0;
                     document.getElementById('stat-grants').textContent = activeGrants;
                 } catch (e) {
@@ -1267,8 +1212,7 @@
 
         async function loadGrants() {
             try {
-                const endpoint = authMode === 'password' ? '/space/admin/grants/password' : '/space/admin/grants';
-                const data = await apiGet(endpoint);
+                const data = await apiGet('/space/admin/grants/password');
                 const tbody = document.getElementById('grants-table');
 
                 if (!data.success || !data.data?.length) {
@@ -1315,35 +1259,15 @@
             const grants = grantsStr.split(',');
 
             try {
-                if (authMode === 'wallet') {
-                    const timestamp = Date.now();
-                    const message = `Grant access to ${wallet}: ${timestamp}`;
-                    const encodedMessage = new TextEncoder().encode(message);
-                    const signedMessage = await window.solana.signMessage(encodedMessage, 'utf8');
-                    const signature = btoa(String.fromCharCode(...signedMessage.signature));
+                const data = await apiPost('/space/admin/grants/password', {
+                    targetWallet: wallet,
+                    grants,
+                    reason
+                });
 
-                    const data = await apiPost('/space/admin/grants', {
-                        wallet: connectedWallet,
-                        signature,
-                        timestamp,
-                        params: { targetWallet: wallet, grants, reason }
-                    });
-
-                    if (!data.success) {
-                        toast(data.error || 'Failed to add grant', 'error');
-                        return;
-                    }
-                } else {
-                    const data = await apiPost('/space/admin/grants/password', {
-                        targetWallet: wallet,
-                        grants,
-                        reason
-                    });
-
-                    if (!data.success) {
-                        toast(data.error || 'Failed to add grant', 'error');
-                        return;
-                    }
+                if (!data.success) {
+                    toast(data.error || 'Failed to add grant', 'error');
+                    return;
                 }
 
                 toast('Grant added successfully', 'success');
@@ -1363,40 +1287,15 @@
             if (!confirm(`Revoke access for ${shortWallet(targetWallet)}?`)) return;
 
             try {
-                if (authMode === 'wallet') {
-                    const timestamp = Date.now();
-                    const message = `Revoke access for ${targetWallet}: ${timestamp}`;
-                    const encodedMessage = new TextEncoder().encode(message);
-                    const signedMessage = await window.solana.signMessage(encodedMessage, 'utf8');
-                    const signature = btoa(String.fromCharCode(...signedMessage.signature));
+                const resp = await fetch(`${API_URL}/space/admin/grants/password/${targetWallet}`, {
+                    method: 'DELETE',
+                    headers: getHeaders()
+                });
 
-                    const resp = await fetch(`${API_URL}/space/admin/grants/${targetWallet}`, {
-                        method: 'DELETE',
-                        headers: getHeaders(),
-                        body: JSON.stringify({
-                            wallet: connectedWallet,
-                            signature,
-                            timestamp,
-                            params: { targetWallet }
-                        })
-                    });
-
-                    const data = await resp.json();
-                    if (!data.success) {
-                        toast(data.error || 'Failed to revoke', 'error');
-                        return;
-                    }
-                } else {
-                    const resp = await fetch(`${API_URL}/space/admin/grants/password/${targetWallet}`, {
-                        method: 'DELETE',
-                        headers: getHeaders()
-                    });
-
-                    const data = await resp.json();
-                    if (!data.success) {
-                        toast(data.error || 'Failed to revoke', 'error');
-                        return;
-                    }
+                const data = await resp.json();
+                if (!data.success) {
+                    toast(data.error || 'Failed to revoke', 'error');
+                    return;
                 }
 
                 toast('Grant revoked', 'success');
@@ -1541,37 +1440,40 @@
         // ═══════════════════════════════════════════════════════════════
 
         async function loadActions() {
+            const tbody = document.getElementById('actions-table');
             try {
-                const data = await apiGet('/space/admin/actions?limit=50');
-                const tbody = document.getElementById('actions-table');
+                // Use the history of submissions as action log
+                const data = await apiGet('/api/admin/updates?type=history');
 
-                if (!data.success || !data.data?.length) {
+                if (!data.updates?.length) {
                     tbody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-fire-muted">No actions logged yet</td></tr>';
                     return;
                 }
 
-                tbody.innerHTML = data.data.map(a => `
+                tbody.innerHTML = data.updates.map(u => `
                     <tr class="table-row">
-                        <td class="py-3 text-xs text-fire-muted">${new Date(a.createdAt).toLocaleString()}</td>
-                        <td class="py-3 font-mono text-xs">${shortWallet(a.wallet)}</td>
+                        <td class="py-3 text-xs text-fire-muted">${new Date(Number(u.submittedat || u.submittedAt)).toLocaleString()}</td>
+                        <td class="py-3 font-mono text-xs">${shortWallet(u.mint)}</td>
                         <td class="py-3">
-                            <span class="badge ${a.action.includes('denied') || a.action.includes('failed') ? 'badge-revoked' : 'badge-active'}">
-                                ${a.action}
+                            <span class="badge ${u.status === 'approved' ? 'badge-active' : u.status === 'rejected' ? 'badge-revoked' : 'badge-pending'}">
+                                ${u.status}
                             </span>
                         </td>
-                        <td class="py-3 text-xs text-fire-muted max-w-[200px] truncate">${JSON.stringify(a.metadata || {}).slice(0, 50)}...</td>
+                        <td class="py-3 text-xs text-fire-muted">${u.ticker || '-'} | ${u.twitter ? 'Twitter' : ''} ${u.website ? 'Web' : ''}</td>
                         <td class="py-3">
-                            ${a.success
+                            ${u.status === 'approved'
                                 ? '<span class="text-neon-green">✓</span>'
-                                : '<span class="text-red-500">✗</span>'}
+                                : u.status === 'rejected'
+                                    ? '<span class="text-red-500">✗</span>'
+                                    : '<span class="text-yellow-400">○</span>'}
                         </td>
                     </tr>
                 `).join('');
 
             } catch (e) {
                 console.error('Actions load error:', e);
-                document.getElementById('actions-table').innerHTML =
-                    '<tr><td colspan="5" class="py-8 text-center text-fire-muted">Failed to load actions (wallet auth may be required)</td></tr>';
+                tbody.innerHTML =
+                    '<tr><td colspan="5" class="py-8 text-center text-fire-muted">Failed to load actions</td></tr>';
             }
         }
 
