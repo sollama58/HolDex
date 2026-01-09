@@ -533,6 +533,20 @@ async function initDB() {
                 // Token verifications: Add cryptographic proof
                 `ALTER TABLE token_verifications ADD COLUMN IF NOT EXISTS node_signature TEXT DEFAULT NULL`, // Ed25519 signature (base64)
                 `ALTER TABLE token_verifications ADD COLUMN IF NOT EXISTS signature_version TEXT DEFAULT 'v1'`, // For future algorithm upgrades
+                // ═══════════════════════════════════════════════════════════
+                // WATCHLIST SYSTEM (Consumer Journey Stage 4: Investment)
+                // ═══════════════════════════════════════════════════════════
+                `CREATE TABLE IF NOT EXISTS user_watchlists (
+                    id SERIAL PRIMARY KEY,
+                    wallet TEXT NOT NULL,
+                    mint TEXT NOT NULL,
+                    label TEXT DEFAULT NULL,
+                    alert_threshold INTEGER DEFAULT NULL,
+                    alert_direction TEXT DEFAULT 'below',
+                    added_at BIGINT DEFAULT EXTRACT(EPOCH FROM NOW()) * 1000,
+                    last_notified_at BIGINT DEFAULT NULL,
+                    UNIQUE(wallet, mint)
+                )`,
             ];
 
             // PERFORMANCE: Add indexes for frequently queried columns
@@ -595,6 +609,15 @@ async function initDB() {
                 `CREATE INDEX IF NOT EXISTS idx_token_verifications_node ON token_verifications (node_id, verified_at DESC)`,
                 // Node key fingerprint lookup (for signature verification)
                 `CREATE INDEX IF NOT EXISTS idx_nodes_key_fingerprint ON nodes (node_key_fingerprint) WHERE node_key_fingerprint IS NOT NULL`,
+                // ═══════════════════════════════════════════════════════════
+                // WATCHLIST INDEXES
+                // ═══════════════════════════════════════════════════════════
+                // Watchlist by wallet (most common query)
+                `CREATE INDEX IF NOT EXISTS idx_watchlist_wallet ON user_watchlists (wallet)`,
+                // Watchlist by mint (for K-Score update broadcasts)
+                `CREATE INDEX IF NOT EXISTS idx_watchlist_mint ON user_watchlists (mint)`,
+                // Alert queries (for background worker)
+                `CREATE INDEX IF NOT EXISTS idx_watchlist_alerts ON user_watchlists (alert_threshold) WHERE alert_threshold IS NOT NULL`,
             ];
 
             for (const sql of migrations) {
@@ -860,4 +883,181 @@ async function aggregateAndSaveToken(db, mint) {
     }
 }
 
-module.exports = { initDB, getDB, smartCache, enableIndexing, aggregateAndSaveToken };
+// ═══════════════════════════════════════════════════════════════════════════════
+// WATCHLIST FUNCTIONS (Consumer Journey Stage 4: Investment)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get user's watchlist with current K-Scores
+ * @param {string} wallet - Wallet address
+ * @returns {Promise<Array>} Watchlist items with token details
+ */
+async function getWatchlist(wallet) {
+    const db = getDB();
+    if (!db) return [];
+
+    const rows = await db.all(`
+        SELECT w.*,
+               t.name, t.symbol, t.k_score, t.tier, t.image as logo_uri,
+               t.priceusd, t.marketcap, t.change24h
+        FROM user_watchlists w
+        LEFT JOIN tokens t ON w.mint = t.mint
+        WHERE w.wallet = $1
+        ORDER BY w.added_at DESC
+    `, [wallet]);
+
+    return rows.map(r => ({
+        mint: r.mint,
+        label: r.label,
+        added_at: r.added_at,
+        alert_threshold: r.alert_threshold,
+        alert_direction: r.alert_direction,
+        last_notified_at: r.last_notified_at,
+        token: r.name ? {
+            name: r.name,
+            symbol: r.symbol,
+            k_score: r.k_score,
+            tier: r.tier,
+            logo_uri: r.logo_uri,
+            price_usd: r.priceusd,
+            market_cap: r.marketcap,
+            change_24h: r.change24h
+        } : null
+    }));
+}
+
+/**
+ * Add token to watchlist
+ * @param {string} wallet - Wallet address
+ * @param {string} mint - Token mint address
+ * @param {string|null} label - Optional label
+ * @param {number|null} alertThreshold - K-Score threshold for alerts
+ * @param {string} alertDirection - 'below' or 'above'
+ * @returns {Promise<boolean>} Success
+ */
+async function addToWatchlist(wallet, mint, label = null, alertThreshold = null, alertDirection = 'below') {
+    const db = getDB();
+    if (!db) return false;
+
+    try {
+        // Check watchlist limit (50 tokens max)
+        const count = await db.get('SELECT COUNT(*) as count FROM user_watchlists WHERE wallet = $1', [wallet]);
+        if (count.count >= 50) {
+            throw new Error('Watchlist limit reached (50 tokens)');
+        }
+
+        await db.run(`
+            INSERT INTO user_watchlists (wallet, mint, label, alert_threshold, alert_direction, added_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT(wallet, mint) DO UPDATE SET
+                label = COALESCE(EXCLUDED.label, user_watchlists.label),
+                alert_threshold = EXCLUDED.alert_threshold,
+                alert_direction = EXCLUDED.alert_direction
+        `, [wallet, mint, label, alertThreshold, alertDirection, Date.now()]);
+
+        return true;
+    } catch (e) {
+        logger.error(`[Watchlist] Add failed for ${wallet.slice(0,8)}: ${e.message}`);
+        return false;
+    }
+}
+
+/**
+ * Remove token from watchlist
+ * @param {string} wallet - Wallet address
+ * @param {string} mint - Token mint address
+ * @returns {Promise<boolean>} Success
+ */
+async function removeFromWatchlist(wallet, mint) {
+    const db = getDB();
+    if (!db) return false;
+
+    try {
+        await db.run('DELETE FROM user_watchlists WHERE wallet = $1 AND mint = $2', [wallet, mint]);
+        return true;
+    } catch (e) {
+        logger.error(`[Watchlist] Remove failed: ${e.message}`);
+        return false;
+    }
+}
+
+/**
+ * Update watchlist item
+ * @param {string} wallet - Wallet address
+ * @param {string} mint - Token mint address
+ * @param {Object} updates - Fields to update (label, alert_threshold, alert_direction)
+ * @returns {Promise<boolean>} Success
+ */
+async function updateWatchlistItem(wallet, mint, updates) {
+    const db = getDB();
+    if (!db) return false;
+
+    const fields = [];
+    const values = [];
+    let idx = 1;
+
+    if (updates.label !== undefined) { fields.push(`label = $${idx++}`); values.push(updates.label); }
+    if (updates.alert_threshold !== undefined) { fields.push(`alert_threshold = $${idx++}`); values.push(updates.alert_threshold); }
+    if (updates.alert_direction !== undefined) { fields.push(`alert_direction = $${idx++}`); values.push(updates.alert_direction); }
+
+    if (fields.length === 0) return true;
+
+    values.push(wallet, mint);
+
+    try {
+        await db.run(`UPDATE user_watchlists SET ${fields.join(', ')} WHERE wallet = $${idx++} AND mint = $${idx}`, values);
+        return true;
+    } catch (e) {
+        logger.error(`[Watchlist] Update failed: ${e.message}`);
+        return false;
+    }
+}
+
+/**
+ * Get all watchlist items with pending alerts (for background worker)
+ * @returns {Promise<Array>} Items where K-Score crossed threshold
+ */
+async function getWatchlistAlerts() {
+    const db = getDB();
+    if (!db) return [];
+
+    return db.all(`
+        SELECT w.*, t.k_score, t.name, t.symbol
+        FROM user_watchlists w
+        JOIN tokens t ON w.mint = t.mint
+        WHERE w.alert_threshold IS NOT NULL
+        AND (
+            (w.alert_direction = 'below' AND t.k_score < w.alert_threshold)
+            OR
+            (w.alert_direction = 'above' AND t.k_score > w.alert_threshold)
+        )
+        AND (w.last_notified_at IS NULL OR w.last_notified_at < $1)
+    `, [Date.now() - 24 * 60 * 60 * 1000]); // Only alert once per 24 hours
+}
+
+/**
+ * Mark watchlist alert as notified
+ * @param {number} id - Watchlist item ID
+ * @returns {Promise<void>}
+ */
+async function markWatchlistAlertNotified(id) {
+    const db = getDB();
+    if (!db) return;
+
+    await db.run('UPDATE user_watchlists SET last_notified_at = $1 WHERE id = $2', [Date.now(), id]);
+}
+
+module.exports = {
+    initDB,
+    getDB,
+    smartCache,
+    enableIndexing,
+    aggregateAndSaveToken,
+    // Watchlist functions
+    getWatchlist,
+    addToWatchlist,
+    removeFromWatchlist,
+    updateWatchlistItem,
+    getWatchlistAlerts,
+    markWatchlistAlertNotified
+};

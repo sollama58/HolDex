@@ -818,6 +818,162 @@ router.get('/admin/actions', requireSession(), requireGrant('grants_admin'), spa
 });
 
 // ═══════════════════════════════════════════════════════════════
+// WATCHLIST ENDPOINTS (Consumer Journey Stage 4: Investment)
+// ═══════════════════════════════════════════════════════════════
+
+const {
+    getWatchlist,
+    addToWatchlist,
+    removeFromWatchlist,
+    updateWatchlistItem
+} = require('../services/database');
+
+/**
+ * GET /api/space/watchlist
+ * Get user's watchlist with current K-Scores
+ */
+router.get('/watchlist', spaceRateLimiter, requireSession, async (req, res) => {
+    try {
+        const watchlist = await getWatchlist(req.wallet);
+
+        await logAction(req.wallet, 'watchlist_view', 'space_access', {
+            count: watchlist.length
+        });
+
+        res.json({
+            success: true,
+            watchlist,
+            count: watchlist.length,
+            limit: 50
+        });
+    } catch (e) {
+        logger?.error(`[Space] Watchlist fetch error: ${e.message}`);
+        res.status(500).json({ success: false, error: 'Failed to fetch watchlist' });
+    }
+});
+
+/**
+ * POST /api/space/watchlist
+ * Add token to watchlist
+ * Body: { mint, label?, alert_threshold?, alert_direction? }
+ */
+router.post('/watchlist', writeRateLimiter, requireSession, async (req, res) => {
+    try {
+        const { mint, label, alert_threshold, alert_direction } = req.body;
+
+        if (!mint || typeof mint !== 'string' || mint.length < 30) {
+            return res.status(400).json({ success: false, error: 'Invalid mint address' });
+        }
+
+        // Validate alert_direction if provided
+        if (alert_direction && !['below', 'above'].includes(alert_direction)) {
+            return res.status(400).json({ success: false, error: 'alert_direction must be "below" or "above"' });
+        }
+
+        // Validate alert_threshold if provided
+        if (alert_threshold !== undefined && alert_threshold !== null) {
+            const threshold = parseInt(alert_threshold);
+            if (isNaN(threshold) || threshold < 0 || threshold > 100) {
+                return res.status(400).json({ success: false, error: 'alert_threshold must be 0-100' });
+            }
+        }
+
+        const success = await addToWatchlist(
+            req.wallet,
+            mint,
+            label || null,
+            alert_threshold !== undefined ? parseInt(alert_threshold) : null,
+            alert_direction || 'below'
+        );
+
+        if (!success) {
+            return res.status(400).json({ success: false, error: 'Failed to add to watchlist (limit may be reached)' });
+        }
+
+        await logAction(req.wallet, 'watchlist_add', 'space_access', { mint });
+
+        res.json({ success: true, message: 'Token added to watchlist' });
+    } catch (e) {
+        logger?.error(`[Space] Watchlist add error: ${e.message}`);
+        res.status(500).json({ success: false, error: 'Failed to add to watchlist' });
+    }
+});
+
+/**
+ * DELETE /api/space/watchlist/:mint
+ * Remove token from watchlist
+ */
+router.delete('/watchlist/:mint', writeRateLimiter, requireSession, async (req, res) => {
+    try {
+        const { mint } = req.params;
+
+        if (!mint || mint.length < 30) {
+            return res.status(400).json({ success: false, error: 'Invalid mint address' });
+        }
+
+        const success = await removeFromWatchlist(req.wallet, mint);
+
+        if (!success) {
+            return res.status(400).json({ success: false, error: 'Failed to remove from watchlist' });
+        }
+
+        await logAction(req.wallet, 'watchlist_remove', 'space_access', { mint });
+
+        res.json({ success: true, message: 'Token removed from watchlist' });
+    } catch (e) {
+        logger?.error(`[Space] Watchlist remove error: ${e.message}`);
+        res.status(500).json({ success: false, error: 'Failed to remove from watchlist' });
+    }
+});
+
+/**
+ * PATCH /api/space/watchlist/:mint
+ * Update watchlist item (label, alert settings)
+ * Body: { label?, alert_threshold?, alert_direction? }
+ */
+router.patch('/watchlist/:mint', writeRateLimiter, requireSession, async (req, res) => {
+    try {
+        const { mint } = req.params;
+        const { label, alert_threshold, alert_direction } = req.body;
+
+        if (!mint || mint.length < 30) {
+            return res.status(400).json({ success: false, error: 'Invalid mint address' });
+        }
+
+        // Validate alert_direction if provided
+        if (alert_direction !== undefined && !['below', 'above'].includes(alert_direction)) {
+            return res.status(400).json({ success: false, error: 'alert_direction must be "below" or "above"' });
+        }
+
+        // Validate alert_threshold if provided
+        if (alert_threshold !== undefined && alert_threshold !== null) {
+            const threshold = parseInt(alert_threshold);
+            if (isNaN(threshold) || threshold < 0 || threshold > 100) {
+                return res.status(400).json({ success: false, error: 'alert_threshold must be 0-100' });
+            }
+        }
+
+        const updates = {};
+        if (label !== undefined) updates.label = label;
+        if (alert_threshold !== undefined) updates.alert_threshold = alert_threshold === null ? null : parseInt(alert_threshold);
+        if (alert_direction !== undefined) updates.alert_direction = alert_direction;
+
+        const success = await updateWatchlistItem(req.wallet, mint, updates);
+
+        if (!success) {
+            return res.status(400).json({ success: false, error: 'Failed to update watchlist item' });
+        }
+
+        await logAction(req.wallet, 'watchlist_update', 'space_access', { mint, updates });
+
+        res.json({ success: true, message: 'Watchlist item updated' });
+    } catch (e) {
+        logger?.error(`[Space] Watchlist update error: ${e.message}`);
+        res.status(500).json({ success: false, error: 'Failed to update watchlist item' });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════
 // INITIALIZATION
 // ═══════════════════════════════════════════════════════════════
 
