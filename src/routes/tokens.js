@@ -1583,6 +1583,155 @@ function init(deps) {
         }
     });
 
+    // ═══════════════════════════════════════════════════════════════
+    // ANNOUNCEMENT SYSTEM
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * GET /api/announcement
+     * Public endpoint to fetch active announcement
+     */
+    router.get('/announcement', cacheControl(60, 120), async (req, res) => {
+        try {
+            const redis = getClient();
+
+            // Check Redis first
+            if (redis) {
+                const cached = await redis.get('announcement:active');
+                if (cached) {
+                    const announcement = JSON.parse(cached);
+                    return res.json({ success: true, announcement });
+                }
+            }
+
+            // Check database for active announcement
+            const announcement = await db.get(`
+                SELECT id, title, content, created_at
+                FROM announcements
+                WHERE active = TRUE
+                ORDER BY created_at DESC
+                LIMIT 1
+            `);
+
+            if (announcement) {
+                announcement.active = true;
+                // Cache for 5 minutes
+                if (redis) {
+                    await redis.setEx('announcement:active', 300, JSON.stringify(announcement));
+                }
+            }
+
+            res.json({ success: true, announcement: announcement || null });
+        } catch (e) {
+            // If table doesn't exist, return null silently
+            if (e.code === '42P01') {
+                return res.json({ success: true, announcement: null });
+            }
+            logger.error(`[Announcement] Fetch error: ${e.message}`);
+            res.json({ success: true, announcement: null });
+        }
+    });
+
+    /**
+     * POST /api/admin/announcement
+     * Set/update the active announcement
+     */
+    router.post('/admin/announcement', requireAdmin, async (req, res) => {
+        const { title, content, active = true } = req.body;
+
+        if (!content || content.trim().length === 0) {
+            return res.status(400).json({ success: false, error: 'Content is required' });
+        }
+
+        try {
+            // Ensure announcements table exists
+            await db.run(`
+                CREATE TABLE IF NOT EXISTS announcements (
+                    id SERIAL PRIMARY KEY,
+                    title TEXT,
+                    content TEXT NOT NULL,
+                    active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            `);
+
+            // Deactivate all existing announcements if setting a new active one
+            if (active) {
+                await db.run(`UPDATE announcements SET active = FALSE WHERE active = TRUE`);
+            }
+
+            // Insert new announcement
+            const result = await db.get(`
+                INSERT INTO announcements (title, content, active)
+                VALUES ($1, $2, $3)
+                RETURNING id, title, content, active, created_at
+            `, [title || 'Announcement', content.trim(), active]);
+
+            // Clear cache
+            const redis = getClient();
+            if (redis) {
+                await redis.del('announcement:active');
+            }
+
+            logger.info(`[Announcement] New announcement created: ${result.id}`);
+            res.json({ success: true, announcement: result });
+        } catch (e) {
+            logger.error(`[Announcement] Create error: ${e.message}`);
+            res.status(500).json({ success: false, error: sanitizeError(e) });
+        }
+    });
+
+    /**
+     * DELETE /api/admin/announcement
+     * Clear/deactivate all announcements
+     */
+    router.delete('/admin/announcement', requireAdmin, async (req, res) => {
+        try {
+            await db.run(`UPDATE announcements SET active = FALSE WHERE active = TRUE`);
+
+            // Clear cache
+            const redis = getClient();
+            if (redis) {
+                await redis.del('announcement:active');
+            }
+
+            logger.info('[Announcement] All announcements deactivated');
+            res.json({ success: true, message: 'Announcements cleared' });
+        } catch (e) {
+            // If table doesn't exist, that's fine
+            if (e.code === '42P01') {
+                return res.json({ success: true, message: 'No announcements to clear' });
+            }
+            logger.error(`[Announcement] Clear error: ${e.message}`);
+            res.status(500).json({ success: false, error: sanitizeError(e) });
+        }
+    });
+
+    /**
+     * GET /api/admin/announcements
+     * Get all announcements (history)
+     */
+    router.get('/admin/announcements', requireAdmin, async (req, res) => {
+        try {
+            const announcements = await db.all(`
+                SELECT id, title, content, active, created_at, updated_at
+                FROM announcements
+                ORDER BY created_at DESC
+                LIMIT 20
+            `);
+
+            res.json({ success: true, announcements: announcements || [] });
+        } catch (e) {
+            // If table doesn't exist, return empty
+            if (e.code === '42P01') {
+                return res.json({ success: true, announcements: [] });
+            }
+            logger.error(`[Announcement] History error: ${e.message}`);
+            res.status(500).json({ success: false, error: sanitizeError(e) });
+        }
+    });
+
     /**
      * GET /api/token/:mint/evolution
      * K-Score evolution with price correlation for overlay charts

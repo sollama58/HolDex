@@ -644,6 +644,34 @@
                     </div>
                 </div>
 
+                <!-- Announcements -->
+                <div class="glass-panel p-6">
+                    <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
+                        <i data-lucide="megaphone" class="w-5 h-5"></i> Announcements
+                    </h3>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="text-sm text-fire-muted block mb-1">Title</label>
+                            <input type="text" id="announcement-title" class="form-input w-full" placeholder="Announcement Title">
+                        </div>
+                        <div>
+                            <label class="text-sm text-fire-muted block mb-1">Content (supports **bold**)</label>
+                            <textarea id="announcement-content" class="form-input w-full h-24 resize-none" placeholder="Enter announcement content..."></textarea>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="publishAnnouncement()" class="btn-success flex-1">
+                                <i data-lucide="send" class="w-4 h-4 inline"></i> Publish
+                            </button>
+                            <button onclick="clearAnnouncement()" class="btn-danger flex-1">
+                                <i data-lucide="x" class="w-4 h-4 inline"></i> Clear
+                            </button>
+                        </div>
+                        <div id="current-announcement" class="text-xs text-fire-muted mt-2 p-2 bg-[#0a0a12] rounded hidden">
+                            <span class="text-fire-accent">Active:</span> <span id="current-announcement-text"></span>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Quick Actions -->
                 <div class="glass-panel p-6">
                     <h3 class="text-lg font-bold mb-4 flex items-center gap-2">
@@ -788,6 +816,7 @@
             loadGrants();
             loadApiKeys();
             loadActions();
+            loadCurrentAnnouncement();
 
             // Auto-refresh status every 30 seconds
             statusRefreshInterval = setInterval(refreshSystemStatus, 30000);
@@ -1648,6 +1677,79 @@
                 toast('Network Error', 'error');
                 logError('Failed to repair database', 'error');
                 alert('Network error - check console for details');
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // ANNOUNCEMENT MANAGEMENT
+        // ═══════════════════════════════════════════════════════════════
+
+        async function loadCurrentAnnouncement() {
+            try {
+                const res = await fetch(`${API_URL}/api/announcement`);
+                const data = await res.json();
+
+                const container = document.getElementById('current-announcement');
+                const text = document.getElementById('current-announcement-text');
+
+                if (data.success && data.announcement) {
+                    const ann = data.announcement;
+                    text.textContent = ann.content.length > 100 ? ann.content.substring(0, 100) + '...' : ann.content;
+                    container.classList.remove('hidden');
+                } else {
+                    container.classList.add('hidden');
+                }
+            } catch (e) {
+                console.debug('[Announcement] Load failed:', e.message);
+            }
+        }
+
+        async function publishAnnouncement() {
+            const title = document.getElementById('announcement-title').value.trim();
+            const content = document.getElementById('announcement-content').value.trim();
+
+            if (!content) {
+                toast('Announcement content is required', 'error');
+                return;
+            }
+
+            if (!confirm(`Publish this announcement?\n\n"${content.substring(0, 100)}${content.length > 100 ? '...' : ''}"`)) {
+                return;
+            }
+
+            try {
+                const data = await apiPost('/api/admin/announcement', { title, content, active: true });
+                if (data.success) {
+                    toast('Announcement published!', 'success');
+                    document.getElementById('announcement-title').value = '';
+                    document.getElementById('announcement-content').value = '';
+                    loadCurrentAnnouncement();
+                } else {
+                    toast('Error: ' + data.error, 'error');
+                }
+            } catch (e) {
+                toast('Failed to publish announcement', 'error');
+            }
+        }
+
+        async function clearAnnouncement() {
+            if (!confirm('Clear the current announcement? Users will no longer see it.')) return;
+
+            try {
+                const res = await fetch(`${API_URL}/api/admin/announcement`, {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    toast('Announcement cleared', 'success');
+                    loadCurrentAnnouncement();
+                } else {
+                    toast('Error: ' + data.error, 'error');
+                }
+            } catch (e) {
+                toast('Failed to clear announcement', 'error');
             }
         }
 
