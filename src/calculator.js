@@ -265,6 +265,12 @@ async function main() {
         metadataUpdater.start(deps);
         logger.info('✅ Metadata Updater Running');
 
+        // 7. Start Watchlist Alerts Worker
+        logger.info('🔔 Starting Watchlist Alerts Worker...');
+        const watchlistAlerts = require('./tasks/watchlistAlerts');
+        watchlistAlerts.startWatchlistAlertsWorker();
+        logger.info('✅ Watchlist Alerts Worker Running');
+
         // ============================================================================
         // TOKEN ADDITION POLICY:
         // Tokens are ONLY added to the database when users search by Contract Address (CA).
