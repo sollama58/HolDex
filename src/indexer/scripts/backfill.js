@@ -121,22 +121,32 @@ async function backfill() {
             const metadata = content.metadata || {};
             const links = content.links || {};
 
+            const name = metadata.name || asset.name;
+            const symbol = metadata.symbol || asset.symbol;
+            const image = content.files?.[0]?.uri || links.image || null;
+
+            // Validate metadata - reject placeholder values
+            const invalidNames = ['Unknown', 'New Discovery', '', null, undefined];
+            const invalidSymbols = ['UNK', 'UNKNOWN', 'NEW', '', null, undefined];
+            const hasRealName = name && !invalidNames.includes(name) && !name.startsWith('Token ');
+            const hasRealSymbol = symbol && !invalidSymbols.includes(symbol);
+
+            if (!hasRealName || !hasRealSymbol) {
+                console.log(`❌ Cannot backfill ${MINT.slice(0, 8)} - no valid metadata (name: ${name}, symbol: ${symbol})`);
+                console.log("   Token metadata must be available on-chain before backfilling.");
+                process.exit(1);
+            }
+
             await db.run(`
                 INSERT INTO tokens (mint, name, symbol, image, timestamp)
                 VALUES ($1, $2, $3, $4, $5)
                 ON CONFLICT(mint) DO UPDATE SET
-                    name = COALESCE(EXCLUDED.name, tokens.name),
-                    symbol = COALESCE(EXCLUDED.symbol, tokens.symbol),
-                    image = COALESCE(EXCLUDED.image, tokens.image)
-            `, [
-                MINT,
-                metadata.name || asset.name || 'Unknown',
-                metadata.symbol || asset.symbol || 'UNKNOWN',
-                content.files?.[0]?.uri || links.image || null,
-                Date.now()
-            ]);
+                    name = CASE WHEN tokens.name IN ('Unknown', 'New Discovery', '') OR tokens.name IS NULL THEN EXCLUDED.name ELSE tokens.name END,
+                    symbol = CASE WHEN tokens.symbol IN ('UNKNOWN', 'UNK', 'NEW', '') OR tokens.symbol IS NULL THEN EXCLUDED.symbol ELSE tokens.symbol END,
+                    image = CASE WHEN tokens.image IS NULL OR tokens.image = '' THEN EXCLUDED.image ELSE tokens.image END
+            `, [MINT, name, symbol, image, Date.now()]);
 
-            console.log(`Token metadata updated: ${metadata.symbol || asset.symbol}`);
+            console.log(`✅ Token metadata updated: ${symbol} (${name})`);
         }
 
         console.log("Backfill Complete.");

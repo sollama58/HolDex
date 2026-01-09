@@ -125,25 +125,36 @@ async function seed() {
             const jupiterPrice = await getJupiterPrice(mint);
 
             // Extract data
-            const name = metadata.name || asset?.name || 'Unknown';
-            const symbol = metadata.symbol || asset?.symbol || 'UNKNOWN';
+            const name = metadata.name || asset?.name;
+            const symbol = metadata.symbol || asset?.symbol;
             const image = content.files?.[0]?.uri || links.image || null;
             const priceUsd = jupiterPrice || raydiumPool?.price || 0;
             const liquidity = raydiumPool?.tvl || 0;
             const volume24h = raydiumPool?.day?.volume || 0;
 
+            // Validate metadata - reject placeholder values
+            const invalidNames = ['Unknown', 'New Discovery', '', null, undefined];
+            const invalidSymbols = ['UNK', 'UNKNOWN', 'NEW', '', null, undefined];
+            const hasRealName = name && !invalidNames.includes(name) && !name.startsWith('Token ');
+            const hasRealSymbol = symbol && !invalidSymbols.includes(symbol);
+
+            if (!hasRealName || !hasRealSymbol) {
+                console.log(`⚠️ Skipping ${mint.slice(0, 8)} - no valid metadata (name: ${name}, symbol: ${symbol})`);
+                continue;
+            }
+
             // Calculate rough market cap (FDV)
             // This is approximate - real mcap requires supply data
             const fdv = raydiumPool?.tvl ? raydiumPool.tvl * 2 : 0;
 
-            // 4. Insert Token
+            // 4. Insert Token - only with valid metadata
             await pool.query(`
                 INSERT INTO tokens (mint, name, symbol, image, marketCap, priceUsd, timestamp)
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
                 ON CONFLICT(mint) DO UPDATE SET
-                    name = COALESCE(EXCLUDED.name, tokens.name),
-                    symbol = COALESCE(EXCLUDED.symbol, tokens.symbol),
-                    image = COALESCE(EXCLUDED.image, tokens.image),
+                    name = CASE WHEN tokens.name IN ('Unknown', 'New Discovery', '') OR tokens.name IS NULL THEN EXCLUDED.name ELSE tokens.name END,
+                    symbol = CASE WHEN tokens.symbol IN ('UNKNOWN', 'UNK', 'NEW', '') OR tokens.symbol IS NULL THEN EXCLUDED.symbol ELSE tokens.symbol END,
+                    image = CASE WHEN tokens.image IS NULL OR tokens.image = '' THEN EXCLUDED.image ELSE tokens.image END,
                     marketCap = EXCLUDED.marketCap,
                     priceUsd = EXCLUDED.priceUsd
             `, [
