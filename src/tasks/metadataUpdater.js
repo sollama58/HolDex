@@ -39,7 +39,55 @@ async function processSingleToken(db, t, now) {
     try {
         let poolsData = await fetchGeckoTerminalData(t.mint);
         let tokenDetails = await fetchTokenDetails(t.mint);
-        
+
+        // --- 0. CHECK FOR PLACEHOLDER METADATA AND UPDATE IF POSSIBLE ---
+        // Tokens may be stuck with "New Discovery" or "Unknown" names if metadata
+        // wasn't available when they were first indexed
+        const placeholderNames = ['Unknown', 'New Discovery', '', null, undefined];
+        const placeholderSymbols = ['UNK', 'UNKNOWN', 'NEW', '', null, undefined];
+        const hasPlaceholderName = placeholderNames.includes(t.name);
+        const hasPlaceholderSymbol = placeholderSymbols.includes(t.symbol);
+        const hasNoImage = !t.image || t.image === '';
+
+        if ((hasPlaceholderName || hasPlaceholderSymbol || hasNoImage) && tokenDetails && tokenDetails.attributes) {
+            const attr = tokenDetails.attributes;
+            const newName = attr.name;
+            const newSymbol = attr.symbol;
+            const newImage = attr.image_url;
+
+            // Only update if we have real values from GeckoTerminal
+            const hasRealName = newName && !placeholderNames.includes(newName);
+            const hasRealSymbol = newSymbol && !placeholderSymbols.includes(newSymbol);
+
+            if (hasRealName || hasRealSymbol || newImage) {
+                const metaUpdates = [];
+                const metaParams = [];
+                let metaIdx = 1;
+
+                if (hasPlaceholderName && hasRealName) {
+                    metaUpdates.push(`name = $${metaIdx++}`);
+                    metaParams.push(newName);
+                }
+                if (hasPlaceholderSymbol && hasRealSymbol) {
+                    metaUpdates.push(`symbol = $${metaIdx++}`);
+                    metaParams.push(newSymbol);
+                }
+                if (hasNoImage && newImage) {
+                    metaUpdates.push(`image = $${metaIdx++}`);
+                    metaParams.push(newImage);
+                }
+
+                if (metaUpdates.length > 0) {
+                    metaParams.push(t.mint);
+                    await db.run(
+                        `UPDATE tokens SET ${metaUpdates.join(', ')}, updated_at = NOW() WHERE mint = $${metaIdx}`,
+                        metaParams
+                    );
+                    logger.info(`🔄 [MetadataUpdater] Fixed placeholder metadata for ${t.mint.slice(0, 8)}: ${newName || t.name} (${newSymbol || t.symbol})`);
+                }
+            }
+        }
+
         // --- 1. HOLDER COUNT LOGIC (OPTIMIZED) ---
         let holderCount = t.holders || 0;
         let foundNewData = false;
@@ -257,10 +305,11 @@ async function updateMetadata(deps) {
         // Fetch tokens that haven't been updated recently or need holder checks
         // OOM FIX: Reduced LIMIT from 75 to 25 to reduce working set size
         // AGE FIX: Added 'timestamp' to selection to perform comparisons
+        // METADATA FIX: Added name, symbol, image to fix placeholder tokens
         let tokens = await db.all(`
-            SELECT mint, supply, decimals, holders, last_holder_check, timestamp 
-            FROM tokens 
-            ORDER BY liquidity DESC, updated_at ASC 
+            SELECT mint, name, symbol, image, supply, decimals, holders, last_holder_check, timestamp
+            FROM tokens
+            ORDER BY liquidity DESC, updated_at ASC
             LIMIT 25
         `);
         
