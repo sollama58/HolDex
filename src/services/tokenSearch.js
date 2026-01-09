@@ -98,9 +98,27 @@ async function loadJupiterTokenList() {
         // Strategy 2: Fallback to public Jupiter token list (no API key required)
         if (!tokens || !Array.isArray(tokens) || tokens.length === 0) {
             logger.info('[TokenSearch] Fetching Jupiter public token list...');
-            const publicListUrl = 'https://token.jup.ag/strict';
-            const response = await axios.get(publicListUrl, { timeout: 30000 });
-            tokens = response.data;
+
+            // List of public endpoints to try (in order of preference)
+            const publicEndpoints = [
+                'https://token.jup.ag/strict',
+                'https://token.jup.ag/all',
+                'https://cache.jup.ag/tokens'
+            ];
+
+            for (const url of publicEndpoints) {
+                try {
+                    logger.debug(`[TokenSearch] Trying: ${url}`);
+                    const response = await axios.get(url, { timeout: 30000 });
+                    if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+                        tokens = response.data;
+                        logger.info(`[TokenSearch] Success: loaded ${tokens.length} tokens from ${url}`);
+                        break;
+                    }
+                } catch (err) {
+                    logger.debug(`[TokenSearch] ${url} failed: ${err.message}`);
+                }
+            }
         }
 
         if (tokens && Array.isArray(tokens) && tokens.length > 0) {
@@ -486,6 +504,29 @@ async function searchTokens(query, limit = 10) {
         }
     }
 
+    // Strategy 5: For address searches, try Metaplex on-chain metadata as last resort
+    if (results.length === 0 && isAddressSearch) {
+        try {
+            const { fetchTokenMetadata } = require('../utils/metaplex');
+            logger.debug(`[TokenSearch] Trying Metaplex for: ${query.slice(0, 8)}...`);
+            const meta = await fetchTokenMetadata(query);
+            if (meta && meta.name && meta.name !== 'Unknown') {
+                results = [{
+                    mint: query,
+                    name: meta.name,
+                    symbol: meta.symbol || 'UNK',
+                    image: meta.image || meta.uri || null,
+                    decimals: meta.decimals || 9,
+                    verified: false,
+                    source: 'metaplex'
+                }];
+                logger.debug(`[TokenSearch] Metaplex found token: ${meta.name}`);
+            }
+        } catch (metaErr) {
+            logger.debug(`[TokenSearch] Metaplex lookup failed: ${metaErr.message}`);
+        }
+    }
+
     // Enrich with prices if we have results
     if (results.length > 0) {
         const mints = results.map(r => r.mint);
@@ -511,7 +552,11 @@ async function searchTokens(query, limit = 10) {
         } catch (_e) { /* ignore */ }
     }
 
-    logger.info(`[TokenSearch] Found ${results.length} results for "${query}"`);
+    if (results.length === 0) {
+        logger.warn(`[TokenSearch] No results found for "${query}" after trying all strategies`);
+    } else {
+        logger.info(`[TokenSearch] Found ${results.length} results for "${query}"`);
+    }
     return results;
 }
 
