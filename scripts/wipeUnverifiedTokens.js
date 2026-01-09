@@ -99,183 +99,137 @@ async function main() {
         try {
             await client.query('BEGIN');
 
-            // 1. Delete related data first (foreign key constraints)
-            console.log('   Deleting pools...');
-            const poolsResult = await client.query(`
-                DELETE FROM pools
-                WHERE mint IN (
-                    SELECT mint FROM tokens
-                    WHERE hasCommunityUpdate = FALSE OR hasCommunityUpdate IS NULL
-                )
-            `);
-            console.log(`   ✓ Deleted ${poolsResult.rowCount} pool records`);
-
-            console.log('   Deleting holders_history...');
-            const holdersHistResult = await client.query(`
-                DELETE FROM holders_history
-                WHERE mint IN (
-                    SELECT mint FROM tokens
-                    WHERE hasCommunityUpdate = FALSE OR hasCommunityUpdate IS NULL
-                )
-            `);
-            console.log(`   ✓ Deleted ${holdersHistResult.rowCount} holder history records`);
-
-            // Check if holder_snapshots table exists before deleting
-            const snapshotsExist = await client.query(`
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_name = 'holder_snapshots'
-                )
-            `);
-            if (snapshotsExist.rows[0].exists) {
-                console.log('   Deleting holder_snapshots...');
-                const snapshotsResult = await client.query(`
-                    DELETE FROM holder_snapshots
-                    WHERE mint IN (
-                        SELECT mint FROM tokens
-                        WHERE hasCommunityUpdate = FALSE OR hasCommunityUpdate IS NULL
+            // Helper to check if table exists
+            const tableExists = async (tableName) => {
+                const result = await client.query(`
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables
+                        WHERE table_name = $1
                     )
-                `);
-                console.log(`   ✓ Deleted ${snapshotsResult.rowCount} holder snapshot records`);
-            }
+                `, [tableName]);
+                return result.rows[0].exists;
+            };
 
-            // Check if k_score_history table exists before deleting
-            const kScoreHistoryExist = await client.query(`
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_name = 'k_score_history'
-                )
-            `);
-            if (kScoreHistoryExist.rows[0].exists) {
-                console.log('   Deleting k_score_history...');
-                const kScoreResult = await client.query(`
-                    DELETE FROM k_score_history
-                    WHERE mint IN (
-                        SELECT mint FROM tokens
-                        WHERE hasCommunityUpdate = FALSE OR hasCommunityUpdate IS NULL
-                    )
-                `);
-                console.log(`   ✓ Deleted ${kScoreResult.rowCount} K-Score history records`);
-            }
+            // Subquery for unverified token mints (reused throughout)
+            const unverifiedMintsSubquery = `
+                SELECT mint FROM tokens
+                WHERE hasCommunityUpdate = FALSE OR hasCommunityUpdate IS NULL
+            `;
 
-            // Check if holder_history table exists before deleting
-            const holderHistoryExist = await client.query(`
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_name = 'holder_history'
-                )
-            `);
-            if (holderHistoryExist.rows[0].exists) {
-                console.log('   Deleting holder_history...');
-                const holderHistResult = await client.query(`
-                    DELETE FROM holder_history
-                    WHERE mint IN (
-                        SELECT mint FROM tokens
-                        WHERE hasCommunityUpdate = FALSE OR hasCommunityUpdate IS NULL
-                    )
-                `);
-                console.log(`   ✓ Deleted ${holderHistResult.rowCount} holder history records`);
-            }
+            // ═══════════════════════════════════════════════════════════
+            // DELETE ORDER: Must respect foreign key constraints
+            // 1. candles_1m (references pools.address)
+            // 2. pools (references tokens.mint via foreign key)
+            // 3. All other tables that reference tokens.mint (no FK)
+            // 4. tokens (last - parent table)
+            // ═══════════════════════════════════════════════════════════
 
-            // Check if supply_history table exists before deleting
-            const supplyHistoryExist = await client.query(`
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_name = 'supply_history'
-                )
-            `);
-            if (supplyHistoryExist.rows[0].exists) {
-                console.log('   Deleting supply_history...');
-                const supplyHistResult = await client.query(`
-                    DELETE FROM supply_history
-                    WHERE mint IN (
-                        SELECT mint FROM tokens
-                        WHERE hasCommunityUpdate = FALSE OR hasCommunityUpdate IS NULL
-                    )
-                `);
-                console.log(`   ✓ Deleted ${supplyHistResult.rowCount} supply history records`);
-            }
-
-            // Check if token_verifications table exists before deleting
-            const tokenVerifExist = await client.query(`
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_name = 'token_verifications'
-                )
-            `);
-            if (tokenVerifExist.rows[0].exists) {
-                console.log('   Deleting token_verifications...');
-                const tokenVerifResult = await client.query(`
-                    DELETE FROM token_verifications
-                    WHERE mint IN (
-                        SELECT mint FROM tokens
-                        WHERE hasCommunityUpdate = FALSE OR hasCommunityUpdate IS NULL
-                    )
-                `);
-                console.log(`   ✓ Deleted ${tokenVerifResult.rowCount} token verification records`);
-            }
-
-            // Check if webhooks table exists before deleting
-            const webhooksExist = await client.query(`
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_name = 'webhooks'
-                )
-            `);
-            if (webhooksExist.rows[0].exists) {
-                console.log('   Deleting webhooks...');
-                const webhooksResult = await client.query(`
-                    DELETE FROM webhooks
-                    WHERE mint IN (
-                        SELECT mint FROM tokens
-                        WHERE hasCommunityUpdate = FALSE OR hasCommunityUpdate IS NULL
-                    )
-                `);
-                console.log(`   ✓ Deleted ${webhooksResult.rowCount} webhook records`);
-            }
-
-            // Check if wallet_tx_cache table exists before deleting
-            const walletTxCacheExist = await client.query(`
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_name = 'wallet_tx_cache'
-                )
-            `);
-            if (walletTxCacheExist.rows[0].exists) {
-                console.log('   Deleting wallet_tx_cache...');
-                const walletTxResult = await client.query(`
-                    DELETE FROM wallet_tx_cache
-                    WHERE mint IN (
-                        SELECT mint FROM tokens
-                        WHERE hasCommunityUpdate = FALSE OR hasCommunityUpdate IS NULL
-                    )
-                `);
-                console.log(`   ✓ Deleted ${walletTxResult.rowCount} wallet tx cache records`);
-            }
-
-            // Delete candles_1m via pools (candles reference pool_address, not mint directly)
-            const candlesExist = await client.query(`
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_name = 'candles_1m'
-                )
-            `);
-            if (candlesExist.rows[0].exists) {
+            // 1. Delete tables that reference pools.address FIRST
+            if (await tableExists('candles_1m')) {
                 console.log('   Deleting candles_1m (via pools)...');
                 const candlesResult = await client.query(`
                     DELETE FROM candles_1m
                     WHERE pool_address IN (
                         SELECT address FROM pools
-                        WHERE mint IN (
-                            SELECT mint FROM tokens
-                            WHERE hasCommunityUpdate = FALSE OR hasCommunityUpdate IS NULL
-                        )
+                        WHERE mint IN (${unverifiedMintsSubquery})
                     )
                 `);
                 console.log(`   ✓ Deleted ${candlesResult.rowCount} candle records`);
             }
 
-            // 2. Delete the tokens themselves
+            if (await tableExists('active_trackers')) {
+                console.log('   Deleting active_trackers (via pools)...');
+                const trackersResult = await client.query(`
+                    DELETE FROM active_trackers
+                    WHERE pool_address IN (
+                        SELECT address FROM pools
+                        WHERE mint IN (${unverifiedMintsSubquery})
+                    )
+                `);
+                console.log(`   ✓ Deleted ${trackersResult.rowCount} active_trackers records`);
+            }
+
+            // 2. Delete pools (has foreign key to tokens.mint)
+            console.log('   Deleting pools...');
+            const poolsResult = await client.query(`
+                DELETE FROM pools
+                WHERE mint IN (${unverifiedMintsSubquery})
+            `);
+            console.log(`   ✓ Deleted ${poolsResult.rowCount} pool records`);
+
+            // 3. Delete all other related tables (no FK constraints to tokens)
+
+            console.log('   Deleting holders_history...');
+            const holdersHistResult = await client.query(`
+                DELETE FROM holders_history
+                WHERE mint IN (${unverifiedMintsSubquery})
+            `);
+            console.log(`   ✓ Deleted ${holdersHistResult.rowCount} holders_history records`);
+
+            if (await tableExists('holder_history')) {
+                console.log('   Deleting holder_history...');
+                const holderHistResult = await client.query(`
+                    DELETE FROM holder_history
+                    WHERE mint IN (${unverifiedMintsSubquery})
+                `);
+                console.log(`   ✓ Deleted ${holderHistResult.rowCount} holder_history records`);
+            }
+
+            if (await tableExists('holder_snapshots')) {
+                console.log('   Deleting holder_snapshots...');
+                const snapshotsResult = await client.query(`
+                    DELETE FROM holder_snapshots
+                    WHERE mint IN (${unverifiedMintsSubquery})
+                `);
+                console.log(`   ✓ Deleted ${snapshotsResult.rowCount} holder_snapshots records`);
+            }
+
+            if (await tableExists('k_score_history')) {
+                console.log('   Deleting k_score_history...');
+                const kScoreResult = await client.query(`
+                    DELETE FROM k_score_history
+                    WHERE mint IN (${unverifiedMintsSubquery})
+                `);
+                console.log(`   ✓ Deleted ${kScoreResult.rowCount} k_score_history records`);
+            }
+
+            if (await tableExists('supply_history')) {
+                console.log('   Deleting supply_history...');
+                const supplyHistResult = await client.query(`
+                    DELETE FROM supply_history
+                    WHERE mint IN (${unverifiedMintsSubquery})
+                `);
+                console.log(`   ✓ Deleted ${supplyHistResult.rowCount} supply_history records`);
+            }
+
+            if (await tableExists('token_verifications')) {
+                console.log('   Deleting token_verifications...');
+                const tokenVerifResult = await client.query(`
+                    DELETE FROM token_verifications
+                    WHERE mint IN (${unverifiedMintsSubquery})
+                `);
+                console.log(`   ✓ Deleted ${tokenVerifResult.rowCount} token_verifications records`);
+            }
+
+            if (await tableExists('webhooks')) {
+                console.log('   Deleting webhooks...');
+                const webhooksResult = await client.query(`
+                    DELETE FROM webhooks
+                    WHERE mint IN (${unverifiedMintsSubquery})
+                `);
+                console.log(`   ✓ Deleted ${webhooksResult.rowCount} webhook records`);
+            }
+
+            if (await tableExists('wallet_tx_cache')) {
+                console.log('   Deleting wallet_tx_cache...');
+                const walletTxResult = await client.query(`
+                    DELETE FROM wallet_tx_cache
+                    WHERE mint IN (${unverifiedMintsSubquery})
+                `);
+                console.log(`   ✓ Deleted ${walletTxResult.rowCount} wallet_tx_cache records`);
+            }
+
+            // 4. Delete tokens LAST (parent table)
             console.log('   Deleting tokens...');
             const tokensResult = await client.query(`
                 DELETE FROM tokens
