@@ -790,7 +790,7 @@
             top: 0;
             left: 0;
             right: 0;
-            z-index: 100;
+            z-index: 9999;
             background: linear-gradient(90deg, #ea580c 0%, #f97316 50%, #fb923c 100%);
             transform: translateY(-100%);
             transition: transform 0.3s ease;
@@ -3494,8 +3494,10 @@
 
     // Show announcement banner at top of page
     function showAnnouncementBanner(text, id) {
+        console.log('[Announcement] showAnnouncementBanner called with:', { text, id });
         const banner = document.getElementById('announcement-banner');
         const bannerText = document.getElementById('announcement-banner-text');
+        console.log('[Announcement] Banner element:', banner, 'Text element:', bannerText);
         if (banner && bannerText) {
             // Strip markdown and limit length for banner
             let cleanText = text.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\n/g, ' ').trim();
@@ -3507,9 +3509,14 @@
             banner.classList.remove('hidden');
             document.body.classList.add('has-announcement-banner');
             // Trigger animation
-            setTimeout(() => banner.classList.add('visible'), 10);
+            setTimeout(() => {
+                banner.classList.add('visible');
+                console.log('[Announcement] Banner should now be visible');
+            }, 10);
             // Re-init lucide icons for the banner
             if (typeof lucide !== 'undefined') lucide.createIcons();
+        } else {
+            console.error('[Announcement] Banner elements not found!');
         }
     }
 
@@ -3530,17 +3537,25 @@
     async function checkAnnouncement() {
         try {
             const res = await fetch(`${API_URL}/api/announcement`);
-            if (!res.ok) return;
+            if (!res.ok) {
+                console.debug('[Announcement] Fetch failed:', res.status);
+                return;
+            }
             const data = await res.json();
+            console.log('[Announcement] Response:', data);
 
-            if (data.success && data.announcement && data.announcement.active) {
+            // The endpoint only returns active announcements, so just check if we got one
+            if (data.success && data.announcement && data.announcement.content) {
                 const announcement = data.announcement;
                 const announcementId = String(announcement.id); // Convert to string for storage comparisons
                 const seenId = localStorage.getItem('holdex_seen_announcement');
                 const dismissedId = sessionStorage.getItem('holdex_banner_dismissed');
 
+                console.log('[Announcement] ID:', announcementId, 'SeenID:', seenId, 'DismissedID:', dismissedId);
+
                 // Always show banner if not dismissed this session
                 if (dismissedId !== announcementId) {
+                    console.log('[Announcement] Showing banner...');
                     showAnnouncementBanner(announcement.content, announcementId);
                 }
 
@@ -3566,9 +3581,11 @@
                         openAnnouncementModal();
                     }
                 }
+            } else {
+                console.log('[Announcement] No active announcement');
             }
         } catch (e) {
-            console.debug('[Announcement] Check failed:', e.message);
+            console.error('[Announcement] Check failed:', e.message);
         }
     }
 

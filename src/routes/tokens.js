@@ -1591,8 +1591,9 @@ function init(deps) {
     /**
      * GET /api/announcement
      * Public endpoint to fetch active announcement
+     * Short cache (10s) to ensure announcements appear quickly
      */
-    router.get('/announcement', cacheControl(60, 120), async (req, res) => {
+    router.get('/announcement', cacheControl(10, 30), async (req, res) => {
         try {
             const redis = getClient();
 
@@ -1601,6 +1602,7 @@ function init(deps) {
                 const cached = await redis.get('announcement:active');
                 if (cached) {
                     const announcement = JSON.parse(cached);
+                    logger.debug(`[Announcement] Returning cached: id=${announcement.id}`);
                     return res.json({ success: true, announcement });
                 }
             }
@@ -1616,16 +1618,20 @@ function init(deps) {
 
             if (announcement) {
                 announcement.active = true;
-                // Cache for 5 minutes
+                logger.info(`[Announcement] Found active: id=${announcement.id}, title="${announcement.title}"`);
+                // Cache for 60 seconds (short to ensure quick updates)
                 if (redis) {
-                    await redis.setEx('announcement:active', 300, JSON.stringify(announcement));
+                    await redis.setEx('announcement:active', 60, JSON.stringify(announcement));
                 }
+            } else {
+                logger.debug('[Announcement] No active announcement found');
             }
 
             res.json({ success: true, announcement: announcement || null });
         } catch (e) {
             // If table doesn't exist, return null silently
             if (e.code === '42P01') {
+                logger.debug('[Announcement] Table does not exist yet');
                 return res.json({ success: true, announcement: null });
             }
             logger.error(`[Announcement] Fetch error: ${e.message}`);
