@@ -487,6 +487,14 @@ async function initDB() {
                 // K-Score v10: Real holders tracking
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS real_holders INTEGER DEFAULT 0`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS total_holders INTEGER DEFAULT 0`,
+                // ═══════════════════════════════════════════════════════════
+                // NODE-BASED K-SCORE TRACKING (Distributed Consensus)
+                // Tracks which node calculated the K-Score for verification
+                // ═══════════════════════════════════════════════════════════
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_node_id TEXT DEFAULT NULL`,        // Node that calculated the K-Score
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_node_signature TEXT DEFAULT NULL`, // Ed25519 signature from the node
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_node_timestamp BIGINT DEFAULT NULL`, // When the node signed
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_node_status TEXT DEFAULT NULL`,    // Node status at time of calculation
                 // Harmony: Fix operation_costs schema if old version exists
                 `ALTER TABLE operation_costs RENAME COLUMN operation TO operation_type`,
                 `ALTER TABLE operation_costs RENAME COLUMN infrastructure_cost TO actual_cost`,
