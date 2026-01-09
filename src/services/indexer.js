@@ -66,10 +66,18 @@ async function searchGeckoTerminal(query, limit = 10) {
 
                 if (tokenData) {
                     const tokenAttrs = tokenData.attributes;
+                    const tokenName = tokenAttrs.name;
+                    const tokenSymbol = tokenAttrs.symbol;
+
+                    // Skip tokens without real metadata
+                    if (!tokenName || !tokenSymbol || tokenName === 'Unknown' || tokenSymbol === 'UNK') {
+                        continue;
+                    }
+
                     results.push({
                         mint,
-                        name: tokenAttrs.name || `Token ${mint.slice(0, 6)}`,
-                        symbol: tokenAttrs.symbol || mint.slice(0, 4).toUpperCase(),
+                        name: tokenName,
+                        symbol: tokenSymbol,
                         image: tokenAttrs.image_url || null,
                         priceUsd: parseFloat(tokenAttrs.price_usd || attrs.base_token_price_usd || 0),
                         volume24h: parseFloat(attrs.volume_usd?.h24 || 0),
@@ -99,6 +107,15 @@ async function quickIndexFromGecko(tokenData) {
     const { mint, name, symbol, image, priceUsd, volume24h, marketCap, liquidity } = tokenData;
 
     try {
+        // Validate metadata - only add tokens with real names/symbols
+        const hasRealName = name && name !== 'Unknown' && name !== 'New Discovery' && !name.startsWith('Token ') && name.length > 0;
+        const hasRealSymbol = symbol && symbol !== 'UNK' && symbol !== 'UNKNOWN' && symbol !== 'NEW' && symbol.length > 0;
+
+        if (!hasRealName || !hasRealSymbol) {
+            logger.warn(`⚠️ [QuickIndex] Skipping ${mint.slice(0, 8)} - invalid metadata (name: ${name}, symbol: ${symbol})`);
+            return false;
+        }
+
         // Check if already exists
         const exists = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
         if (exists) return false; // Already indexed
@@ -143,15 +160,11 @@ async function indexTokenOnChain(mint, retryCount = 0) {
             return indexTokenOnChain(mint, retryCount + 1);
         }
 
-        // If still no valid metadata after retries, use truncated mint as fallback
-        // This ensures the token is always added when a user searches for it
+        // If still no valid metadata after retries, DO NOT add token to database
+        // We only want tokens with real metadata - no placeholders like "New Discovery"
         if (!hasRealName || !hasRealSymbol) {
-            logger.warn(`⚠️ [Indexer] Using fallback metadata for ${mint.slice(0, 8)} - real metadata unavailable`);
-            meta = {
-                name: meta?.name && meta.name !== 'Unknown' ? meta.name : `Token ${mint.slice(0, 6)}`,
-                symbol: meta?.symbol && meta.symbol !== 'UNK' && meta.symbol !== 'UNKNOWN' ? meta.symbol : mint.slice(0, 4).toUpperCase(),
-                image: meta?.image || null
-            };
+            logger.warn(`⚠️ [Indexer] Skipping ${mint.slice(0, 8)} - no valid metadata after ${MAX_RETRIES} retries (name: ${meta?.name}, symbol: ${meta?.symbol})`);
+            return { name: null, ticker: null, pairs: [], skipped: true, reason: 'no_metadata' };
         }
 
         logger.info(`📝 [Indexer] Metadata: ${meta.name} (${meta.symbol})`);
