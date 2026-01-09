@@ -91,8 +91,8 @@ async function processToken(mint) {
         const meta = await fetchTokenMetadata(mint);
 
         // Check if we got real metadata (not placeholder)
-        const hasRealName = meta && meta.name && meta.name !== 'Unknown' && meta.name.length > 0;
-        const hasRealSymbol = meta && meta.symbol && meta.symbol !== 'UNK' && meta.symbol !== 'UNKNOWN';
+        const hasRealName = meta && meta.name && meta.name !== 'Unknown' && meta.name !== 'New Discovery' && meta.name.length > 0;
+        const hasRealSymbol = meta && meta.symbol && meta.symbol !== 'UNK' && meta.symbol !== 'UNKNOWN' && meta.symbol !== 'NEW';
 
         if (!hasRealName || !hasRealSymbol) {
             // Metadata not ready - retry or fail
