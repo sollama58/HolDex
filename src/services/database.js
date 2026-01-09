@@ -503,6 +503,8 @@ async function initDB() {
                 `ALTER TABLE participants ADD COLUMN IF NOT EXISTS escore_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
                 `ALTER TABLE participants ADD COLUMN IF NOT EXISTS first_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
                 `ALTER TABLE participants ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+                // FIX: Ensure conviction_score is DOUBLE PRECISION (might be INTEGER in old DBs)
+                `ALTER TABLE tokens ALTER COLUMN conviction_score TYPE DOUBLE PRECISION USING conviction_score::DOUBLE PRECISION`,
                 // ═══════════════════════════════════════════════════════════
                 // PER-NODE CRYPTOGRAPHIC IDENTITY (Ed25519)
                 // Philosophy: "Don't trust. Verify." - Each node has unique identity
@@ -717,8 +719,11 @@ async function enableIndexing(db, mint, poolData) {
                 reserve_a = COALESCE(EXCLUDED.reserve_a, pools.reserve_a),
                 reserve_b = COALESCE(EXCLUDED.reserve_b, pools.reserve_b)
         `, [
-            poolData.pairAddress, mint, poolData.dexId, poolData.priceUsd || 0, poolData.liquidity?.usd || 0,
-            poolData.volume?.h24 || 0, Date.now(), poolData.baseToken, poolData.quoteToken,
+            poolData.pairAddress, mint, poolData.dexId, poolData.priceUsd || 0, Math.floor(poolData.liquidity?.usd || 0),
+            Math.floor(poolData.volume?.h24 || 0), Date.now(),
+            // Handle both object format ({address: "..."}) and string format for token addresses
+            typeof poolData.baseToken === 'object' ? poolData.baseToken?.address : poolData.baseToken,
+            typeof poolData.quoteToken === 'object' ? poolData.quoteToken?.address : poolData.quoteToken,
             poolData.reserve_a || null, poolData.reserve_b || null
         ]);
         await db.run(`INSERT INTO active_trackers (pool_address, priority, last_check) VALUES ($1, 10, 0) ON CONFLICT(pool_address) DO NOTHING`, [poolData.pairAddress]);
@@ -799,17 +804,17 @@ async function aggregateAndSaveToken(db, mint) {
         // FIX: Only update liquidity/volume/price if we have valid data (> 0), otherwise preserve existing
         // FIX: Ensure all numeric values are properly typed to avoid integer overflow errors
         // FIX: Validate all numeric values are finite to prevent PostgreSQL type errors
-        // FIX: Use Math.floor() for liquidity/volume to avoid decimal precision issues (only price keeps decimals)
+        // FIX: Use Math.floor() for liquidity/volume/marketCap to avoid decimal precision issues (only price keeps decimals)
         const safeTotalLiq = Number.isFinite(totalLiq) ? Math.floor(totalLiq) : 0;
         const safeTotalVol = Number.isFinite(totalVol) ? Math.floor(totalVol) : 0;
         const safePrice = Number.isFinite(price) ? price : 0;  // Keep decimals for price
         const params = [safeTotalLiq, safeTotalVol, safePrice, mint];
         let query = `UPDATE tokens SET
-            liquidity = CASE WHEN $1 > 0 THEN $1::DOUBLE PRECISION ELSE liquidity END,
-            volume24h = CASE WHEN $2 > 0 THEN $2::DOUBLE PRECISION ELSE volume24h END,
+            liquidity = CASE WHEN $1 > 0 THEN FLOOR($1)::DOUBLE PRECISION ELSE liquidity END,
+            volume24h = CASE WHEN $2 > 0 THEN FLOOR($2)::DOUBLE PRECISION ELSE volume24h END,
             priceUsd = CASE WHEN $3 > 0 THEN $3::DOUBLE PRECISION ELSE priceUsd END,
             updated_at = NOW(),
-            marketCap = CASE WHEN $3 > 0 THEN ($3::DOUBLE PRECISION * CAST(supply AS DOUBLE PRECISION) / POWER(10, COALESCE(decimals, 9))) ELSE marketCap END`;
+            marketCap = CASE WHEN $3 > 0 THEN FLOOR($3::DOUBLE PRECISION * CAST(supply AS DOUBLE PRECISION) / POWER(10, COALESCE(decimals, 9)))::DOUBLE PRECISION ELSE marketCap END`;
 
         let idx = 5; // Start at 5 since we use $1-$4 above
         if (change24h !== null) { query += `, change24h = $${idx++}::DOUBLE PRECISION`; params.push(Number.isFinite(change24h) ? change24h : 0); }

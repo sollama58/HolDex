@@ -217,26 +217,29 @@ async function processPoolBatch(db, connection, pools, _redis) {
             getRealVolume(p.address, lastSig, solPriceCache).then(volData => {
                 if (volData.txCount > 0) {
                     stateCache.set(sigKey, volData.latestSignature);
-                    
+
                     if (volData.volumeUsd > 0) {
-                        db.query(`UPDATE pools SET volume_24h = volume_24h + $1 WHERE address = $2`, [volData.volumeUsd, p.address]).catch(() => {});
+                        // FIX: Use Math.floor() for volume to ensure integer values
+                        const flooredVolume = Math.floor(volData.volumeUsd);
+                        db.query(`UPDATE pools SET volume_24h = volume_24h + $1 WHERE address = $2`, [flooredVolume, p.address]).catch(() => {});
 
                         const bucket = Math.floor(Date.now() / 60000) * 60000;
                         db.query(`
-                            INSERT INTO candles_1m (pool_address, timestamp, open, high, low, close, volume) 
-                            VALUES ($1, $2, $3, $3, $3, $3, $4) 
-                            ON CONFLICT(pool_address, timestamp) 
+                            INSERT INTO candles_1m (pool_address, timestamp, open, high, low, close, volume)
+                            VALUES ($1, $2, $3, $3, $3, $3, $4)
+                            ON CONFLICT(pool_address, timestamp)
                             DO UPDATE SET volume = candles_1m.volume + $4
-                        `, [p.address, bucket, priceUsd, volData.volumeUsd]).catch(() => {});
+                        `, [p.address, bucket, priceUsd, flooredVolume]).catch(() => {});
                     }
                 }
             }).catch(() => {});
         }
 
-        if (success && priceUsd > 0) { 
+        if (success && priceUsd > 0) {
             affectedMints.add(p.mint);
-            
-            updates.push(db.query(`UPDATE pools SET price_usd = $1, liquidity_usd = $2 WHERE address = $3`, [priceUsd, liquidityUsd, p.address]));
+
+            // FIX: Use Math.floor() for liquidity to ensure integer values (price keeps decimals)
+            updates.push(db.query(`UPDATE pools SET price_usd = $1, liquidity_usd = $2 WHERE address = $3`, [priceUsd, Math.floor(liquidityUsd), p.address]));
             
             updates.push(db.query(`
                 INSERT INTO candles_1m (pool_address, timestamp, open, high, low, close, volume) 

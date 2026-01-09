@@ -1591,12 +1591,51 @@ function init(deps) {
                                   conviction_score, conviction_accumulators, conviction_holders, conviction_reducers, conviction_extractors`;
             if (search.length > 0) {
                 const isAddress = isValidPubkey(search);
+                const MIN_RESULTS = 5;
+
                 if (isAddress) {
+                    // Contract address search - index if not found
                     rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE mint = $1`, [search]);
+                    if (rows.length === 0) {
+                        try {
+                            await indexTokenOnChain(search);
+                            rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE mint = $1`, [search]);
+                        } catch (indexErr) {
+                            logger.error(`[PublicSearch] Indexing failed for ${search}: ${indexErr.message}`);
+                            rows = [];
+                        }
+                    }
                 } else {
                     // SECURITY: Escape LIKE pattern to prevent injection (M9)
                     const safeSearch = `%${escapeLikePattern(search)}%`;
-                    rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) LIMIT $2`, [safeSearch, limit]);
+                    rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) ORDER BY volume24h DESC NULLS LAST LIMIT $2`, [safeSearch, limit]);
+
+                    // Backfill from GeckoTerminal if not enough results
+                    if (rows.length < MIN_RESULTS && search.length >= 2) {
+                        try {
+                            const existingMints = new Set(rows.map(r => r.mint));
+                            const needed = MIN_RESULTS - rows.length;
+
+                            // Search GeckoTerminal for more results
+                            const geckoResults = await searchGeckoTerminal(search, needed + 5);
+
+                            // Filter out tokens we already have
+                            const newTokens = geckoResults.filter(t => !existingMints.has(t.mint));
+
+                            // Quick index new tokens
+                            const indexPromises = newTokens.slice(0, needed).map(token =>
+                                quickIndexFromGecko(token).catch(() => false)
+                            );
+                            await Promise.all(indexPromises);
+
+                            // Re-query to get freshly indexed tokens
+                            rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) ORDER BY volume24h DESC NULLS LAST LIMIT $2`, [safeSearch, limit]);
+
+                            logger.info(`[PublicSearch] Backfilled "${search}": ${rows.length} results`);
+                        } catch (geckoErr) {
+                            logger.warn(`[PublicSearch] GeckoTerminal backfill failed for "${search}": ${geckoErr.message}`);
+                        }
+                    }
                 }
             } else {
                 const dir = direction === 'asc' ? 'ASC' : 'DESC';
