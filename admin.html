@@ -659,6 +659,9 @@
                         <button onclick="runMigrations()" class="btn-success w-full">
                             <i data-lucide="database" class="w-4 h-4 inline"></i> Run DB Migrations
                         </button>
+                        <button onclick="repairDatabase()" class="btn-primary w-full">
+                            <i data-lucide="wrench" class="w-4 h-4 inline"></i> Repair Database
+                        </button>
                     </div>
                 </div>
 
@@ -1597,6 +1600,54 @@
             } catch (e) {
                 toast('Network Error', 'error');
                 logError('Failed to run migrations', 'error');
+            }
+        }
+
+        async function repairDatabase() {
+            if (!confirm('Repair database? This will:\n\n- Create missing tables\n- Add missing columns\n- Fix column types\n- Create missing indexes\n- Remove problematic constraints\n\nThis is safe to run multiple times. Continue?')) return;
+
+            toast('Repairing database... this may take a moment', 'success');
+
+            try {
+                const data = await apiPost('/api/admin/repair-database', {});
+                if (data.success) {
+                    const summary = data.summary || {};
+                    const results = data.results || {};
+
+                    let message = `Database Repair Complete!\n\n`;
+                    message += `Tables: ${summary.tables || 'N/A'}\n`;
+                    message += `Columns: ${summary.columns || 'N/A'}\n`;
+                    message += `Indexes: ${summary.indexes || 'N/A'}\n`;
+                    message += `Errors: ${summary.errors || 0}\n`;
+
+                    // Show created items
+                    if (results.tables?.created?.length > 0) {
+                        message += `\nNew Tables: ${results.tables.created.join(', ')}`;
+                    }
+                    if (results.columns?.added?.length > 0) {
+                        message += `\nNew Columns: ${results.columns.added.length} added`;
+                    }
+                    if (results.indexes?.created?.length > 0) {
+                        message += `\nNew Indexes: ${results.indexes.created.length} created`;
+                    }
+
+                    // Show failures if any
+                    if (results.tables?.failed?.length > 0 || results.columns?.failed?.length > 0) {
+                        message += `\n\nWarnings:`;
+                        results.tables?.failed?.forEach(f => message += `\n- Table ${f.table}: ${f.error}`);
+                        results.columns?.failed?.forEach(f => message += `\n- Column: ${f.error}`);
+                    }
+
+                    alert(message);
+                    toast('Database repair complete', 'success');
+                } else {
+                    toast('Error: ' + data.error, 'error');
+                    alert('Database repair failed: ' + data.error);
+                }
+            } catch (e) {
+                toast('Network Error', 'error');
+                logError('Failed to repair database', 'error');
+                alert('Network error - check console for details');
             }
         }
 
