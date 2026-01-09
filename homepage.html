@@ -3535,16 +3535,17 @@
 
             if (data.success && data.announcement && data.announcement.active) {
                 const announcement = data.announcement;
+                const announcementId = String(announcement.id); // Convert to string for storage comparisons
                 const seenId = localStorage.getItem('holdex_seen_announcement');
                 const dismissedId = sessionStorage.getItem('holdex_banner_dismissed');
 
                 // Always show banner if not dismissed this session
-                if (dismissedId !== announcement.id) {
-                    showAnnouncementBanner(announcement.content, announcement.id);
+                if (dismissedId !== announcementId) {
+                    showAnnouncementBanner(announcement.content, announcementId);
                 }
 
                 // Show modal popup only if not already seen (localStorage persists)
-                if (seenId !== announcement.id) {
+                if (seenId !== announcementId) {
                     const contentEl = document.getElementById('announcement-content');
                     const dateEl = document.getElementById('announcement-date');
                     const modal = document.getElementById('announcement-modal');
@@ -3561,7 +3562,7 @@
                             dateEl.textContent = `Posted: ${date.toLocaleDateString()}`;
                         }
 
-                        modal.dataset.announcementId = announcement.id;
+                        modal.dataset.announcementId = announcementId;
                         openAnnouncementModal();
                     }
                 }

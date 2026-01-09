@@ -131,6 +131,9 @@ async function searchJupiterList(query, limit = 10) {
     for (const token of tokens) {
         if (results.length >= limit) break;
 
+        // Skip tokens without valid address
+        if (!token.address) continue;
+
         const nameLower = (token.name || '').toLowerCase();
         const symbolLower = (token.symbol || '').toLowerCase();
 
@@ -354,15 +357,19 @@ async function searchJupiterV2(query, limit = 10) {
         let tokens = response.data?.tokens || response.data;
         if (!tokens || !Array.isArray(tokens)) return [];
 
-        return tokens.slice(0, limit).map(t => ({
-            mint: t.mint || t.address,
-            name: t.name || 'Unknown',
-            symbol: t.symbol || 'UNK',
-            image: t.logo || t.logoURI || t.image || null,
-            decimals: t.decimals || 9,
-            verified: t.tags?.includes('verified') || t.verified || false,
-            source: 'jupiter_v2_search'
-        }));
+        // Filter out tokens without valid mint addresses and map to standard format
+        return tokens
+            .filter(t => t.mint || t.address) // Must have a valid mint address
+            .slice(0, limit)
+            .map(t => ({
+                mint: t.mint || t.address,
+                name: t.name || 'Unknown',
+                symbol: t.symbol || 'UNK',
+                image: t.logo || t.logoURI || t.image || null,
+                decimals: t.decimals || 9,
+                verified: t.tags?.includes('verified') || t.verified || false,
+                source: 'jupiter_v2_search'
+            }));
     } catch (e) {
         logger.debug(`[TokenSearch] Jupiter V2 search failed: ${e.message}`);
         return [];
@@ -436,6 +443,9 @@ async function searchTokens(query, limit = 10) {
             };
         });
     }
+
+    // Final validation - ensure all results have valid mint addresses
+    results = results.filter(r => r.mint && typeof r.mint === 'string' && r.mint.length >= 32);
 
     // Cache results
     if (redis && results.length > 0) {

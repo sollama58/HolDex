@@ -161,6 +161,12 @@ async function quickIndexFromGecko(tokenData) {
     const { mint, name, symbol, image, priceUsd, volume24h, marketCap, liquidity } = tokenData;
 
     try {
+        // Validate mint address - REQUIRED
+        if (!mint || typeof mint !== 'string' || mint.length < 32) {
+            logger.warn(`⚠️ [QuickIndex] Skipping token - invalid mint address: ${mint}`);
+            return false;
+        }
+
         // Validate metadata - only add tokens with real names/symbols
         const hasRealName = name && name !== 'Unknown' && name !== 'New Discovery' && !name.startsWith('Token ') && name.length > 0;
         const hasRealSymbol = symbol && symbol !== 'UNK' && symbol !== 'UNKNOWN' && symbol !== 'NEW' && symbol.length > 0;
@@ -242,6 +248,12 @@ async function quickIndexFromGecko(tokenData) {
 
 async function indexTokenOnChain(mint, retryCount = 0) {
     try {
+        // Validate mint address - REQUIRED
+        if (!mint || typeof mint !== 'string' || mint.length < 32) {
+            logger.warn(`⚠️ [Indexer] Invalid mint address: ${mint}`);
+            return { name: null, ticker: null, pairs: [], skipped: true, reason: 'invalid_mint' };
+        }
+
         const db = getDB();
         logger.info(`🔍 [Indexer] Starting indexing for ${mint.slice(0, 8)}...${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
 
