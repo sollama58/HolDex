@@ -797,22 +797,25 @@ async function aggregateAndSaveToken(db, mint) {
         // FIX: Removed `timestamp` column update to preserve original creation time.
         // FIX: Added `updated_at = NOW()` to track recent updates properly.
         // FIX: Only update liquidity/volume/price if we have valid data (> 0), otherwise preserve existing
+        // FIX: Ensure all numeric values are properly typed to avoid integer overflow errors
         const params = [totalLiq, totalVol, price, mint];
         let query = `UPDATE tokens SET
-            liquidity = CASE WHEN $1 > 0 THEN $1 ELSE liquidity END,
-            volume24h = CASE WHEN $2 > 0 THEN $2 ELSE volume24h END,
-            priceUsd = CASE WHEN $3 > 0 THEN $3 ELSE priceUsd END,
+            liquidity = CASE WHEN $1 > 0 THEN $1::DOUBLE PRECISION ELSE liquidity END,
+            volume24h = CASE WHEN $2 > 0 THEN $2::DOUBLE PRECISION ELSE volume24h END,
+            priceUsd = CASE WHEN $3 > 0 THEN $3::DOUBLE PRECISION ELSE priceUsd END,
             updated_at = NOW(),
-            marketCap = CASE WHEN $3 > 0 THEN ($3 * CAST(supply AS DOUBLE PRECISION) / POWER(10, COALESCE(decimals, 9))) ELSE marketCap END`;
+            marketCap = CASE WHEN $3 > 0 THEN ($3::DOUBLE PRECISION * CAST(supply AS DOUBLE PRECISION) / POWER(10, COALESCE(decimals, 9))) ELSE marketCap END`;
 
         let idx = 5; // Start at 5 since we use $1-$4 above
-        if (change24h !== null) { query += `, change24h = $${idx++}`; params.push(change24h); }
-        if (change1h !== null) { query += `, change1h = $${idx++}`; params.push(change1h); }
-        if (change5m !== null) { query += `, change5m = $${idx++}`; params.push(change5m); }
-        if (holderCount !== null) { query += `, holders = $${idx++}, last_holder_check = $${idx++}`; params.push(holderCount); params.push(now); }
+        if (change24h !== null) { query += `, change24h = $${idx++}::DOUBLE PRECISION`; params.push(change24h); }
+        if (change1h !== null) { query += `, change1h = $${idx++}::DOUBLE PRECISION`; params.push(change1h); }
+        if (change5m !== null) { query += `, change5m = $${idx++}::DOUBLE PRECISION`; params.push(change5m); }
+        if (holderCount !== null) { query += `, holders = $${idx++}::INTEGER, last_holder_check = $${idx++}::BIGINT`; params.push(Math.floor(holderCount)); params.push(now); }
 
         // Include kscore fields in RETURNING if holders were updated (needed for sig_kscore)
-        query += ` WHERE mint = $4 RETURNING mint, priceusd, marketcap, liquidity, price_source, price_timestamp, price_pool, liquidity_source, liquidity_timestamp, mcap_calculated, holders_source, holders_timestamp, age_days, k_score, conviction_score, conviction_accumulators, conviction_holders, conviction_reducers, conviction_extractors, conviction_analyzed, holders, last_k_score_update`;
+        // Cast conviction_score to DOUBLE PRECISION in case column is still INTEGER
+        query += ` WHERE mint = $4 RETURNING mint, priceusd, marketcap, liquidity, price_source, price_timestamp, price_pool, liquidity_source, liquidity_timestamp, mcap_calculated, holders_source, holders_timestamp, age_days, k_score, CAST(conviction_score AS DOUBLE PRECISION) as conviction_score, conviction_accumulators, conviction_holders, conviction_reducers, conviction_extractors, conviction_analyzed, holders, last_k_score_update`;
+
         const result = await db.get(query, params);
 
         // Re-sign market data to maintain integrity
