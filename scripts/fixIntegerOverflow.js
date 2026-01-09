@@ -35,8 +35,14 @@ async function main() {
         const client = await pool.connect();
 
         try {
-            // First, show ALL numeric columns in tokens table
-            const allNumericResult = await client.query(`
+            // ═══════════════════════════════════════════════════════════
+            // TOKENS TABLE - Main token data
+            // ═══════════════════════════════════════════════════════════
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('TOKENS TABLE');
+            console.log('═══════════════════════════════════════════════════════════\n');
+
+            const tokensNumericResult = await client.query(`
                 SELECT column_name, data_type, numeric_precision, numeric_scale
                 FROM information_schema.columns
                 WHERE table_name = 'tokens'
@@ -44,30 +50,15 @@ async function main() {
                 ORDER BY column_name
             `);
 
-            console.log('ALL numeric columns in tokens table:');
-            for (const col of allNumericResult.rows) {
+            console.log('All numeric columns in tokens table:');
+            for (const col of tokensNumericResult.rows) {
                 const marker = col.data_type === 'integer' ? ' <-- INTEGER!' : '';
                 console.log(`  ${col.column_name}: ${col.data_type}${marker}`);
             }
             console.log('');
 
-            // Get current column types
-            const columnsResult = await client.query(`
-                SELECT column_name, data_type, numeric_precision, numeric_scale
-                FROM information_schema.columns
-                WHERE table_name = 'tokens'
-                AND column_name IN ('marketcap', 'k_score', 'liquidity', 'volume24h', 'priceusd', 'change24h', 'change1h', 'change5m', 'conviction_score', 'mcap_calculated')
-                ORDER BY column_name
-            `);
-
-            console.log('Target columns to check:');
-            for (const col of columnsResult.rows) {
-                console.log(`  ${col.column_name}: ${col.data_type}`);
-            }
-            console.log('');
-
-            // Fix columns that need to be DOUBLE PRECISION
-            const columnsToFix = [
+            // Fix columns that MUST be DOUBLE PRECISION (can have decimal values or exceed INTEGER max)
+            const tokensColumnsToFix = [
                 { name: 'marketcap', targetType: 'DOUBLE PRECISION' },
                 { name: 'k_score', targetType: 'DOUBLE PRECISION' },
                 { name: 'liquidity', targetType: 'DOUBLE PRECISION' },
@@ -76,76 +67,40 @@ async function main() {
                 { name: 'change24h', targetType: 'DOUBLE PRECISION' },
                 { name: 'change1h', targetType: 'DOUBLE PRECISION' },
                 { name: 'change5m', targetType: 'DOUBLE PRECISION' },
-                { name: 'conviction_score', targetType: 'DOUBLE PRECISION' }
-                // Note: mcap_calculated is BOOLEAN, not numeric - do not convert
+                { name: 'conviction_score', targetType: 'DOUBLE PRECISION' },
+                { name: 'age_days', targetType: 'DOUBLE PRECISION' },
+                { name: 'lp_burn_pct', targetType: 'DOUBLE PRECISION' },
+                { name: 'lp_locked_pct', targetType: 'DOUBLE PRECISION' },
+                { name: 'burned_amount', targetType: 'DOUBLE PRECISION' },
+                { name: 'burned_percent', targetType: 'DOUBLE PRECISION' },
+                { name: 'supply_change_24h', targetType: 'DOUBLE PRECISION' }
             ];
 
-            for (const col of columnsToFix) {
-                const currentType = columnsResult.rows.find(r => r.column_name === col.name);
+            for (const col of tokensColumnsToFix) {
+                const currentType = tokensNumericResult.rows.find(r => r.column_name === col.name);
 
                 if (currentType && currentType.data_type !== 'double precision') {
-                    console.log(`Altering ${col.name} from ${currentType.data_type} to ${col.targetType}...`);
-
+                    console.log(`Altering tokens.${col.name} from ${currentType.data_type} to ${col.targetType}...`);
                     await client.query(`
                         ALTER TABLE tokens
                         ALTER COLUMN ${col.name} TYPE ${col.targetType}
                         USING ${col.name}::${col.targetType}
                     `);
-
-                    console.log(`  ${col.name} fixed`);
+                    console.log(`  ✓ tokens.${col.name} fixed`);
                 } else if (currentType) {
-                    console.log(`${col.name} is already ${currentType.data_type} (OK)`);
+                    console.log(`✓ tokens.${col.name} is already ${currentType.data_type}`);
                 } else {
-                    console.log(`${col.name} column not found (will be created on next start)`);
+                    console.log(`- tokens.${col.name} column not found (will be created on next start)`);
                 }
             }
 
-            // Also check holders_history.count column
-            const holdersHistResult = await client.query(`
-                SELECT column_name, data_type
-                FROM information_schema.columns
-                WHERE table_name = 'holders_history'
-                AND column_name = 'count'
-            `);
+            // ═══════════════════════════════════════════════════════════
+            // POOLS TABLE
+            // ═══════════════════════════════════════════════════════════
+            console.log('\n═══════════════════════════════════════════════════════════');
+            console.log('POOLS TABLE');
+            console.log('═══════════════════════════════════════════════════════════\n');
 
-            if (holdersHistResult.rows.length > 0 && holdersHistResult.rows[0].data_type === 'integer') {
-                console.log('\nholders_history.count is INTEGER, which should be fine for holder counts.');
-            }
-
-            // Check and fix k_score_history table
-            const kScoreHistResult = await client.query(`
-                SELECT column_name, data_type
-                FROM information_schema.columns
-                WHERE table_name = 'k_score_history'
-            `);
-
-            if (kScoreHistResult.rows.length > 0) {
-                console.log('\nk_score_history columns:');
-                for (const col of kScoreHistResult.rows) {
-                    console.log(`  ${col.column_name}: ${col.data_type}`);
-                }
-
-                // Fix k_score_history columns if needed
-                const historyColumnsToFix = [
-                    { name: 'k_score', targetType: 'DOUBLE PRECISION' },
-                    { name: 'conviction_score', targetType: 'DOUBLE PRECISION' }
-                ];
-
-                for (const col of historyColumnsToFix) {
-                    const currentType = kScoreHistResult.rows.find(r => r.column_name === col.name);
-                    if (currentType && currentType.data_type !== 'double precision') {
-                        console.log(`Altering k_score_history.${col.name} from ${currentType.data_type} to ${col.targetType}...`);
-                        await client.query(`
-                            ALTER TABLE k_score_history
-                            ALTER COLUMN ${col.name} TYPE ${col.targetType}
-                            USING ${col.name}::${col.targetType}
-                        `);
-                        console.log(`  k_score_history.${col.name} fixed`);
-                    }
-                }
-            }
-
-            // Check and fix pools table
             const poolsResult = await client.query(`
                 SELECT column_name, data_type
                 FROM information_schema.columns
@@ -154,11 +109,6 @@ async function main() {
             `);
 
             if (poolsResult.rows.length > 0) {
-                console.log('\nPools table columns:');
-                for (const col of poolsResult.rows) {
-                    console.log(`  ${col.column_name}: ${col.data_type}`);
-                }
-
                 const poolColumnsToFix = [
                     { name: 'price_usd', targetType: 'DOUBLE PRECISION' },
                     { name: 'liquidity_usd', targetType: 'DOUBLE PRECISION' },
@@ -174,34 +124,154 @@ async function main() {
                             ALTER COLUMN ${col.name} TYPE ${col.targetType}
                             USING ${col.name}::${col.targetType}
                         `);
-                        console.log(`  pools.${col.name} fixed`);
+                        console.log(`  ✓ pools.${col.name} fixed`);
+                    } else if (currentType) {
+                        console.log(`✓ pools.${col.name} is already ${currentType.data_type}`);
                     }
                 }
+            } else {
+                console.log('Pools table not found or has no target columns');
             }
 
-            // Check and fix polling_tasks table (k_score_result)
-            const pollingTasksResult = await client.query(`
+            // ═══════════════════════════════════════════════════════════
+            // K_SCORE_HISTORY TABLE
+            // ═══════════════════════════════════════════════════════════
+            console.log('\n═══════════════════════════════════════════════════════════');
+            console.log('K_SCORE_HISTORY TABLE');
+            console.log('═══════════════════════════════════════════════════════════\n');
+
+            const kScoreHistResult = await client.query(`
                 SELECT column_name, data_type
                 FROM information_schema.columns
-                WHERE table_name = 'polling_tasks'
-                AND column_name = 'k_score_result'
+                WHERE table_name = 'k_score_history'
             `);
 
-            if (pollingTasksResult.rows.length > 0) {
-                const col = pollingTasksResult.rows[0];
-                console.log(`\npolling_tasks.k_score_result: ${col.data_type}`);
-                if (col.data_type !== 'double precision') {
-                    console.log(`Altering polling_tasks.k_score_result from ${col.data_type} to DOUBLE PRECISION...`);
-                    await client.query(`
-                        ALTER TABLE polling_tasks
-                        ALTER COLUMN k_score_result TYPE DOUBLE PRECISION
-                        USING k_score_result::DOUBLE PRECISION
-                    `);
-                    console.log(`  polling_tasks.k_score_result fixed`);
+            if (kScoreHistResult.rows.length > 0) {
+                console.log('k_score_history columns:');
+                for (const col of kScoreHistResult.rows) {
+                    const marker = col.data_type === 'integer' ? ' <-- INTEGER!' : '';
+                    console.log(`  ${col.column_name}: ${col.data_type}${marker}`);
                 }
+
+                const historyColumnsToFix = [
+                    { name: 'k_score', targetType: 'DOUBLE PRECISION' },
+                    { name: 'conviction_score', targetType: 'DOUBLE PRECISION' }
+                ];
+
+                for (const col of historyColumnsToFix) {
+                    const currentType = kScoreHistResult.rows.find(r => r.column_name === col.name);
+                    if (currentType && currentType.data_type !== 'double precision') {
+                        console.log(`Altering k_score_history.${col.name} from ${currentType.data_type} to ${col.targetType}...`);
+                        await client.query(`
+                            ALTER TABLE k_score_history
+                            ALTER COLUMN ${col.name} TYPE ${col.targetType}
+                            USING ${col.name}::${col.targetType}
+                        `);
+                        console.log(`  ✓ k_score_history.${col.name} fixed`);
+                    } else if (currentType) {
+                        console.log(`✓ k_score_history.${col.name} is already ${currentType.data_type}`);
+                    }
+                }
+            } else {
+                console.log('k_score_history table not found');
             }
 
-            // Check and fix token_verifications table
+            // ═══════════════════════════════════════════════════════════
+            // HOLDER_HISTORY TABLE (different from holders_history!)
+            // ═══════════════════════════════════════════════════════════
+            console.log('\n═══════════════════════════════════════════════════════════');
+            console.log('HOLDER_HISTORY TABLE');
+            console.log('═══════════════════════════════════════════════════════════\n');
+
+            const holderHistResult = await client.query(`
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_name = 'holder_history'
+            `);
+
+            if (holderHistResult.rows.length > 0) {
+                console.log('holder_history columns:');
+                for (const col of holderHistResult.rows) {
+                    const marker = col.data_type === 'integer' ? ' <-- INTEGER (OK for counts)' : '';
+                    console.log(`  ${col.column_name}: ${col.data_type}${marker}`);
+                }
+                console.log('Note: INTEGER is acceptable for holder counts (they are always whole numbers)');
+            } else {
+                console.log('holder_history table not found');
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // HOLDERS_HISTORY TABLE (legacy, with timestamp)
+            // ═══════════════════════════════════════════════════════════
+            console.log('\n═══════════════════════════════════════════════════════════');
+            console.log('HOLDERS_HISTORY TABLE');
+            console.log('═══════════════════════════════════════════════════════════\n');
+
+            const holdersHistResult = await client.query(`
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_name = 'holders_history'
+            `);
+
+            if (holdersHistResult.rows.length > 0) {
+                console.log('holders_history columns:');
+                for (const col of holdersHistResult.rows) {
+                    const marker = col.data_type === 'integer' ? ' <-- INTEGER (OK for counts)' : '';
+                    console.log(`  ${col.column_name}: ${col.data_type}${marker}`);
+                }
+                console.log('Note: INTEGER is acceptable for holder counts (code now uses Math.floor())');
+            } else {
+                console.log('holders_history table not found');
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // CANDLES_1M TABLE
+            // ═══════════════════════════════════════════════════════════
+            console.log('\n═══════════════════════════════════════════════════════════');
+            console.log('CANDLES_1M TABLE');
+            console.log('═══════════════════════════════════════════════════════════\n');
+
+            const candlesResult = await client.query(`
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_name = 'candles_1m'
+                AND column_name IN ('open', 'high', 'low', 'close', 'volume')
+            `);
+
+            if (candlesResult.rows.length > 0) {
+                const candleColumnsToFix = [
+                    { name: 'open', targetType: 'DOUBLE PRECISION' },
+                    { name: 'high', targetType: 'DOUBLE PRECISION' },
+                    { name: 'low', targetType: 'DOUBLE PRECISION' },
+                    { name: 'close', targetType: 'DOUBLE PRECISION' },
+                    { name: 'volume', targetType: 'DOUBLE PRECISION' }
+                ];
+
+                for (const col of candleColumnsToFix) {
+                    const currentType = candlesResult.rows.find(r => r.column_name === col.name);
+                    if (currentType && currentType.data_type !== 'double precision') {
+                        console.log(`Altering candles_1m.${col.name} from ${currentType.data_type} to ${col.targetType}...`);
+                        await client.query(`
+                            ALTER TABLE candles_1m
+                            ALTER COLUMN ${col.name} TYPE ${col.targetType}
+                            USING ${col.name}::${col.targetType}
+                        `);
+                        console.log(`  ✓ candles_1m.${col.name} fixed`);
+                    } else if (currentType) {
+                        console.log(`✓ candles_1m.${col.name} is already ${currentType.data_type}`);
+                    }
+                }
+            } else {
+                console.log('candles_1m table not found');
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // TOKEN_VERIFICATIONS TABLE
+            // ═══════════════════════════════════════════════════════════
+            console.log('\n═══════════════════════════════════════════════════════════');
+            console.log('TOKEN_VERIFICATIONS TABLE');
+            console.log('═══════════════════════════════════════════════════════════\n');
+
             const tokenVerifResult = await client.query(`
                 SELECT column_name, data_type
                 FROM information_schema.columns
@@ -211,7 +281,6 @@ async function main() {
 
             if (tokenVerifResult.rows.length > 0) {
                 const col = tokenVerifResult.rows[0];
-                console.log(`\ntoken_verifications.k_score: ${col.data_type}`);
                 if (col.data_type !== 'double precision') {
                     console.log(`Altering token_verifications.k_score from ${col.data_type} to DOUBLE PRECISION...`);
                     await client.query(`
@@ -219,33 +288,101 @@ async function main() {
                         ALTER COLUMN k_score TYPE DOUBLE PRECISION
                         USING k_score::DOUBLE PRECISION
                     `);
-                    console.log(`  token_verifications.k_score fixed`);
+                    console.log(`  ✓ token_verifications.k_score fixed`);
+                } else {
+                    console.log(`✓ token_verifications.k_score is already ${col.data_type}`);
                 }
+            } else {
+                console.log('token_verifications table not found or k_score column missing');
             }
 
-            // Check and fix consensus_snapshots table
-            const consensusResult = await client.query(`
+            // ═══════════════════════════════════════════════════════════
+            // PARTICIPANTS TABLE (Harmony E-Score)
+            // ═══════════════════════════════════════════════════════════
+            console.log('\n═══════════════════════════════════════════════════════════');
+            console.log('PARTICIPANTS TABLE');
+            console.log('═══════════════════════════════════════════════════════════\n');
+
+            const participantsResult = await client.query(`
                 SELECT column_name, data_type
                 FROM information_schema.columns
-                WHERE table_name = 'consensus_snapshots'
-                AND column_name = 'k_score_consensus'
+                WHERE table_name = 'participants'
+                AND column_name IN ('holdings', 'total_burned', 'cached_escore', 'e_score_delta')
             `);
 
-            if (consensusResult.rows.length > 0) {
-                const col = consensusResult.rows[0];
-                console.log(`\nconsensus_snapshots.k_score_consensus: ${col.data_type}`);
-                if (col.data_type !== 'double precision') {
-                    console.log(`Altering consensus_snapshots.k_score_consensus from ${col.data_type} to DOUBLE PRECISION...`);
-                    await client.query(`
-                        ALTER TABLE consensus_snapshots
-                        ALTER COLUMN k_score_consensus TYPE DOUBLE PRECISION
-                        USING k_score_consensus::DOUBLE PRECISION
-                    `);
-                    console.log(`  consensus_snapshots.k_score_consensus fixed`);
+            if (participantsResult.rows.length > 0) {
+                const participantColumnsToFix = [
+                    { name: 'holdings', targetType: 'DOUBLE PRECISION' },
+                    { name: 'total_burned', targetType: 'DOUBLE PRECISION' },
+                    { name: 'cached_escore', targetType: 'DOUBLE PRECISION' },
+                    { name: 'e_score_delta', targetType: 'DOUBLE PRECISION' }
+                ];
+
+                for (const col of participantColumnsToFix) {
+                    const currentType = participantsResult.rows.find(r => r.column_name === col.name);
+                    if (currentType && currentType.data_type !== 'double precision') {
+                        console.log(`Altering participants.${col.name} from ${currentType.data_type} to ${col.targetType}...`);
+                        await client.query(`
+                            ALTER TABLE participants
+                            ALTER COLUMN ${col.name} TYPE ${col.targetType}
+                            USING ${col.name}::${col.targetType}
+                        `);
+                        console.log(`  ✓ participants.${col.name} fixed`);
+                    } else if (currentType) {
+                        console.log(`✓ participants.${col.name} is already ${currentType.data_type}`);
+                    }
                 }
+            } else {
+                console.log('participants table not found');
             }
 
-            console.log('\nColumn type fixes completed!');
+            // ═══════════════════════════════════════════════════════════
+            // CONTRIBUTIONS TABLE
+            // ═══════════════════════════════════════════════════════════
+            console.log('\n═══════════════════════════════════════════════════════════');
+            console.log('CONTRIBUTIONS TABLE');
+            console.log('═══════════════════════════════════════════════════════════\n');
+
+            const contributionsResult = await client.query(`
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_name = 'contributions'
+                AND column_name IN ('amount', 'e_score_delta')
+            `);
+
+            if (contributionsResult.rows.length > 0) {
+                const contribColumnsToFix = [
+                    { name: 'amount', targetType: 'DOUBLE PRECISION' },
+                    { name: 'e_score_delta', targetType: 'DOUBLE PRECISION' }
+                ];
+
+                for (const col of contribColumnsToFix) {
+                    const currentType = contributionsResult.rows.find(r => r.column_name === col.name);
+                    if (currentType && currentType.data_type !== 'double precision') {
+                        console.log(`Altering contributions.${col.name} from ${currentType.data_type} to ${col.targetType}...`);
+                        await client.query(`
+                            ALTER TABLE contributions
+                            ALTER COLUMN ${col.name} TYPE ${col.targetType}
+                            USING ${col.name}::${col.targetType}
+                        `);
+                        console.log(`  ✓ contributions.${col.name} fixed`);
+                    } else if (currentType) {
+                        console.log(`✓ contributions.${col.name} is already ${currentType.data_type}`);
+                    }
+                }
+            } else {
+                console.log('contributions table not found');
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // SUMMARY
+            // ═══════════════════════════════════════════════════════════
+            console.log('\n═══════════════════════════════════════════════════════════');
+            console.log('COMPLETE');
+            console.log('═══════════════════════════════════════════════════════════\n');
+            console.log('All column type fixes completed!');
+            console.log('\nNote: INTEGER columns for holder counts are OK - the code');
+            console.log('now uses Math.floor() before inserting into these columns.');
 
         } finally {
             client.release();

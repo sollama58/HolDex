@@ -191,7 +191,7 @@ async function saveHolderHistory(db, mint, totalHolders, realHolders) {
             ON CONFLICT (mint, date) DO UPDATE SET
                 holders = EXCLUDED.holders,
                 real_holders = EXCLUDED.real_holders
-        `, [mint, totalHolders, realHolders]);
+        `, [mint, Math.floor(totalHolders), Math.floor(realHolders)]);
     } catch (_e) {
         // Ignore errors (table might not exist on first run)
     }
@@ -210,7 +210,7 @@ async function saveKScoreHistory(db, mint, kScore, convictionScore, holders) {
                 k_score = EXCLUDED.k_score,
                 conviction_score = EXCLUDED.conviction_score,
                 holders = EXCLUDED.holders
-        `, [mint, kScore, convictionScore, holders]);
+        `, [mint, kScore, convictionScore, Math.floor(holders)]);
     } catch (_e) {
         // Ignore errors (table might not exist on first run)
     }

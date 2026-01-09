@@ -202,7 +202,7 @@ async function processSingleToken(db, t, now) {
         // Update Holders if we found new data OR if we performed a valid RPC check (even if result was same)
         if (foundNewData || didCheckRpc) {
             updateParts.push(`holders = $${idx++}`);
-            finalParams.push(holderCount);
+            finalParams.push(Math.floor(holderCount));
             
             // Update the check timestamp so we don't spam RPC
             updateParts.push(`last_holder_check = $${idx++}`);
@@ -213,7 +213,7 @@ async function processSingleToken(db, t, now) {
                 INSERT INTO holders_history (mint, count, timestamp)
                 VALUES ($1, $2, $3)
                 ON CONFLICT(mint, timestamp) DO UPDATE SET count = EXCLUDED.count
-            `, [t.mint, holderCount, today]);
+            `, [t.mint, Math.floor(holderCount), today]);
         }
 
         updateParts.push(`updated_at = CURRENT_TIMESTAMP`);
