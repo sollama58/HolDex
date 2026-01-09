@@ -1621,7 +1621,7 @@ function init(deps) {
                 logger.info(`[Announcement] Found active: id=${announcement.id}, title="${announcement.title}"`);
                 // Cache for 60 seconds (short to ensure quick updates)
                 if (redis) {
-                    await redis.setEx('announcement:active', 60, JSON.stringify(announcement));
+                    await redis.setex('announcement:active', 60, JSON.stringify(announcement));
                 }
             } else {
                 logger.debug('[Announcement] No active announcement found');
@@ -2358,7 +2358,7 @@ function init(deps) {
             const response = { success: true, page, limit, tokens };
 
             if (redis) {
-                try { await redis.setEx(cacheKey, 10, JSON.stringify(response)); } catch (_) { /* ignore */ }
+                try { await redis.setex(cacheKey, 10, JSON.stringify(response)); } catch (_) { /* ignore */ }
             }
 
             res.setHeader('X-Cache', 'MISS');
@@ -2510,7 +2510,7 @@ function init(deps) {
 
             // Cache for 10 seconds
             if (redis) {
-                try { await redis.setEx(cacheKey, 10, JSON.stringify(response)); } catch (_) { /* ignore */ }
+                try { await redis.setex(cacheKey, 10, JSON.stringify(response)); } catch (_) { /* ignore */ }
             }
 
             res.setHeader('X-Cache', 'MISS');
