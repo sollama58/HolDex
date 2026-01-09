@@ -563,7 +563,7 @@ async function initDB() {
                 // HARMONY SYSTEM INDEXES
                 // ═══════════════════════════════════════════════════════════
                 // E-Score leaderboard queries (most common)
-                `CREATE INDEX IF NOT EXISTS idx_participants_escore ON participants (e_score DESC NULLS LAST)`,
+                `CREATE INDEX IF NOT EXISTS idx_participants_escore ON participants (cached_escore DESC NULLS LAST)`,
                 // Contributions by wallet (for E-Score calculation)
                 `CREATE INDEX IF NOT EXISTS idx_contributions_wallet ON contributions (wallet, created_at DESC)`,
                 // Contributions by type (analytics)

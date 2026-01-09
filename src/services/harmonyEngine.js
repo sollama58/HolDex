@@ -512,11 +512,15 @@ class HarmonyEngine {
      */
     async getLeaderboard(limit = 100) {
         const rows = await this.db.all(`
-            SELECT wallet, e_score, tier, tier_icon, type,
+            SELECT wallet,
+                   cached_escore as e_score,
+                   cached_tier as tier,
+                   cached_tier_icon as tier_icon,
+                   type,
                    holdings, total_burned, api_calls_30d
             FROM participants
-            WHERE e_score > 0
-            ORDER BY e_score DESC
+            WHERE cached_escore > 0
+            ORDER BY cached_escore DESC
             LIMIT $1
         `, [limit]);
 
@@ -533,19 +537,19 @@ class HarmonyEngine {
         const stats = await this.db.get(`
             SELECT
                 COUNT(*) as total_participants,
-                COUNT(*) FILTER (WHERE e_score > 0) as active_participants,
-                SUM(e_score) as total_e_score,
-                AVG(e_score) FILTER (WHERE e_score > 0) as avg_e_score,
+                COUNT(*) FILTER (WHERE cached_escore > 0) as active_participants,
+                SUM(cached_escore) as total_e_score,
+                AVG(cached_escore) FILTER (WHERE cached_escore > 0) as avg_e_score,
                 SUM(total_burned) as total_burned,
-                SUM(rewards_lifetime) as total_rewards_distributed
+                COALESCE(SUM(total_burned), 0) as total_rewards_distributed
             FROM participants
         `);
 
         const tierBreakdown = await this.db.all(`
-            SELECT tier, COUNT(*) as count
+            SELECT cached_tier as tier, COUNT(*) as count
             FROM participants
-            WHERE e_score > 0
-            GROUP BY tier
+            WHERE cached_escore > 0
+            GROUP BY cached_tier
             ORDER BY COUNT(*) DESC
         `);
 
