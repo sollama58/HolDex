@@ -242,7 +242,7 @@ async function cleanupStaleTasks() {
         WHERE status = 'claimed'
           AND claimed_at < $1
           AND attempts < $2
-        RETURNING id as task_id, mint
+        RETURNING task_id, mint
     `, [cutoff, CONFIG.TASK_RETRY_LIMIT]);
 
     if (result.rows.length > 0) {
