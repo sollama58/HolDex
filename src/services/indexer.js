@@ -47,10 +47,15 @@ async function indexTokenOnChain(mint, retryCount = 0) {
             return indexTokenOnChain(mint, retryCount + 1);
         }
 
-        // If still no valid metadata after retries, skip this token entirely
+        // If still no valid metadata after retries, use truncated mint as fallback
+        // This ensures the token is always added when a user searches for it
         if (!hasRealName || !hasRealSymbol) {
-            logger.warn(`⚠️ [Indexer] Skipping ${mint.slice(0, 8)} - no valid metadata after ${MAX_RETRIES} retries`);
-            return { name: 'Unknown', ticker: 'UNK', pairs: [] };
+            logger.warn(`⚠️ [Indexer] Using fallback metadata for ${mint.slice(0, 8)} - real metadata unavailable`);
+            meta = {
+                name: meta?.name && meta.name !== 'Unknown' ? meta.name : `Token ${mint.slice(0, 6)}`,
+                symbol: meta?.symbol && meta.symbol !== 'UNK' && meta.symbol !== 'UNKNOWN' ? meta.symbol : mint.slice(0, 4).toUpperCase(),
+                image: meta?.image || null
+            };
         }
 
         logger.info(`📝 [Indexer] Metadata: ${meta.name} (${meta.symbol})`);

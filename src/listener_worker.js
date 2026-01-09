@@ -8,9 +8,19 @@ const logger = require('./services/logger');
 // --- TASKS ---
 const { updateSingleToken } = require('./tasks/kScoreUpdater');
 const growerScanner = require('./tasks/growerScanner');
+
+// ============================================================================
+// TOKEN ADDITION POLICY:
+// Tokens are ONLY added to the database when users search by Contract Address (CA).
+// Automatic discovery from Raydium/Pump.fun blockchain events is DISABLED.
+// This ensures we only track tokens that users are actively interested in.
+// See: routes/tokens.js GET /tokens (search) and GET /token/:mint endpoints
+// ============================================================================
+
 // DISABLED: New token listener removed - tokens are now only added when CA is searched
 // const newTokenListener = require('./tasks/newTokenListener');
-const { startQueueProcessor, stopQueueProcessor } = require('./services/tokenQueue');
+// DISABLED: Queue processor no longer needed since no automatic token discovery
+// const { startQueueProcessor, stopQueueProcessor } = require('./services/tokenQueue');
 
 // GLOBAL ERROR HANDLERS
 process.on('uncaughtException', (err) => {
@@ -99,9 +109,9 @@ async function startListenerWorker() {
             indexerService.start();
         }
 
-        // 3. Start Token Queue Processor (processes new tokens once metadata is available)
-        logger.info("📥 LISTENER: Starting Token Queue Processor...");
-        startQueueProcessor();
+        // DISABLED: Token Queue Processor no longer needed - tokens only added via CA search
+        // logger.info("📥 LISTENER: Starting Token Queue Processor...");
+        // startQueueProcessor();
 
         // DISABLED: New token listener removed - tokens are now only added when CA is searched
         // if (newTokenListener && typeof newTokenListener.startNewTokenListener === 'function') {
@@ -132,7 +142,7 @@ async function startListenerWorker() {
 
 process.on('SIGINT', () => {
     logger.info("🎧 LISTENER WORKER: Shutting down...");
-    stopQueueProcessor();
+    // stopQueueProcessor(); // DISABLED: Queue processor no longer running
     process.exit(0);
 });
 
