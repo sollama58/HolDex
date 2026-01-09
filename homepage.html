@@ -260,9 +260,9 @@
             box-shadow: 0 0 20px rgba(249, 115, 22, 0.2), 0 0 40px rgba(249, 115, 22, 0.1);
         }
         .search-box::placeholder { color: #64748b; }
-        .clear-search { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: #64748b; cursor: pointer; display: none !important; transition: color 0.2s; z-index: 10; }
-        .clear-search:hover { color: #f97316; }
-        .clear-search.active { display: block !important; }
+        .clear-search { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: #64748b; cursor: pointer; display: block !important; transition: color 0.2s, opacity 0.2s; z-index: 10; opacity: 0.5; }
+        .clear-search:hover { color: #f97316; opacity: 1; }
+        .clear-search.active { opacity: 1; }
 
         .nav-btn {
             background: transparent;
@@ -1654,10 +1654,6 @@
         <i data-lucide="upload-cloud" width="20"></i>
         <span>Update</span>
     </button>
-    <a href="/track-record.html" class="bottom-nav-item" id="nav-track">
-        <i data-lucide="bar-chart-2" width="20"></i>
-        <span>K-Score</span>
-    </a>
     <button class="bottom-nav-item" onclick="toggleAppsModal()" id="nav-apps">
         <i data-lucide="grid" width="20"></i>
         <span>Apps</span>
@@ -2997,26 +2993,41 @@
     };
     
     // FETCH FEES & UPDATE BALANCE CHECK
-    async function fetchFees() { 
-        try { 
-            const res = await fetch(`${API_URL}/api/config/fees`); 
-            const data = await res.json(); 
-            if (data.success) { 
-                feeConfig = data; 
-                const solEl = document.getElementById('fee-sol'); 
-                const tokEl = document.getElementById('fee-token'); 
-                
-                if (solEl) solEl.innerText = `${data.solFee} SOL`; 
-                if (tokEl) tokEl.innerText = `${data.tokenFee.toLocaleString()}`;
-                
-                // Try to get token name via backend proxy or just use ticker
-                // For now, hardcode "HDX" or similar if unknown, but better to fetch name
-                document.getElementById('fee-token-name').innerText = "Token Fee";
-                
+    async function fetchFees() {
+        try {
+            const res = await fetch(`${API_URL}/api/config/fees`);
+            const data = await res.json();
+            if (data.success) {
+                feeConfig = data;
+                const solEl = document.getElementById('fee-sol');
+                const tokEl = document.getElementById('fee-token');
+                const tokenNameEl = document.getElementById('fee-token-name');
+
+                // Display SOL fee with USD estimate
+                if (solEl) {
+                    const solUsd = data.solFeeUsd ? ` (~$${data.solFeeUsd.toFixed(2)})` : '';
+                    solEl.innerText = `${data.solFee} SOL${solUsd}`;
+                }
+
+                // Display token fee with name, amount, and USD value
+                if (tokEl) {
+                    const symbol = data.tokenSymbol || 'TKN';
+                    const usdStr = data.tokenFeeUsd && data.tokenFeeUsd > 0
+                        ? ` (~$${data.tokenFeeUsd < 1 ? data.tokenFeeUsd.toFixed(4) : data.tokenFeeUsd.toFixed(2)})`
+                        : '';
+                    tokEl.innerText = `${data.tokenFee.toLocaleString()} $${symbol}${usdStr}`;
+                }
+
+                // Display token name in the label
+                if (tokenNameEl) {
+                    const tokenName = data.tokenName || data.tokenSymbol || 'Token';
+                    tokenNameEl.innerText = `${tokenName} Fee`;
+                }
+
                 if (walletAddress) { checkBalances(); }
-                document.getElementById('fee-panel').classList.remove('hidden'); 
-            } 
-        } catch (e) { console.error("Fee fetch failed", e); } 
+                document.getElementById('fee-panel').classList.remove('hidden');
+            }
+        } catch (e) { console.error("Fee fetch failed", e); }
     }
     
     async function checkBalances() {

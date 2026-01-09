@@ -521,8 +521,40 @@ function init(deps) {
     });
 
     // SECURITY: Rate limit config endpoints (M2)
-    router.get('/config/fees', proxyRateLimit, (req, res) => {
-        res.json({ success: true, solFee: config.FEE_SOL, tokenFee: config.FEE_TOKEN_AMOUNT, tokenMint: config.FEE_TOKEN_MINT, treasury: config.TREASURY_WALLET });
+    router.get('/config/fees', proxyRateLimit, async (req, res) => {
+        try {
+            // Fetch fee token metadata from database for name and price
+            const feeToken = await db.get('SELECT name, ticker, priceUsd FROM tokens WHERE mint = $1', [config.FEE_TOKEN_MINT]);
+
+            // Calculate USD values
+            const tokenPrice = feeToken?.priceusd || 0;
+            const tokenFeeUsd = tokenPrice * config.FEE_TOKEN_AMOUNT;
+            // Assume SOL price ~$200 if we don't have it cached (or fetch from Jupiter)
+            const solPriceUsd = 200; // Conservative estimate
+            const solFeeUsd = config.FEE_SOL * solPriceUsd;
+
+            res.json({
+                success: true,
+                solFee: config.FEE_SOL,
+                solFeeUsd: solFeeUsd,
+                tokenFee: config.FEE_TOKEN_AMOUNT,
+                tokenFeeUsd: tokenFeeUsd,
+                tokenMint: config.FEE_TOKEN_MINT,
+                tokenName: feeToken?.name || 'Token',
+                tokenSymbol: feeToken?.ticker || 'TKN',
+                tokenPrice: tokenPrice,
+                treasury: config.TREASURY_WALLET
+            });
+        } catch (e) {
+            // Fallback to basic config if DB lookup fails
+            res.json({
+                success: true,
+                solFee: config.FEE_SOL,
+                tokenFee: config.FEE_TOKEN_AMOUNT,
+                tokenMint: config.FEE_TOKEN_MINT,
+                treasury: config.TREASURY_WALLET
+            });
+        }
     });
 
     // SECURITY: Rate limit balance proxy (M2)
