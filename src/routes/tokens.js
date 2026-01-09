@@ -537,8 +537,18 @@ function init(deps) {
                 INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
             `, [mint, twitter, website, telegram, banner, finalDescription, Date.now(), signature, userPublicKey]);
-            
+
             try { await indexTokenOnChain(mint); } catch (_err) { /* ignore */ }
+
+            // Clear cache after indexing to ensure fresh data on next request
+            const redis = getClient();
+            if (redis) {
+                try {
+                    await redis.del(`public:token:${mint}`);
+                    await redis.del(`token:detail:${mint}`);
+                } catch (_) { /* ignore cache errors */ }
+            }
+
             res.json({ success: true, message: "Update queued." });
         } catch (_e) { res.status(500).json({ success: false, error: "Submission failed" }); }
     });
@@ -1713,7 +1723,20 @@ function init(deps) {
             ]);
 
             if (!token) {
-                return res.status(404).json({ success: false, error: 'Token not found' });
+                // AUTO-INDEX: Try to index new token on-chain (matches /api/token/:mint behavior)
+                try {
+                    logger.info(`[PublicToken] Auto-indexing new token: ${mint}`);
+                    const indexed = await indexTokenOnChain(mint);
+                    token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+                    pairs = indexed?.pairs || [];
+                } catch (indexErr) {
+                    logger.warn(`[PublicToken] Auto-index failed for ${mint}: ${indexErr.message}`);
+                }
+
+                // Still not found after indexing attempt
+                if (!token) {
+                    return res.status(404).json({ success: false, error: 'Token not found' });
+                }
             }
 
             // Build token data

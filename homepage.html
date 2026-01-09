@@ -2827,6 +2827,17 @@
     window.fetchTokenForUpdate = async (mint) => {
         if(!mint || mint.length < 32) return;
         document.getElementById('mint-check-spinner').classList.remove('hidden');
+
+        // BUGFIX: Clear all form fields before fetching new token to prevent stale data
+        document.getElementById('update-twitter').value = '';
+        document.getElementById('update-telegram').value = '';
+        document.getElementById('update-website').value = '';
+        document.getElementById('update-description').value = '';
+        document.getElementById('update-token-name').innerText = 'Loading...';
+        document.getElementById('update-token-ticker').innerText = '...';
+        document.getElementById('update-token-img').src = 'https://placehold.co/40';
+        currentUpdateTokenData = null;
+
         try {
             const res = await fetch(`${API_URL}/api/token/${mint}/public`);
             const data = await res.json();
@@ -2840,16 +2851,27 @@
                 document.getElementById('update-token-name').innerText = t.name || 'Unknown';
                 // FIX: Use 'symbol' from API (was 'ticker')
                 document.getElementById('update-token-ticker').innerText = t.symbol || t.ticker || 'UNK';
-                if(t.twitter) document.getElementById('update-twitter').value = t.twitter;
-                if(t.telegram) document.getElementById('update-telegram').value = t.telegram;
-                if(t.website) document.getElementById('update-website').value = t.website;
-                if(t.description) document.getElementById('update-description').value = t.description;
-                if(t.verified || t.hasCommunityUpdate) { document.getElementById('update-cto-warning').classList.remove('hidden'); document.getElementById('update-cto-user').required = true; } 
+                // Set form fields (already cleared above, so empty string if not provided)
+                document.getElementById('update-twitter').value = t.twitter || '';
+                document.getElementById('update-telegram').value = t.telegram || '';
+                document.getElementById('update-website').value = t.website || '';
+                document.getElementById('update-description').value = t.description || '';
+                if(t.verified || t.hasCommunityUpdate) { document.getElementById('update-cto-warning').classList.remove('hidden'); document.getElementById('update-cto-user').required = true; }
                 else { document.getElementById('update-cto-warning').classList.add('hidden'); document.getElementById('update-cto-user').required = false; }
-                
+
                 checkSubmitEligibility();
+            } else {
+                // Token not found - show error state
+                document.getElementById('update-token-name').innerText = 'Not Found';
+                document.getElementById('update-token-ticker').innerText = 'N/A';
+                document.getElementById('token-preview-info').classList.add('hidden');
             }
-        } catch(e) { console.error(e); document.getElementById('mint-check-spinner').classList.add('hidden'); }
+        } catch(e) {
+            console.error(e);
+            document.getElementById('mint-check-spinner').classList.add('hidden');
+            document.getElementById('update-token-name').innerText = 'Error';
+            document.getElementById('update-token-ticker').innerText = 'N/A';
+        }
     };
     
     // FETCH FEES & UPDATE BALANCE CHECK
