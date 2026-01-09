@@ -26,12 +26,23 @@ async function fetchInitialMarketData(mint) {
     } catch (_e) { return null; }
 }
 
-async function indexTokenOnChain(mint) {
+async function indexTokenOnChain(mint, retryCount = 0) {
     try {
         const db = getDB();
-        logger.info(`🔍 [Indexer] Starting indexing for ${mint.slice(0, 8)}...`);
+        logger.info(`🔍 [Indexer] Starting indexing for ${mint.slice(0, 8)}...${retryCount > 0 ? ` (retry ${retryCount})` : ''}`);
 
-        const meta = await fetchTokenMetadata(mint);
+        let meta = await fetchTokenMetadata(mint);
+
+        // For brand new tokens, metadata might not be indexed yet - retry with delay
+        const MAX_RETRIES = 3;
+        const RETRY_DELAY_MS = 2000;
+
+        if ((!meta || meta.name === 'Unknown' || !meta.name) && retryCount < MAX_RETRIES) {
+            logger.info(`⏳ [Indexer] Metadata not ready for ${mint.slice(0, 8)}, will retry in ${RETRY_DELAY_MS}ms...`);
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+            return indexTokenOnChain(mint, retryCount + 1);
+        }
+
         logger.info(`📝 [Indexer] Metadata: ${meta?.name || 'Unknown'} (${meta?.symbol || 'UNKNOWN'})`);
 
         let supply = '1000000000';

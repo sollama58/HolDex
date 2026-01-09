@@ -52,8 +52,8 @@ async function fetchTokenMetadata(mintAddress) {
                     description: m?.description || c.json_uri?.description || ''
                 };
             }
-        } catch (_e) {
-            // console.warn(`Helius DAS failed, falling back to on-chain: ${_e.message}`);
+        } catch (e) {
+            console.warn(`[Metaplex] Helius DAS failed for ${mintAddress.slice(0,8)}: ${e.message}`);
         }
     }
 
@@ -106,10 +106,27 @@ async function fetchTokenMetadata(mintAddress) {
             }
             return metadata;
         }
-    } catch (_e) {
-        // console.warn(`All metadata fetches failed for ${mintAddress}: ${_e.message}`);
+    } catch (e) {
+        console.warn(`[Metaplex] On-chain parse failed for ${mintAddress.slice(0,8)}: ${e.message}`);
     }
 
+    // 3. Fallback: Pump.fun API (for Pump.fun tokens)
+    try {
+        const pumpRes = await axios.get(`https://frontend-api.pump.fun/coins/${mintAddress}`, { timeout: 3000 });
+        if (pumpRes.data && pumpRes.data.name) {
+            console.log(`[Metaplex] Found metadata via Pump.fun API for ${mintAddress.slice(0,8)}`);
+            return {
+                name: pumpRes.data.name || 'Unknown',
+                symbol: pumpRes.data.symbol || 'UNK',
+                image: pumpRes.data.image_uri || pumpRes.data.metadata?.image || null,
+                description: pumpRes.data.description || ''
+            };
+        }
+    } catch (e) {
+        // Not a Pump.fun token or API failed - that's fine
+    }
+
+    console.warn(`[Metaplex] All metadata fetches failed for ${mintAddress.slice(0,8)}`);
     return null; // Truly failed
 }
 
