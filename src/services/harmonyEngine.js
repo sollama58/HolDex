@@ -511,52 +511,74 @@ class HarmonyEngine {
      * Get leaderboard
      */
     async getLeaderboard(limit = 100) {
-        const rows = await this.db.all(`
-            SELECT wallet,
-                   cached_escore as e_score,
-                   cached_tier as tier,
-                   cached_tier_icon as tier_icon,
-                   type,
-                   holdings, total_burned, api_calls_30d
-            FROM participants
-            WHERE cached_escore > 0
-            ORDER BY cached_escore DESC
-            LIMIT $1
-        `, [limit]);
+        try {
+            const rows = await this.db.all(`
+                SELECT wallet,
+                       COALESCE(cached_escore, 0) as e_score,
+                       COALESCE(cached_tier, 'Newcomer') as tier,
+                       COALESCE(cached_tier_icon, '🌱') as tier_icon,
+                       COALESCE(type, 'user') as type,
+                       COALESCE(holdings, 0) as holdings,
+                       COALESCE(total_burned, 0) as total_burned,
+                       COALESCE(api_calls_30d, 0) as api_calls_30d
+                FROM participants
+                WHERE cached_escore > 0
+                ORDER BY cached_escore DESC
+                LIMIT $1
+            `, [limit]);
 
-        return rows.map((row, index) => ({
-            rank: index + 1,
-            ...row
-        }));
+            return (rows || []).map((row, index) => ({
+                rank: index + 1,
+                ...row
+            }));
+        } catch (e) {
+            // Log the actual error for debugging
+            console.error('[HarmonyEngine] getLeaderboard error:', e.message);
+            // Return empty array on failure (table may not exist yet)
+            return [];
+        }
     }
 
     /**
      * Get system stats
      */
     async getStats() {
-        const stats = await this.db.get(`
-            SELECT
-                COUNT(*) as total_participants,
-                COUNT(*) FILTER (WHERE cached_escore > 0) as active_participants,
-                SUM(cached_escore) as total_e_score,
-                AVG(cached_escore) FILTER (WHERE cached_escore > 0) as avg_e_score,
-                SUM(total_burned) as total_burned,
-                COALESCE(SUM(total_burned), 0) as total_rewards_distributed
-            FROM participants
-        `);
+        try {
+            const stats = await this.db.get(`
+                SELECT
+                    COUNT(*) as total_participants,
+                    COUNT(*) FILTER (WHERE cached_escore > 0) as active_participants,
+                    COALESCE(SUM(cached_escore), 0) as total_e_score,
+                    COALESCE(AVG(cached_escore) FILTER (WHERE cached_escore > 0), 0) as avg_e_score,
+                    COALESCE(SUM(total_burned), 0) as total_burned,
+                    COALESCE(SUM(total_burned), 0) as total_rewards_distributed
+                FROM participants
+            `);
 
-        const tierBreakdown = await this.db.all(`
-            SELECT cached_tier as tier, COUNT(*) as count
-            FROM participants
-            WHERE cached_escore > 0
-            GROUP BY cached_tier
-            ORDER BY COUNT(*) DESC
-        `);
+            const tierBreakdown = await this.db.all(`
+                SELECT COALESCE(cached_tier, 'Newcomer') as tier, COUNT(*) as count
+                FROM participants
+                WHERE cached_escore > 0
+                GROUP BY cached_tier
+                ORDER BY COUNT(*) DESC
+            `);
 
-        return {
-            ...stats,
-            tierBreakdown
-        };
+            return {
+                ...(stats || { total_participants: 0, active_participants: 0, total_e_score: 0, avg_e_score: 0, total_burned: 0, total_rewards_distributed: 0 }),
+                tierBreakdown: tierBreakdown || []
+            };
+        } catch (e) {
+            console.error('[HarmonyEngine] getStats error:', e.message);
+            return {
+                total_participants: 0,
+                active_participants: 0,
+                total_e_score: 0,
+                avg_e_score: 0,
+                total_burned: 0,
+                total_rewards_distributed: 0,
+                tierBreakdown: []
+            };
+        }
     }
 }
 
