@@ -201,6 +201,7 @@ function init(deps) {
             const events = Array.isArray(req.body) ? req.body : [req.body];
             let processed = 0;
             let skipped = 0;
+            const affectedMints = new Set(); // FIX 2026-01-09: Track mints to update TTL
 
             // ============================================
             // VALIDATION: Check batch size BEFORE processing
@@ -294,6 +295,7 @@ function init(deps) {
 
                     if (!token) continue; // Not a tracked token
 
+                    affectedMints.add(mint); // FIX 2026-01-09: Track for TTL update
                     const now = Date.now();
                     // K-Score v9: Use actual transaction timestamp for activity freshness
                     const txTimestamp = event.timestamp ? event.timestamp * 1000 : now;
@@ -364,11 +366,27 @@ function init(deps) {
                 }
             }
 
+            // ============================================
+            // FIX 2026-01-09: Update holders_snapshot_check TTL for affected mints
+            // This prevents K-Score from falling back to expensive polling mode
+            // when webhook data is fresh but TTL has expired
+            // ============================================
+            if (affectedMints.size > 0) {
+                const now = Date.now();
+                const mintArray = [...affectedMints];
+                // Batch update for efficiency (PostgreSQL ANY syntax)
+                await db.run(
+                    `UPDATE tokens SET holders_snapshot_check = $1 WHERE mint = ANY($2::text[])`,
+                    [now, mintArray]
+                );
+                logger.debug(`🔄 Webhook: Updated TTL for ${mintArray.length} mints`);
+            }
+
             if (processed > 0 || skipped > 0) {
                 logger.debug(`📥 Webhook: Processed ${processed}, Skipped ${skipped} transfers`);
             }
 
-            res.status(200).json({ received: true, processed, skipped });
+            res.status(200).json({ received: true, processed, skipped, ttlUpdated: affectedMints.size });
 
         } catch (error) {
             // SECURITY: Log full error internally, return sanitized message externally

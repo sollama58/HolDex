@@ -1261,8 +1261,9 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, _decimals = 9, 
 
         // 0. Try delta analysis first (if snapshots exist and are fresh)
         // OPTIMIZATION: Use cached holder count from DB - avoid expensive fetchTokenHolders
-        // NOTE: Delta mode is for NON-WEBHOOK mode only (when we need to poll for updates)
-        if (db && !config.USE_WEBHOOKS) {
+        // NOTE: Delta mode is available in ALL modes as fallback when webhook cache expires
+        // FIX 2026-01-09: Removed !config.USE_WEBHOOKS condition - delta should work in both modes
+        if (db) {
             const deltaResult = await deltaConvictionAnalysis(db, mint);
             if (deltaResult) {
                 // Delta succeeded - use cached holder count from tokens table
