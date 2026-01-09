@@ -117,25 +117,32 @@ async function quickIndexFromGecko(tokenData) {
             return false;
         }
 
-        // Check if already exists and has market data
+        // Check if already exists
         const existing = await db.get(
             'SELECT mint, priceUsd, volume24h, marketCap, liquidity FROM tokens WHERE mint = $1',
             [mint]
         );
 
         if (existing) {
-            // Token exists - check if it has blank market data that we can fill
-            const hasBlankData = !existing.priceusd && !existing.volume24h && !existing.marketcap && !existing.liquidity;
+            // Token exists - update any missing market data fields
             const hasNewData = priceUsd > 0 || volume24h > 0 || marketCap > 0 || liquidity > 0;
 
-            if (hasBlankData && hasNewData) {
+            // Check which fields need updating (are currently blank/zero)
+            const needsPriceUpdate = !existing.priceusd || existing.priceusd === 0;
+            const needsVolumeUpdate = !existing.volume24h || existing.volume24h === 0;
+            const needsMcapUpdate = !existing.marketcap || existing.marketcap === 0;
+            const needsLiquidityUpdate = !existing.liquidity || existing.liquidity === 0;
+            const needsAnyUpdate = (needsPriceUpdate || needsVolumeUpdate || needsMcapUpdate || needsLiquidityUpdate) && hasNewData;
+
+            if (needsAnyUpdate) {
                 // Update existing token with market data from GeckoTerminal
+                // Only update fields that are currently blank/zero
                 await db.run(`
                     UPDATE tokens SET
-                        priceUsd = COALESCE(NULLIF($2, 0), priceUsd),
-                        volume24h = COALESCE(NULLIF($3, 0), volume24h),
-                        marketCap = COALESCE(NULLIF($4, 0), marketCap),
-                        liquidity = COALESCE(NULLIF($5, 0), liquidity),
+                        priceUsd = CASE WHEN COALESCE(priceUsd, 0) = 0 AND $2 > 0 THEN $2 ELSE priceUsd END,
+                        volume24h = CASE WHEN COALESCE(volume24h, 0) = 0 AND $3 > 0 THEN $3 ELSE volume24h END,
+                        marketCap = CASE WHEN COALESCE(marketCap, 0) = 0 AND $4 > 0 THEN $4 ELSE marketCap END,
+                        liquidity = CASE WHEN COALESCE(liquidity, 0) = 0 AND $5 > 0 THEN $5 ELSE liquidity END,
                         image = COALESCE(NULLIF($6, ''), image),
                         updated_at = NOW()
                     WHERE mint = $1
@@ -147,17 +154,28 @@ async function quickIndexFromGecko(tokenData) {
                 enqueueTokenUpdate(mint).catch(() => {});
                 return true;
             }
+
+            logger.debug(`[QuickIndex] Token ${symbol} (${mint.slice(0, 8)}) already has market data, skipping`);
             return false; // Already has data, skip
         }
 
         // Insert new token with data from GeckoTerminal
+        // Use DO UPDATE to fill in market data if token exists but has blanks
         await db.run(`
             INSERT INTO tokens (mint, name, symbol, image, priceUsd, volume24h, marketCap, liquidity, timestamp, updated_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-            ON CONFLICT(mint) DO NOTHING
+            ON CONFLICT(mint) DO UPDATE SET
+                name = CASE WHEN tokens.name IS NULL OR tokens.name = '' OR tokens.name = 'Unknown' THEN EXCLUDED.name ELSE tokens.name END,
+                symbol = CASE WHEN tokens.symbol IS NULL OR tokens.symbol = '' OR tokens.symbol = 'UNK' THEN EXCLUDED.symbol ELSE tokens.symbol END,
+                image = CASE WHEN tokens.image IS NULL OR tokens.image = '' THEN EXCLUDED.image ELSE tokens.image END,
+                priceUsd = CASE WHEN COALESCE(tokens.priceUsd, 0) = 0 AND EXCLUDED.priceUsd > 0 THEN EXCLUDED.priceUsd ELSE tokens.priceUsd END,
+                volume24h = CASE WHEN COALESCE(tokens.volume24h, 0) = 0 AND EXCLUDED.volume24h > 0 THEN EXCLUDED.volume24h ELSE tokens.volume24h END,
+                marketCap = CASE WHEN COALESCE(tokens.marketCap, 0) = 0 AND EXCLUDED.marketCap > 0 THEN EXCLUDED.marketCap ELSE tokens.marketCap END,
+                liquidity = CASE WHEN COALESCE(tokens.liquidity, 0) = 0 AND EXCLUDED.liquidity > 0 THEN EXCLUDED.liquidity ELSE tokens.liquidity END,
+                updated_at = NOW()
         `, [mint, name, symbol, image, priceUsd, volume24h, marketCap, liquidity || 0, Date.now()]);
 
-        logger.info(`⚡ [QuickIndex] Added ${symbol} (${mint.slice(0, 8)}) from GeckoTerminal`);
+        logger.info(`⚡ [QuickIndex] Added/Updated ${symbol} (${mint.slice(0, 8)}) from GeckoTerminal`);
 
         // Queue for full indexing in background (pools, supply, etc.)
         enqueueTokenUpdate(mint).catch(() => {});
