@@ -342,14 +342,14 @@ async function checkAndClaimTask(deps) {
             status = 'claimed',
             claimed_by = $1,
             claimed_at = $2
-        WHERE id = (
-            SELECT id FROM polling_tasks
+        WHERE task_id = (
+            SELECT task_id FROM polling_tasks
             WHERE status = 'pending'
             ORDER BY priority ASC, created_at ASC
             LIMIT 1
             FOR UPDATE SKIP LOCKED
         )
-        RETURNING id as task_id, mint, reason, attempts
+        RETURNING task_id, mint, reason, attempts
     `, [currentNodeId, Date.now()]);
 
     if (claimResult.rows.length === 0) {
@@ -376,7 +376,7 @@ async function checkAndClaimTask(deps) {
             UPDATE polling_tasks SET
                 status = 'completed',
                 completed_at = $1
-            WHERE id = $2
+            WHERE task_id = $2
         `, [Date.now(), task.task_id]);
 
         // Record work history
@@ -399,7 +399,7 @@ async function checkAndClaimTask(deps) {
                 claimed_at = NULL,
                 last_error = $2,
                 attempts = attempts + 1
-            WHERE id = $3
+            WHERE task_id = $3
         `, [newStatus, error.message, task.task_id]);
     }
 }

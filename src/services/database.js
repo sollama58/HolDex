@@ -44,18 +44,46 @@ async function initDB() {
             primaryPool = new Pool({
                 connectionString: config.DATABASE_URL,
                 ssl: sslConfig,
-                max: 10, 
+                max: 10,
                 idleTimeoutMillis: 30000,
                 connectionTimeoutMillis: 5000,
+                // FIX: Enable TCP keepalive to prevent "unexpected eof while reading" SSL errors
+                // This keeps idle connections alive and detects dead connections faster
+                keepAlive: true,
+                keepAliveInitialDelayMillis: 10000, // Start keepalive after 10 seconds idle
             });
 
-            primaryPool.on('error', (err) => logger.error(`Unexpected error on Primary DB: ${err.message}`));
+            // Handle pool errors gracefully - don't crash on transient SSL issues
+            primaryPool.on('error', (err) => {
+                // SSL EOF errors are usually transient - log but don't crash
+                if (err.message?.includes('unexpected eof') || err.message?.includes('SSL')) {
+                    logger.warn(`⚠️ DB Pool: SSL connection issue (will reconnect): ${err.message}`);
+                } else {
+                    logger.error(`❌ DB Pool: Unexpected error: ${err.message}`);
+                }
+            });
+
             const client = await primaryPool.connect();
             client.release();
             logger.info(`💾 Database: Connection Successful.`);
 
             if (process.env.READ_DATABASE_URL) {
-                readPool = new Pool({ connectionString: process.env.READ_DATABASE_URL, ssl: sslConfig });
+                readPool = new Pool({
+                    connectionString: process.env.READ_DATABASE_URL,
+                    ssl: sslConfig,
+                    max: 5,
+                    idleTimeoutMillis: 30000,
+                    connectionTimeoutMillis: 5000,
+                    keepAlive: true,
+                    keepAliveInitialDelayMillis: 10000,
+                });
+                readPool.on('error', (err) => {
+                    if (err.message?.includes('unexpected eof') || err.message?.includes('SSL')) {
+                        logger.warn(`⚠️ Read DB Pool: SSL connection issue (will reconnect): ${err.message}`);
+                    } else {
+                        logger.error(`❌ Read DB Pool: Unexpected error: ${err.message}`);
+                    }
+                });
             } else {
                 readPool = primaryPool;
             }
@@ -485,6 +513,8 @@ async function initDB() {
                 // Wallet Credits: Add columns for cached burns
                 `ALTER TABLE wallet_credits ADD COLUMN IF NOT EXISTS total_burned DOUBLE PRECISION DEFAULT 0`,
                 `ALTER TABLE wallet_credits ADD COLUMN IF NOT EXISTS last_burn_check BIGINT DEFAULT 0`,
+                // Ensure tokens table has updated_at column for tracking data freshness
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS initial_supply TEXT`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS burned_amount DOUBLE PRECISION DEFAULT 0`,
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS burned_percent DOUBLE PRECISION DEFAULT 0`,
@@ -548,9 +578,12 @@ async function initDB() {
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_node_timestamp BIGINT DEFAULT NULL`, // When the node signed
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_node_status TEXT DEFAULT NULL`,    // Node status at time of calculation
                 // Harmony: Fix operation_costs schema if old version exists
-                `ALTER TABLE operation_costs RENAME COLUMN operation TO operation_type`,
-                `ALTER TABLE operation_costs RENAME COLUMN infrastructure_cost TO actual_cost`,
+                // Use DO blocks to safely rename columns only if they exist (prevents errors on fresh DBs)
+                `DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'operation_costs' AND column_name = 'operation') THEN ALTER TABLE operation_costs RENAME COLUMN operation TO operation_type; END IF; END $$`,
+                `DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'operation_costs' AND column_name = 'infrastructure_cost') THEN ALTER TABLE operation_costs RENAME COLUMN infrastructure_cost TO actual_cost; END IF; END $$`,
                 `ALTER TABLE operation_costs ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE`,
+                `ALTER TABLE operation_costs ADD COLUMN IF NOT EXISTS operation_type TEXT`,
+                `ALTER TABLE operation_costs ADD COLUMN IF NOT EXISTS actual_cost DOUBLE PRECISION DEFAULT 0`,
                 // Harmony: Fix participants schema if old version exists (add missing columns)
                 `ALTER TABLE participants ADD COLUMN IF NOT EXISTS holdings DOUBLE PRECISION DEFAULT 0`,
                 `ALTER TABLE participants ADD COLUMN IF NOT EXISTS api_calls_30d INTEGER DEFAULT 0`,
