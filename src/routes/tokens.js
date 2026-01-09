@@ -1793,7 +1793,9 @@ function init(deps) {
                 }
 
                 // SECURITY: Whitelist filter
-                let whereClause = 'WHERE volume24h > 0';
+                // Show tokens with ANY market activity (volume, mcap, liquidity, or price)
+                // This fixes bug where searched tokens don't appear in general view
+                let whereClause = 'WHERE (COALESCE(volume24h, 0) > 0 OR COALESCE(marketCap, 0) > 0 OR COALESCE(liquidity, 0) > 0 OR COALESCE(priceUsd, 0) > 0)';
                 if (filter === 'verified') {
                     whereClause += ' AND hasCommunityUpdate = TRUE';
                 }

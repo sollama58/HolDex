@@ -117,11 +117,40 @@ async function quickIndexFromGecko(tokenData) {
             return false;
         }
 
-        // Check if already exists
-        const exists = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
-        if (exists) return false; // Already indexed
+        // Check if already exists and has market data
+        const existing = await db.get(
+            'SELECT mint, priceUsd, volume24h, marketCap, liquidity FROM tokens WHERE mint = $1',
+            [mint]
+        );
 
-        // Insert with data from GeckoTerminal
+        if (existing) {
+            // Token exists - check if it has blank market data that we can fill
+            const hasBlankData = !existing.priceusd && !existing.volume24h && !existing.marketcap && !existing.liquidity;
+            const hasNewData = priceUsd > 0 || volume24h > 0 || marketCap > 0 || liquidity > 0;
+
+            if (hasBlankData && hasNewData) {
+                // Update existing token with market data from GeckoTerminal
+                await db.run(`
+                    UPDATE tokens SET
+                        priceUsd = COALESCE(NULLIF($2, 0), priceUsd),
+                        volume24h = COALESCE(NULLIF($3, 0), volume24h),
+                        marketCap = COALESCE(NULLIF($4, 0), marketCap),
+                        liquidity = COALESCE(NULLIF($5, 0), liquidity),
+                        image = COALESCE(NULLIF($6, ''), image),
+                        updated_at = NOW()
+                    WHERE mint = $1
+                `, [mint, priceUsd, volume24h, marketCap, liquidity || 0, image]);
+
+                logger.info(`🔄 [QuickIndex] Updated ${symbol} (${mint.slice(0, 8)}) with market data from GeckoTerminal`);
+
+                // Queue for full indexing
+                enqueueTokenUpdate(mint).catch(() => {});
+                return true;
+            }
+            return false; // Already has data, skip
+        }
+
+        // Insert new token with data from GeckoTerminal
         await db.run(`
             INSERT INTO tokens (mint, name, symbol, image, priceUsd, volume24h, marketCap, liquidity, timestamp, updated_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
