@@ -14,9 +14,9 @@ const growerScanner = require('./tasks/growerScanner');
 // See: POST /webhook/new-tokens (receives CREATE_POOL, TOKEN_MINT, SWAP events)
 // Cost reduction: ~98% (from ~5000 credits/hour to ~50-100)
 // Webhook ID: 4a1ca70b-5932-4adf-b1f3-5e456b6cc913
-const USE_WEBSOCKET = false; // Legacy - kept for reference
-const newTokenListener = null;
-const tokenPoller = null;
+const _USE_WEBSOCKET = false; // Legacy - kept for reference
+const _newTokenListener = null;
+const _tokenPoller = null;
 
 // GLOBAL ERROR HANDLERS
 process.on('uncaughtException', (err) => {

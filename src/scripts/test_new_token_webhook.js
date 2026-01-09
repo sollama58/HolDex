@@ -92,7 +92,7 @@ async function sendWebhook(payload, description) {
                     const json = JSON.parse(body);
                     console.log(`   Response:`, JSON.stringify(json, null, 2));
                     resolve({ status: res.statusCode, body: json });
-                } catch (e) {
+                } catch (_e) {
                     console.log(`   Response: ${body}`);
                     resolve({ status: res.statusCode, body });
                 }
@@ -126,7 +126,7 @@ async function testStats() {
                     const json = JSON.parse(body);
                     console.log(`   Stats:`, JSON.stringify(json, null, 2));
                     resolve(json);
-                } catch (e) {
+                } catch (_e) {
                     console.log(`   Response: ${body}`);
                     resolve(body);
                 }

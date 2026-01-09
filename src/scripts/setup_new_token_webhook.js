@@ -19,7 +19,7 @@
 require('dotenv').config();
 
 const newTokenWebhook = require('../services/newTokenWebhook');
-const logger = require('../services/logger');
+const _logger = require('../services/logger');
 
 const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 const API_URL = process.env.API_URL || 'http://localhost:3000';
