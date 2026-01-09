@@ -1306,6 +1306,284 @@ function init(deps) {
     });
 
     /**
+     * POST /api/admin/repair-database
+     * Comprehensive database repair - adds all missing tables, columns, and indexes
+     * This is a superset of run-migrations - use when database is missing schema elements
+     */
+    router.post('/admin/repair-database', requireAdmin, async (req, res) => {
+        const results = {
+            tables: { created: [], existing: [], failed: [] },
+            columns: { added: [], existing: [], failed: [] },
+            indexes: { created: [], existing: [], failed: [] },
+            constraints: { modified: [], failed: [] }
+        };
+
+        try {
+            // ═══════════════════════════════════════════════════════════
+            // STEP 1: CREATE MISSING TABLES
+            // ═══════════════════════════════════════════════════════════
+            const tableDefs = [
+                { name: 'polling_tasks', sql: `CREATE TABLE IF NOT EXISTS polling_tasks (
+                    task_id SERIAL PRIMARY KEY, mint TEXT NOT NULL, priority INTEGER DEFAULT 100,
+                    reason TEXT NOT NULL DEFAULT 'scheduled', status TEXT NOT NULL DEFAULT 'pending',
+                    created_at BIGINT NOT NULL, created_by TEXT, claimed_by TEXT, claimed_at BIGINT,
+                    completed_at BIGINT, attempts INTEGER DEFAULT 0, last_error TEXT, k_score_result DOUBLE PRECISION
+                )` },
+                { name: 'consensus_snapshots', sql: `CREATE TABLE IF NOT EXISTS consensus_snapshots (
+                    mint TEXT PRIMARY KEY, k_score_consensus DOUBLE PRECISION, agreeing_nodes INTEGER DEFAULT 0,
+                    total_nodes INTEGER DEFAULT 0, consensus_at BIGINT, confidence DECIMAL(5,4)
+                )` },
+                { name: 'node_work_history', sql: `CREATE TABLE IF NOT EXISTS node_work_history (
+                    id SERIAL PRIMARY KEY, node_id TEXT NOT NULL, task_type TEXT NOT NULL DEFAULT 'polling',
+                    mint TEXT NOT NULL, completed_at BIGINT NOT NULL, duration_ms INTEGER,
+                    rpc_calls INTEGER DEFAULT 0, k_score_calculated BOOLEAN DEFAULT FALSE, error_message TEXT
+                )` },
+                { name: 'node_approvals', sql: `CREATE TABLE IF NOT EXISTS node_approvals (
+                    node_id TEXT NOT NULL, approved_by TEXT NOT NULL, approval_signature TEXT,
+                    approved_at BIGINT NOT NULL, PRIMARY KEY (node_id, approved_by)
+                )` },
+            ];
+
+            for (const table of tableDefs) {
+                try {
+                    const exists = await db.get(`SELECT 1 FROM information_schema.tables WHERE table_name = $1`, [table.name]);
+                    if (exists) {
+                        results.tables.existing.push(table.name);
+                    } else {
+                        await db.run(table.sql);
+                        results.tables.created.push(table.name);
+                    }
+                } catch (e) {
+                    results.tables.failed.push({ table: table.name, error: e.message });
+                }
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // STEP 2: ADD MISSING COLUMNS
+            // ═══════════════════════════════════════════════════════════
+            const columnMigrations = [
+                // Tokens table - Core columns
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS initial_supply TEXT`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS burned_amount DOUBLE PRECISION DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS burned_percent DOUBLE PRECISION DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS is_pump_fun BOOLEAN DEFAULT FALSE`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS bonding_curve_complete BOOLEAN DEFAULT FALSE`,
+                // Conviction system
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_score DOUBLE PRECISION DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_accumulators INTEGER DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_holders INTEGER DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_reducers INTEGER DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_extractors INTEGER DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS conviction_analyzed INTEGER DEFAULT 0`,
+                // Supply tracking
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS supply_last_check BIGINT DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS supply_change_24h DOUBLE PRECISION DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS is_mutable_supply BOOLEAN DEFAULT FALSE`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS mint_authority_revoked BOOLEAN DEFAULT FALSE`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS freeze_authority_revoked BOOLEAN DEFAULT FALSE`,
+                // Security/LP tracking
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS security_last_check BIGINT DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS lp_last_check BIGINT DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS lp_burn_pct DOUBLE PRECISION DEFAULT NULL`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS lp_locked_pct DOUBLE PRECISION DEFAULT NULL`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS lp_status TEXT DEFAULT NULL`,
+                // Data integrity signatures
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS data_signature TEXT DEFAULT NULL`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_identity TEXT DEFAULT NULL`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_security TEXT DEFAULT NULL`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_lp TEXT DEFAULT NULL`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_supply TEXT DEFAULT NULL`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_kscore TEXT DEFAULT NULL`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_market TEXT DEFAULT NULL`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_origin TEXT DEFAULT NULL`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_full TEXT DEFAULT NULL`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS chaos_nonce TEXT DEFAULT NULL`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_holders TEXT DEFAULT NULL`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS holders_snapshot_check BIGINT DEFAULT 0`,
+                // Market data provenance
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS price_source TEXT DEFAULT 'unknown'`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS price_timestamp BIGINT DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS price_pool TEXT DEFAULT ''`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS mcap_calculated BOOLEAN DEFAULT FALSE`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS liquidity_source TEXT DEFAULT 'unknown'`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS liquidity_timestamp BIGINT DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS holders_source TEXT DEFAULT 'unknown'`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS holders_timestamp BIGINT DEFAULT 0`,
+                // K-Score tracking
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS age_days DOUBLE PRECISION DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS real_holders INTEGER DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS total_holders INTEGER DEFAULT 0`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_node_id TEXT DEFAULT NULL`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_node_signature TEXT DEFAULT NULL`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_node_timestamp BIGINT DEFAULT NULL`,
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_node_status TEXT DEFAULT NULL`,
+                // Holder snapshots
+                `ALTER TABLE holder_snapshots ADD COLUMN IF NOT EXISTS last_tx_timestamp BIGINT DEFAULT 0`,
+                // API Keys
+                `ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS wallet TEXT`,
+                `ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_hash TEXT`,
+                `ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS key_prefix TEXT`,
+                // Wallet Credits
+                `ALTER TABLE wallet_credits ADD COLUMN IF NOT EXISTS total_burned DOUBLE PRECISION DEFAULT 0`,
+                `ALTER TABLE wallet_credits ADD COLUMN IF NOT EXISTS last_burn_check BIGINT DEFAULT 0`,
+                // Operation costs
+                `ALTER TABLE operation_costs ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE`,
+                `ALTER TABLE operation_costs ADD COLUMN IF NOT EXISTS operation_type TEXT`,
+                `ALTER TABLE operation_costs ADD COLUMN IF NOT EXISTS actual_cost DOUBLE PRECISION DEFAULT 0`,
+                // Participants
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS holdings DOUBLE PRECISION DEFAULT 0`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS api_calls_30d INTEGER DEFAULT 0`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS apps_live INTEGER DEFAULT 0`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS nodes_active INTEGER DEFAULT 0`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS referrals_active INTEGER DEFAULT 0`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS cached_escore DOUBLE PRECISION DEFAULT 0`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS cached_tier TEXT DEFAULT 'Newcomer'`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS cached_tier_icon TEXT DEFAULT '🌱'`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS escore_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS first_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+                `ALTER TABLE participants ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+                // Nodes - Cryptographic identity
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS node_public_key TEXT DEFAULT NULL`,
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS node_key_fingerprint TEXT DEFAULT NULL`,
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS key_registered_at BIGINT DEFAULT NULL`,
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS sig_node_identity TEXT DEFAULT NULL`,
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS sig_node_status TEXT DEFAULT NULL`,
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS node_chaos_nonce TEXT DEFAULT NULL`,
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS updated_at BIGINT DEFAULT 0`,
+                // Nodes - Approval system
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS approval_status TEXT DEFAULT 'pending'`,
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS is_genesis BOOLEAN DEFAULT FALSE`,
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS approved_at BIGINT DEFAULT NULL`,
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS approval_expires_at BIGINT DEFAULT NULL`,
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS required_approvals INTEGER DEFAULT 2`,
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS current_approvals INTEGER DEFAULT 0`,
+                // Nodes - Distributed polling
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS credits DOUBLE PRECISION DEFAULT 1.618033988749895`,
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS capabilities JSONB DEFAULT '["polling", "webhooks", "verification"]'::jsonb`,
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS last_work_at BIGINT DEFAULT NULL`,
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS total_rpc_calls BIGINT DEFAULT 0`,
+                // Token verifications
+                `ALTER TABLE token_verifications ADD COLUMN IF NOT EXISTS node_signature TEXT DEFAULT NULL`,
+                `ALTER TABLE token_verifications ADD COLUMN IF NOT EXISTS signature_version TEXT DEFAULT 'v1'`,
+            ];
+
+            for (const sql of columnMigrations) {
+                try {
+                    await db.run(sql);
+                    const match = sql.match(/ALTER TABLE (\w+) ADD COLUMN.*?(\w+)\s/i);
+                    if (match) {
+                        results.columns.added.push(`${match[1]}.${match[2]}`);
+                    }
+                } catch (e) {
+                    if (e.message?.includes('already exists')) {
+                        const match = sql.match(/ALTER TABLE (\w+) ADD COLUMN.*?(\w+)\s/i);
+                        if (match) results.columns.existing.push(`${match[1]}.${match[2]}`);
+                    } else {
+                        results.columns.failed.push({ sql: sql.slice(0, 60), error: e.message });
+                    }
+                }
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // STEP 3: FIX COLUMN TYPES
+            // ═══════════════════════════════════════════════════════════
+            const typeFixes = [
+                `ALTER TABLE tokens ALTER COLUMN conviction_score TYPE DOUBLE PRECISION USING conviction_score::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN liquidity TYPE DOUBLE PRECISION USING liquidity::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN marketcap TYPE DOUBLE PRECISION USING marketcap::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN volume24h TYPE DOUBLE PRECISION USING volume24h::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN priceusd TYPE DOUBLE PRECISION USING priceusd::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN change24h TYPE DOUBLE PRECISION USING change24h::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN change1h TYPE DOUBLE PRECISION USING change1h::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN change5m TYPE DOUBLE PRECISION USING change5m::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN k_score TYPE DOUBLE PRECISION USING k_score::DOUBLE PRECISION`,
+                `ALTER TABLE pools ALTER COLUMN price_usd TYPE DOUBLE PRECISION USING price_usd::DOUBLE PRECISION`,
+                `ALTER TABLE pools ALTER COLUMN liquidity_usd TYPE DOUBLE PRECISION USING liquidity_usd::DOUBLE PRECISION`,
+                `ALTER TABLE pools ALTER COLUMN volume_24h TYPE DOUBLE PRECISION USING volume_24h::DOUBLE PRECISION`,
+            ];
+
+            for (const sql of typeFixes) {
+                try {
+                    await db.run(sql);
+                } catch (_e) { /* ignore - already correct type */ }
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // STEP 4: CREATE INDEXES
+            // ═══════════════════════════════════════════════════════════
+            const indexMigrations = [
+                `CREATE INDEX IF NOT EXISTS idx_tokens_community_update ON tokens (hasCommunityUpdate) WHERE hasCommunityUpdate = TRUE`,
+                `CREATE INDEX IF NOT EXISTS idx_tokens_kscore ON tokens (k_score DESC NULLS LAST)`,
+                `CREATE INDEX IF NOT EXISTS idx_tokens_timestamp ON tokens (timestamp DESC NULLS LAST)`,
+                `CREATE INDEX IF NOT EXISTS idx_tokens_marketcap ON tokens (marketCap DESC NULLS LAST)`,
+                `CREATE INDEX IF NOT EXISTS idx_tokens_verified_kscore ON tokens (hasCommunityUpdate, k_score DESC NULLS LAST) WHERE hasCommunityUpdate = TRUE`,
+                `CREATE INDEX IF NOT EXISTS idx_pools_mint ON pools (mint)`,
+                `CREATE INDEX IF NOT EXISTS idx_holder_snapshots_mint_balance ON holder_snapshots (mint, balance DESC)`,
+                `CREATE INDEX IF NOT EXISTS idx_participants_escore ON participants (cached_escore DESC NULLS LAST)`,
+                `CREATE INDEX IF NOT EXISTS idx_contributions_wallet ON contributions (wallet, created_at DESC)`,
+                `CREATE INDEX IF NOT EXISTS idx_nodes_status ON nodes (status) WHERE status = 'active'`,
+                `CREATE INDEX IF NOT EXISTS idx_nodes_heartbeat ON nodes (last_heartbeat DESC)`,
+                `CREATE INDEX IF NOT EXISTS idx_token_verifications_mint ON token_verifications (mint, verified_at DESC)`,
+                `CREATE INDEX IF NOT EXISTS idx_token_verifications_node ON token_verifications (node_id, verified_at DESC)`,
+                `CREATE UNIQUE INDEX IF NOT EXISTS idx_polling_tasks_unique_pending ON polling_tasks (mint) WHERE status = 'pending'`,
+                `CREATE INDEX IF NOT EXISTS idx_polling_tasks_pending_priority ON polling_tasks (priority ASC, created_at ASC) WHERE status = 'pending'`,
+                `CREATE INDEX IF NOT EXISTS idx_polling_tasks_status ON polling_tasks (status)`,
+                `CREATE INDEX IF NOT EXISTS idx_node_approvals_node ON node_approvals (node_id)`,
+            ];
+
+            for (const sql of indexMigrations) {
+                try {
+                    await db.run(sql);
+                    const match = sql.match(/INDEX.*?(\w+)\s+ON/i);
+                    if (match) results.indexes.created.push(match[1]);
+                } catch (e) {
+                    if (e.message?.includes('already exists')) {
+                        const match = sql.match(/INDEX.*?(\w+)\s+ON/i);
+                        if (match) results.indexes.existing.push(match[1]);
+                    } else {
+                        results.indexes.failed.push({ sql: sql.slice(0, 60), error: e.message });
+                    }
+                }
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // STEP 5: FIX CONSTRAINTS
+            // ═══════════════════════════════════════════════════════════
+            try {
+                await db.run(`ALTER TABLE token_verifications DROP CONSTRAINT IF EXISTS token_verifications_node_id_fkey`);
+                results.constraints.modified.push('Removed token_verifications FK constraint');
+            } catch (e) {
+                results.constraints.failed.push({ constraint: 'token_verifications_node_id_fkey', error: e.message });
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // SUMMARY
+            // ═══════════════════════════════════════════════════════════
+            const summary = {
+                tables: `${results.tables.created.length} created, ${results.tables.existing.length} existing`,
+                columns: `${results.columns.added.length} added, ${results.columns.existing.length} existing`,
+                indexes: `${results.indexes.created.length} created, ${results.indexes.existing.length} existing`,
+                errors: results.tables.failed.length + results.columns.failed.length + results.indexes.failed.length + results.constraints.failed.length
+            };
+
+            res.json({
+                success: true,
+                message: `Database repair complete. Tables: ${summary.tables}. Columns: ${summary.columns}. Indexes: ${summary.indexes}. Errors: ${summary.errors}`,
+                summary,
+                results
+            });
+
+        } catch (e) {
+            res.status(500).json({
+                success: false,
+                error: sanitizeError(e),
+                results
+            });
+        }
+    });
+
+    /**
      * GET /api/token/:mint/evolution
      * K-Score evolution with price correlation for overlay charts
      * SECURITY: Only available for verified tokens (hasCommunityUpdate=TRUE)
