@@ -530,6 +530,9 @@ async function initDB() {
                 `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS sig_node_status TEXT DEFAULT NULL`,      // Signs: status, last_heartbeat, version
                 `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS node_chaos_nonce TEXT DEFAULT NULL`,     // Random nonce for unpredictability
                 `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS updated_at BIGINT DEFAULT 0`,            // Last update timestamp
+                // Node approval system (required for distributed consensus)
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS approval_status TEXT DEFAULT 'pending'`, // pending | approved | rejected
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS is_genesis BOOLEAN DEFAULT FALSE`,       // Genesis nodes are auto-approved
                 // Token verifications: Add cryptographic proof
                 `ALTER TABLE token_verifications ADD COLUMN IF NOT EXISTS node_signature TEXT DEFAULT NULL`, // Ed25519 signature (base64)
                 `ALTER TABLE token_verifications ADD COLUMN IF NOT EXISTS signature_version TEXT DEFAULT 'v1'`, // For future algorithm upgrades
