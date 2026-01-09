@@ -464,6 +464,16 @@ async function initDB() {
                     k_score_calculated BOOLEAN DEFAULT FALSE,
                     error_message TEXT
                 );
+
+                -- Node Approvals: Multi-signature approval system for new nodes
+                -- Tracks which existing nodes have approved which new nodes
+                CREATE TABLE IF NOT EXISTS node_approvals (
+                    node_id TEXT NOT NULL,
+                    approved_by TEXT NOT NULL,
+                    approval_signature TEXT,
+                    approved_at BIGINT NOT NULL,
+                    PRIMARY KEY (node_id, approved_by)
+                );
             `);
 
             // Add new columns if they don't exist (migration-safe)
@@ -583,6 +593,15 @@ async function initDB() {
                 // Node approval system (required for distributed consensus)
                 `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS approval_status TEXT DEFAULT 'pending'`, // pending | approved | rejected
                 `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS is_genesis BOOLEAN DEFAULT FALSE`,       // Genesis nodes are auto-approved
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS approved_at BIGINT DEFAULT NULL`,        // When node was approved
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS approval_expires_at BIGINT DEFAULT NULL`, // Approval expiration (for rate limiting)
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS required_approvals INTEGER DEFAULT 2`,    // Threshold of approvals needed
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS current_approvals INTEGER DEFAULT 0`,     // Current approval count
+                // Distributed polling: φ-based credit system
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS credits DOUBLE PRECISION DEFAULT 1.618033988749895`, // φ (golden ratio) initial credits
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS capabilities JSONB DEFAULT '["polling", "webhooks", "verification"]'::jsonb`, // Node capabilities
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS last_work_at BIGINT DEFAULT NULL`,        // Last task completion time
+                `ALTER TABLE nodes ADD COLUMN IF NOT EXISTS total_rpc_calls BIGINT DEFAULT 0`,        // Total RPC calls made
                 // Token verifications: Add cryptographic proof
                 `ALTER TABLE token_verifications ADD COLUMN IF NOT EXISTS node_signature TEXT DEFAULT NULL`, // Ed25519 signature (base64)
                 `ALTER TABLE token_verifications ADD COLUMN IF NOT EXISTS signature_version TEXT DEFAULT 'v1'`, // For future algorithm upgrades
@@ -671,6 +690,10 @@ async function initDB() {
                 `CREATE INDEX IF NOT EXISTS idx_node_work_history_node ON node_work_history (node_id, completed_at DESC)`,
                 // Node work history by mint
                 `CREATE INDEX IF NOT EXISTS idx_node_work_history_mint ON node_work_history (mint, completed_at DESC)`,
+                // Node approvals by node (for approval counting)
+                `CREATE INDEX IF NOT EXISTS idx_node_approvals_node ON node_approvals (node_id)`,
+                // Node approvals by approver (for approval history)
+                `CREATE INDEX IF NOT EXISTS idx_node_approvals_approver ON node_approvals (approved_by)`,
             ];
 
             for (const sql of migrations) {

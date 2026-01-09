@@ -36,6 +36,7 @@ const TABLES_TO_DROP = [
     // Tables with foreign key dependencies (drop dependents first)
     'token_verifications',
     'node_work_history',
+    'node_approvals',
     'consensus_snapshots',
     'polling_tasks',
 
