@@ -16,12 +16,12 @@ async function fetchInitialMarketData(mint) {
         const res = await axios.get(url, { timeout: 3000 });
         const attrs = res.data.data.attributes;
         return {
-            priceUsd: parseFloat(attrs.price_usd || 0),
-            volume24h: parseFloat(attrs.volume_usd?.h24 || 0),
-            change24h: parseFloat(attrs.price_change_percentage?.h24 || 0),
-            change1h: parseFloat(attrs.price_change_percentage?.h1 || 0),
-            change5m: parseFloat(attrs.price_change_percentage?.m5 || 0),
-            marketCap: parseFloat(attrs.fdv_usd || attrs.market_cap_usd || 0)
+            priceUsd: parseFloat(attrs.price_usd || 0),  // Keep decimals for price
+            volume24h: Math.floor(parseFloat(attrs.volume_usd?.h24 || 0)),  // Integer
+            change24h: parseFloat(attrs.price_change_percentage?.h24 || 0),  // Keep decimals for percentage
+            change1h: parseFloat(attrs.price_change_percentage?.h1 || 0),  // Keep decimals for percentage
+            change5m: parseFloat(attrs.price_change_percentage?.m5 || 0),  // Keep decimals for percentage
+            marketCap: Math.floor(parseFloat(attrs.fdv_usd || attrs.market_cap_usd || 0))  // Integer
         };
     } catch (_e) { return null; }
 }
@@ -79,10 +79,10 @@ async function searchGeckoTerminal(query, limit = 10) {
                         name: tokenName,
                         symbol: tokenSymbol,
                         image: tokenAttrs.image_url || null,
-                        priceUsd: parseFloat(tokenAttrs.price_usd || attrs.base_token_price_usd || 0),
-                        volume24h: parseFloat(attrs.volume_usd?.h24 || 0),
-                        marketCap: parseFloat(tokenAttrs.fdv_usd || attrs.fdv_usd || 0),
-                        liquidity: parseFloat(attrs.reserve_in_usd || 0)
+                        priceUsd: parseFloat(tokenAttrs.price_usd || attrs.base_token_price_usd || 0),  // Keep decimals for price
+                        volume24h: Math.floor(parseFloat(attrs.volume_usd?.h24 || 0)),  // Integer
+                        marketCap: Math.floor(parseFloat(tokenAttrs.fdv_usd || attrs.fdv_usd || 0)),  // Integer
+                        liquidity: Math.floor(parseFloat(attrs.reserve_in_usd || 0))  // Integer
                     });
                 }
             }

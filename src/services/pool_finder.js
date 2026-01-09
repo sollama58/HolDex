@@ -36,18 +36,18 @@ async function findPoolsViaGeckoTerminal(mintAddress, retries = 3) {
         return response.data.data.map(item => {
             const attr = item.attributes;
             const rel = item.relationships;
-            
+
             return {
                 pairAddress: attr.address,
                 dexId: rel?.dex?.data?.id || 'unknown',
-                type: 'standard', 
+                type: 'standard',
                 baseToken: { address: rel?.base_token?.data?.id?.replace('solana_', '') || mintAddress },
                 quoteToken: { address: rel?.quote_token?.data?.id?.replace('solana_', '') || 'So11111111111111111111111111111111111111112' },
-                liquidity: { usd: parseFloat(attr.reserve_in_usd || 0) },
-                volume: { h24: parseFloat(attr.volume_usd?.h24 || 0) },
-                priceUsd: parseFloat(attr.base_token_price_usd || 0),
-                reserve_a: null, 
-                reserve_b: null 
+                liquidity: { usd: Math.floor(parseFloat(attr.reserve_in_usd || 0)) },  // Integer
+                volume: { h24: Math.floor(parseFloat(attr.volume_usd?.h24 || 0)) },  // Integer
+                priceUsd: parseFloat(attr.base_token_price_usd || 0),  // Keep decimals for price
+                reserve_a: null,
+                reserve_b: null
             };
         });
 

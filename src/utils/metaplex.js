@@ -1,11 +1,13 @@
 const axios = require('axios');
 const { PublicKey } = require('@solana/web3.js');
 const { getSolanaConnection } = require('../services/solana');
+const config = require('../config/env');
 
 const METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 
-// Optional API key from environment
+// Optional API keys from environment
 const SOLSCAN_API_KEY = process.env.SOLSCAN_API_KEY || null;
+const HELIUS_API_KEY = config.HELIUS_API_KEY || null;
 
 function removeNullBytes(str) {
     return str.split('\u0000')[0];
@@ -52,7 +54,63 @@ async function fetchTokenMetadata(mintAddress) {
         console.log(`[Metaplex] GeckoTerminal failed for ${mintAddress.slice(0,8)}: ${e.message}`);
     }
 
-    // 2. Fallback: Solscan Pro API (if API key is set)
+    // 2. Helius DAS API (Digital Asset Standard) - best for new tokens
+    // Helius indexes on-chain metadata directly, so it has data for brand new tokens
+    if (HELIUS_API_KEY) {
+        try {
+            const heliusRes = await axios.post(
+                `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
+                {
+                    jsonrpc: '2.0',
+                    id: 'helius-das',
+                    method: 'getAsset',
+                    params: { id: mintAddress }
+                },
+                { timeout: 5000 }
+            );
+
+            if (heliusRes.data?.result) {
+                const asset = heliusRes.data.result;
+                const content = asset.content || {};
+                const metadata = content.metadata || {};
+                const links = content.links || {};
+
+                const heliusMeta = {
+                    name: metadata.name || content.name || null,
+                    symbol: metadata.symbol || content.symbol || null,
+                    image: links.image || content.image || (content.json_uri ? null : null),
+                    description: metadata.description || content.description || ''
+                };
+
+                // If we have name/symbol but no image, try fetching from json_uri
+                if (heliusMeta.name && !heliusMeta.image && content.json_uri) {
+                    try {
+                        const jsonRes = await axios.get(content.json_uri, { timeout: 3000 });
+                        heliusMeta.image = jsonRes.data?.image || null;
+                        if (!heliusMeta.description && jsonRes.data?.description) {
+                            heliusMeta.description = jsonRes.data.description;
+                        }
+                    } catch (_e) {
+                        // Failed to fetch json_uri, continue without image
+                    }
+                }
+
+                console.log(`[Metaplex] Helius DAS raw response for ${mintAddress.slice(0,8)}: name=${heliusMeta.name}, symbol=${heliusMeta.symbol}`);
+                if (isValidMetadata(heliusMeta)) {
+                    console.log(`[Metaplex] Found metadata via Helius DAS API for ${mintAddress.slice(0,8)}`);
+                    return heliusMeta;
+                } else {
+                    console.log(`[Metaplex] Helius DAS returned invalid metadata for ${mintAddress.slice(0,8)}: name=${heliusMeta.name}, symbol=${heliusMeta.symbol}`);
+                }
+            } else {
+                console.log(`[Metaplex] Helius DAS returned no result for ${mintAddress.slice(0,8)}`);
+            }
+        } catch (e) {
+            console.log(`[Metaplex] Helius DAS failed for ${mintAddress.slice(0,8)}: ${e.message}`);
+        }
+    }
+
+    // 3. Fallback: Solscan Pro API (if API key is set)
     if (SOLSCAN_API_KEY) {
         try {
             const solscanRes = await axios.get(
@@ -82,7 +140,7 @@ async function fetchTokenMetadata(mintAddress) {
         }
     }
 
-    // 3. Fallback: Public Solscan API (free, no key required)
+    // 4. Fallback: Public Solscan API (free, no key required)
     try {
         const solscanPublicRes = await axios.get(
             `https://api.solscan.io/token/meta?token=${mintAddress}`,
@@ -108,7 +166,7 @@ async function fetchTokenMetadata(mintAddress) {
         console.log(`[Metaplex] Solscan Public failed for ${mintAddress.slice(0,8)}: ${e.message}`);
     }
 
-    // 4. Last resort: On-Chain Metaplex Parse
+    // 5. Last resort: On-Chain Metaplex Parse
     try {
         const connection = getSolanaConnection();
         const mint = new PublicKey(mintAddress);

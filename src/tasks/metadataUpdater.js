@@ -150,9 +150,9 @@ async function processSingleToken(db, t, now) {
 
                 const address = attr.address;
                 const dexId = rel?.dex?.data?.id || 'unknown';
-                const price = parseFloat(attr.base_token_price_usd || 0);
-                const liqUsd = parseFloat(attr.reserve_in_usd || 0);
-                const vol24h = parseFloat(attr.volume_usd?.h24 || 0);
+                const price = parseFloat(attr.base_token_price_usd || 0);  // Keep decimals for price
+                const liqUsd = Math.floor(parseFloat(attr.reserve_in_usd || 0));  // Integer
+                const vol24h = Math.floor(parseFloat(attr.volume_usd?.h24 || 0));  // Integer
                 
                 let tokenA = rel?.base_token?.data?.id || null;
                 let tokenB = rel?.quote_token?.data?.id || null;
@@ -200,7 +200,7 @@ async function processSingleToken(db, t, now) {
         
         // A. Try direct FDV from Gecko
         if (tokenDetails && tokenDetails.attributes) {
-            marketCap = parseFloat(tokenDetails.attributes.fdv_usd || tokenDetails.attributes.market_cap_usd || 0);
+            marketCap = Math.floor(parseFloat(tokenDetails.attributes.fdv_usd || tokenDetails.attributes.market_cap_usd || 0));  // Integer
         }
 
         // B. Fallback: Manual Calculation
@@ -215,7 +215,7 @@ async function processSingleToken(db, t, now) {
 
             const divisor = Math.pow(10, decimals);
             const supply = rawSupply / divisor;
-            marketCap = supply * bestPrice;
+            marketCap = Math.floor(supply * bestPrice);  // Integer
         }
 
         // Explicitly clear large objects
@@ -228,10 +228,10 @@ async function processSingleToken(db, t, now) {
         let idx = 1;
 
         if (totalVolume24h > 0 || totalLiquidity > 0) {
-            updateParts.push(`volume24h = $${idx++}`); finalParams.push(totalVolume24h);
-            updateParts.push(`marketCap = $${idx++}`); finalParams.push(marketCap);
-            updateParts.push(`priceUsd = $${idx++}`); finalParams.push(bestPrice);
-            updateParts.push(`liquidity = $${idx++}`); finalParams.push(totalLiquidity);
+            updateParts.push(`volume24h = $${idx++}`); finalParams.push(Math.floor(totalVolume24h));  // Integer
+            updateParts.push(`marketCap = $${idx++}`); finalParams.push(Math.floor(marketCap));  // Integer
+            updateParts.push(`priceUsd = $${idx++}`); finalParams.push(bestPrice);  // Keep decimals for price
+            updateParts.push(`liquidity = $${idx++}`); finalParams.push(Math.floor(totalLiquidity));  // Integer
             
             if (bestChange24h !== null) { updateParts.push(`change24h = $${idx++}`); finalParams.push(bestChange24h); }
             if (bestChange1h !== null) { updateParts.push(`change1h = $${idx++}`); finalParams.push(bestChange1h); }

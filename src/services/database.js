@@ -799,9 +799,10 @@ async function aggregateAndSaveToken(db, mint) {
         // FIX: Only update liquidity/volume/price if we have valid data (> 0), otherwise preserve existing
         // FIX: Ensure all numeric values are properly typed to avoid integer overflow errors
         // FIX: Validate all numeric values are finite to prevent PostgreSQL type errors
-        const safeTotalLiq = Number.isFinite(totalLiq) ? totalLiq : 0;
-        const safeTotalVol = Number.isFinite(totalVol) ? totalVol : 0;
-        const safePrice = Number.isFinite(price) ? price : 0;
+        // FIX: Use Math.floor() for liquidity/volume to avoid decimal precision issues (only price keeps decimals)
+        const safeTotalLiq = Number.isFinite(totalLiq) ? Math.floor(totalLiq) : 0;
+        const safeTotalVol = Number.isFinite(totalVol) ? Math.floor(totalVol) : 0;
+        const safePrice = Number.isFinite(price) ? price : 0;  // Keep decimals for price
         const params = [safeTotalLiq, safeTotalVol, safePrice, mint];
         let query = `UPDATE tokens SET
             liquidity = CASE WHEN $1 > 0 THEN $1::DOUBLE PRECISION ELSE liquidity END,
