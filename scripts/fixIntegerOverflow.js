@@ -76,8 +76,8 @@ async function main() {
                 { name: 'change24h', targetType: 'DOUBLE PRECISION' },
                 { name: 'change1h', targetType: 'DOUBLE PRECISION' },
                 { name: 'change5m', targetType: 'DOUBLE PRECISION' },
-                { name: 'conviction_score', targetType: 'DOUBLE PRECISION' },
-                { name: 'mcap_calculated', targetType: 'DOUBLE PRECISION' }
+                { name: 'conviction_score', targetType: 'DOUBLE PRECISION' }
+                // Note: mcap_calculated is BOOLEAN, not numeric - do not convert
             ];
 
             for (const col of columnsToFix) {
