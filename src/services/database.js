@@ -409,10 +409,11 @@ async function initDB() {
 
                 -- Token Verifications: Per-token verification log by node
                 -- Tracks which nodes verified which tokens and when
+                -- NOTE: No foreign key on node_id - nodes may not exist yet when verification is recorded
                 CREATE TABLE IF NOT EXISTS token_verifications (
                     id SERIAL PRIMARY KEY,
                     mint TEXT NOT NULL,
-                    node_id TEXT NOT NULL REFERENCES nodes(node_id),
+                    node_id TEXT NOT NULL,
 
                     -- Verification data
                     verified_at BIGINT NOT NULL,
@@ -544,6 +545,12 @@ async function initDB() {
                 // Token verifications: Add cryptographic proof
                 `ALTER TABLE token_verifications ADD COLUMN IF NOT EXISTS node_signature TEXT DEFAULT NULL`, // Ed25519 signature (base64)
                 `ALTER TABLE token_verifications ADD COLUMN IF NOT EXISTS signature_version TEXT DEFAULT 'v1'`, // For future algorithm upgrades
+                // ═══════════════════════════════════════════════════════════
+                // FIX: Remove foreign key constraint on token_verifications
+                // The constraint causes failures when nodes aren't registered yet
+                // Orphan records are acceptable - node_id is just a label
+                // ═══════════════════════════════════════════════════════════
+                `ALTER TABLE token_verifications DROP CONSTRAINT IF EXISTS token_verifications_node_id_fkey`,
             ];
 
             // PERFORMANCE: Add indexes for frequently queried columns
