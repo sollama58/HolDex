@@ -1198,9 +1198,55 @@ function init(deps) {
 
             res.json({ success: true, results, message: `Update Log: ${results.updates.restored} added, ${results.updates.merged} merged. Keys: ${results.keys.restored} added, ${results.keys.merged} merged.` });
 
-        } catch (e) { 
-            res.status(500).json({ success: false, error: sanitizeError(e) }); 
+        } catch (e) {
+            res.status(500).json({ success: false, error: sanitizeError(e) });
         }
+    });
+
+    /**
+     * POST /admin/run-migrations
+     * Manually run column type migrations (INTEGER -> DOUBLE PRECISION)
+     * Use this if migrations failed to run on startup
+     */
+    router.post('/admin/run-migrations', requireAdmin, async (req, res) => {
+        const results = { success: [], failed: [] };
+
+        const migrations = [
+            // Tokens table
+            `ALTER TABLE tokens ALTER COLUMN liquidity TYPE DOUBLE PRECISION USING liquidity::DOUBLE PRECISION`,
+            `ALTER TABLE tokens ALTER COLUMN marketcap TYPE DOUBLE PRECISION USING marketcap::DOUBLE PRECISION`,
+            `ALTER TABLE tokens ALTER COLUMN volume24h TYPE DOUBLE PRECISION USING volume24h::DOUBLE PRECISION`,
+            `ALTER TABLE tokens ALTER COLUMN priceusd TYPE DOUBLE PRECISION USING priceusd::DOUBLE PRECISION`,
+            `ALTER TABLE tokens ALTER COLUMN change24h TYPE DOUBLE PRECISION USING change24h::DOUBLE PRECISION`,
+            `ALTER TABLE tokens ALTER COLUMN change1h TYPE DOUBLE PRECISION USING change1h::DOUBLE PRECISION`,
+            `ALTER TABLE tokens ALTER COLUMN change5m TYPE DOUBLE PRECISION USING change5m::DOUBLE PRECISION`,
+            `ALTER TABLE tokens ALTER COLUMN k_score TYPE DOUBLE PRECISION USING k_score::DOUBLE PRECISION`,
+            `ALTER TABLE tokens ALTER COLUMN conviction_score TYPE DOUBLE PRECISION USING conviction_score::DOUBLE PRECISION`,
+            // Pools table
+            `ALTER TABLE pools ALTER COLUMN price_usd TYPE DOUBLE PRECISION USING price_usd::DOUBLE PRECISION`,
+            `ALTER TABLE pools ALTER COLUMN liquidity_usd TYPE DOUBLE PRECISION USING liquidity_usd::DOUBLE PRECISION`,
+            `ALTER TABLE pools ALTER COLUMN volume_24h TYPE DOUBLE PRECISION USING volume_24h::DOUBLE PRECISION`,
+        ];
+
+        for (const sql of migrations) {
+            try {
+                await db.run(sql);
+                results.success.push(sql.match(/ALTER TABLE (\w+) ALTER COLUMN (\w+)/)?.[0] || sql.slice(0, 50));
+            } catch (e) {
+                // "already" means column is already the correct type - that's fine
+                if (e.message?.includes('already')) {
+                    results.success.push(`${sql.match(/ALTER TABLE (\w+) ALTER COLUMN (\w+)/)?.[0] || sql.slice(0, 50)} (already correct)`);
+                } else {
+                    results.failed.push({ sql: sql.slice(0, 60), error: e.message });
+                }
+            }
+        }
+
+        res.json({
+            success: true,
+            message: `Migrations complete: ${results.success.length} successful, ${results.failed.length} failed`,
+            results
+        });
     });
 
     /**

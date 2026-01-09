@@ -656,6 +656,9 @@
                         <button onclick="checkIntegrity()" class="btn-blue w-full">
                             <i data-lucide="shield-check" class="w-4 h-4 inline"></i> Run Integrity Check
                         </button>
+                        <button onclick="runMigrations()" class="btn-success w-full">
+                            <i data-lucide="database" class="w-4 h-4 inline"></i> Run DB Migrations
+                        </button>
                     </div>
                 </div>
 
@@ -1570,6 +1573,31 @@
         async function checkIntegrity() {
             toast('Integrity check triggered (check server logs)', 'success');
             // This would trigger the integrity watchdog
+        }
+
+        async function runMigrations() {
+            if (!confirm('Run database migrations? This will convert INTEGER columns to DOUBLE PRECISION to fix type errors.')) return;
+
+            try {
+                const data = await apiPost('/api/admin/run-migrations', {});
+                if (data.success) {
+                    const successCount = data.results?.success?.length || 0;
+                    const failedCount = data.results?.failed?.length || 0;
+
+                    let message = data.message || `Migrations complete: ${successCount} successful`;
+                    if (failedCount > 0) {
+                        message += `\n\nFailed migrations:\n${data.results.failed.map(f => `- ${f.sql}: ${f.error}`).join('\n')}`;
+                    }
+
+                    alert(message);
+                    toast('Migrations complete', 'success');
+                } else {
+                    toast('Error: ' + data.error, 'error');
+                }
+            } catch (e) {
+                toast('Network Error', 'error');
+                logError('Failed to run migrations', 'error');
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════
