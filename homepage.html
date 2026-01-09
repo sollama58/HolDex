@@ -1384,6 +1384,37 @@
                 </div>
             </div>
 
+            <!-- Your API Keys Section -->
+            <div class="bg-[#000000] border border-[#252525] p-4 rounded-lg mb-6">
+                <h4 class="text-[#fb923c] font-bold mb-3 text-sm uppercase flex items-center gap-2">
+                    <i data-lucide="wallet" width="14"></i> Your API Keys
+                </h4>
+
+                <!-- Not Connected State -->
+                <div id="dev-keys-unconnected">
+                    <p class="text-sm text-[#737373] mb-4">Connect your wallet to view and manage your API keys.</p>
+                    <button onclick="openWalletModal()" class="bg-[#141414] border border-[#22c55e] text-[#22c55e] px-4 py-2 rounded-lg text-sm font-bold hover:bg-green-900/20 transition flex items-center gap-2">
+                        <i data-lucide="wallet" width="16"></i> Connect Wallet
+                    </button>
+                </div>
+
+                <!-- Connected State -->
+                <div id="dev-keys-connected" class="hidden">
+                    <div class="flex justify-between items-center mb-4">
+                        <p class="text-xs text-[#737373]">Manage your API keys and view usage statistics.</p>
+                        <button onclick="requestApiKey()" class="text-xs text-[#22c55e] border border-[#22c55e] px-3 py-1.5 rounded bg-[#0a0a0a] hover:bg-green-900/20 flex items-center gap-1">
+                            <i data-lucide="plus" width="12"></i> Request New Key
+                        </button>
+                    </div>
+
+                    <div id="dev-keys-list" class="space-y-2">
+                        <div class="text-center py-4 text-[#737373] text-xs font-mono">
+                            <button onclick="fetchDevKeys()" class="text-[#ea580c] underline hover:text-[#fb923c] font-bold">Sign to Reveal My Keys</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Base URL -->
             <div class="bg-[#141414] border border-[#252525] p-4 rounded-lg mb-6">
                 <h4 class="text-[#737373] font-bold mb-2 text-xs uppercase">Base URL</h4>
@@ -3156,7 +3187,7 @@
             const signature = await getAuthSignature();
             const res = await fetch(`${API_URL}/api/request-api-key`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wallet: walletAddress, signature }) });
             const data = await res.json();
-            if (data.success) { document.getElementById('generated-key-display').innerText = data.key; toggleModal('key-modal'); fetchMyKeys(); } else { alert(data.error); }
+            if (data.success) { document.getElementById('generated-key-display').innerText = data.key; toggleModal('key-modal'); fetchMyKeys(); fetchDevKeys(); } else { alert(data.error); }
         } catch (e) { alert("Sign failed"); }
     }
     
@@ -3214,7 +3245,57 @@
         } catch (e) { console.error('fetchMyKeys error:', e); }
     }
 
-    window.requestApiKey = requestApiKey; window.fetchMyKeys = fetchMyKeys; window.closeKeyModal = () => toggleModal('key-modal');
+    // fetchDevKeys - populates the dev page API keys list (mirrors fetchMyKeys)
+    async function fetchDevKeys() {
+        if (!walletAddress) return;
+        const listDiv = document.getElementById('dev-keys-list');
+        try {
+            const signature = await getAuthSignature();
+            const res = await fetch(`${API_URL}/api/request-my-keys`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wallet: walletAddress, signature }) });
+            const data = await res.json();
+            if (data.success && listDiv) {
+                if (data.keys.length === 0) {
+                    listDiv.innerHTML = '<div class="text-center py-4 text-[#737373] text-xs">No API keys yet. Click "Request New Key" to create one.</div>';
+                    return;
+                }
+                listDiv.innerHTML = data.keys.map(k => {
+                    const tierColors = {
+                        free: { bg: 'bg-[#ea580c]/30', text: 'text-[#737373]', border: 'border-[#252525]' },
+                        pro: { bg: 'bg-[#fb923c]/10', text: 'text-[#fb923c]', border: 'border-[#fb923c]' },
+                        enterprise: { bg: 'bg-[#22c55e]/10', text: 'text-[#22c55e]', border: 'border-[#22c55e]' }
+                    };
+                    const safeTier = escapeHtml(k.tier);
+                    const tc = tierColors[k.tier] || tierColors.free;
+                    const usagePct = Math.round((parseInt(k.requests_today) || 0) / (parseInt(k.requests_limit) || 1) * 100);
+                    const safeKeyPreview = escapeHtml(k.key_preview);
+                    const safeReqToday = (parseInt(k.requests_today) || 0).toLocaleString();
+                    const safeReqLimit = (parseInt(k.requests_limit) || 0).toLocaleString();
+
+                    return `
+                        <div class="bg-[#141414] rounded-lg p-3 border ${tc.border}">
+                            <div class="flex justify-between items-start mb-2">
+                                <div>
+                                    <span class="font-mono text-[#fb923c] text-sm">${safeKeyPreview}</span>
+                                    <span class="ml-2 px-2 py-0.5 rounded text-xs ${tc.bg} ${tc.text} uppercase font-bold">${safeTier}</span>
+                                    ${!k.is_active ? '<span class="ml-1 px-2 py-0.5 rounded text-xs bg-red-900/30 text-red-500">REVOKED</span>' : ''}
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2 text-xs">
+                                <span class="text-[#737373]">Today:</span>
+                                <div class="flex-1 bg-[#0a0a0a] rounded-full h-2 overflow-hidden">
+                                    <div class="h-full ${usagePct > 80 ? 'bg-red-500' : usagePct > 50 ? 'bg-yellow-500' : 'bg-[#22c55e]'}" style="width: ${Math.min(usagePct, 100)}%"></div>
+                                </div>
+                                <span class="text-[#737373] font-mono">${safeReqToday}/${safeReqLimit}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                lucide.createIcons();
+            }
+        } catch (e) { console.error('fetchDevKeys error:', e); }
+    }
+
+    window.requestApiKey = requestApiKey; window.fetchMyKeys = fetchMyKeys; window.fetchDevKeys = fetchDevKeys; window.closeKeyModal = () => toggleModal('key-modal');
     window.copyKey = () => { navigator.clipboard.writeText(document.getElementById('generated-key-display').innerText); alert('Copied'); };
 
     // Standard Helpers
@@ -3321,17 +3402,23 @@
         const txtDesk = document.getElementById('desktop-wallet-text');
         const apiUn = document.getElementById('api-section-unconnected');
         const apiConn = document.getElementById('api-section-connected');
+        const devKeysUn = document.getElementById('dev-keys-unconnected');
+        const devKeysConn = document.getElementById('dev-keys-connected');
         if(connected) {
             if(txt) txt.innerText = 'Connected';
             if(txtDesk) txtDesk.innerText = walletAddress.slice(0,4) + '...';
             if(apiUn) apiUn.classList.add('hidden');
             if(apiConn) apiConn.classList.remove('hidden');
+            if(devKeysUn) devKeysUn.classList.add('hidden');
+            if(devKeysConn) devKeysConn.classList.remove('hidden');
             document.getElementById('wallet-disconnected-msg')?.classList.add('hidden');
         } else {
             if(txt) txt.innerText = 'Connect';
             if(txtDesk) txtDesk.innerText = 'Connect Wallet';
             if(apiUn) apiUn.classList.remove('hidden');
             if(apiConn) apiConn.classList.add('hidden');
+            if(devKeysUn) devKeysUn.classList.remove('hidden');
+            if(devKeysConn) devKeysConn.classList.add('hidden');
             document.getElementById('wallet-disconnected-msg')?.classList.remove('hidden');
         }
     }
