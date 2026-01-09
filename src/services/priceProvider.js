@@ -526,7 +526,7 @@ async function fetchBatchPrices(mints) {
 
         results.set(mint, {
             priceUsd: clampValue(priceUsd, PRICE_BOUNDS.MIN_PRICE, PRICE_BOUNDS.MAX_PRICE),
-            mcap: 0, // Calculated separately with supply
+            mcap: null, // Calculated by metadataUpdater with supply data - use null to preserve existing
             liquidity: liquidity !== null ? clampValue(liquidity, PRICE_BOUNDS.MIN_LIQUIDITY, PRICE_BOUNDS.MAX_LIQUIDITY) : null,
             volume24h: volume24h !== null ? clampValue(volume24h, PRICE_BOUNDS.MIN_VOLUME, PRICE_BOUNDS.MAX_VOLUME) : null,
             change24h: change24h !== null ? clampValue(change24h, PRICE_BOUNDS.MIN_CHANGE_PCT, PRICE_BOUNDS.MAX_CHANGE_PCT) : null,

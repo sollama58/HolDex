@@ -36,14 +36,16 @@ async function runPriceUpdateCycle(db, broadcast) {
     const startTime = Date.now();
 
     try {
-        // Get tokens grouped by tier
+        // Get tokens grouped by tier - include priceUsd and marketCap to detect missing data
         const tokens = await db.all(`
             SELECT
                 mint,
                 symbol,
                 hasCommunityUpdate,
                 volume24h,
-                price_timestamp
+                price_timestamp,
+                priceUsd,
+                marketCap
             FROM tokens
             WHERE mint != 'So11111111111111111111111111111111111111112'
             ORDER BY
@@ -54,6 +56,7 @@ async function runPriceUpdateCycle(db, broadcast) {
 
         const now = Date.now();
         const toUpdate = {
+            missingData: [], // HIGH PRIORITY: Tokens with null price/mcap
             verified: [],
             top100: [],
             active: [],
@@ -65,20 +68,32 @@ async function runPriceUpdateCycle(db, broadcast) {
             const t = tokens[i];
             const lastUpdate = parseInt(t.price_timestamp || 0);
             const age = now - lastUpdate;
+            const volume = parseFloat(t.volume24h) || 0;
+            const price = parseFloat(t.priceusd || t.priceUsd) || 0;
+            const mcap = parseFloat(t.marketcap || t.marketCap) || 0;
+
+            // HIGH PRIORITY: Tokens missing critical data get refreshed first
+            const hasMissingData = price === 0 || mcap === 0;
+            if (hasMissingData && age > 60000) { // Only if not recently checked (1 min cooldown)
+                toUpdate.missingData.push(t.mint);
+                continue; // Don't add to other tiers
+            }
 
             if (t.hascommunityupdate || t.hasCommunityUpdate) {
                 if (age > TIERS.VERIFIED) toUpdate.verified.push(t.mint);
             } else if (i < 100) {
                 if (age > TIERS.TOP_100) toUpdate.top100.push(t.mint);
-            } else if (t.volume24h > 1000) {
+            } else if (volume > 1000) {
                 if (age > TIERS.ACTIVE) toUpdate.active.push(t.mint);
             } else {
+                // Dormant tier includes tokens with no volume data (null/0)
                 if (age > TIERS.DORMANT) toUpdate.dormant.push(t.mint);
             }
         }
 
-        // Combine all tokens needing update (prioritized)
+        // Combine all tokens needing update (prioritized - missing data first)
         const allToUpdate = [
+            ...toUpdate.missingData.slice(0, 50), // Prioritize up to 50 tokens with missing data
             ...toUpdate.verified,
             ...toUpdate.top100,
             ...toUpdate.active.slice(0, 100), // Limit active per cycle
@@ -98,7 +113,10 @@ async function runPriceUpdateCycle(db, broadcast) {
             batches.push(allToUpdate.slice(i, i + BATCH_SIZE));
         }
 
-        logger.info(`[PriceWorker] Updating ${allToUpdate.length} tokens in ${batches.length} batches`);
+        if (toUpdate.missingData.length > 0) {
+            logger.info(`[PriceWorker] Found ${toUpdate.missingData.length} tokens with missing price/mcap data`);
+        }
+        logger.info(`[PriceWorker] Updating ${allToUpdate.length} tokens in ${batches.length} batches (missing: ${toUpdate.missingData.slice(0, 50).length}, verified: ${toUpdate.verified.length}, top100: ${toUpdate.top100.length})`);
 
         for (const batch of batches) {
             // Use new price provider instead of DexScreener
