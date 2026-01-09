@@ -521,16 +521,30 @@ function init(deps) {
     });
 
     // SECURITY: Rate limit config endpoints (M2)
+    // Hardcoded $ASDFASDFA token details (upgrade token)
+    const ASDFASDFA_TOKEN = {
+        mint: '9zB5wRarXMj86MymwLumSKA1Dx35zPqqKfcZtK1Spump',
+        name: 'ASDFASDFA',
+        symbol: 'ASDFASDFA'
+    };
+
     router.get('/config/fees', proxyRateLimit, async (req, res) => {
         try {
-            // Fetch fee token metadata from database for name and price
-            const feeToken = await db.get('SELECT name, ticker, priceUsd FROM tokens WHERE mint = $1', [config.FEE_TOKEN_MINT]);
+            // Fetch fee token metadata from database for price (name/symbol hardcoded)
+            const feeToken = await db.get('SELECT name, symbol, priceusd FROM tokens WHERE mint = $1', [config.FEE_TOKEN_MINT]);
+
+            // Use hardcoded name/symbol for $ASDFASDFA, fallback for other tokens
+            const isAsdfToken = config.FEE_TOKEN_MINT === ASDFASDFA_TOKEN.mint;
+            const tokenName = isAsdfToken ? ASDFASDFA_TOKEN.name : (feeToken?.name || 'Token');
+            const tokenSymbol = isAsdfToken ? ASDFASDFA_TOKEN.symbol : (feeToken?.symbol || 'TKN');
 
             // Calculate USD values
             const tokenPrice = feeToken?.priceusd || 0;
             const tokenFeeUsd = tokenPrice * config.FEE_TOKEN_AMOUNT;
-            // Assume SOL price ~$200 if we don't have it cached (or fetch from Jupiter)
-            const solPriceUsd = 200; // Conservative estimate
+
+            // Get SOL price from wrapped SOL in database, fallback to estimate
+            const solToken = await db.get('SELECT priceusd FROM tokens WHERE mint = $1', ['So11111111111111111111111111111111111111112']);
+            const solPriceUsd = solToken?.priceusd || 200;
             const solFeeUsd = config.FEE_SOL * solPriceUsd;
 
             res.json({
@@ -540,18 +554,24 @@ function init(deps) {
                 tokenFee: config.FEE_TOKEN_AMOUNT,
                 tokenFeeUsd: tokenFeeUsd,
                 tokenMint: config.FEE_TOKEN_MINT,
-                tokenName: feeToken?.name || 'Token',
-                tokenSymbol: feeToken?.ticker || 'TKN',
+                tokenName: tokenName,
+                tokenSymbol: tokenSymbol,
                 tokenPrice: tokenPrice,
                 treasury: config.TREASURY_WALLET
             });
         } catch (e) {
-            // Fallback to basic config if DB lookup fails
+            // Fallback to hardcoded config if DB lookup fails
+            const isAsdfToken = config.FEE_TOKEN_MINT === ASDFASDFA_TOKEN.mint;
             res.json({
                 success: true,
                 solFee: config.FEE_SOL,
+                solFeeUsd: config.FEE_SOL * 200,
                 tokenFee: config.FEE_TOKEN_AMOUNT,
+                tokenFeeUsd: 0,
                 tokenMint: config.FEE_TOKEN_MINT,
+                tokenName: isAsdfToken ? ASDFASDFA_TOKEN.name : 'Token',
+                tokenSymbol: isAsdfToken ? ASDFASDFA_TOKEN.symbol : 'TKN',
+                tokenPrice: 0,
                 treasury: config.TREASURY_WALLET
             });
         }
