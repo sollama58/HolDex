@@ -12,7 +12,7 @@
 
 const config = require('../config/env');
 const logger = require('./logger');
-const { getRedis } = require('./redis');
+const { getRedis: _getRedis } = require('./redis');
 
 // ============================================
 // CONFIGURATION
@@ -34,9 +34,9 @@ const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
 
 // Raydium AMM Program IDs for pool identification
-const RAYDIUM_AMM_V4 = '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8';
-const RAYDIUM_CLMM = 'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK';
-const ORCA_WHIRLPOOL = 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc';
+const _RAYDIUM_AMM_V4 = '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8';
+const _RAYDIUM_CLMM = 'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK';
+const _ORCA_WHIRLPOOL = 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc';
 
 // Cache settings
 const PRICE_CACHE_TTL = 60000;      // 1 minute for prices
@@ -339,7 +339,7 @@ async function calculateOnChainLiquidity(connection, poolAddress, baseDecimals =
 /**
  * Discover pools for a token using Helius DAS API
  */
-async function discoverPools(mint) {
+async function _discoverPools(mint) {
     if (!config.HELIUS_API_KEY) return [];
 
     try {

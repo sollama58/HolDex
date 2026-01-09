@@ -55,3 +55,6 @@ TODO.md
 INTERNAL*.md
 PRIVATE*.md
 *.png
+
+# Serena MCP cache
+.serena/

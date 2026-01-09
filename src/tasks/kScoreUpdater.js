@@ -145,7 +145,7 @@ async function getMarketData(mint) {
 }
 
 // Legacy alias for backward compatibility within this file
-const getDexScreenerData = getMarketData;
+const _getDexScreenerData = getMarketData;
 
 /**
  * Parse rate limit headers from Helius response
@@ -1275,9 +1275,9 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, _decimals = 9, 
 
         // 0. Try delta analysis first (if snapshots exist and are fresh)
         // OPTIMIZATION: Use cached holder count from DB - avoid expensive fetchTokenHolders
-        // NOTE: Delta mode is for NON-WEBHOOK mode only (when we need to poll for updates)
+        // NOTE: Delta mode available in ALL modes as fallback when webhook cache expires
         // RPC CREDIT OPTIMIZATION: Only do delta (which calls getNewTransactions) for verified tokens
-        if (db && !config.USE_WEBHOOKS) {
+        if (db) {
             // Check if token is community verified before doing delta analysis
             const tokenVerifyCheck = await db.get(
                 'SELECT hasCommunityUpdate FROM tokens WHERE mint = $1',
@@ -1286,6 +1286,7 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, _decimals = 9, 
             const isVerified = tokenVerifyCheck?.hascommunityupdate || tokenVerifyCheck?.hasCommunityUpdate || false;
 
             // Only run delta analysis (which calls TransactionHistory API) for verified tokens
+            // FIX 2026-01-09: Delta works in ALL modes but restricted to verified tokens for credit savings
             const deltaResult = isVerified ? await deltaConvictionAnalysis(db, mint) : null;
             if (deltaResult) {
                 // Delta succeeded - use cached holder count from tokens table

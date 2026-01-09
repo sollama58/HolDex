@@ -11,16 +11,15 @@ const { updateSingleToken } = require('./tasks/kScoreUpdater');
 // const growerScanner = require('./tasks/growerScanner');
 
 // ============================================================================
-// TOKEN ADDITION POLICY:
-// Tokens are ONLY added to the database when users search by Contract Address (CA).
-// Automatic discovery from Raydium/Pump.fun blockchain events is DISABLED.
-// This ensures we only track tokens that users are actively interested in.
-// See: routes/tokens.js GET /tokens (search) and GET /token/:mint endpoints
+// TOKEN DISCOVERY POLICY (v2.0):
+// Primary: Helius webhooks for Raydium/Pump.fun new tokens (cheap, reliable)
+// Fallback: CA search adds tokens on-demand
+// WebSocket listeners: DISABLED (expensive, unreliable)
+// Queue processor: DISABLED (handled by webhook → indexer flow)
 // ============================================================================
 
-// DISABLED: New token listener removed - tokens are now only added when CA is searched
+// DISABLED: Legacy token discovery - now using Helius webhooks
 // const newTokenListener = require('./tasks/newTokenListener');
-// DISABLED: Queue processor no longer needed since no automatic token discovery
 // const { startQueueProcessor, stopQueueProcessor } = require('./services/tokenQueue');
 
 // GLOBAL ERROR HANDLERS
@@ -110,7 +109,14 @@ async function startListenerWorker() {
             indexerService.start();
         }
 
-        // DISABLED: Token Queue Processor no longer needed - tokens only added via CA search
+        // 3. Token Discovery - NOW HANDLED BY HELIUS WEBHOOKS
+        // No local polling or WebSocket needed - Helius pushes events to us
+        logger.info("📡 LISTENER: Token discovery via Helius webhooks (passive mode)");
+        logger.info("   → Endpoint: POST /webhook/new-tokens");
+        logger.info("   → Events: CREATE_POOL, TOKEN_MINT, SWAP");
+        logger.info("   → Fallback: CA search adds tokens on-demand");
+
+        // DISABLED: Token Queue Processor no longer needed - webhook handles directly
         // logger.info("📥 LISTENER: Starting Token Queue Processor...");
         // startQueueProcessor();
 

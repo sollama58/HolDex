@@ -11,7 +11,7 @@
 
 const { getRedis } = require('./redis');
 const logger = require('./logger');
-const config = require('../config/env');
+const _config = require('../config/env');
 
 // Credit budgets (customize based on your Helius plan)
 const BUDGET = {
@@ -27,7 +27,7 @@ const BUDGET = {
  * @param {number} credits - Credits consumed (default: 1)
  * @param {Object} metadata - Optional metadata (mint, address, etc.)
  */
-async function trackRpcCall(method, credits = 1, metadata = {}) {
+async function trackRpcCall(method, credits = 1, _metadata = {}) {
     try {
         const redis = await getRedis();
         if (!redis) return;

@@ -871,6 +871,13 @@
                     <option value="50">50</option>
                 </select>
 
+                <!-- WATCHLIST BUTTON -->
+                <button id="watchlist-btn" onclick="toggleWatchlistModal()" class="filter-toggle relative" title="My Watchlist">
+                    <i data-lucide="heart" width="14"></i>
+                    <span class="hidden md:inline">Watchlist</span>
+                    <span id="watchlist-badge" class="hidden absolute -top-1 -right-1 bg-fire-accent text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold">0</span>
+                </button>
+
                 <div class="md:hidden flex-shrink-0 w-4"></div> <!-- Spacer -->
             </div>
         </div>
@@ -1299,6 +1306,9 @@
                                 <span id="detail-name" class="text-[#fb923c] text-xs px-2 py-0.5 rounded border border-[#252525] truncate max-w-[120px]">Name</span>
                                 <span id="detail-mint" class="hidden"></span>
                                 <i data-lucide="copy" width="12" class="text-[#737373] cursor-pointer" onclick="copyMint()"></i>
+                                <button id="detail-watchlist-btn" onclick="toggleDetailWatchlist()" class="flex items-center gap-1 text-[#737373] hover:text-fire-accent transition" title="Add to watchlist">
+                                    <i data-lucide="heart" width="14" id="detail-heart-icon"></i>
+                                </button>
                             </div>
                             
                             <!-- New Badge Section -->
@@ -1778,6 +1788,101 @@
     </div>
 </div>
 
+<!-- WATCHLIST MODAL -->
+<div id="watchlist-modal" class="modal-overlay hidden">
+    <div class="modal-content bg-fire-panel backdrop-blur-glass border border-fire-border p-6 shadow-2xl relative w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col">
+        <button class="absolute top-4 right-4 text-fire-muted hover:text-fire-accent" onclick="toggleWatchlistModal()">
+            <i data-lucide="x" width="24"></i>
+        </button>
+        <h3 class="text-xl font-bold text-white mb-4 flex items-center gap-2">
+            <i data-lucide="heart" width="24" class="text-fire-accent fill-fire-accent/20"></i> My Watchlist
+        </h3>
+
+        <!-- Login prompt (shown when not connected) -->
+        <div id="watchlist-login-prompt" class="hidden text-center py-8">
+            <i data-lucide="wallet" width="48" class="mx-auto text-fire-muted mb-4"></i>
+            <p class="text-fire-muted mb-4">Connect your wallet to save tokens to your watchlist</p>
+            <button onclick="connectWalletForWatchlist()" class="action-btn">
+                <i data-lucide="wallet" width="16"></i> Connect Wallet
+            </button>
+        </div>
+
+        <!-- Watchlist content (shown when connected) -->
+        <div id="watchlist-content" class="hidden flex-1 overflow-hidden flex flex-col">
+            <div class="text-xs text-fire-muted mb-3 flex justify-between items-center">
+                <span id="watchlist-count">0/50 tokens</span>
+                <button onclick="refreshWatchlist()" class="text-fire-accent hover:text-fire-highlight">
+                    <i data-lucide="refresh-cw" width="14"></i>
+                </button>
+            </div>
+
+            <!-- Watchlist items -->
+            <div id="watchlist-items" class="flex-1 overflow-y-auto space-y-2 pr-1">
+                <!-- Populated dynamically -->
+            </div>
+
+            <!-- Empty state -->
+            <div id="watchlist-empty" class="hidden text-center py-8">
+                <i data-lucide="bookmark-plus" width="48" class="mx-auto text-fire-muted mb-4"></i>
+                <p class="text-fire-muted">No tokens saved yet</p>
+                <p class="text-xs text-fire-muted mt-2">Click the heart icon on any token to add it</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- WATCHLIST ALERT CONFIG MODAL -->
+<div id="watchlist-alert-modal" class="modal-overlay hidden">
+    <div class="modal-content bg-fire-panel backdrop-blur-glass border border-fire-border p-6 shadow-2xl relative w-full max-w-sm">
+        <button class="absolute top-4 right-4 text-fire-muted hover:text-fire-accent" onclick="closeAlertModal()">
+            <i data-lucide="x" width="24"></i>
+        </button>
+        <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+            <i data-lucide="bell" width="20" class="text-fire-accent"></i> K-Score Alert
+        </h3>
+
+        <div class="space-y-4">
+            <div>
+                <label class="text-xs text-fire-muted mb-1 block">Token</label>
+                <div id="alert-token-info" class="flex items-center gap-2 p-2 bg-fire-solid rounded">
+                    <img id="alert-token-img" src="" class="w-6 h-6 rounded-full">
+                    <span id="alert-token-symbol" class="font-bold text-white"></span>
+                </div>
+            </div>
+
+            <div>
+                <label class="text-xs text-fire-muted mb-1 block">Label (optional)</label>
+                <input type="text" id="alert-label" placeholder="e.g. My gem"
+                    class="w-full bg-fire-solid border border-fire-border rounded p-2 text-white text-sm focus:border-fire-accent outline-none">
+            </div>
+
+            <div>
+                <label class="text-xs text-fire-muted mb-1 block">Alert when K-Score goes</label>
+                <select id="alert-direction" class="w-full bg-fire-solid border border-fire-border rounded p-2 text-white text-sm focus:border-fire-accent outline-none">
+                    <option value="below">Below threshold</option>
+                    <option value="above">Above threshold</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="text-xs text-fire-muted mb-1 block">Threshold (0-100)</label>
+                <input type="number" id="alert-threshold" min="0" max="100" placeholder="70"
+                    class="w-full bg-fire-solid border border-fire-border rounded p-2 text-white text-sm focus:border-fire-accent outline-none">
+            </div>
+
+            <div class="flex gap-2 pt-2">
+                <button onclick="saveWatchlistAlert()" class="flex-1 action-btn">
+                    <i data-lucide="save" width="14"></i> Save
+                </button>
+                <button onclick="closeAlertModal()" class="flex-1 bg-fire-solid border border-fire-border text-fire-muted hover:text-white rounded p-2 text-sm">
+                    Cancel
+                </button>
+            </div>
+        </div>
+        <input type="hidden" id="alert-mint">
+    </div>
+</div>
+
 <script>
     const API_URL = "https://asdev-backend.onrender.com"; // Dynamic: uses localhost or production
     const FALLBACK_BANNER = "https://images.squarespace-cdn.com/content/690b8c21384b3f1201c2650c/967ea61f-a88a-4497-81c2-5c67d3d06d9e/Gemini_Generated_Image_c82gwyc82gwyc82g.png?content-type=image%2Fpng";
@@ -1806,6 +1911,11 @@
     let feeConfig = { solFee: 0, tokenFee: 0, tokenMint: null, treasury: null }; // Fetched from /api/config/fees
     let userSolBalance = 0;
     let userTokenBalance = 0;
+
+    // Watchlist state
+    let watchlistSessionToken = null;
+    let watchlistData = [];
+    let watchlistMints = new Set(); // For quick lookup
 
     // Native tokens - Infrastructure, not rated
     // "K-Score is for the jungle. SOL and USDC are the roads. We don't rate roads."
@@ -2200,11 +2310,22 @@
             const safeTicker = escapeHtml(ticker);
             const safeName = escapeHtml(t.name || 'Unknown');
 
+            // Check if this mint is in watchlist
+            const isWatched = watchlistMints.has(t.mint);
+
             return `
             <tr onclick="navigateTo('token/${safeMint}')" data-token-idx="${idx}" class="cursor-pointer group border-b border-[#252525]/30">
                 <td class="bg-[#0a0a0a]">
                     <div class="flex items-center gap-2">
-                        <img src="${img}" class="img-token" onerror="this.src='https://placehold.co/40'">
+                        <div class="relative">
+                            <img src="${img}" class="img-token" onerror="this.src='https://placehold.co/40'">
+                            <button class="watchlist-heart absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 transition p-0.5 bg-fire-bg rounded-full hover:scale-110"
+                                    data-mint="${safeMint}"
+                                    onclick="event.stopPropagation(); toggleWatchlistItem('${safeMint}', '${safeTicker}', '${img}')"
+                                    title="${isWatched ? 'Remove from watchlist' : 'Add to watchlist'}">
+                                <i data-lucide="heart" width="12" class="${isWatched ? 'fill-fire-accent text-fire-accent' : 'text-fire-muted hover:text-fire-accent'}"></i>
+                            </button>
+                        </div>
                         <div class="flex flex-col min-w-0">
                             <div class="flex items-center gap-1">
                                 <span class="font-bold text-white text-xs truncate font-sans">${safeTicker}</span>
@@ -2435,6 +2556,9 @@
                 if (loadingDiv) loadingDiv.classList.add('hidden');
                 if (contentDiv) contentDiv.style.display = 'block';
                 lucide.createIcons();
+
+                // Update watchlist heart icon for detail view
+                updateDetailWatchlistIcon();
 
                 // Show K-Score overlay button only for verified tokens
                 const kScoreBtn = document.getElementById('btn-kscore');
@@ -3252,6 +3376,338 @@
     
     // --- NEW FUNCTIONS: Apps & Share ---
     window.toggleAppsModal = () => toggleModal('apps-modal');
+
+    // =====================================
+    // WATCHLIST FUNCTIONS
+    // =====================================
+    window.toggleWatchlistModal = async () => {
+        const modal = document.getElementById('watchlist-modal');
+        if (modal.classList.contains('hidden')) {
+            modal.classList.remove('hidden');
+            setTimeout(() => modal.classList.add('open'), 10);
+
+            // Check session status and show appropriate view
+            if (watchlistSessionToken) {
+                document.getElementById('watchlist-login-prompt').classList.add('hidden');
+                document.getElementById('watchlist-content').classList.remove('hidden');
+                await refreshWatchlist();
+            } else if (walletAddress) {
+                // Wallet connected but no watchlist session - try to login
+                await connectWalletForWatchlist();
+            } else {
+                document.getElementById('watchlist-login-prompt').classList.remove('hidden');
+                document.getElementById('watchlist-content').classList.add('hidden');
+            }
+            lucide.createIcons();
+        } else {
+            modal.classList.remove('open');
+            setTimeout(() => modal.classList.add('hidden'), 300);
+        }
+    };
+
+    window.connectWalletForWatchlist = async () => {
+        try {
+            // First ensure wallet is connected
+            if (!walletAddress || !walletProvider) {
+                if (window.solana?.isPhantom) {
+                    const resp = await window.solana.connect();
+                    walletAddress = resp.publicKey.toString();
+                    walletProvider = window.solana;
+                    updateWalletUI(true);
+                } else {
+                    openWalletModal();
+                    return;
+                }
+            }
+
+            // Sign message for session
+            const timestamp = Date.now();
+            const message = `Access HolDex Space: ${timestamp}`;
+            const encodedMessage = new TextEncoder().encode(message);
+            const signedMessage = await walletProvider.signMessage(encodedMessage, 'utf8');
+            const signature = btoa(String.fromCharCode(...signedMessage.signature));
+
+            // Login to space API
+            const loginResp = await fetch(`${API_URL}/api/space/auth/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ wallet: walletAddress, message, signature })
+            });
+
+            const data = await loginResp.json();
+            if (!data.success) {
+                console.error('Watchlist login failed:', data.error);
+                alert(data.error || 'Login failed');
+                return;
+            }
+
+            watchlistSessionToken = data.data.sessionToken;
+            document.getElementById('watchlist-login-prompt').classList.add('hidden');
+            document.getElementById('watchlist-content').classList.remove('hidden');
+            await refreshWatchlist();
+
+        } catch (e) {
+            console.error('Watchlist connection error:', e);
+            alert('Failed to connect wallet for watchlist');
+        }
+    };
+
+    window.refreshWatchlist = async () => {
+        if (!watchlistSessionToken) return;
+
+        try {
+            const res = await fetch(`${API_URL}/api/space/watchlist`, {
+                headers: { 'x-session-token': watchlistSessionToken }
+            });
+            const data = await res.json();
+
+            if (!data.success) {
+                if (res.status === 401) {
+                    watchlistSessionToken = null;
+                    document.getElementById('watchlist-login-prompt').classList.remove('hidden');
+                    document.getElementById('watchlist-content').classList.add('hidden');
+                }
+                return;
+            }
+
+            watchlistData = data.watchlist || [];
+            watchlistMints = new Set(watchlistData.map(w => w.mint));
+
+            // Update badge
+            const badge = document.getElementById('watchlist-badge');
+            if (watchlistData.length > 0) {
+                badge.textContent = watchlistData.length;
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+
+            // Update count
+            document.getElementById('watchlist-count').textContent = `${watchlistData.length}/50 tokens`;
+
+            // Render items (all data is escaped via escapeHtml/escapeJs/sanitizeUrl)
+            const itemsEl = document.getElementById('watchlist-items');
+            const emptyEl = document.getElementById('watchlist-empty');
+
+            if (watchlistData.length === 0) {
+                itemsEl.classList.add('hidden');
+                emptyEl.classList.remove('hidden');
+            } else {
+                itemsEl.classList.remove('hidden');
+                emptyEl.classList.add('hidden');
+
+                itemsEl.innerHTML = watchlistData.map(w => {
+                    const t = w.token || {};
+                    const score = t.k_score || t.kScore || 0;
+                    const tier = t.tier || getTierFromScore(score);
+                    const safeSymbol = escapeHtml(t.symbol || 'UNK');
+                    const safeName = escapeHtml(t.name || 'Unknown');
+                    const safeLabel = escapeHtml(w.label || '');
+                    const safeMint = escapeJs(w.mint);
+                    const img = sanitizeUrl(t.logo_uri || t.image) || `https://placehold.co/32/0a0a0a/ea580c?text=${safeSymbol[0]}`;
+
+                    return `
+                    <div class="flex items-center gap-3 p-3 bg-fire-solid/50 rounded-lg border border-fire-border hover:border-fire-accent/50 transition group">
+                        <img src="${img}" class="w-8 h-8 rounded-full cursor-pointer" onclick="navigateTo('token/${safeMint}')" onerror="this.src='https://placehold.co/32'">
+                        <div class="flex-1 min-w-0 cursor-pointer" onclick="navigateTo('token/${safeMint}')">
+                            <div class="flex items-center gap-2">
+                                <span class="font-bold text-white text-sm">${safeSymbol}</span>
+                                ${safeLabel ? `<span class="text-[10px] text-fire-muted bg-fire-bg px-1.5 py-0.5 rounded">${safeLabel}</span>` : ''}
+                            </div>
+                            <div class="text-xs text-fire-muted truncate">${safeName}</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="font-mono font-bold text-sm ${getKScoreColorClass(score)}">${Math.round(score)}</div>
+                            <div class="text-[10px] text-fire-muted">${tier}</div>
+                        </div>
+                        <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition">
+                            <button onclick="openAlertConfigModal('${safeMint}', '${safeSymbol}', '${img}')" class="p-1 text-fire-muted hover:text-fire-accent" title="Configure alert">
+                                <i data-lucide="bell" width="14"></i>
+                            </button>
+                            <button onclick="removeFromWatchlist('${safeMint}')" class="p-1 text-fire-muted hover:text-red-500" title="Remove">
+                                <i data-lucide="trash-2" width="14"></i>
+                            </button>
+                        </div>
+                    </div>`;
+                }).join('');
+            }
+            lucide.createIcons();
+
+            // Update heart icons in table if visible
+            updateWatchlistHeartIcons();
+
+        } catch (e) {
+            console.error('Failed to refresh watchlist:', e);
+        }
+    };
+
+    window.addToWatchlist = async (mint, symbol, image) => {
+        if (!watchlistSessionToken) {
+            await toggleWatchlistModal();
+            return;
+        }
+
+        try {
+            const res = await fetch(`${API_URL}/api/space/watchlist`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-session-token': watchlistSessionToken
+                },
+                body: JSON.stringify({ mint })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                watchlistMints.add(mint);
+                await refreshWatchlist();
+                updateWatchlistHeartIcons();
+            } else {
+                alert(data.error || 'Failed to add to watchlist');
+            }
+        } catch (e) {
+            console.error('Add to watchlist error:', e);
+        }
+    };
+
+    window.removeFromWatchlist = async (mint) => {
+        if (!watchlistSessionToken) return;
+
+        try {
+            const res = await fetch(`${API_URL}/api/space/watchlist/${mint}`, {
+                method: 'DELETE',
+                headers: { 'x-session-token': watchlistSessionToken }
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                watchlistMints.delete(mint);
+                await refreshWatchlist();
+                updateWatchlistHeartIcons();
+            }
+        } catch (e) {
+            console.error('Remove from watchlist error:', e);
+        }
+    };
+
+    window.toggleWatchlistItem = async (mint, symbol, image, event) => {
+        if (event) event.stopPropagation();
+
+        if (watchlistMints.has(mint)) {
+            await removeFromWatchlist(mint);
+        } else {
+            await addToWatchlist(mint, symbol, image);
+        }
+    };
+
+    window.openAlertConfigModal = (mint, symbol, image) => {
+        document.getElementById('alert-mint').value = mint;
+        document.getElementById('alert-token-symbol').textContent = symbol;
+        document.getElementById('alert-token-img').src = image;
+        document.getElementById('alert-label').value = '';
+        document.getElementById('alert-threshold').value = '';
+        document.getElementById('alert-direction').value = 'below';
+
+        // Pre-fill if already in watchlist
+        const existing = watchlistData.find(w => w.mint === mint);
+        if (existing) {
+            document.getElementById('alert-label').value = existing.label || '';
+            document.getElementById('alert-threshold').value = existing.alert_threshold || '';
+            document.getElementById('alert-direction').value = existing.alert_direction || 'below';
+        }
+
+        toggleModal('watchlist-alert-modal');
+        lucide.createIcons();
+    };
+
+    window.closeAlertModal = () => toggleModal('watchlist-alert-modal');
+
+    window.saveWatchlistAlert = async () => {
+        const mint = document.getElementById('alert-mint').value;
+        const label = document.getElementById('alert-label').value.trim() || null;
+        const threshold = document.getElementById('alert-threshold').value;
+        const direction = document.getElementById('alert-direction').value;
+
+        try {
+            const res = await fetch(`${API_URL}/api/space/watchlist/${mint}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-session-token': watchlistSessionToken
+                },
+                body: JSON.stringify({
+                    label,
+                    alert_threshold: threshold ? parseInt(threshold) : null,
+                    alert_direction: direction
+                })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                closeAlertModal();
+                await refreshWatchlist();
+            } else {
+                alert(data.error || 'Failed to save alert');
+            }
+        } catch (e) {
+            console.error('Save alert error:', e);
+        }
+    };
+
+    function updateWatchlistHeartIcons() {
+        document.querySelectorAll('.watchlist-heart').forEach(btn => {
+            const mint = btn.dataset.mint;
+            const isWatched = watchlistMints.has(mint);
+            btn.innerHTML = `<i data-lucide="heart" width="14" class="${isWatched ? 'fill-fire-accent text-fire-accent' : 'text-fire-muted'}"></i>`;
+        });
+        lucide.createIcons();
+    }
+
+    function getKScoreColorClass(score) {
+        if (score >= 80) return 'text-[#22d3ee]'; // Diamond - Cyan
+        if (score >= 60) return 'text-[#fbbf24]'; // Gold
+        if (score >= 40) return 'text-[#94a3b8]'; // Silver
+        return 'text-[#a16207]'; // Bronze
+    }
+
+    function getTierFromScore(score) {
+        if (score >= 80) return 'Diamond';
+        if (score >= 60) return 'Gold';
+        if (score >= 40) return 'Silver';
+        if (score >= 20) return 'Bronze';
+        return 'Coal';
+    }
+
+    window.toggleDetailWatchlist = async () => {
+        if (!currentMint) return;
+
+        const heartIcon = document.getElementById('detail-heart-icon');
+        const isWatched = watchlistMints.has(currentMint);
+
+        if (isWatched) {
+            await removeFromWatchlist(currentMint);
+        } else {
+            // Get token info from the detail view
+            const symbol = document.getElementById('detail-ticker')?.textContent || 'UNK';
+            const img = document.querySelector('#detail-media-container img')?.src || '';
+            await addToWatchlist(currentMint, symbol, img);
+        }
+
+        // Update the detail heart icon
+        updateDetailWatchlistIcon();
+    };
+
+    function updateDetailWatchlistIcon() {
+        const heartIcon = document.getElementById('detail-heart-icon');
+        if (!heartIcon || !currentMint) return;
+
+        const isWatched = watchlistMints.has(currentMint);
+        heartIcon.className = isWatched ? 'fill-fire-accent text-fire-accent' : '';
+        document.getElementById('detail-watchlist-btn').title = isWatched ? 'Remove from watchlist' : 'Add to watchlist';
+        lucide.createIcons();
+    }
+    // =====================================
+
     window.shareToken = () => {
         const url = window.location.href;
         navigator.clipboard.writeText(url).then(() => {
