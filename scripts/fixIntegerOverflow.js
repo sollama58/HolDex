@@ -94,7 +94,7 @@ async function main() {
                 console.log('\nholders_history.count is INTEGER, which should be fine for holder counts.');
             }
 
-            // Check k_score_history if it exists
+            // Check and fix k_score_history table
             const kScoreHistResult = await client.query(`
                 SELECT column_name, data_type
                 FROM information_schema.columns
@@ -105,6 +105,125 @@ async function main() {
                 console.log('\nk_score_history columns:');
                 for (const col of kScoreHistResult.rows) {
                     console.log(`  ${col.column_name}: ${col.data_type}`);
+                }
+
+                // Fix k_score_history columns if needed
+                const historyColumnsToFix = [
+                    { name: 'k_score', targetType: 'DOUBLE PRECISION' },
+                    { name: 'conviction_score', targetType: 'DOUBLE PRECISION' }
+                ];
+
+                for (const col of historyColumnsToFix) {
+                    const currentType = kScoreHistResult.rows.find(r => r.column_name === col.name);
+                    if (currentType && currentType.data_type !== 'double precision') {
+                        console.log(`Altering k_score_history.${col.name} from ${currentType.data_type} to ${col.targetType}...`);
+                        await client.query(`
+                            ALTER TABLE k_score_history
+                            ALTER COLUMN ${col.name} TYPE ${col.targetType}
+                            USING ${col.name}::${col.targetType}
+                        `);
+                        console.log(`  k_score_history.${col.name} fixed`);
+                    }
+                }
+            }
+
+            // Check and fix pools table
+            const poolsResult = await client.query(`
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_name = 'pools'
+                AND column_name IN ('price_usd', 'liquidity_usd', 'volume_24h')
+            `);
+
+            if (poolsResult.rows.length > 0) {
+                console.log('\nPools table columns:');
+                for (const col of poolsResult.rows) {
+                    console.log(`  ${col.column_name}: ${col.data_type}`);
+                }
+
+                const poolColumnsToFix = [
+                    { name: 'price_usd', targetType: 'DOUBLE PRECISION' },
+                    { name: 'liquidity_usd', targetType: 'DOUBLE PRECISION' },
+                    { name: 'volume_24h', targetType: 'DOUBLE PRECISION' }
+                ];
+
+                for (const col of poolColumnsToFix) {
+                    const currentType = poolsResult.rows.find(r => r.column_name === col.name);
+                    if (currentType && currentType.data_type !== 'double precision') {
+                        console.log(`Altering pools.${col.name} from ${currentType.data_type} to ${col.targetType}...`);
+                        await client.query(`
+                            ALTER TABLE pools
+                            ALTER COLUMN ${col.name} TYPE ${col.targetType}
+                            USING ${col.name}::${col.targetType}
+                        `);
+                        console.log(`  pools.${col.name} fixed`);
+                    }
+                }
+            }
+
+            // Check and fix polling_tasks table (k_score_result)
+            const pollingTasksResult = await client.query(`
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_name = 'polling_tasks'
+                AND column_name = 'k_score_result'
+            `);
+
+            if (pollingTasksResult.rows.length > 0) {
+                const col = pollingTasksResult.rows[0];
+                console.log(`\npolling_tasks.k_score_result: ${col.data_type}`);
+                if (col.data_type !== 'double precision') {
+                    console.log(`Altering polling_tasks.k_score_result from ${col.data_type} to DOUBLE PRECISION...`);
+                    await client.query(`
+                        ALTER TABLE polling_tasks
+                        ALTER COLUMN k_score_result TYPE DOUBLE PRECISION
+                        USING k_score_result::DOUBLE PRECISION
+                    `);
+                    console.log(`  polling_tasks.k_score_result fixed`);
+                }
+            }
+
+            // Check and fix token_verifications table
+            const tokenVerifResult = await client.query(`
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_name = 'token_verifications'
+                AND column_name = 'k_score'
+            `);
+
+            if (tokenVerifResult.rows.length > 0) {
+                const col = tokenVerifResult.rows[0];
+                console.log(`\ntoken_verifications.k_score: ${col.data_type}`);
+                if (col.data_type !== 'double precision') {
+                    console.log(`Altering token_verifications.k_score from ${col.data_type} to DOUBLE PRECISION...`);
+                    await client.query(`
+                        ALTER TABLE token_verifications
+                        ALTER COLUMN k_score TYPE DOUBLE PRECISION
+                        USING k_score::DOUBLE PRECISION
+                    `);
+                    console.log(`  token_verifications.k_score fixed`);
+                }
+            }
+
+            // Check and fix consensus_snapshots table
+            const consensusResult = await client.query(`
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_name = 'consensus_snapshots'
+                AND column_name = 'k_score_consensus'
+            `);
+
+            if (consensusResult.rows.length > 0) {
+                const col = consensusResult.rows[0];
+                console.log(`\nconsensus_snapshots.k_score_consensus: ${col.data_type}`);
+                if (col.data_type !== 'double precision') {
+                    console.log(`Altering consensus_snapshots.k_score_consensus from ${col.data_type} to DOUBLE PRECISION...`);
+                    await client.query(`
+                        ALTER TABLE consensus_snapshots
+                        ALTER COLUMN k_score_consensus TYPE DOUBLE PRECISION
+                        USING k_score_consensus::DOUBLE PRECISION
+                    `);
+                    console.log(`  consensus_snapshots.k_score_consensus fixed`);
                 }
             }
 

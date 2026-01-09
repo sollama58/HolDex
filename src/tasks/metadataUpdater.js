@@ -128,15 +128,22 @@ async function processSingleToken(db, t, now) {
                     bestChange5m = parseChange(attr.price_change_percentage?.m5);
                 }
 
-                await db.run(`
-                    INSERT INTO pools (
-                        address, mint, dex, price_usd, liquidity_usd, volume_24h, created_at, token_a, token_b
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                    ON CONFLICT(address) DO UPDATE SET
-                        price_usd = EXCLUDED.price_usd,
-                        liquidity_usd = EXCLUDED.liquidity_usd,
-                        volume_24h = EXCLUDED.volume_24h
-                `, [address, t.mint, dexId, price, liqUsd, vol24h, now, tokenA, tokenB]);
+                try {
+                    await db.run(`
+                        INSERT INTO pools (
+                            address, mint, dex, price_usd, liquidity_usd, volume_24h, created_at, token_a, token_b
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                        ON CONFLICT(address) DO UPDATE SET
+                            price_usd = EXCLUDED.price_usd,
+                            liquidity_usd = EXCLUDED.liquidity_usd,
+                            volume_24h = EXCLUDED.volume_24h
+                    `, [address, t.mint, dexId, price, liqUsd, vol24h, now, tokenA, tokenB]);
+                } catch (poolErr) {
+                    // Ignore foreign key errors - token may have been deleted
+                    if (!poolErr.message.includes('foreign key')) {
+                        throw poolErr;
+                    }
+                }
             }
         }
         
