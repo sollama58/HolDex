@@ -265,11 +265,18 @@ async function main() {
         metadataUpdater.start(deps);
         logger.info('✅ Metadata Updater Running');
 
-        // 7. Start Grower Scanner
-        logger.info('🌱 Starting Grower Scanner...');
-        const growerScanner = require('./tasks/growerScanner');
-        growerScanner.start(deps);
-        logger.info('✅ Grower Scanner Running');
+        // ============================================================================
+        // TOKEN ADDITION POLICY:
+        // Tokens are ONLY added to the database when users search by Contract Address (CA).
+        // Automatic discovery/promotion is DISABLED to ensure we only track tokens users want.
+        // See: routes/tokens.js GET /tokens (search) and GET /token/:mint endpoints
+        // ============================================================================
+
+        // DISABLED: Grower Scanner automatically adds tokens when they reach $10k mcap
+        // This is disabled because tokens should only be added via user CA search
+        // const growerScanner = require('./tasks/growerScanner');
+        // growerScanner.start(deps);
+        logger.info('⏸️ Grower Scanner DISABLED (tokens only added via CA search)');
 
         // Start heartbeat
         setInterval(logHeartbeat, 60000); // Every minute
@@ -278,7 +285,8 @@ async function main() {
         logger.info('='.repeat(50));
         logger.info('🧠 Calculator Brain ACTIVE');
         logger.info(`   Mode: ${useDistributed ? 'DISTRIBUTED' : 'STANDALONE'}`);
-        logger.info('   Running: K-Score, Metadata, Growers');
+        logger.info('   Running: K-Score, Metadata');
+        logger.info('   Disabled: Grower Scanner (tokens via CA search only)');
         if (useDistributed) {
             logger.info('   Network: Distributed polling enabled');
         }
