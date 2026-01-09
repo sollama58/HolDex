@@ -454,7 +454,7 @@ CREATE TABLE token_verifications (
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `ADMIN_PASSWORD` | Prod | Admin API access |
-| `DEXSCREENER_API_KEY` | No | Premium data |
+| `JUPITER_API_KEY` | No | Jupiter premium tier (optional) |
 
 ### GASdf-specific
 

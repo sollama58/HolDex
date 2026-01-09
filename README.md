@@ -133,8 +133,9 @@ curl https://holdex-api.onrender.com/oracle/discount/WALLET.../gasdf_submit_stan
 
 ## External Integrations
 
-- **Helius**: RPC + Webhooks (holder enumeration, transfers)
-- **DexScreener**: Price/liquidity data (free, batch)
+- **Helius**: RPC + Webhooks (holder enumeration, transfers, token metadata)
+- **Jupiter**: Price API (free tier via lite-api.jup.ag)
+- **Raydium**: Pool/liquidity data (free API)
 - **CoinGecko**: SOL/USD price
 - **Metaplex**: Token metadata
 

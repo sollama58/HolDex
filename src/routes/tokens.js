@@ -28,16 +28,41 @@ const proxyRateLimit = rateLimit({
     legacyHeaders: false,
     keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip
 });
+
+// SECURITY: Rate limiter for token indexing (prevents RPC abuse via CA search spam)
+// Limits: 10 new token indexing requests per IP per minute
+const INDEX_RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+const INDEX_RATE_LIMIT_MAX = 10; // 10 indexing requests per minute per IP
+
+async function checkIndexingRateLimit(ip) {
+    const redis = getClient();
+    if (!redis) return { allowed: true }; // Allow if Redis unavailable
+
+    const key = `indexing_ratelimit:${ip}`;
+    try {
+        const current = await redis.incr(key);
+        if (current === 1) {
+            await redis.pexpire(key, INDEX_RATE_LIMIT_WINDOW_MS);
+        }
+        if (current > INDEX_RATE_LIMIT_MAX) {
+            const ttl = await redis.pttl(key);
+            return { allowed: false, retryAfter: Math.ceil(ttl / 1000) };
+        }
+        return { allowed: true, remaining: INDEX_RATE_LIMIT_MAX - current };
+    } catch (_e) {
+        return { allowed: true }; // Allow on Redis error
+    }
+}
 const { smartCache, aggregateAndSaveToken } = require('../services/database');
 const { getSolanaConnection } = require('../services/solana'); 
 const config = require('../config/env');
-const { updateSingleToken, getHealthStatus } = require('../tasks/kScoreUpdater'); 
+const { updateSingleToken, updateKScores, getHealthStatus } = require('../tasks/kScoreUpdater'); 
 const { getClient } = require('../services/redis'); 
 const { snapshotPools } = require('../indexer/tasks/snapshotter'); 
 const logger = require('../services/logger');
 const cacheControl = require('../middleware/httpCache');
 const unifiedRateLimiter = require('../middleware/unifiedRateLimiter');
-const { indexTokenOnChain } = require('../services/indexer');
+const { indexTokenOnChain, searchGeckoTerminal, quickIndexFromGecko } = require('../services/indexer');
 const { addTokenToMasterWebhook } = require('../services/heliusWebhook');
 const verification = require('../services/verificationService');
 const dataVerification = require('../services/dataVerification');
@@ -106,21 +131,22 @@ function getKRank(score, mint = null) {
 }
 
 /**
- * Credit Rating System - "Moody's for Memecoins"
+ * Credit Rating System - Simplified K-Score Tiers
+ * Uses same tier names as getKRank for consistency
  */
 function getCreditRating(score, mint = null) {
     // Native tokens are infrastructure - not rated
     if (mint && isNativeToken(mint)) {
-        return { grade: '—', label: 'Infrastructure', color: '#6366f1', isNative: true };
+        return { grade: 'Native', label: 'Infrastructure', color: '#6366f1', isNative: true };
     }
-    if (score >= 90) return { grade: 'A1', label: 'Prime', color: '#00ff88' };
-    if (score >= 80) return { grade: 'A2', label: 'Excellent', color: '#00dd77' };
-    if (score >= 70) return { grade: 'A3', label: 'Good', color: '#00bb66' };
-    if (score >= 60) return { grade: 'B1', label: 'Fair', color: '#ffcc00' };
-    if (score >= 50) return { grade: 'B2', label: 'Speculative', color: '#ffaa00' };
-    if (score >= 40) return { grade: 'B3', label: 'Risky', color: '#ff8800' };
-    if (score >= 20) return { grade: 'C', label: 'High Risk', color: '#ff4400' };
-    return { grade: 'D', label: 'Junk', color: '#ff0000' };
+    if (score >= 90) return { grade: 'Diamond', label: 'Exceptional Quality', color: '#b9f2ff' };
+    if (score >= 80) return { grade: 'Platinum', label: 'High Quality', color: '#e5e4e2' };
+    if (score >= 70) return { grade: 'Gold', label: 'Good Quality', color: '#ffd700' };
+    if (score >= 60) return { grade: 'Silver', label: 'Fair Quality', color: '#c0c0c0' };
+    if (score >= 50) return { grade: 'Bronze', label: 'Speculative', color: '#cd7f32' };
+    if (score >= 40) return { grade: 'Copper', label: 'High Risk', color: '#b87333' };
+    if (score >= 20) return { grade: 'Iron', label: 'Very High Risk', color: '#707070' };
+    return { grade: 'Rust', label: 'Distressed', color: '#8b4513' };
 }
 
 /**
@@ -536,8 +562,18 @@ function init(deps) {
                 INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
             `, [mint, twitter, website, telegram, banner, finalDescription, Date.now(), signature, userPublicKey]);
-            
+
             try { await indexTokenOnChain(mint); } catch (_err) { /* ignore */ }
+
+            // Clear cache after indexing to ensure fresh data on next request
+            const redis = getClient();
+            if (redis) {
+                try {
+                    await redis.del(`public:token:${mint}`);
+                    await redis.del(`token:detail:${mint}`);
+                } catch (_) { /* ignore cache errors */ }
+            }
+
             res.json({ success: true, message: "Update queued." });
         } catch (_e) { res.status(500).json({ success: false, error: "Submission failed" }); }
     });
@@ -871,6 +907,45 @@ function init(deps) {
             const newScore = await updateSingleToken({ db }, mint);
             res.json({ success: true, message: `K-Score Updated: ${newScore}` });
         } catch (e) { res.status(500).json({ success: false, error: sanitizeError(e) }); }
+    });
+
+    // Bulk K-Score refresh (all verified tokens)
+    // CAUTION: This will consume significant RPC credits
+    router.post('/admin/refresh-all-kscores', requireAdmin, async (req, res) => {
+        const { deepRefresh } = req.body;
+
+        try {
+            // Check cooldown (1 hour minimum between bulk refreshes)
+            const redis = getClient();
+            if (redis) {
+                const cooldownKey = 'kscore:bulk:cooldown';
+                const lastRun = await redis.get(cooldownKey);
+                if (lastRun) {
+                    const elapsed = Date.now() - parseInt(lastRun);
+                    const remaining = Math.ceil((3600000 - elapsed) / 60000); // minutes
+                    return res.status(429).json({
+                        success: false,
+                        error: `Bulk refresh rate limited. Try again in ${remaining} min.`,
+                        lastRun: new Date(parseInt(lastRun)).toISOString()
+                    });
+                }
+                // Set cooldown (1 hour TTL)
+                await redis.set(cooldownKey, Date.now().toString(), { EX: 3600 });
+            }
+
+            // Trigger bulk update (runs async)
+            const broadcast = () => {}; // No WebSocket broadcast from admin panel
+            updateKScores({ db, broadcast, forceDeepRefresh: !!deepRefresh }).catch(err => {
+                logger.error(`[Admin] Bulk K-Score refresh failed: ${err.message}`);
+            });
+
+            res.json({
+                success: true,
+                message: `Bulk K-Score refresh started${deepRefresh ? ' (deep mode)' : ''}. Check logs for progress.`
+            });
+        } catch (e) {
+            res.status(500).json({ success: false, error: sanitizeError(e) });
+        }
     });
 
     // --- API KEY ADMIN ---
@@ -1239,11 +1314,16 @@ function init(deps) {
                 ]);
 
                 if (!token) {
-                    try {
-                        const indexed = await indexTokenOnChain(mint);
-                        token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
-                        pairs = indexed.pairs || [];
-                    } catch (_e) { /* ignore */ }
+                    // Rate limit indexing to prevent RPC abuse
+                    const clientIp = req.headers['x-forwarded-for'] || req.ip || 'unknown';
+                    const rateCheck = await checkIndexingRateLimit(clientIp);
+                    if (rateCheck.allowed) {
+                        try {
+                            const indexed = await indexTokenOnChain(mint);
+                            token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+                            pairs = indexed.pairs || [];
+                        } catch (_e) { /* ignore */ }
+                    }
                 }
 
                 if (!token) return { success: false, error: "Token not found" };
@@ -1541,12 +1621,60 @@ function init(deps) {
                                   conviction_score, conviction_accumulators, conviction_holders, conviction_reducers, conviction_extractors`;
             if (search.length > 0) {
                 const isAddress = isValidPubkey(search);
+                const MIN_RESULTS = 5;
+
                 if (isAddress) {
+                    // Contract address search - index if not found
                     rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE mint = $1`, [search]);
+                    if (rows.length === 0) {
+                        // Rate limit indexing to prevent RPC abuse
+                        const clientIp = req.headers['x-forwarded-for'] || req.ip || 'unknown';
+                        const rateCheck = await checkIndexingRateLimit(clientIp);
+                        if (!rateCheck.allowed) {
+                            logger.warn(`[PublicSearch] Indexing rate limited for IP ${clientIp}`);
+                            // Return empty results instead of error to avoid exposing rate limit info
+                            rows = [];
+                        } else {
+                            try {
+                                await indexTokenOnChain(search);
+                                rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE mint = $1`, [search]);
+                            } catch (indexErr) {
+                                logger.error(`[PublicSearch] Indexing failed for ${search}: ${indexErr.message}`);
+                                rows = [];
+                            }
+                        }
+                    }
                 } else {
                     // SECURITY: Escape LIKE pattern to prevent injection (M9)
                     const safeSearch = `%${escapeLikePattern(search)}%`;
-                    rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) LIMIT $2`, [safeSearch, limit]);
+                    rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) ORDER BY volume24h DESC NULLS LAST LIMIT $2`, [safeSearch, limit]);
+
+                    // Backfill from GeckoTerminal if not enough results
+                    if (rows.length < MIN_RESULTS && search.length >= 2) {
+                        try {
+                            const existingMints = new Set(rows.map(r => r.mint));
+                            const needed = MIN_RESULTS - rows.length;
+
+                            // Search GeckoTerminal for more results
+                            const geckoResults = await searchGeckoTerminal(search, needed + 5);
+
+                            // Filter out tokens we already have
+                            const newTokens = geckoResults.filter(t => !existingMints.has(t.mint));
+
+                            // Quick index new tokens
+                            const indexPromises = newTokens.slice(0, needed).map(token =>
+                                quickIndexFromGecko(token).catch(() => false)
+                            );
+                            await Promise.all(indexPromises);
+
+                            // Re-query to get freshly indexed tokens
+                            rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) ORDER BY volume24h DESC NULLS LAST LIMIT $2`, [safeSearch, limit]);
+
+                            logger.info(`[PublicSearch] Backfilled "${search}": ${rows.length} results`);
+                        } catch (geckoErr) {
+                            logger.warn(`[PublicSearch] GeckoTerminal backfill failed for "${search}": ${geckoErr.message}`);
+                        }
+                    }
                 }
             } else {
                 const dir = direction === 'asc' ? 'ASC' : 'DESC';
@@ -1673,7 +1801,26 @@ function init(deps) {
             ]);
 
             if (!token) {
-                return res.status(404).json({ success: false, error: 'Token not found' });
+                // Rate limit indexing to prevent RPC abuse
+                const clientIp = req.headers['x-forwarded-for'] || req.ip || 'unknown';
+                const rateCheck = await checkIndexingRateLimit(clientIp);
+
+                if (rateCheck.allowed) {
+                    // AUTO-INDEX: Try to index new token on-chain (matches /api/token/:mint behavior)
+                    try {
+                        logger.info(`[PublicToken] Auto-indexing new token: ${mint}`);
+                        const indexed = await indexTokenOnChain(mint);
+                        token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+                        pairs = indexed?.pairs || [];
+                    } catch (indexErr) {
+                        logger.warn(`[PublicToken] Auto-index failed for ${mint}: ${indexErr.message}`);
+                    }
+                }
+
+                // Still not found after indexing attempt
+                if (!token) {
+                    return res.status(404).json({ success: false, error: 'Token not found' });
+                }
             }
 
             // Build token data
@@ -1915,13 +2062,60 @@ function init(deps) {
             let rows = [];
 
             if (search.length > 0) {
+                const MIN_RESULTS = 5; // Minimum results to show user
+
                 if (isAddressSearch) {
+                    // Contract address search - index if not found
                     rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
-                    if (rows.length === 0) { await indexTokenOnChain(search); rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]); }
+                    if (rows.length === 0) {
+                        // Rate limit indexing to prevent RPC abuse
+                        const clientIp = req.headers['x-forwarded-for'] || req.ip || 'unknown';
+                        const rateCheck = await checkIndexingRateLimit(clientIp);
+                        if (!rateCheck.allowed) {
+                            logger.warn(`[Search] Indexing rate limited for IP ${clientIp}`);
+                            rows = [];
+                        } else {
+                            try {
+                                await indexTokenOnChain(search);
+                                rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
+                            } catch (indexErr) {
+                                logger.error(`[Search] Indexing failed for ${search}: ${indexErr.message}`);
+                                rows = [];
+                            }
+                        }
+                    }
                 } else {
-                    // SECURITY: Escape LIKE pattern to prevent injection (M9)
+                    // Name/symbol search - check local DB first
                     const safeSearch = `%${escapeLikePattern(search)}%`;
-                    rows = await db.all(`SELECT * FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) LIMIT $2`, [safeSearch, limit]);
+                    rows = await db.all(`SELECT * FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) ORDER BY volume24h DESC NULLS LAST LIMIT $2`, [safeSearch, limit]);
+
+                    // Backfill from GeckoTerminal if not enough results
+                    if (rows.length < MIN_RESULTS && search.length >= 2) {
+                        try {
+                            const existingMints = new Set(rows.map(r => r.mint));
+                            const needed = MIN_RESULTS - rows.length;
+
+                            // Search GeckoTerminal for more results
+                            const geckoResults = await searchGeckoTerminal(search, needed + 5);
+
+                            // Filter out tokens we already have
+                            const newTokens = geckoResults.filter(t => !existingMints.has(t.mint));
+
+                            // Quick index new tokens (fast insert, background full indexing)
+                            const indexPromises = newTokens.slice(0, needed).map(token =>
+                                quickIndexFromGecko(token).catch(() => false)
+                            );
+                            await Promise.all(indexPromises);
+
+                            // Re-query to get freshly indexed tokens
+                            rows = await db.all(`SELECT * FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) ORDER BY volume24h DESC NULLS LAST LIMIT $2`, [safeSearch, limit]);
+
+                            logger.info(`[Search] Backfilled "${search}": ${rows.length} results (${newTokens.length} from GeckoTerminal)`);
+                        } catch (geckoErr) {
+                            logger.warn(`[Search] GeckoTerminal backfill failed for "${search}": ${geckoErr.message}`);
+                            // Continue with existing results
+                        }
+                    }
                 }
             } else {
                 const dir = direction.toLowerCase() === 'asc' ? 'ASC' : 'DESC';

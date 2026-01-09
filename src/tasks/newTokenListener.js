@@ -1,9 +1,9 @@
 const { getSolanaConnection } = require('../services/solana');
 const { getDB } = require('../services/database');
-const { getClient } = require('../services/redis'); 
+const { getClient } = require('../services/redis');
 const logger = require('../services/logger');
 const { PublicKey } = require('@solana/web3.js');
-const { indexTokenOnChain } = require('../services/indexer');
+const { queueNewToken } = require('../services/tokenQueue');
 
 // --- CONSTANTS ---
 const RAYDIUM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
@@ -141,27 +141,10 @@ async function processNewPoolTx(signature, connection, db, source) {
                 continue;
             }
 
-            logger.info(`🚀 [ADDING TO PENDING] ${mint} from ${source}`);
+            logger.info(`🚀 [QUEUING] ${mint} from ${source}`);
 
-            // 1. ADD TO DB IMMEDIATELY
-            try {
-                await db.run(`
-                    INSERT INTO tokens (mint, name, symbol, timestamp, k_score, marketCap, hasCommunityUpdate, updated_at) 
-                    VALUES ($1, 'New Discovery', 'NEW', $2, 10, 0, FALSE, NOW()) 
-                    ON CONFLICT (mint) DO NOTHING
-                `, [mint, Date.now()]);
-            } catch(dbErr) {
-                logger.error(`DB Insert Error for ${mint}: ${dbErr.message}`);
-            }
-
-            // 2. TRIGGER INDEXER
-            indexTokenOnChain(mint).catch(e => logger.error(`Indexer failed for ${mint}: ${e.message}`));
-
-            // 3. ADD TO GROWER SCANNER
-            if (redis) {
-                const data = JSON.stringify({ mint, addedAt: Date.now(), source });
-                await redis.sadd(PENDING_KEY, data);
-            }
+            // Queue token for processing - will only add to DB once metadata is available
+            await queueNewToken(mint, source);
         }
     } catch (e) {
         logger.error(`Listener Logic Error: ${e.message}`);

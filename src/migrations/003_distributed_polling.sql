@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS polling_tasks (
     completed_at BIGINT,
     attempts INTEGER DEFAULT 0,
     last_error TEXT,
-    k_score_result INTEGER
+    k_score_result DOUBLE PRECISION
 );
 
 -- Partial unique index: only one pending task per mint
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS token_verifications (
     id SERIAL PRIMARY KEY,
     mint TEXT NOT NULL,
     node_id TEXT NOT NULL,
-    k_score INTEGER,
+    k_score DOUBLE PRECISION,
     node_signature TEXT,
     verified_at BIGINT NOT NULL,
 
@@ -83,7 +83,7 @@ CREATE INDEX IF NOT EXISTS idx_node_work_history_mint
 -- ============================================
 CREATE TABLE IF NOT EXISTS consensus_snapshots (
     mint TEXT PRIMARY KEY,
-    k_score_consensus INTEGER,
+    k_score_consensus DOUBLE PRECISION,
     agreeing_nodes INTEGER DEFAULT 0,
     total_nodes INTEGER DEFAULT 0,
     consensus_at BIGINT,

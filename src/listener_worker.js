@@ -7,16 +7,20 @@ const logger = require('./services/logger');
 
 // --- TASKS ---
 const { updateSingleToken } = require('./tasks/kScoreUpdater');
-const growerScanner = require('./tasks/growerScanner');
+// DISABLED: Grower Scanner automatically adds tokens - tokens are now only added via CA search
+// const growerScanner = require('./tasks/growerScanner');
 
-// --- TOKEN DISCOVERY ---
-// DISABLED: New token discovery is now handled by Helius webhooks
-// See: POST /webhook/new-tokens (receives CREATE_POOL, TOKEN_MINT, SWAP events)
-// Cost reduction: ~98% (from ~5000 credits/hour to ~50-100)
-// Webhook ID: 4a1ca70b-5932-4adf-b1f3-5e456b6cc913
-const _USE_WEBSOCKET = false; // Legacy - kept for reference
-const _newTokenListener = null;
-const _tokenPoller = null;
+// ============================================================================
+// TOKEN DISCOVERY POLICY (v2.0):
+// Primary: Helius webhooks for Raydium/Pump.fun new tokens (cheap, reliable)
+// Fallback: CA search adds tokens on-demand
+// WebSocket listeners: DISABLED (expensive, unreliable)
+// Queue processor: DISABLED (handled by webhook → indexer flow)
+// ============================================================================
+
+// DISABLED: Legacy token discovery - now using Helius webhooks
+// const newTokenListener = require('./tasks/newTokenListener');
+// const { startQueueProcessor, stopQueueProcessor } = require('./services/tokenQueue');
 
 // GLOBAL ERROR HANDLERS
 process.on('uncaughtException', (err) => {
@@ -110,13 +114,27 @@ async function startListenerWorker() {
         logger.info("📡 LISTENER: Token discovery via Helius webhooks (passive mode)");
         logger.info("   → Endpoint: POST /webhook/new-tokens");
         logger.info("   → Events: CREATE_POOL, TOKEN_MINT, SWAP");
-        logger.info("   → Stats: GET /webhook/new-tokens/stats");
+        logger.info("   → Fallback: CA search adds tokens on-demand");
 
-        // 4. Start Grower Scanner (Market Cap Check)
-        if (growerScanner && typeof growerScanner.start === 'function') {
-            logger.info("🌱 LISTENER: Starting Grower Scanner...");
-            growerScanner.start({ db });
-        }
+        // DISABLED: Token Queue Processor no longer needed - webhook handles directly
+        // logger.info("📥 LISTENER: Starting Token Queue Processor...");
+        // startQueueProcessor();
+
+        // DISABLED: New token listener removed - tokens are now only added when CA is searched
+        // if (newTokenListener && typeof newTokenListener.startNewTokenListener === 'function') {
+        //     logger.info("🛰️ LISTENER: Starting New Token Discovery...");
+        //     setTimeout(() => {
+        //         newTokenListener.startNewTokenListener();
+        //     }, 1000);
+        // } else {
+        //     logger.warn("⚠️ LISTENER: newTokenListener module missing startNewTokenListener function.");
+        // }
+
+        // DISABLED: Grower Scanner automatically adds tokens - tokens are now only added via CA search
+        // if (growerScanner && typeof growerScanner.start === 'function') {
+        //     logger.info("🌱 LISTENER: Starting Grower Scanner...");
+        //     growerScanner.start({ db });
+        // }
 
         // 5. Start K-Score Loop (Background Analysis)
         runKScoreLoop(db).catch(err => {
@@ -131,6 +149,7 @@ async function startListenerWorker() {
 
 process.on('SIGINT', () => {
     logger.info("🎧 LISTENER WORKER: Shutting down...");
+    // stopQueueProcessor(); // DISABLED: Queue processor no longer running
     process.exit(0);
 });
 

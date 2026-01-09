@@ -59,7 +59,8 @@ function getSubscriber() {
 
 module.exports = {
     connectRedis,
-    initRedis: connectRedis, // ALIAS ADDED HERE
+    initRedis: connectRedis, // ALIAS for backwards compatibility
     getClient,
+    getRedis: getClient, // ALIAS for backwards compatibility
     getSubscriber
 };

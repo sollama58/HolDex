@@ -45,7 +45,7 @@ async function finalReset() {
                 change1h DOUBLE PRECISION DEFAULT 0,
                 change5m DOUBLE PRECISION DEFAULT 0,
                 
-                k_score INTEGER DEFAULT 0,
+                k_score DOUBLE PRECISION DEFAULT 0,
                 hasCommunityUpdate BOOLEAN DEFAULT FALSE,
                 
                 metadata JSONB,

@@ -91,23 +91,27 @@ L = A * S
 
 ## Score Interpretation
 
-| K-Score | Rating | Description |
-|---------|--------|-------------|
-| 80-100 | Excellent | Strong conviction, organic growth, proven survival |
-| 60-79 | Good | Solid fundamentals, some areas to improve |
-| 40-59 | Fair | Mixed signals, needs monitoring |
-| 20-39 | Weak | Concerning metrics, high risk |
-| 0-19 | Poor | Failed one or more pillars completely |
+| K-Score | Tier | Icon | Quality | Description |
+|---------|------|------|---------|-------------|
+| 90-100 | Diamond | 💎 | Exceptional | Strong conviction, healthy distribution, proven survival |
+| 80-89 | Platinum | 💠 | High Quality | Very good fundamentals across all metrics |
+| 70-79 | Gold | 🥇 | Good Quality | Solid token with good holder behavior |
+| 60-69 | Silver | 🥈 | Fair Quality | Average token, some positive indicators |
+| 50-59 | Bronze | 🥉 | Speculative | Borderline - may have one weak metric |
+| 40-49 | Copper | 🟤 | High Risk | Weak fundamentals, proceed with caution |
+| 20-39 | Iron | ⚫ | Very High Risk | Multiple red flags, likely short-lived |
+| 0-19 | Rust | 🔩 | Distressed | Failing or abandoned token |
 
-## Tiers
+## Acceptance Thresholds
 
-| K-Score | Tier | Acceptance |
-|---------|------|------------|
-| 80+ | Elite | Always accepted |
-| 60-79 | Trusted | Always accepted |
-| 50-59 | Standard | Accepted |
-| 30-49 | Caution | Review required |
-| < 30 | Reject | Not accepted |
+For automated acceptance (GASdf, Oracle integrations):
+
+| K-Score | Status | Action |
+|---------|--------|--------|
+| 70+ | Always Accepted | Gold tier or higher - high quality |
+| 50-69 | Accepted | Silver/Bronze - acceptable quality |
+| 30-49 | Review Required | Copper tier - manual review needed |
+| < 30 | Rejected | Iron/Rust - not accepted |
 
 **Hardcoded Accepts:** SOL, USDC, USDT, $ASDF (bypass K-Score check)
 
@@ -118,10 +122,15 @@ L = A * S
 - **Transfer History**: Webhook callbacks
 - **Cost**: Paginated, no per-holder RPC cost
 
-### DexScreener (Market Data)
-- Price, liquidity, volume
-- Free batch API
+### Jupiter Price API (Market Data)
+- Token prices (USD)
+- Free tier via lite-api.jup.ag
 - Not used for conviction (Helius-only)
+
+### Raydium API (Pool Data)
+- Liquidity, volume, pool info
+- Free API (api-v3.raydium.io)
+- Pool discovery and tracking
 
 ### On-chain RPC
 - Supply, decimals

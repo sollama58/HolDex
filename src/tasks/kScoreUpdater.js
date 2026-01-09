@@ -36,6 +36,7 @@ const alerting = require('../services/alerting');
 const nodeService = require('../services/nodeService');
 const signedWrites = require('../services/signedWrites');
 const nodeKeys = require('../utils/nodeKeys');
+const rpcMonitor = require('../services/rpcMonitor');
 
 // ============================================
 // HELIUS CONFIG
@@ -127,13 +128,14 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // PRICE SERVICE (Unified - from PriceWorker)
 // ============================================
 // K-Score = Helius (our value-add)
-// Price/MCap = PriceWorker handles DexScreener batch (free, efficient)
+// Price/MCap = PriceWorker handles Jupiter + Raydium batch (free, independent)
 const { getPrice: getPriceFromWorker, getCachedPrice } = require('./priceWorker');
 
 /**
  * Get price from unified PriceWorker (uses cache, no duplicate API calls)
+ * Sources: Jupiter Price API + Raydium pools (no DexScreener dependency)
  */
-async function getDexScreenerData(mint) {
+async function getMarketData(mint) {
     // Try cache first (instant, no API call)
     const cached = getCachedPrice(mint, 120000); // 2 min cache tolerance
     if (cached) return cached;
@@ -141,6 +143,9 @@ async function getDexScreenerData(mint) {
     // Fallback to single fetch if not in cache
     return await getPriceFromWorker(mint);
 }
+
+// Legacy alias for backward compatibility within this file
+const getDexScreenerData = getMarketData;
 
 /**
  * Parse rate limit headers from Helius response
@@ -186,7 +191,7 @@ async function saveHolderHistory(db, mint, totalHolders, realHolders) {
             ON CONFLICT (mint, date) DO UPDATE SET
                 holders = EXCLUDED.holders,
                 real_holders = EXCLUDED.real_holders
-        `, [mint, totalHolders, realHolders]);
+        `, [mint, Math.floor(totalHolders), Math.floor(realHolders)]);
     } catch (_e) {
         // Ignore errors (table might not exist on first run)
     }
@@ -205,7 +210,7 @@ async function saveKScoreHistory(db, mint, kScore, convictionScore, holders) {
                 k_score = EXCLUDED.k_score,
                 conviction_score = EXCLUDED.conviction_score,
                 holders = EXCLUDED.holders
-        `, [mint, kScore, convictionScore, holders]);
+        `, [mint, kScore, convictionScore, Math.floor(holders)]);
     } catch (_e) {
         // Ignore errors (table might not exist on first run)
     }
@@ -374,6 +379,11 @@ async function cacheWalletTxBulk(db, wallet, tokenInteractions, lastSignature) {
     try {
         // Use batch insert with ON CONFLICT UPDATE
         for (const ti of tokenInteractions) {
+            // FIX: Convert netFlow to integer (BIGINT column requirement)
+            const buyCount = Math.floor(Number(ti.buyCount)) || 0;
+            const sellCount = Math.floor(Number(ti.sellCount)) || 0;
+            const netFlow = Math.floor(Number(ti.netFlow)) || 0;
+
             await db.run(`
                 INSERT INTO wallet_tx_cache (wallet, mint, buy_count, sell_count, net_flow,
                     first_tx_timestamp, last_tx_timestamp, last_signature, analyzed_at)
@@ -385,7 +395,7 @@ async function cacheWalletTxBulk(db, wallet, tokenInteractions, lastSignature) {
                     last_tx_timestamp = GREATEST(wallet_tx_cache.last_tx_timestamp, $7),
                     last_signature = $8,
                     analyzed_at = $9
-            `, [wallet, ti.mint, ti.buyCount, ti.sellCount, ti.netFlow,
+            `, [wallet, ti.mint, buyCount, sellCount, netFlow,
                 ti.firstTxTimestamp, ti.lastTxTimestamp, lastSignature, now]);
         }
     } catch (e) {
@@ -802,6 +812,10 @@ async function heliusRpc(method, params) {
         });
         const data = await response.json();
         if (data.error) throw new Error(data.error.message);
+
+        // Track RPC call for monitoring (fire-and-forget)
+        rpcMonitor.trackRpcCall(method, 1, { params }).catch(() => {});
+
         return data.result;
     } catch (error) {
         logger.error(`[Helius] RPC error: ${error.message}`);
@@ -1261,10 +1275,19 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, _decimals = 9, 
 
         // 0. Try delta analysis first (if snapshots exist and are fresh)
         // OPTIMIZATION: Use cached holder count from DB - avoid expensive fetchTokenHolders
-        // NOTE: Delta mode is available in ALL modes as fallback when webhook cache expires
-        // FIX 2026-01-09: Removed !config.USE_WEBHOOKS condition - delta should work in both modes
+        // NOTE: Delta mode available in ALL modes as fallback when webhook cache expires
+        // RPC CREDIT OPTIMIZATION: Only do delta (which calls getNewTransactions) for verified tokens
         if (db) {
-            const deltaResult = await deltaConvictionAnalysis(db, mint);
+            // Check if token is community verified before doing delta analysis
+            const tokenVerifyCheck = await db.get(
+                'SELECT hasCommunityUpdate FROM tokens WHERE mint = $1',
+                [mint]
+            );
+            const isVerified = tokenVerifyCheck?.hascommunityupdate || tokenVerifyCheck?.hasCommunityUpdate || false;
+
+            // Only run delta analysis (which calls TransactionHistory API) for verified tokens
+            // FIX 2026-01-09: Delta works in ALL modes but restricted to verified tokens for credit savings
+            const deltaResult = isVerified ? await deltaConvictionAnalysis(db, mint) : null;
             if (deltaResult) {
                 // Delta succeeded - use cached holder count from tokens table
                 // This is updated by: webhooks, periodic holder scan, or previous full analysis
@@ -1334,38 +1357,164 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, _decimals = 9, 
         let analyzed = 0;
         const snapshotData = []; // For saving to DB
 
+        // ============================================
+        // RPC CREDIT OPTIMIZATION: Only analyze holders for community-updated tokens
+        // and only once per day per holder (reuse cached classifications)
+        // ============================================
+        // TransactionHistory API is expensive - only use when necessary
+        // For non-verified tokens: use basic holder count only
+        // For verified tokens: full classification, but cache for 24h per holder
+
+        const HOLDER_ANALYSIS_TTL = 24 * 60 * 60 * 1000; // 24 hours - one deep analysis per day
+        const now = Date.now();
+
+        // Check if this token is community verified
+        let isVerifiedToken = false;
+        if (db) {
+            const tokenCheck = await db.get(
+                'SELECT hasCommunityUpdate FROM tokens WHERE mint = $1',
+                [mint]
+            );
+            isVerifiedToken = tokenCheck?.hascommunityupdate || tokenCheck?.hasCommunityUpdate || false;
+        }
+
+        // OPTIMIZATION: If not verified, skip expensive holder transaction analysis
+        // Use simple holder count only (no API calls for classifications)
+        if (!isVerifiedToken && db) {
+            logger.info(`[Conviction] ${mint.slice(0,8)}: Skipping holder analysis (not community verified) - 0 RPC calls`);
+
+            // Try to get cached classifications from previous analysis
+            const cachedSnapshots = await db.all(
+                'SELECT holder, conviction_class, balance FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 20',
+                [mint]
+            );
+
+            if (cachedSnapshots.length > 0) {
+                // Use cached classifications
+                for (const snap of cachedSnapshots) {
+                    switch (snap.conviction_class) {
+                        case 'accumulator': accumulators++; break;
+                        case 'holder': holders++; break;
+                        case 'reducer': reducers++; break;
+                        case 'extractor': extractors++; break;
+                        default: holders++; // Default to holder
+                    }
+                    analyzed++;
+                }
+                const score = analyzed > 0 ? Math.round(((accumulators + holders) / analyzed) * 100) : 50;
+                logger.info(`[Conviction] ${mint.slice(0,8)}: ${score}% from cache (${analyzed} holders, not verified)`);
+
+                return {
+                    score,
+                    analyzed,
+                    accumulators,
+                    holders,
+                    reducers,
+                    extractors,
+                    realHoldersCount,
+                    totalHolders: allHolders.length,
+                    allHolders,
+                    filteredTop50: realCandidates,
+                    poolsFiltered,
+                    skipDeepAnalysis: true
+                };
+            }
+
+            // No cache - use basic estimation (all holders = neutral)
+            return {
+                score: 50,
+                analyzed: 0,
+                accumulators: 0,
+                holders: 0,
+                reducers: 0,
+                extractors: 0,
+                realHoldersCount,
+                totalHolders: allHolders.length,
+                allHolders,
+                filteredTop50: realCandidates,
+                poolsFiltered,
+                skipDeepAnalysis: true
+            };
+        }
+
+        // VERIFIED TOKEN: Perform holder analysis with per-holder caching
+        // Fetch existing snapshots to check which holders need fresh analysis
+        let existingSnapshots = new Map();
+        if (db) {
+            const snapshots = await db.all(
+                'SELECT holder, conviction_class, buy_count, sell_count, net_flow, last_signature, last_tx_timestamp, balance, updated_at FROM holder_snapshots WHERE mint = $1',
+                [mint]
+            );
+            for (const snap of snapshots) {
+                existingSnapshots.set(snap.holder, snap);
+            }
+        }
+
         // OPTIMIZATION: Process holders in parallel batches (5x faster)
+        // But skip API calls for holders already analyzed today
         const BATCH_SIZE = 5;
+        let apiCallsSaved = 0;
+
         for (let i = 0; i < top20.length; i += BATCH_SIZE) {
             const batch = top20.slice(i, i + BATCH_SIZE);
 
             const results = await Promise.allSettled(
                 batch.map(async (holder) => {
+                    // Check if holder was already analyzed today (within TTL)
+                    const cachedSnapshot = existingSnapshots.get(holder.address);
+                    const lastAnalysis = parseInt(cachedSnapshot?.updated_at || 0);
+                    const isRecent = (now - lastAnalysis) < HOLDER_ANALYSIS_TTL;
+
+                    if (cachedSnapshot && isRecent && cachedSnapshot.conviction_class) {
+                        // Use cached data - NO API CALL (saves Helius credits!)
+                        apiCallsSaved++;
+                        return {
+                            holder,
+                            retentionData: {
+                                retention: cachedSnapshot.conviction_class === 'accumulator' ? 1.5 :
+                                           cachedSnapshot.conviction_class === 'holder' ? 1.0 :
+                                           cachedSnapshot.conviction_class === 'reducer' ? 0.7 : 0.3,
+                                buyCount: cachedSnapshot.buy_count || 0,
+                                sellCount: cachedSnapshot.sell_count || 0,
+                                netFlow: cachedSnapshot.net_flow || 0,
+                                lastSignature: cachedSnapshot.last_signature,
+                                lastTxTimestamp: cachedSnapshot.last_tx_timestamp || lastAnalysis
+                            },
+                            classification: cachedSnapshot.conviction_class,
+                            fromCache: true
+                        };
+                    }
+
+                    // Not in cache or expired - fetch from Helius (uses TransactionHistory API)
                     const retentionData = await getHolderRetention(holder.address, mint);
                     const classification = classifyRetention(retentionData);
-                    return { holder, retentionData, classification };
+                    return { holder, retentionData, classification, fromCache: false };
                 })
             );
 
             for (const result of results) {
                 if (result.status === 'fulfilled') {
-                    const { holder, retentionData, classification } = result.value;
+                    const { holder, retentionData, classification, fromCache } = result.value;
 
                     if (classification === 'accumulator') accumulators++;
                     else if (classification === 'holder') holders++;
                     else if (classification === 'reducer') reducers++;
                     else if (classification === 'extractor') extractors++;
 
-                    snapshotData.push({
-                        address: holder.address,
-                        balance: holder.balance,
-                        buyCount: retentionData.buyCount,
-                        sellCount: retentionData.sellCount,
-                        netFlow: retentionData.netFlow,
-                        lastSignature: retentionData.lastSignature,
-                        lastTxTimestamp: retentionData.lastTxTimestamp,  // K-Score v9
-                        convictionClass: classification
-                    });
+                    // Only add to snapshotData if this was a fresh analysis (not from cache)
+                    // This avoids unnecessary DB writes for cached data
+                    if (!fromCache) {
+                        snapshotData.push({
+                            address: holder.address,
+                            balance: holder.balance,
+                            buyCount: retentionData.buyCount,
+                            sellCount: retentionData.sellCount,
+                            netFlow: retentionData.netFlow,
+                            lastSignature: retentionData.lastSignature,
+                            lastTxTimestamp: retentionData.lastTxTimestamp,  // K-Score v9
+                            convictionClass: classification
+                        });
+                    }
 
                     analyzed++;
                 }
@@ -1376,6 +1525,10 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, _decimals = 9, 
             if (i + BATCH_SIZE < top20.length) {
                 await sleep(200);
             }
+        }
+
+        if (apiCallsSaved > 0) {
+            logger.info(`[Conviction] ${mint.slice(0,8)}: Saved ${apiCallsSaved} TransactionHistory API calls (used 24h cache)`);
         }
 
         if (analyzed === 0) {
@@ -2418,11 +2571,11 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
     try {
         const decimals = dbData?.decimals || 9;
 
-        // Get price for $1+ holder filtering (use cached or fetch from DexScreener)
+        // Get price for $1+ holder filtering (use cached or fetch from Jupiter/Raydium)
         let priceUsd = dbData?.priceusd || dbData?.priceUsd || 0;
         if (priceUsd === 0) {
-            const dexData = await getDexScreenerData(mint);
-            if (dexData) priceUsd = dexData.priceUsd;
+            const marketData = await getMarketData(mint);
+            if (marketData) priceUsd = marketData.priceUsd;
         }
 
         // ============================================
@@ -2582,7 +2735,7 @@ async function computeScoreInternal(mint, dbData = null, skipConviction = false,
             }
         }
 
-        // Get age from token timestamp (DexScreener creation date)
+        // Get age from token timestamp (creation date)
         if (db) {
             const tokenData = await db.get(`
                 SELECT timestamp FROM tokens WHERE mint = $1
@@ -2945,33 +3098,33 @@ async function updateSingleToken(deps, mint) {
             change1h: token.change1h || 0
         };
 
-        // Get price/mcap/liquidity from DexScreener (FREE, RELIABLE)
-        // K-Score = Helius (our value-add), Price = DexScreener (free)
+        // Get price/mcap/liquidity from Jupiter + Raydium (FREE, INDEPENDENT)
+        // K-Score = Helius (our value-add), Price = Jupiter/Raydium (free)
         const priceNeedsRefresh = !token.price_timestamp ||
                                   (Date.now() - parseInt(token.price_timestamp || 0) > 60000); // 1 min
 
         if (priceNeedsRefresh) {
             try {
-                const dexData = await getDexScreenerData(mint);
+                const priceData = await getMarketData(mint);
 
-                if (dexData && dexData.priceUsd > 0) {
-                    marketData.priceUsd = dexData.priceUsd;
-                    marketData.priceSource = 'dexscreener';
-                    marketData.priceTimestamp = dexData.timestamp;
-                    marketData.pricePool = dexData.pairAddress;
-                    marketData.mcap = dexData.mcap;
+                if (priceData && priceData.priceUsd > 0) {
+                    marketData.priceUsd = priceData.priceUsd;
+                    marketData.priceSource = priceData.source || 'jupiter';
+                    marketData.priceTimestamp = priceData.timestamp;
+                    marketData.pricePool = priceData.pairAddress;
+                    marketData.mcap = priceData.mcap;
                     marketData.mcapCalculated = true;
-                    marketData.liquidity = dexData.liquidity;
-                    marketData.liquiditySource = 'dexscreener';
-                    marketData.liquidityTimestamp = dexData.timestamp;
-                    marketData.volume24h = dexData.volume24h || 0;
-                    marketData.change24h = dexData.change24h || 0;
-                    marketData.change1h = dexData.change1h || 0;
+                    marketData.liquidity = priceData.liquidity;
+                    marketData.liquiditySource = priceData.source || 'raydium';
+                    marketData.liquidityTimestamp = priceData.timestamp;
+                    marketData.volume24h = priceData.volume24h || 0;
+                    marketData.change24h = priceData.change24h || 0;
+                    marketData.change1h = priceData.change1h || 0;
 
-                    logger.debug(`[DexScreener] ${token.symbol}: $${dexData.priceUsd.toExponential(2)}, MCap $${dexData.mcap.toLocaleString()}`);
+                    logger.debug(`[Market] ${token.symbol}: $${priceData.priceUsd.toExponential(2)}, MCap $${(priceData.mcap || 0).toLocaleString()}`);
                 }
             } catch (_e) {
-                logger.debug(`[Market] ${mint.slice(0,8)}: DexScreener failed, using cached`);
+                logger.debug(`[Market] ${mint.slice(0,8)}: Price fetch failed, using cached`);
             }
         }
 
@@ -3068,15 +3221,16 @@ async function updateSingleToken(deps, mint) {
         }
 
         // Determine holder values based on mode
-        const holdersValue = conviction.preserveHolders
+        // FIX: Ensure all holder values are integers to avoid PostgreSQL type errors
+        const holdersValue = Math.floor(conviction.preserveHolders
             ? (token.holders || conviction.realHoldersCount || 0)
-            : (conviction.realHoldersCount || 0);
-        const realHoldersValue = conviction.preserveHolders
+            : (conviction.realHoldersCount || 0));
+        const realHoldersValue = Math.floor(conviction.preserveHolders
             ? (token.real_holders || conviction.realHoldersCount || 0)
-            : (conviction.realHoldersCount || 0);
-        const totalHoldersValue = conviction.preserveHolders
+            : (conviction.realHoldersCount || 0));
+        const totalHoldersValue = Math.floor(conviction.preserveHolders
             ? (token.total_holders || conviction.totalHolders || 0)
-            : (conviction.totalHolders || 0);
+            : (conviction.totalHolders || 0));
 
         await db.run(`
             UPDATE tokens
@@ -3133,12 +3287,12 @@ async function updateSingleToken(deps, mint) {
         `, [
             smoothedScore,
             updateTimestamp.toString(),
-            conviction.score || 0,
-            conviction.accumulators || 0,
-            conviction.holders || 0,
-            conviction.reducers || 0,
-            conviction.extractors || 0,
-            conviction.analyzed || 0,
+            Math.floor(conviction.score || 0),
+            Math.floor(conviction.accumulators || 0),
+            Math.floor(conviction.holders || 0),
+            Math.floor(conviction.reducers || 0),
+            Math.floor(conviction.extractors || 0),
+            Math.floor(conviction.analyzed || 0),
             holdersValue,
             realHoldersValue,
             totalHoldersValue,
@@ -3336,32 +3490,32 @@ async function updateKScores(deps) {
                     change1h: t.change1h || 0
                 };
 
-                // Get price/mcap/liquidity from DexScreener (FREE, RELIABLE)
+                // Get price/mcap/liquidity from Jupiter + Raydium (FREE, INDEPENDENT)
                 const batchPriceNeedsRefresh = !t.price_timestamp ||
                                               (Date.now() - parseInt(t.price_timestamp || 0) > 60000); // 1 min
 
                 if (batchPriceNeedsRefresh) {
                     try {
-                        const dexData = await getDexScreenerData(t.mint);
+                        const priceData = await getMarketData(t.mint);
 
-                        if (dexData && dexData.priceUsd > 0) {
-                            batchMarketData.priceUsd = dexData.priceUsd;
-                            batchMarketData.priceSource = 'dexscreener';
-                            batchMarketData.priceTimestamp = dexData.timestamp;
-                            batchMarketData.pricePool = dexData.pairAddress;
-                            batchMarketData.mcap = dexData.mcap;
+                        if (priceData && priceData.priceUsd > 0) {
+                            batchMarketData.priceUsd = priceData.priceUsd;
+                            batchMarketData.priceSource = priceData.source || 'jupiter';
+                            batchMarketData.priceTimestamp = priceData.timestamp;
+                            batchMarketData.pricePool = priceData.pairAddress;
+                            batchMarketData.mcap = priceData.mcap;
                             batchMarketData.mcapCalculated = true;
-                            batchMarketData.liquidity = dexData.liquidity;
-                            batchMarketData.liquiditySource = 'dexscreener';
-                            batchMarketData.liquidityTimestamp = dexData.timestamp;
-                            batchMarketData.volume24h = dexData.volume24h || 0;
-                            batchMarketData.change24h = dexData.change24h || 0;
-                            batchMarketData.change1h = dexData.change1h || 0;
+                            batchMarketData.liquidity = priceData.liquidity;
+                            batchMarketData.liquiditySource = priceData.source || 'raydium';
+                            batchMarketData.liquidityTimestamp = priceData.timestamp;
+                            batchMarketData.volume24h = priceData.volume24h || 0;
+                            batchMarketData.change24h = priceData.change24h || 0;
+                            batchMarketData.change1h = priceData.change1h || 0;
 
-                            logger.debug(`[DexScreener] ${t.symbol}: $${dexData.priceUsd.toExponential(2)}, MCap $${dexData.mcap.toLocaleString()}`);
+                            logger.debug(`[Market] ${t.symbol}: $${priceData.priceUsd.toExponential(2)}, MCap $${(priceData.mcap || 0).toLocaleString()}`);
                         }
                     } catch (_e) {
-                        logger.debug(`[Market] ${t.mint.slice(0,8)}: DexScreener failed, using cached`);
+                        logger.debug(`[Market] ${t.mint.slice(0,8)}: Price fetch failed, using cached`);
                     }
                 }
 
@@ -3623,25 +3777,22 @@ function start(deps) {
         logger.warn("[K-Score] No HELIUS_API_KEY - conviction analysis disabled");
     }
 
-    // Determine interval based on webhook mode
-    // Webhook mode: Data arrives in real-time, so we just need to aggregate periodically
-    // Polling mode: We need to fetch data ourselves, but 10 min is overkill for conviction
-    const LIGHT_INTERVAL = config.USE_WEBHOOKS ? 3600000 : 1800000; // 1h (webhook) or 30m (polling)
-    const DEEP_INTERVAL = 86400000; // 24h for full holder refresh
+    // OPTIMIZATION: Reduce K-Score refresh frequency to save RPC credits
+    // K-Scores only update every 12 hours (instead of 30min-1h)
+    // On-demand updates still work for new tokens and admin panel
+    const KSCORE_INTERVAL = 12 * 60 * 60 * 1000; // 12 hours
+    const DEEP_INTERVAL = 24 * 60 * 60 * 1000;   // 24h for full holder refresh
 
-    const modeLabel = config.USE_WEBHOOKS ? 'WEBHOOK (0 RPC)' : 'POLLING';
-    const intervalMin = LIGHT_INTERVAL / 60000;
+    const intervalHours = KSCORE_INTERVAL / (60 * 60 * 1000);
+    logger.info(`🟢 K-Score Updater Started - Interval: ${intervalHours}h (RPC optimized)`);
 
-    logger.info(`🟢 K-Score Updater Started - Mode: ${modeLabel}, Interval: ${intervalMin}min`);
-
-    // Light updates (uses cached data in webhook mode)
-    setInterval(() => updateKScores(deps), LIGHT_INTERVAL);
+    // Run K-Score updates every 12 hours
+    setInterval(() => updateKScores(deps), KSCORE_INTERVAL);
 
     // Deep refresh once per day (full RPC analysis to update holder counts, burn, etc.)
     // Runs at a different offset to avoid overlap
     setInterval(() => {
         logger.info('[K-Score] Starting daily deep refresh (full RPC analysis)');
-        // Force polling mode for deep refresh by temporarily clearing webhook flag
         updateKScores({ ...deps, forceDeepRefresh: true });
     }, DEEP_INTERVAL);
 
@@ -3734,6 +3885,7 @@ function getHealthStatus() {
 module.exports = {
     start,
     updateSingleToken,
+    updateKScores, // Exported for admin panel bulk refresh
     calculateTokenScore: async (mint) => {
         const result = await computeScoreInternal(mint, null, true);
         return result.score;

@@ -22,6 +22,7 @@ const router = express.Router();
 const { getHarmonyEngine, harmony } = require('../services/harmonyEngine');
 const { getClient: getRedis } = require('../services/redis');
 const config = require('../config/env');
+const rpcMonitor = require('../services/rpcMonitor');
 
 // ═══════════════════════════════════════════════════════════════
 // SECURITY: Oracle-Specific Rate Limiting
@@ -710,6 +711,58 @@ function init(deps) {
         }
     });
 
+    // ═══════════════════════════════════════════════════════════════
+    // RPC MONITORING (Admin Only)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * GET /oracle/rpc-stats
+     *
+     * Returns Helius RPC usage statistics (admin endpoint).
+     * Requires ADMIN_PASSWORD in x-admin-password header.
+     *
+     * Response:
+     * {
+     *   hourly: { usage, budget, percent },
+     *   daily: { usage, budget, percent },
+     *   methods: { [method]: count },
+     *   timestamp
+     * }
+     */
+    router.get('/rpc-stats', async (req, res) => {
+        try {
+            // Admin authentication
+            const adminPassword = req.headers['x-admin-password'];
+            if (!adminPassword || adminPassword !== config.ADMIN_PASSWORD) {
+                return res.status(401).json({
+                    success: false,
+                    error: 'Unauthorized: Invalid admin password'
+                });
+            }
+
+            const stats = await rpcMonitor.getUsageStats();
+
+            if (!stats) {
+                return res.status(503).json({
+                    success: false,
+                    error: 'Monitoring data unavailable (Redis offline?)'
+                });
+            }
+
+            res.json({
+                success: true,
+                data: stats
+            });
+
+        } catch (error) {
+            logger.error(`[Oracle] RPC stats failed: ${error.message}`);
+            res.status(500).json({
+                success: false,
+                error: 'RPC stats lookup failed'
+            });
+        }
+    });
+
     return router;
 }
 
@@ -718,14 +771,14 @@ function init(deps) {
 // ═══════════════════════════════════════════════════════════════
 
 function getKRank(score) {
-    if (score >= 90) return { tier: 'Diamond', icon: '💎', level: 8 };
-    if (score >= 80) return { tier: 'Platinum', icon: '💠', level: 7 };
-    if (score >= 70) return { tier: 'Gold', icon: '🥇', level: 6 };
-    if (score >= 60) return { tier: 'Silver', icon: '🥈', level: 5 };
-    if (score >= 50) return { tier: 'Bronze', icon: '🥉', level: 4 };
-    if (score >= 40) return { tier: 'Copper', icon: '🟤', level: 3 };
-    if (score >= 20) return { tier: 'Iron', icon: '⚫', level: 2 };
-    return { tier: 'Rust', icon: '🔩', level: 1 };
+    if (score >= 90) return { tier: 'Diamond', icon: '💎', level: 8, label: 'Exceptional Quality' };
+    if (score >= 80) return { tier: 'Platinum', icon: '💠', level: 7, label: 'High Quality' };
+    if (score >= 70) return { tier: 'Gold', icon: '🥇', level: 6, label: 'Good Quality' };
+    if (score >= 60) return { tier: 'Silver', icon: '🥈', level: 5, label: 'Fair Quality' };
+    if (score >= 50) return { tier: 'Bronze', icon: '🥉', level: 4, label: 'Speculative' };
+    if (score >= 40) return { tier: 'Copper', icon: '🟤', level: 3, label: 'High Risk' };
+    if (score >= 20) return { tier: 'Iron', icon: '⚫', level: 2, label: 'Very High Risk' };
+    return { tier: 'Rust', icon: '🔩', level: 1, label: 'Distressed' };
 }
 
 module.exports = { init };

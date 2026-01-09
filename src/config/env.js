@@ -144,6 +144,11 @@ module.exports = {
     ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || null, // REQUIRED - no default
     HELIUS_API_KEY: heliusKey || '',
 
+    // --- JUPITER API ---
+    // Optional: Set for higher rate limits on Jupiter Price API
+    // Get your API key at: https://portal.jup.ag/
+    JUPITER_API_KEY: process.env.JUPITER_API_KEY || null,
+
     // --- PAYMENT CONFIGURATION ---
     TREASURY_WALLET: process.env.TREASURY_WALLET || null, // REQUIRED - set in production
     FEE_SOL: parseFloat(process.env.FEE_SOL) || 0.1,

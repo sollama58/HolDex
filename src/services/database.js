@@ -503,6 +503,21 @@ async function initDB() {
                 `ALTER TABLE participants ADD COLUMN IF NOT EXISTS escore_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
                 `ALTER TABLE participants ADD COLUMN IF NOT EXISTS first_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
                 `ALTER TABLE participants ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+                // FIX: Ensure conviction_score is DOUBLE PRECISION (might be INTEGER in old DBs)
+                `ALTER TABLE tokens ALTER COLUMN conviction_score TYPE DOUBLE PRECISION USING conviction_score::DOUBLE PRECISION`,
+                // FIX: Ensure all market data columns are DOUBLE PRECISION (might be INTEGER in old DBs)
+                // This fixes "invalid input syntax for type integer" errors when inserting decimal values
+                `ALTER TABLE tokens ALTER COLUMN liquidity TYPE DOUBLE PRECISION USING liquidity::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN marketcap TYPE DOUBLE PRECISION USING marketcap::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN volume24h TYPE DOUBLE PRECISION USING volume24h::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN priceusd TYPE DOUBLE PRECISION USING priceusd::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN change24h TYPE DOUBLE PRECISION USING change24h::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN change1h TYPE DOUBLE PRECISION USING change1h::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN change5m TYPE DOUBLE PRECISION USING change5m::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN k_score TYPE DOUBLE PRECISION USING k_score::DOUBLE PRECISION`,
+                `ALTER TABLE pools ALTER COLUMN price_usd TYPE DOUBLE PRECISION USING price_usd::DOUBLE PRECISION`,
+                `ALTER TABLE pools ALTER COLUMN liquidity_usd TYPE DOUBLE PRECISION USING liquidity_usd::DOUBLE PRECISION`,
+                `ALTER TABLE pools ALTER COLUMN volume_24h TYPE DOUBLE PRECISION USING volume_24h::DOUBLE PRECISION`,
                 // ═══════════════════════════════════════════════════════════
                 // PER-NODE CRYPTOGRAPHIC IDENTITY (Ed25519)
                 // Philosophy: "Don't trust. Verify." - Each node has unique identity
@@ -705,23 +720,34 @@ async function smartCache(key, ttlSeconds, fetchFn) {
 async function enableIndexing(db, mint, poolData) {
     if (!poolData || !poolData.pairAddress) return;
     try {
+        // Only update pool data if we have valid (non-zero) values, otherwise preserve existing
         await db.run(`
             INSERT INTO pools (
                 address, mint, dex, price_usd, liquidity_usd, volume_24h, created_at, token_a, token_b, reserve_a, reserve_b
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             ON CONFLICT(address) DO UPDATE SET
-                price_usd = EXCLUDED.price_usd,
-                liquidity_usd = EXCLUDED.liquidity_usd,
-                volume_24h = EXCLUDED.volume_24h,
-                reserve_a = EXCLUDED.reserve_a,
-                reserve_b = EXCLUDED.reserve_b
+                price_usd = CASE WHEN EXCLUDED.price_usd > 0 THEN EXCLUDED.price_usd ELSE pools.price_usd END,
+                liquidity_usd = CASE WHEN EXCLUDED.liquidity_usd > 0 THEN EXCLUDED.liquidity_usd ELSE pools.liquidity_usd END,
+                volume_24h = CASE WHEN EXCLUDED.volume_24h > 0 THEN EXCLUDED.volume_24h ELSE pools.volume_24h END,
+                reserve_a = COALESCE(EXCLUDED.reserve_a, pools.reserve_a),
+                reserve_b = COALESCE(EXCLUDED.reserve_b, pools.reserve_b)
         `, [
-            poolData.pairAddress, mint, poolData.dexId, poolData.priceUsd || 0, poolData.liquidity?.usd || 0,
-            poolData.volume?.h24 || 0, Date.now(), poolData.baseToken, poolData.quoteToken,
+            poolData.pairAddress, mint, poolData.dexId, poolData.priceUsd || 0, Math.floor(poolData.liquidity?.usd || 0),
+            Math.floor(poolData.volume?.h24 || 0), Date.now(),
+            // Handle both object format ({address: "..."}) and string format for token addresses
+            typeof poolData.baseToken === 'object' ? poolData.baseToken?.address : poolData.baseToken,
+            typeof poolData.quoteToken === 'object' ? poolData.quoteToken?.address : poolData.quoteToken,
             poolData.reserve_a || null, poolData.reserve_b || null
         ]);
         await db.run(`INSERT INTO active_trackers (pool_address, priority, last_check) VALUES ($1, 10, 0) ON CONFLICT(pool_address) DO NOTHING`, [poolData.pairAddress]);
-    } catch (_err) { /* ignore */ }
+    } catch (err) {
+        // Log foreign key errors - these indicate token wasn't created first
+        if (err.message && err.message.includes('foreign key')) {
+            logger.error(`[enableIndexing] Foreign key error for ${mint.slice(0,8)}: Token must exist before adding pools`);
+        } else {
+            logger.warn(`[enableIndexing] Pool insert failed for ${mint.slice(0,8)}: ${err.message}`);
+        }
+    }
 }
 
 async function aggregateAndSaveToken(db, mint) {
@@ -775,10 +801,10 @@ async function aggregateAndSaveToken(db, mint) {
                     const today = Math.floor(now / (24 * 60 * 60 * 1000)) * (24 * 60 * 60 * 1000);
                     
                     await db.run(`
-                        INSERT INTO holders_history (mint, count, timestamp) 
-                        VALUES ($1, $2, $3)
-                        ON CONFLICT (mint, timestamp) DO UPDATE SET count = EXCLUDED.count
-                    `, [mint, holderCount, today]);
+                        INSERT INTO holders_history (mint, count, timestamp)
+                        VALUES ($1, $2::INTEGER, $3)
+                        ON CONFLICT (mint, timestamp) DO UPDATE SET count = EXCLUDED.count::INTEGER
+                    `, [mint, Math.floor(holderCount), today]);
                 }
             } catch (e) {
                 logger.warn(`Holder check failed for ${mint}: ${e.message}`);
@@ -788,17 +814,31 @@ async function aggregateAndSaveToken(db, mint) {
         // Build Update Query
         // FIX: Removed `timestamp` column update to preserve original creation time.
         // FIX: Added `updated_at = NOW()` to track recent updates properly.
-        const params = [totalLiq, totalVol, price, mint]; 
-        let query = `UPDATE tokens SET liquidity = $1, volume24h = $2, priceUsd = $3, updated_at = NOW(), marketCap = ($3 * CAST(supply AS DOUBLE PRECISION) / POWER(10, COALESCE(decimals, 9)))`;
-        
+        // FIX: Only update liquidity/volume/price if we have valid data (> 0), otherwise preserve existing
+        // FIX: Ensure all numeric values are properly typed to avoid integer overflow errors
+        // FIX: Validate all numeric values are finite to prevent PostgreSQL type errors
+        // FIX: Use Math.floor() for liquidity/volume/marketCap to avoid decimal precision issues (only price keeps decimals)
+        const safeTotalLiq = Number.isFinite(totalLiq) ? Math.floor(totalLiq) : 0;
+        const safeTotalVol = Number.isFinite(totalVol) ? Math.floor(totalVol) : 0;
+        const safePrice = Number.isFinite(price) ? price : 0;  // Keep decimals for price
+        const params = [safeTotalLiq, safeTotalVol, safePrice, mint];
+        let query = `UPDATE tokens SET
+            liquidity = CASE WHEN $1 > 0 THEN FLOOR($1)::DOUBLE PRECISION ELSE liquidity END,
+            volume24h = CASE WHEN $2 > 0 THEN FLOOR($2)::DOUBLE PRECISION ELSE volume24h END,
+            priceUsd = CASE WHEN $3 > 0 THEN $3::DOUBLE PRECISION ELSE priceUsd END,
+            updated_at = NOW(),
+            marketCap = CASE WHEN $3 > 0 THEN FLOOR($3::DOUBLE PRECISION * CAST(supply AS DOUBLE PRECISION) / POWER(10, COALESCE(decimals, 9)))::DOUBLE PRECISION ELSE marketCap END`;
+
         let idx = 5; // Start at 5 since we use $1-$4 above
-        if (change24h !== null) { query += `, change24h = $${idx++}`; params.push(change24h); }
-        if (change1h !== null) { query += `, change1h = $${idx++}`; params.push(change1h); }
-        if (change5m !== null) { query += `, change5m = $${idx++}`; params.push(change5m); }
-        if (holderCount !== null) { query += `, holders = $${idx++}, last_holder_check = $${idx++}`; params.push(holderCount); params.push(now); }
+        if (change24h !== null) { query += `, change24h = $${idx++}::DOUBLE PRECISION`; params.push(Number.isFinite(change24h) ? change24h : 0); }
+        if (change1h !== null) { query += `, change1h = $${idx++}::DOUBLE PRECISION`; params.push(Number.isFinite(change1h) ? change1h : 0); }
+        if (change5m !== null) { query += `, change5m = $${idx++}::DOUBLE PRECISION`; params.push(Number.isFinite(change5m) ? change5m : 0); }
+        if (holderCount !== null && Number.isFinite(holderCount)) { query += `, holders = $${idx++}::INTEGER, last_holder_check = $${idx++}::BIGINT`; params.push(Math.floor(holderCount)); params.push(now); }
 
         // Include kscore fields in RETURNING if holders were updated (needed for sig_kscore)
-        query += ` WHERE mint = $4 RETURNING mint, priceusd, marketcap, liquidity, price_source, price_timestamp, price_pool, liquidity_source, liquidity_timestamp, mcap_calculated, holders_source, holders_timestamp, age_days, k_score, conviction_score, conviction_accumulators, conviction_holders, conviction_reducers, conviction_extractors, conviction_analyzed, holders, last_k_score_update`;
+        // Cast conviction_score to DOUBLE PRECISION in case column is still INTEGER
+        query += ` WHERE mint = $4 RETURNING mint, priceusd, marketcap, liquidity, price_source, price_timestamp, price_pool, liquidity_source, liquidity_timestamp, mcap_calculated, holders_source, holders_timestamp, age_days, k_score, CAST(conviction_score AS DOUBLE PRECISION) as conviction_score, conviction_accumulators, conviction_holders, conviction_reducers, conviction_extractors, conviction_analyzed, holders, last_k_score_update`;
+
         const result = await db.get(query, params);
 
         // Re-sign market data to maintain integrity
@@ -814,7 +854,10 @@ async function aggregateAndSaveToken(db, mint) {
             }
         }
 
-    } catch (err) { logger.error(`Aggregation Error ${mint}: ${err.message}`); }
+    } catch (err) {
+        logger.error(`Aggregation Error ${mint}: ${err.message}`);
+        logger.error(`Aggregation Error Stack: ${err.stack}`);
+    }
 }
 
 module.exports = { initDB, getDB, smartCache, enableIndexing, aggregateAndSaveToken };

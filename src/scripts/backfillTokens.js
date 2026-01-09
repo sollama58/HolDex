@@ -1,96 +1,204 @@
 /**
- * Auto Seeder Task (DexScreener Top Volume Version)
- * Replaces the blocked Pump.fun API with DexScreener to fetch top volume tokens.
- * Focuses on 'pump' DEX pairs to find tokens relevant to the PumpFun ecosystem.
+ * Auto Seeder Task (Jupiter + Raydium Version)
+ * Discovers and indexes top volume Solana tokens using independent data sources.
+ * No DexScreener dependency - uses Jupiter Price API + Raydium pools.
  */
-const axios = require('axios');
 const { logger } = require('../services');
 const { saveTokenData } = require('../services/database');
+const priceProvider = require('../services/priceProvider');
 
 // Configuration
 const MIN_VOLUME_24H = 5000; // Only index tokens with > $5k daily volume
-const _BATCH_SIZE = 50; // DexScreener usually returns 30-50 pairs per search
+const BATCH_SIZE = 30;
 let isRunning = false;
 
-// Search terms to find active Pump tokens on DexScreener
-// We rotate these to find "Top" tokens in different clusters
-const SEARCH_TERMS = ['pump', 'solana', 'meme', 'coin', 'moon', 'pepe', 'doge'];
+/**
+ * Fetch top tokens from Raydium pools
+ * Returns tokens sorted by volume/liquidity
+ */
+async function fetchTopRaydiumTokens() {
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+
+        // Raydium V3 API - get top pools by volume
+        const response = await fetch(
+            'https://api-v3.raydium.io/pools/info/list?poolType=all&poolSortField=volume24h&sortType=desc&pageSize=100&page=1',
+            { signal: controller.signal }
+        );
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+            logger.warn(`[AutoSeeder] Raydium API error: ${response.status}`);
+            return [];
+        }
+
+        const data = await response.json();
+        if (!data.success || !data.data?.data?.length) {
+            return [];
+        }
+
+        const tokens = [];
+        const seenMints = new Set();
+
+        for (const pool of data.data.data) {
+            // Extract base token (non-SOL/USDC/USDT)
+            const baseMint = pool.mintA?.address;
+            const quoteMint = pool.mintB?.address;
+
+            // Skip if we've seen this token
+            if (!baseMint || seenMints.has(baseMint)) continue;
+
+            // Skip wrapped SOL and stablecoins
+            const skipMints = [
+                'So11111111111111111111111111111111111111112', // SOL
+                'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+                'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB'  // USDT
+            ];
+            if (skipMints.includes(baseMint)) continue;
+
+            // Volume check
+            const volume = pool.day?.volume || 0;
+            if (volume < MIN_VOLUME_24H) continue;
+
+            seenMints.add(baseMint);
+            tokens.push({
+                mint: baseMint,
+                symbol: pool.mintA?.symbol || 'UNKNOWN',
+                name: pool.mintA?.name || pool.mintA?.symbol || 'Unknown Token',
+                decimals: pool.mintA?.decimals || 9,
+                poolAddress: pool.id,
+                dex: pool.type || 'raydium',
+                price: pool.price || 0,
+                liquidity: pool.tvl || 0,
+                volume24h: volume,
+                image: pool.mintA?.logoURI || null
+            });
+        }
+
+        return tokens;
+
+    } catch (e) {
+        logger.error(`[AutoSeeder] Raydium fetch error: ${e.message}`);
+        return [];
+    }
+}
+
+/**
+ * Fetch token metadata from Helius DAS API
+ */
+async function fetchTokenMetadata(mint) {
+    const config = require('../config/env');
+    if (!config.HELIUS_API_KEY) return null;
+
+    try {
+        const response = await fetch('https://mainnet.helius-rpc.com', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${config.HELIUS_API_KEY}`
+            },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: 'metadata',
+                method: 'getAsset',
+                params: { id: mint }
+            })
+        });
+
+        const data = await response.json();
+        if (data.error || !data.result) return null;
+
+        const asset = data.result;
+        const content = asset.content || {};
+        const metadata = content.metadata || {};
+        const links = content.links || {};
+
+        return {
+            name: metadata.name || asset.name,
+            symbol: metadata.symbol || asset.symbol,
+            image: content.files?.[0]?.uri || links.image,
+            description: metadata.description,
+            website: links.external_url,
+            twitter: null, // Not in DAS response
+            telegram: null
+        };
+
+    } catch (e) {
+        logger.debug(`[AutoSeeder] Metadata fetch error for ${mint}: ${e.message}`);
+        return null;
+    }
+}
 
 async function syncTopTokens(_deps) {
     if (isRunning) return;
     isRunning = true;
 
-    // Rotate search term to diversify "Top" finding
-    const term = SEARCH_TERMS[Math.floor(Math.random() * SEARCH_TERMS.length)];
-    logger.info(`🏆 AutoSeeder: Scanning DexScreener for Top Volume '${term}' tokens...`);
+    logger.info('[AutoSeeder] Scanning Raydium for top volume tokens...');
 
     try {
-        // DexScreener Search API
-        // This returns pairs sorted by relevance/volume usually
-        const response = await axios.get(`https://api.dexscreener.com/latest/dex/search?q=${term}`, {
-            timeout: 10000
-        });
+        // 1. Get top tokens from Raydium
+        const tokens = await fetchTopRaydiumTokens();
 
-        const pairs = response.data.pairs;
-        if (!pairs || pairs.length === 0) {
+        if (tokens.length === 0) {
+            logger.info('[AutoSeeder] No tokens found');
             isRunning = false;
             return;
         }
 
+        logger.info(`[AutoSeeder] Found ${tokens.length} candidate tokens`);
+
+        // 2. Enrich with Jupiter prices in batches
         let addedCount = 0;
+        const mints = tokens.map(t => t.mint);
 
-        for (const pair of pairs) {
-            // 1. Solana Only
-            if (pair.chainId !== 'solana') continue;
+        for (let i = 0; i < mints.length; i += BATCH_SIZE) {
+            const batch = mints.slice(i, i + BATCH_SIZE);
+            const prices = await priceProvider.fetchBatchPrices(batch);
 
-            // 2. Strict Filter: PumpSwap LP (Bonding Curve) OR Raydium (Graduated)
-            // If you ONLY want pre-bonded, check for dexId === 'pump'
-            // If you want ALL successful pump tokens, checking for 'pump' in labels or dexId helps.
-            // Note: DexScreener often labels the DEX as 'raydium' if it graduated.
-            // To find "Only PumpSwap LP", we look for dexId 'pump'.
-            if (pair.dexId !== 'pump') continue;
+            for (const token of tokens.filter(t => batch.includes(t.mint))) {
+                const jupiterData = prices.get(token.mint);
 
-            // 3. Volume Check (Ensure it's a "Top" token)
-            const volume = pair.volume?.h24 || 0;
-            if (volume < MIN_VOLUME_24H) continue;
+                // Get additional metadata from Helius
+                const metadata = await fetchTokenMetadata(token.mint);
 
-            // 4. Map & Save
-            await processPair(pair);
-            addedCount++;
+                const tokenData = {
+                    ticker: metadata?.symbol || token.symbol,
+                    name: metadata?.name || token.name,
+                    description: metadata?.description || `Discovered via AutoSeeder (${token.dex})`,
+                    twitter: metadata?.twitter,
+                    website: metadata?.website,
+                    telegram: metadata?.telegram,
+                    metadataUri: null,
+                    image: metadata?.image || token.image,
+                    isMayhemMode: false,
+                    marketCap: jupiterData?.mcap || 0,
+                    volume24h: jupiterData?.volume24h || token.volume24h,
+                    priceUsd: jupiterData?.priceUsd || token.price,
+                    liquidity: jupiterData?.liquidity || token.liquidity
+                };
+
+                // Use current time as creation (we don't have exact creation time)
+                const createdAt = Date.now();
+
+                // Upsert into DB
+                await saveTokenData(null, token.mint, tokenData, createdAt);
+                addedCount++;
+            }
+
+            // Small delay between batches
+            if (i + BATCH_SIZE < mints.length) {
+                await new Promise(r => setTimeout(r, 500));
+            }
         }
 
-        logger.info(`🏆 AutoSeeder: Synced ${addedCount} active PumpSwap pairs from '${term}'.`);
+        logger.info(`[AutoSeeder] Synced ${addedCount} tokens from Raydium`);
 
     } catch (e) {
-        logger.error(`🏆 AutoSeeder Error: ${e.message}`);
+        logger.error(`[AutoSeeder] Error: ${e.message}`);
     } finally {
         isRunning = false;
     }
-}
-
-async function processPair(pair) {
-    const mcap = pair.fdv || pair.marketCap || 0;
-    
-    const metadata = {
-        ticker: pair.baseToken.symbol,
-        name: pair.baseToken.name,
-        description: `Discovered via AutoSeeder (${pair.dexId})`,
-        twitter: pair.info?.socials?.find(s => s.type === 'twitter')?.url,
-        website: pair.info?.websites?.[0]?.url,
-        telegram: pair.info?.socials?.find(s => s.type === 'telegram')?.url,
-        metadataUri: null,
-        image: pair.info?.imageUrl,
-        isMayhemMode: false,
-        marketCap: mcap,
-        volume24h: pair.volume?.h24 || 0,
-        priceUsd: pair.priceUsd
-    };
-
-    // Use pair creation time or current time
-    const createdAt = pair.pairCreatedAt || Date.now();
-    
-    // Upsert into DB
-    await saveTokenData(null, pair.baseToken.address, metadata, createdAt);
 }
 
 function start(deps) {
@@ -101,4 +209,4 @@ function start(deps) {
     setInterval(() => syncTopTokens(deps), 60000);
 }
 
-module.exports = { start };
+module.exports = { start, syncTopTokens, fetchTopRaydiumTokens };

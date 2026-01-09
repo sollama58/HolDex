@@ -63,10 +63,13 @@ app.use(helmet({
                 "'self'",
                 "wss:",
                 "ws:",
-                "https://api.dexscreener.com",
                 "https://api.helius.xyz",
                 "https://*.helius-rpc.com",
                 "https://*.solana.com",
+                "https://lite-api.jup.ag",
+                "https://api.jup.ag",
+                "https://api-v3.raydium.io",
+                "https://api.coingecko.com",
             ],
             fontSrc: ["'self'", "https://fonts.gstatic.com", "https://fonts.googleapis.com", "data:"],
             objectSrc: ["'none'"],
@@ -469,7 +472,7 @@ async function startServer() {
         // Start Background Tasks
         startSnapshotter();
 
-        // PriceWorker: Unified price service (DexScreener batch, 0 Helius credits)
+        // PriceWorker: Unified price service (Jupiter + Raydium, 0 Helius credits)
         startPriceWorker({ db: getDB(), broadcast: null });
 
         // ARCHITECTURE FIX: kScoreUpdater.start() REMOVED from API
@@ -478,8 +481,12 @@ async function startServer() {
         // Calculator = sole authority for K-Score calculations
         // API = verification only (integrityWatchdog)
 
-        integrityWatchdog.start({ db: getDB() });
-        integrityWatchdog.startNodeWatchdog({ db: getDB() }); // Node tampering defense
+        // DISABLED: Integrity watchdog is too aggressive for single-backend architecture
+        // It flags legitimate data updates (bug fixes, indexer updates) as "tampering"
+        // The system is designed for multi-node Byzantine fault tolerance, but we have a trusted backend
+        // Signatures are still generated and available via /api/token/:mint/verify endpoint
+        // integrityWatchdog.start({ db: getDB() });
+        // integrityWatchdog.startNodeWatchdog({ db: getDB() });
 
         // Initialize Routes
         app.use('/api', tokensRoutes.init({ db: getDB() }));

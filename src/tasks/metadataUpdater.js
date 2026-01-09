@@ -39,7 +39,55 @@ async function processSingleToken(db, t, now) {
     try {
         let poolsData = await fetchGeckoTerminalData(t.mint);
         let tokenDetails = await fetchTokenDetails(t.mint);
-        
+
+        // --- 0. CHECK FOR PLACEHOLDER METADATA AND UPDATE IF POSSIBLE ---
+        // Tokens may be stuck with "New Discovery" or "Unknown" names if metadata
+        // wasn't available when they were first indexed
+        const placeholderNames = ['Unknown', 'New Discovery', '', null, undefined];
+        const placeholderSymbols = ['UNK', 'UNKNOWN', 'NEW', '', null, undefined];
+        const hasPlaceholderName = placeholderNames.includes(t.name);
+        const hasPlaceholderSymbol = placeholderSymbols.includes(t.symbol);
+        const hasNoImage = !t.image || t.image === '';
+
+        if ((hasPlaceholderName || hasPlaceholderSymbol || hasNoImage) && tokenDetails && tokenDetails.attributes) {
+            const attr = tokenDetails.attributes;
+            const newName = attr.name;
+            const newSymbol = attr.symbol;
+            const newImage = attr.image_url;
+
+            // Only update if we have real values from GeckoTerminal
+            const hasRealName = newName && !placeholderNames.includes(newName);
+            const hasRealSymbol = newSymbol && !placeholderSymbols.includes(newSymbol);
+
+            if (hasRealName || hasRealSymbol || newImage) {
+                const metaUpdates = [];
+                const metaParams = [];
+                let metaIdx = 1;
+
+                if (hasPlaceholderName && hasRealName) {
+                    metaUpdates.push(`name = $${metaIdx++}`);
+                    metaParams.push(newName);
+                }
+                if (hasPlaceholderSymbol && hasRealSymbol) {
+                    metaUpdates.push(`symbol = $${metaIdx++}`);
+                    metaParams.push(newSymbol);
+                }
+                if (hasNoImage && newImage) {
+                    metaUpdates.push(`image = $${metaIdx++}`);
+                    metaParams.push(newImage);
+                }
+
+                if (metaUpdates.length > 0) {
+                    metaParams.push(t.mint);
+                    await db.run(
+                        `UPDATE tokens SET ${metaUpdates.join(', ')}, updated_at = NOW() WHERE mint = $${metaIdx}`,
+                        metaParams
+                    );
+                    logger.info(`🔄 [MetadataUpdater] Fixed placeholder metadata for ${t.mint.slice(0, 8)}: ${newName || t.name} (${newSymbol || t.symbol})`);
+                }
+            }
+        }
+
         // --- 1. HOLDER COUNT LOGIC (OPTIMIZED) ---
         let holderCount = t.holders || 0;
         let foundNewData = false;
@@ -102,9 +150,9 @@ async function processSingleToken(db, t, now) {
 
                 const address = attr.address;
                 const dexId = rel?.dex?.data?.id || 'unknown';
-                const price = parseFloat(attr.base_token_price_usd || 0);
-                const liqUsd = parseFloat(attr.reserve_in_usd || 0);
-                const vol24h = parseFloat(attr.volume_usd?.h24 || 0);
+                const price = parseFloat(attr.base_token_price_usd || 0);  // Keep decimals for price
+                const liqUsd = Math.floor(parseFloat(attr.reserve_in_usd || 0));  // Integer
+                const vol24h = Math.floor(parseFloat(attr.volume_usd?.h24 || 0));  // Integer
                 
                 let tokenA = rel?.base_token?.data?.id || null;
                 let tokenB = rel?.quote_token?.data?.id || null;
@@ -128,15 +176,22 @@ async function processSingleToken(db, t, now) {
                     bestChange5m = parseChange(attr.price_change_percentage?.m5);
                 }
 
-                await db.run(`
-                    INSERT INTO pools (
-                        address, mint, dex, price_usd, liquidity_usd, volume_24h, created_at, token_a, token_b
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-                    ON CONFLICT(address) DO UPDATE SET
-                        price_usd = EXCLUDED.price_usd,
-                        liquidity_usd = EXCLUDED.liquidity_usd,
-                        volume_24h = EXCLUDED.volume_24h
-                `, [address, t.mint, dexId, price, liqUsd, vol24h, now, tokenA, tokenB]);
+                try {
+                    await db.run(`
+                        INSERT INTO pools (
+                            address, mint, dex, price_usd, liquidity_usd, volume_24h, created_at, token_a, token_b
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                        ON CONFLICT(address) DO UPDATE SET
+                            price_usd = EXCLUDED.price_usd,
+                            liquidity_usd = EXCLUDED.liquidity_usd,
+                            volume_24h = EXCLUDED.volume_24h
+                    `, [address, t.mint, dexId, price, liqUsd, vol24h, now, tokenA, tokenB]);
+                } catch (poolErr) {
+                    // Ignore foreign key errors - token may have been deleted
+                    if (!poolErr.message.includes('foreign key')) {
+                        throw poolErr;
+                    }
+                }
             }
         }
         
@@ -145,7 +200,7 @@ async function processSingleToken(db, t, now) {
         
         // A. Try direct FDV from Gecko
         if (tokenDetails && tokenDetails.attributes) {
-            marketCap = parseFloat(tokenDetails.attributes.fdv_usd || tokenDetails.attributes.market_cap_usd || 0);
+            marketCap = Math.floor(parseFloat(tokenDetails.attributes.fdv_usd || tokenDetails.attributes.market_cap_usd || 0));  // Integer
         }
 
         // B. Fallback: Manual Calculation
@@ -160,7 +215,7 @@ async function processSingleToken(db, t, now) {
 
             const divisor = Math.pow(10, decimals);
             const supply = rawSupply / divisor;
-            marketCap = supply * bestPrice;
+            marketCap = Math.floor(supply * bestPrice);  // Integer
         }
 
         // Explicitly clear large objects
@@ -173,10 +228,10 @@ async function processSingleToken(db, t, now) {
         let idx = 1;
 
         if (totalVolume24h > 0 || totalLiquidity > 0) {
-            updateParts.push(`volume24h = $${idx++}`); finalParams.push(totalVolume24h);
-            updateParts.push(`marketCap = $${idx++}`); finalParams.push(marketCap);
-            updateParts.push(`priceUsd = $${idx++}`); finalParams.push(bestPrice);
-            updateParts.push(`liquidity = $${idx++}`); finalParams.push(totalLiquidity);
+            updateParts.push(`volume24h = $${idx++}`); finalParams.push(Math.floor(totalVolume24h));  // Integer
+            updateParts.push(`marketCap = $${idx++}`); finalParams.push(Math.floor(marketCap));  // Integer
+            updateParts.push(`priceUsd = $${idx++}`); finalParams.push(bestPrice);  // Keep decimals for price
+            updateParts.push(`liquidity = $${idx++}`); finalParams.push(Math.floor(totalLiquidity));  // Integer
             
             if (bestChange24h !== null) { updateParts.push(`change24h = $${idx++}`); finalParams.push(bestChange24h); }
             if (bestChange1h !== null) { updateParts.push(`change1h = $${idx++}`); finalParams.push(bestChange1h); }
@@ -195,7 +250,7 @@ async function processSingleToken(db, t, now) {
         // Update Holders if we found new data OR if we performed a valid RPC check (even if result was same)
         if (foundNewData || didCheckRpc) {
             updateParts.push(`holders = $${idx++}`);
-            finalParams.push(holderCount);
+            finalParams.push(Math.floor(holderCount));
             
             // Update the check timestamp so we don't spam RPC
             updateParts.push(`last_holder_check = $${idx++}`);
@@ -206,7 +261,7 @@ async function processSingleToken(db, t, now) {
                 INSERT INTO holders_history (mint, count, timestamp)
                 VALUES ($1, $2, $3)
                 ON CONFLICT(mint, timestamp) DO UPDATE SET count = EXCLUDED.count
-            `, [t.mint, holderCount, today]);
+            `, [t.mint, Math.floor(holderCount), today]);
         }
 
         updateParts.push(`updated_at = CURRENT_TIMESTAMP`);
@@ -250,10 +305,11 @@ async function updateMetadata(deps) {
         // Fetch tokens that haven't been updated recently or need holder checks
         // OOM FIX: Reduced LIMIT from 75 to 25 to reduce working set size
         // AGE FIX: Added 'timestamp' to selection to perform comparisons
+        // METADATA FIX: Added name, symbol, image to fix placeholder tokens
         let tokens = await db.all(`
-            SELECT mint, supply, decimals, holders, last_holder_check, timestamp 
-            FROM tokens 
-            ORDER BY liquidity DESC, updated_at ASC 
+            SELECT mint, name, symbol, image, supply, decimals, holders, last_holder_check, timestamp
+            FROM tokens
+            ORDER BY liquidity DESC, updated_at ASC
             LIMIT 25
         `);
         

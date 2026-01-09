@@ -1,6 +1,6 @@
 const { getSolanaConnection } = require('../services/solana');
 const { getDB } = require('../services/database');
-const { indexTokenOnChain } = require('../services/indexer');
+const { queueNewToken } = require('../services/tokenQueue');
 const logger = require('../services/logger');
 const { PublicKey } = require('@solana/web3.js');
 
@@ -74,7 +74,7 @@ async function processNewPoolTx(signature, connection, db, source) {
         }
 
         // --- STRATEGY B: Account Key Signers (Fallback) ---
-        // ONLY use this for Pump.fun. 
+        // ONLY use this for Pump.fun.
         // WARNING: Do NOT use for Raydium. In Raydium Init, the mint is NOT a signer.
         // The Signer is the User (Fee Payer). If we enable this for Raydium, we will index Users as Tokens.
         if (source === 'Pump.fun' && candidateMints.size === 0 && tx.transaction.message.accountKeys) {
@@ -86,8 +86,10 @@ async function processNewPoolTx(signature, connection, db, source) {
                  if (index === 0) return;
 
                  const pubkey = keyObj.pubkey ? keyObj.pubkey.toString() : keyObj.toString();
-                 const isSigner = keyObj.signer || connection._isSigner(keyObj, index);
-                 
+                 // Check signer status from the parsed transaction data
+                 // For parsed transactions, signer info is in the account key object
+                 const isSigner = keyObj.signer === true;
+
                  // Pump.fun 'Create' requires Mint to be a Signer
                  if (isSigner && !isIgnored(pubkey)) {
                       candidateMints.add(pubkey);
@@ -106,19 +108,12 @@ async function processNewPoolTx(signature, connection, db, source) {
             }
 
             const exists = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
-            
+
             if (!exists) {
                 logger.info(`✨ Discovery [${source}]: Found new token ${mint} (Tx: ${signature})`);
-                
-                await db.run(`
-                    INSERT INTO tokens (mint, name, symbol, timestamp, k_score, marketCap, hasCommunityUpdate) 
-                    VALUES ($1, 'New Discovery', 'NEW', $2, 10, 0, FALSE) 
-                    ON CONFLICT (mint) DO NOTHING
-                `, [mint, Date.now()]);
-                
-                indexTokenOnChain(mint).catch(e => 
-                    logger.warn(`Indexing failed for ${mint}: ${e.message}`)
-                );
+
+                // Queue token for processing - will only add to DB once metadata is available
+                await queueNewToken(mint, source);
             }
         }
 

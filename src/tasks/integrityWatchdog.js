@@ -277,14 +277,15 @@ async function restoreFromSnapshot(db, mint, tamperedCategories) {
             snapshot.burned_amount || 0,
             snapshot.burned_percent || 0,
             // K-Score (16-24)
+            // FIX: Ensure all integer columns receive integer values to avoid PostgreSQL type errors
             snapshot.k_score,
             snapshot.conviction_score,
-            snapshot.conviction_accumulators,
-            snapshot.conviction_holders,
-            snapshot.conviction_reducers,
-            snapshot.conviction_extractors,
-            snapshot.conviction_analyzed,
-            snapshot.holders,
+            Math.floor(snapshot.conviction_accumulators || 0),
+            Math.floor(snapshot.conviction_holders || 0),
+            Math.floor(snapshot.conviction_reducers || 0),
+            Math.floor(snapshot.conviction_extractors || 0),
+            Math.floor(snapshot.conviction_analyzed || 0),
+            Math.floor(snapshot.holders || 0),
             snapshot.last_k_score_update || 0,  // Must match signKScore fallback
             // Market (25-27)
             snapshot.priceusd,

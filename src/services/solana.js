@@ -1,6 +1,8 @@
 const { Connection, PublicKey } = require('@solana/web3.js');
 const config = require('../config/env');
 const logger = require('./logger');
+const { getRedis } = require('./redis');
+const rpcMonitor = require('./rpcMonitor');
 
 let connection = null;
 
@@ -130,10 +132,30 @@ async function fetchAccountsForProgram(conn, programId, mintAddress) {
 /**
  * Get holder count using Helius API (paginated, works for any token size)
  * Falls back to standard RPC if Helius unavailable
+ *
+ * OPTIMIZATION: 5-minute Redis cache to reduce RPC calls
+ * Saves ~50-100 calls/hour from website traffic
  */
 async function getHolderCountFromRPC(mintAddress) {
     if (!mintAddress) return 0;
     const cleanMint = mintAddress.trim();
+
+    // Check Redis cache first (5 min TTL)
+    try {
+        const redis = getRedis();
+        if (redis) {
+            const cacheKey = `holders:count:${cleanMint}`;
+            const cached = await redis.get(cacheKey);
+            if (cached) {
+                logger.debug(`[Holders] Cache hit for ${cleanMint.slice(0, 8)}`);
+                return parseInt(cached);
+            }
+        }
+    } catch (e) {
+        logger.debug(`[Holders] Cache check failed: ${e.message}`);
+    }
+
+    let finalCount = 0;
 
     // Try Helius API first (paginated, works for millions of holders)
     if (config.HELIUS_API_KEY) {
@@ -167,6 +189,9 @@ async function getHolderCountFromRPC(mintAddress) {
                     })
                 });
 
+                // Track RPC call for monitoring
+                rpcMonitor.trackRpcCall('getTokenAccounts', 1, { mint: cleanMint }).catch(() => {});
+
                 const data = await response.json();
                 if (data.error || !data.result?.token_accounts) break;
 
@@ -181,7 +206,7 @@ async function getHolderCountFromRPC(mintAddress) {
             }
 
             if (count > 0) {
-                return count;
+                finalCount = count;
             }
         } catch (e) {
             logger.warn(`[Holders] Helius API failed for ${cleanMint.slice(0,8)}: ${e.message}`);
@@ -189,13 +214,29 @@ async function getHolderCountFromRPC(mintAddress) {
     }
 
     // Fallback to standard RPC (may fail for large tokens)
-    const conn = getSolanaConnection();
-    let count = await fetchAccountsForProgram(conn, TOKEN_PROGRAM_ID, cleanMint);
-    if (count === 0) {
-        const count2022 = await fetchAccountsForProgram(conn, TOKEN_2022_PROGRAM_ID, cleanMint);
-        count += count2022;
+    if (finalCount === 0) {
+        const conn = getSolanaConnection();
+        let count = await fetchAccountsForProgram(conn, TOKEN_PROGRAM_ID, cleanMint);
+        if (count === 0) {
+            const count2022 = await fetchAccountsForProgram(conn, TOKEN_2022_PROGRAM_ID, cleanMint);
+            count += count2022;
+        }
+        finalCount = count;
     }
-    return count;
+
+    // Cache the result (5 min TTL)
+    try {
+        const redis = getRedis();
+        if (redis && finalCount > 0) {
+            const cacheKey = `holders:count:${cleanMint}`;
+            await redis.set(cacheKey, finalCount.toString(), 'EX', 300);
+            logger.debug(`[Holders] Cached count for ${cleanMint.slice(0, 8)}: ${finalCount}`);
+        }
+    } catch (e) {
+        logger.debug(`[Holders] Cache write failed: ${e.message}`);
+    }
+
+    return finalCount;
 }
 
 async function analyzeTokenHolders(mintAddress, excludeAddresses = []) {
@@ -203,6 +244,10 @@ async function analyzeTokenHolders(mintAddress, excludeAddresses = []) {
     try {
         const mint = new PublicKey(mintAddress);
         const largest = await retryRPC(() => conn.getTokenLargestAccounts(mint), 2, 2000);
+
+        // Track RPC call
+        rpcMonitor.trackRpcCall('getTokenLargestAccounts', 1, { mint: mintAddress }).catch(() => {});
+
         if (!largest || !largest.value || largest.value.length === 0) return { avgHoldHours: 0 };
 
         const topAccounts = largest.value;
@@ -212,13 +257,16 @@ async function analyzeTokenHolders(mintAddress, excludeAddresses = []) {
         const excludeSet = new Set(excludeAddresses.map(a => a ? a.toString() : ''));
 
         for (const acc of topAccounts) {
-            if (validSamples >= 15) break; 
+            if (validSamples >= 15) break;
             if (excludeSet.has(acc.address.toString())) continue;
 
             try {
                 const pubkey = new PublicKey(acc.address);
                 const signatures = await retryRPC(() => conn.getSignaturesForAddress(pubkey, { limit: 50 }), 2, 1000);
-                
+
+                // Track RPC call
+                rpcMonitor.trackRpcCall('getSignaturesForAddress', 1, { address: pubkey.toBase58() }).catch(() => {});
+
                 if (signatures.length > 0) {
                     const oldestTx = signatures[signatures.length - 1];
                     const txTime = oldestTx.blockTime || nowSec;
