@@ -240,14 +240,24 @@ async function executeKScoreWrite(signedWrite, db) {
     `, [k_score, timestamp, node_id, signature, timestamp, mint]);
 
     // Record in token_verifications for consensus tracking
-    await db.query(`
-        INSERT INTO token_verifications (mint, node_id, k_score, node_signature, verified_at)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (mint, node_id) DO UPDATE SET
-            k_score = EXCLUDED.k_score,
-            node_signature = EXCLUDED.node_signature,
-            verified_at = EXCLUDED.verified_at
-    `, [mint, node_id, k_score, signature, timestamp]);
+    // Wrapped in try-catch to handle foreign key violations if node doesn't exist yet
+    try {
+        await db.query(`
+            INSERT INTO token_verifications (mint, node_id, k_score, node_signature, verified_at)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (mint, node_id) DO UPDATE SET
+                k_score = EXCLUDED.k_score,
+                node_signature = EXCLUDED.node_signature,
+                verified_at = EXCLUDED.verified_at
+        `, [mint, node_id, k_score, signature, timestamp]);
+    } catch (verifyErr) {
+        // Foreign key violation (node not in nodes table) - log but don't fail the K-Score update
+        if (verifyErr.code === '23503') {
+            logger.warn(`[SignedWrites] Skipping token_verification for ${mint}: node ${node_id} not registered`);
+        } else {
+            throw verifyErr;
+        }
+    }
 }
 
 /**
@@ -256,14 +266,23 @@ async function executeKScoreWrite(signedWrite, db) {
 async function executeVerificationWrite(signedWrite, db) {
     const { mint, k_score, verification_hash: _verification_hash, node_id, signature, timestamp } = signedWrite;
 
-    await db.query(`
-        INSERT INTO token_verifications (mint, node_id, k_score, node_signature, verified_at)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (mint, node_id) DO UPDATE SET
-            k_score = EXCLUDED.k_score,
-            node_signature = EXCLUDED.node_signature,
-            verified_at = EXCLUDED.verified_at
-    `, [mint, node_id, k_score, signature, timestamp]);
+    try {
+        await db.query(`
+            INSERT INTO token_verifications (mint, node_id, k_score, node_signature, verified_at)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (mint, node_id) DO UPDATE SET
+                k_score = EXCLUDED.k_score,
+                node_signature = EXCLUDED.node_signature,
+                verified_at = EXCLUDED.verified_at
+        `, [mint, node_id, k_score, signature, timestamp]);
+    } catch (err) {
+        // Foreign key violation (node not in nodes table) - log but don't fail
+        if (err.code === '23503') {
+            logger.warn(`[SignedWrites] Skipping verification write for ${mint}: node ${node_id} not registered`);
+        } else {
+            throw err;
+        }
+    }
 }
 
 /**

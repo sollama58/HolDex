@@ -244,10 +244,10 @@ function startPriceWorker(deps) {
     // Initial run after 5 seconds
     setTimeout(() => runPriceUpdateCycle(db, broadcast), 5000);
 
-    // Main cycle: every 30 seconds
+    // Main cycle: every 60 seconds
     const interval = setInterval(() => {
         runPriceUpdateCycle(db, broadcast);
-    }, 30 * 1000);
+    }, 60 * 1000);
 
     return {
         stop: () => clearInterval(interval),

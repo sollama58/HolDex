@@ -223,35 +223,47 @@ async function processSingleToken(db, t, now) {
         tokenDetails = null;
 
         // --- 4. CONSTRUCT QUERY ---
+        // FIX: Only update fields that have valid data (> 0), never overwrite good data with null/0
         const finalParams = [];
         const updateParts = [];
         let idx = 1;
 
-        if (totalVolume24h > 0 || totalLiquidity > 0) {
-            updateParts.push(`volume24h = $${idx++}`); finalParams.push(Math.floor(totalVolume24h));  // Integer
-            updateParts.push(`marketCap = $${idx++}`); finalParams.push(Math.floor(marketCap));  // Integer
-            updateParts.push(`priceUsd = $${idx++}`); finalParams.push(bestPrice);  // Keep decimals for price
-            updateParts.push(`liquidity = $${idx++}`); finalParams.push(Math.floor(totalLiquidity));  // Integer
-            
+        // Only update each field if it has valid data
+        if (totalVolume24h > 0) {
+            updateParts.push(`volume24h = $${idx++}`); finalParams.push(Math.floor(totalVolume24h));
+        }
+        if (marketCap > 0) {
+            updateParts.push(`marketCap = $${idx++}`); finalParams.push(Math.floor(marketCap));
+        }
+        if (bestPrice > 0) {
+            updateParts.push(`priceUsd = $${idx++}`); finalParams.push(bestPrice);
+        }
+        if (totalLiquidity > 0) {
+            updateParts.push(`liquidity = $${idx++}`); finalParams.push(Math.floor(totalLiquidity));
+        }
+
+        // Only update change percentages if we have valid price data
+        if (bestPrice > 0) {
             if (bestChange24h !== null) { updateParts.push(`change24h = $${idx++}`); finalParams.push(bestChange24h); }
             if (bestChange1h !== null) { updateParts.push(`change1h = $${idx++}`); finalParams.push(bestChange1h); }
             if (bestChange5m !== null) { updateParts.push(`change5m = $${idx++}`); finalParams.push(bestChange5m); }
-            
-            // FIX: Only update timestamp if it's missing (0) or if we found an OLDER timestamp (earlier creation).
-            // Never overwrite an old timestamp with a newer one.
-            if (earliestPoolTime && earliestPoolTime > 0) {
-                const currentTs = parseInt(t.timestamp) || 0;
-                if (currentTs === 0 || earliestPoolTime < currentTs) {
-                    updateParts.push(`timestamp = $${idx++}`); finalParams.push(earliestPoolTime);
-                }
+        }
+
+        // FIX: Only update timestamp if it's missing (0) or if we found an OLDER timestamp (earlier creation).
+        // Never overwrite an old timestamp with a newer one.
+        if (earliestPoolTime && earliestPoolTime > 0) {
+            const currentTs = parseInt(t.timestamp) || 0;
+            if (currentTs === 0 || earliestPoolTime < currentTs) {
+                updateParts.push(`timestamp = $${idx++}`); finalParams.push(earliestPoolTime);
             }
         }
         
-        // Update Holders if we found new data OR if we performed a valid RPC check (even if result was same)
-        if (foundNewData || didCheckRpc) {
+        // Update Holders if we found new data OR if we performed a valid RPC check
+        // FIX: Only update if holderCount > 0 to avoid overwriting good data with 0
+        if ((foundNewData || didCheckRpc) && holderCount > 0) {
             updateParts.push(`holders = $${idx++}`);
             finalParams.push(Math.floor(holderCount));
-            
+
             // Update the check timestamp so we don't spam RPC
             updateParts.push(`last_holder_check = $${idx++}`);
             finalParams.push(now);
@@ -262,6 +274,10 @@ async function processSingleToken(db, t, now) {
                 VALUES ($1, $2, $3)
                 ON CONFLICT(mint, timestamp) DO UPDATE SET count = EXCLUDED.count
             `, [t.mint, Math.floor(holderCount), today]);
+        } else if (foundNewData || didCheckRpc) {
+            // Still update the check timestamp even if we got 0, to avoid repeated checks
+            updateParts.push(`last_holder_check = $${idx++}`);
+            finalParams.push(now);
         }
 
         updateParts.push(`updated_at = CURRENT_TIMESTAMP`);

@@ -441,14 +441,24 @@ async function recordVerification(mint, _deps) {
     const { k_score, sig_kscore } = token.rows[0];
 
     // Record our verification
-    await db.query(`
-        INSERT INTO token_verifications (mint, node_id, k_score, node_signature, verified_at)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (mint, node_id) DO UPDATE SET
-            k_score = EXCLUDED.k_score,
-            node_signature = EXCLUDED.node_signature,
-            verified_at = EXCLUDED.verified_at
-    `, [mint, currentNodeId, k_score, sig_kscore, Date.now()]);
+    // Wrapped in try-catch to handle foreign key violations if node doesn't exist yet
+    try {
+        await db.query(`
+            INSERT INTO token_verifications (mint, node_id, k_score, node_signature, verified_at)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (mint, node_id) DO UPDATE SET
+                k_score = EXCLUDED.k_score,
+                node_signature = EXCLUDED.node_signature,
+                verified_at = EXCLUDED.verified_at
+        `, [mint, currentNodeId, k_score, sig_kscore, Date.now()]);
+    } catch (err) {
+        // Foreign key violation (node not in nodes table) - log but don't fail
+        if (err.code === '23503') {
+            logger.warn(`[DistributedPolling] Skipping verification record for ${mint}: node ${currentNodeId} not registered`);
+        } else {
+            throw err;
+        }
+    }
 
     // Check for consensus
     await checkConsensus(mint);
