@@ -24,7 +24,7 @@ async function forceInit() {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 metadata JSONB,
-                k_score INTEGER DEFAULT 0,
+                k_score DOUBLE PRECISION DEFAULT 0,
                 marketCap DOUBLE PRECISION DEFAULT 0,
                 volume24h DOUBLE PRECISION DEFAULT 0,
                 change24h DOUBLE PRECISION DEFAULT 0,
