@@ -4,6 +4,10 @@
  * This script removes all tokens from the database that do NOT have community updates.
  * Only tokens with hasCommunityUpdate = TRUE will be preserved.
  *
+ * This includes:
+ * - Database: tokens, pools, candles, holder data, k-score history, etc.
+ * - Redis: cached token data, integrity snapshots, holder counts
+ *
  * WARNING: This is a destructive operation! Always backup your database first.
  *
  * Usage:
@@ -13,6 +17,7 @@
 
 require('dotenv').config();
 const { Pool } = require('pg');
+const Redis = require('ioredis');
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
@@ -76,6 +81,7 @@ async function main() {
             console.log('   node scripts/wipeUnverifiedTokens.js --confirm');
             console.log('');
             console.log('⚠️  WARNING: This will also delete related data from:');
+            console.log('   DATABASE:');
             console.log('   - pools (liquidity pool data)');
             console.log('   - holders_history (holder count history)');
             console.log('   - holder_history (holder trend data)');
@@ -83,9 +89,18 @@ async function main() {
             console.log('   - k_score_history (K-Score evolution data)');
             console.log('   - supply_history (supply change data)');
             console.log('   - token_verifications (node verification data)');
+            console.log('   - token_updates (pending community updates)');
             console.log('   - webhooks (Helius webhook subscriptions)');
             console.log('   - wallet_tx_cache (wallet transaction cache)');
             console.log('   - candles_1m (price candle data via pools)');
+            console.log('   - active_trackers (pool tracking data)');
+            console.log('');
+            console.log('   REDIS CACHE:');
+            console.log('   - kscore:snapshot:* (integrity snapshots)');
+            console.log('   - token:detail:* (token detail cache)');
+            console.log('   - public:token:* (public token cache)');
+            console.log('   - holders:count:* (holder count cache)');
+            console.log('   - oracle:kscore:* (oracle cache)');
             return;
         }
 
@@ -227,6 +242,15 @@ async function main() {
                 console.log(`   ✓ Deleted ${walletTxResult.rowCount} wallet_tx_cache records`);
             }
 
+            if (await tableExists('token_updates')) {
+                console.log('   Deleting token_updates...');
+                const tokenUpdatesResult = await client.query(`
+                    DELETE FROM token_updates
+                    WHERE mint IN (${unverifiedMintsSubquery})
+                `);
+                console.log(`   ✓ Deleted ${tokenUpdatesResult.rowCount} token_updates records`);
+            }
+
             // 4. Delete tokens LAST (parent table)
             console.log('   Deleting tokens...');
             const tokensResult = await client.query(`
@@ -236,7 +260,7 @@ async function main() {
             console.log(`   ✓ Deleted ${tokensResult.rowCount} token records`);
 
             await client.query('COMMIT');
-            console.log('\n✅ Transaction committed successfully!');
+            console.log('\n✅ Database transaction committed successfully!');
 
         } catch (err) {
             await client.query('ROLLBACK');
@@ -244,6 +268,58 @@ async function main() {
             throw err;
         } finally {
             client.release();
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // REDIS CLEANUP: Clear cached data for deleted tokens
+        // ═══════════════════════════════════════════════════════════
+        console.log('\n🔴 Cleaning up Redis cache...');
+
+        const REDIS_URL = process.env.REDIS_URL;
+        if (REDIS_URL) {
+            let redis;
+            try {
+                redis = new Redis(REDIS_URL, {
+                    maxRetriesPerRequest: 3,
+                    lazyConnect: true
+                });
+                await redis.connect();
+
+                // Get list of deleted mints (need to query again since we already deleted)
+                // Instead, we'll clear ALL token-related caches and let them rebuild on demand
+                const cachePatterns = [
+                    'kscore:snapshot:*',
+                    'token:detail:*',
+                    'public:token:*',
+                    'holders:count:*',
+                    'oracle:kscore:*',
+                    'public:tokens:*',
+                    'api:tokens:*'
+                ];
+
+                let totalDeleted = 0;
+                for (const pattern of cachePatterns) {
+                    try {
+                        const keys = await redis.keys(pattern);
+                        if (keys.length > 0) {
+                            await redis.del(...keys);
+                            console.log(`   ✓ Cleared ${keys.length} keys matching ${pattern}`);
+                            totalDeleted += keys.length;
+                        }
+                    } catch (_e) {
+                        console.log(`   ⚠ Could not clear ${pattern}`);
+                    }
+                }
+
+                console.log(`   ✓ Total Redis keys cleared: ${totalDeleted}`);
+                await redis.quit();
+
+            } catch (redisErr) {
+                console.log(`   ⚠ Redis cleanup skipped: ${redisErr.message}`);
+                if (redis) await redis.quit().catch(() => {});
+            }
+        } else {
+            console.log('   ⚠ REDIS_URL not set, skipping Redis cleanup');
         }
 
         // Final count
