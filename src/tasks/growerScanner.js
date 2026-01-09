@@ -91,21 +91,26 @@ async function scanGrowers(deps) {
                     logger.info(`🚀 [GROWER PROMOTION] Token Qualified!`);
                     logger.info(`   🎯 Mint:   ${mint}`);
                     logger.info(`   CX Mcap:   $${mcap.toLocaleString()}`);
-                    
-                    // INSERT NEW RECORD (Score 15)
-                    await db.run(`
-                        INSERT INTO tokens (mint, name, symbol, timestamp, updated_at, k_score, marketCap, hasCommunityUpdate) 
-                        VALUES ($1, 'Growth Discovery', 'GROW', $2, NOW(), 15, $3, FALSE) 
-                        ON CONFLICT (mint) DO UPDATE SET
-                            k_score = GREATEST(tokens.k_score, 15),
-                            marketCap = $3,
-                            updated_at = NOW()
-                    `, [mint, Date.now(), mcap]);
-                    
-                    logger.info(`   ✅ Database: Inserted successfully`);
 
-                    await indexTokenOnChain(mint);
-                    logger.info(`   ✅ Indexer:  Triggered deep scan`);
+                    // Don't insert placeholder - let indexer fetch real metadata first
+                    // Just trigger the indexer which will only insert with real metadata
+                    try {
+                        await indexTokenOnChain(mint);
+                        logger.info(`   ✅ Indexer: Token indexed with real metadata`);
+
+                        // Update market cap if token now exists
+                        await db.run(`
+                            UPDATE tokens SET
+                                k_score = GREATEST(COALESCE(k_score, 0), 15),
+                                marketCap = CASE WHEN $1 > COALESCE(marketCap, 0) THEN $1 ELSE marketCap END,
+                                updated_at = NOW()
+                            WHERE mint = $2
+                        `, [mcap, mint]);
+
+                        logger.info(`   ✅ Database: Market data updated`);
+                    } catch (indexErr) {
+                        logger.warn(`   ⚠️ Indexer failed for ${mint.slice(0, 8)}: ${indexErr.message}`);
+                    }
 
                     await redis.srem(PENDING_KEY, memberStr);
                     console.log(`==================================================\n`);

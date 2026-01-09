@@ -20,7 +20,17 @@ async function processToken(mint) {
 
     try {
         let meta = await fetchTokenMetadata(mint);
-        
+
+        // Check if we got real metadata (not placeholder)
+        const hasRealName = meta && meta.name && meta.name !== 'Unknown' && meta.name !== 'New Discovery' && meta.name.length > 0;
+        const hasRealSymbol = meta && meta.symbol && meta.symbol !== 'UNK' && meta.symbol !== 'UNKNOWN';
+
+        if (!hasRealName || !hasRealSymbol) {
+            // Metadata not ready - skip this token, it will be retried later
+            logger.warn(`⚠️ Worker: Skipping ${mint.slice(0, 8)} - metadata not ready (name: ${meta?.name}, symbol: ${meta?.symbol})`);
+            return;
+        }
+
         let supply = '1000000000';
         let decimals = 9;
         try {
@@ -30,24 +40,26 @@ async function processToken(mint) {
         } catch (_e) { /* ignore */ }
 
         const baseData = {
-            name: meta?.name || 'Unknown',
-            ticker: meta?.symbol || 'UNKNOWN',
+            name: meta.name,
+            ticker: meta.symbol,
             image: meta?.image || null,
         };
-        
+
         // Release meta object
         meta = null;
 
         const finalSupply = supply || '0';
         const finalDecimals = decimals || 9;
 
-        // FIX: Do NOT update identity fields (name, symbol, image, decimals) on conflict
-        // Identity fields are signed with sig_identity - updating them breaks the signature
+        // Only insert if we have real metadata - prevents placeholder tokens
         await db.run(`
             INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, timestamp)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ON CONFLICT(mint) DO UPDATE SET
-            updated_at = NOW()
+                name = CASE WHEN tokens.name IN ('Unknown', 'New Discovery', '') OR tokens.name IS NULL THEN EXCLUDED.name ELSE tokens.name END,
+                symbol = CASE WHEN tokens.symbol IN ('UNKNOWN', 'UNK', 'NEW', '') OR tokens.symbol IS NULL THEN EXCLUDED.symbol ELSE tokens.symbol END,
+                image = CASE WHEN tokens.image IS NULL OR tokens.image = '' THEN EXCLUDED.image ELSE tokens.image END,
+                updated_at = NOW()
         `, [
             mint,
             baseData.name,

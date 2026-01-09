@@ -37,13 +37,23 @@ async function indexTokenOnChain(mint, retryCount = 0) {
         const MAX_RETRIES = 3;
         const RETRY_DELAY_MS = 2000;
 
-        if ((!meta || meta.name === 'Unknown' || !meta.name) && retryCount < MAX_RETRIES) {
-            logger.info(`⏳ [Indexer] Metadata not ready for ${mint.slice(0, 8)}, will retry in ${RETRY_DELAY_MS}ms...`);
+        // Check if we got real metadata (not placeholder)
+        const hasRealName = meta && meta.name && meta.name !== 'Unknown' && meta.name !== 'New Discovery' && meta.name.length > 0;
+        const hasRealSymbol = meta && meta.symbol && meta.symbol !== 'UNK' && meta.symbol !== 'UNKNOWN';
+
+        if ((!hasRealName || !hasRealSymbol) && retryCount < MAX_RETRIES) {
+            logger.info(`⏳ [Indexer] Metadata not ready for ${mint.slice(0, 8)} (name: ${meta?.name}, symbol: ${meta?.symbol}), will retry in ${RETRY_DELAY_MS}ms...`);
             await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
             return indexTokenOnChain(mint, retryCount + 1);
         }
 
-        logger.info(`📝 [Indexer] Metadata: ${meta?.name || 'Unknown'} (${meta?.symbol || 'UNKNOWN'})`);
+        // If still no valid metadata after retries, skip this token entirely
+        if (!hasRealName || !hasRealSymbol) {
+            logger.warn(`⚠️ [Indexer] Skipping ${mint.slice(0, 8)} - no valid metadata after ${MAX_RETRIES} retries`);
+            return { name: 'Unknown', ticker: 'UNK', pairs: [] };
+        }
+
+        logger.info(`📝 [Indexer] Metadata: ${meta.name} (${meta.symbol})`);
 
         let supply = '1000000000';
         let decimals = 9;
@@ -62,7 +72,7 @@ async function indexTokenOnChain(mint, retryCount = 0) {
             logger.warn(`⚠️ [Indexer] No market data from GeckoTerminal for ${mint.slice(0, 8)}`);
         }
 
-        const baseData = { name: meta?.name || 'Unknown', ticker: meta?.symbol || 'UNKNOWN', image: meta?.image || null };
+        const baseData = { name: meta.name, ticker: meta.symbol, image: meta?.image || null };
         const initialPrice = marketData?.priceUsd || 0;
         const initialVol = marketData?.volume24h || 0;
         const initialChange = marketData?.change24h || 0;
