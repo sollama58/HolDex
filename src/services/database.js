@@ -783,10 +783,10 @@ async function aggregateAndSaveToken(db, mint) {
                     const today = Math.floor(now / (24 * 60 * 60 * 1000)) * (24 * 60 * 60 * 1000);
                     
                     await db.run(`
-                        INSERT INTO holders_history (mint, count, timestamp) 
+                        INSERT INTO holders_history (mint, count, timestamp)
                         VALUES ($1, $2, $3)
                         ON CONFLICT (mint, timestamp) DO UPDATE SET count = EXCLUDED.count
-                    `, [mint, holderCount, today]);
+                    `, [mint, Math.floor(holderCount), today]);
                 }
             } catch (e) {
                 logger.warn(`Holder check failed for ${mint}: ${e.message}`);
