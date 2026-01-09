@@ -828,7 +828,10 @@ async function aggregateAndSaveToken(db, mint) {
             }
         }
 
-    } catch (err) { logger.error(`Aggregation Error ${mint}: ${err.message}`); }
+    } catch (err) {
+        logger.error(`Aggregation Error ${mint}: ${err.message}`);
+        logger.error(`Aggregation Error Stack: ${err.stack}`);
+    }
 }
 
 module.exports = { initDB, getDB, smartCache, enableIndexing, aggregateAndSaveToken };

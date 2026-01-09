@@ -35,16 +35,32 @@ async function main() {
         const client = await pool.connect();
 
         try {
+            // First, show ALL numeric columns in tokens table
+            const allNumericResult = await client.query(`
+                SELECT column_name, data_type, numeric_precision, numeric_scale
+                FROM information_schema.columns
+                WHERE table_name = 'tokens'
+                AND data_type IN ('integer', 'bigint', 'numeric', 'real', 'double precision', 'smallint')
+                ORDER BY column_name
+            `);
+
+            console.log('ALL numeric columns in tokens table:');
+            for (const col of allNumericResult.rows) {
+                const marker = col.data_type === 'integer' ? ' <-- INTEGER!' : '';
+                console.log(`  ${col.column_name}: ${col.data_type}${marker}`);
+            }
+            console.log('');
+
             // Get current column types
             const columnsResult = await client.query(`
                 SELECT column_name, data_type, numeric_precision, numeric_scale
                 FROM information_schema.columns
                 WHERE table_name = 'tokens'
-                AND column_name IN ('marketcap', 'k_score', 'liquidity', 'volume24h', 'priceusd', 'change24h', 'change1h', 'change5m')
+                AND column_name IN ('marketcap', 'k_score', 'liquidity', 'volume24h', 'priceusd', 'change24h', 'change1h', 'change5m', 'conviction_score', 'mcap_calculated')
                 ORDER BY column_name
             `);
 
-            console.log('Current column types:');
+            console.log('Target columns to check:');
             for (const col of columnsResult.rows) {
                 console.log(`  ${col.column_name}: ${col.data_type}`);
             }
@@ -59,7 +75,9 @@ async function main() {
                 { name: 'priceusd', targetType: 'DOUBLE PRECISION' },
                 { name: 'change24h', targetType: 'DOUBLE PRECISION' },
                 { name: 'change1h', targetType: 'DOUBLE PRECISION' },
-                { name: 'change5m', targetType: 'DOUBLE PRECISION' }
+                { name: 'change5m', targetType: 'DOUBLE PRECISION' },
+                { name: 'conviction_score', targetType: 'DOUBLE PRECISION' },
+                { name: 'mcap_calculated', targetType: 'DOUBLE PRECISION' }
             ];
 
             for (const col of columnsToFix) {
