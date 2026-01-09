@@ -76,7 +76,7 @@ function clampValue(value, min, max, fallback = 0) {
 }
 
 // ============================================
-// SOL PRICE (CoinGecko - free, reliable)
+// SOL PRICE (Jupiter - scalable, no rate limits)
 // ============================================
 
 async function getSolPrice() {
@@ -98,20 +98,31 @@ async function getSolPrice() {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 5000);
 
+        // Use Jupiter Price API for SOL price - more scalable than CoinGecko
+        const headers = {};
+        if (JUPITER_API_KEY) {
+            headers['x-api-key'] = JUPITER_API_KEY;
+        }
+
         const response = await fetch(
-            'https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd',
-            { signal: controller.signal }
+            `${JUPITER_PRICE_URL}?ids=${SOL_MINT}`,
+            {
+                signal: controller.signal,
+                headers: Object.keys(headers).length > 0 ? headers : undefined
+            }
         );
         clearTimeout(timeout);
 
-        if (!response.ok) throw new Error(`CoinGecko: ${response.status}`);
+        if (!response.ok) throw new Error(`Jupiter: ${response.status}`);
 
         const data = await response.json();
-        const price = data?.solana?.usd || 0;
+        // Jupiter V3 format: { data: { [mint]: { usdPrice } } }
+        const priceData = data?.data?.[SOL_MINT] || data?.[SOL_MINT];
+        const price = parseFloat(priceData?.usdPrice || priceData?.price) || 0;
 
         if (price > 0) {
             solPriceCache = { price, timestamp: now, lastAttempt: now };
-            logger.debug(`[PriceProvider] SOL: $${price}`);
+            logger.debug(`[PriceProvider] SOL: $${price} (via Jupiter)`);
         }
 
         return price || solPriceCache.price || 190;

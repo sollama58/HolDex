@@ -1,6 +1,6 @@
 /**
  * On-Chain Price Service
- * - SOL/USD from CoinGecko (free, reliable)
+ * - SOL/USD from Jupiter Price API (scalable, no rate limits)
  * - Token/SOL from on-chain vault balances (Helius RPC)
  * - Token/USD = Token/SOL × SOL/USD
  */
@@ -10,6 +10,8 @@ const config = require('../config/env');
 
 const HELIUS_API_KEY = config.HELIUS_API_KEY;
 const HELIUS_RPC_URL = 'https://mainnet.helius-rpc.com/';
+const JUPITER_PRICE_URL = 'https://api.jup.ag/price/v3';
+const JUPITER_API_KEY = config.JUPITER_API_KEY || process.env.JUPITER_API_KEY;
 
 // Security: API key in header for axios calls
 const HELIUS_HEADERS = HELIUS_API_KEY
@@ -32,8 +34,9 @@ const SOL_CACHE_DURATION = 300000; // 5 minutes
 const SOL_RETRY_COOLDOWN = 60000;  // 1 minute cooldown after error
 
 /**
- * Get SOL/USD price from CoinGecko
+ * Get SOL/USD price from Jupiter Price API
  * Single source of truth - cached globally to prevent rate limits
+ * Jupiter is more scalable than CoinGecko for high-traffic applications
  */
 async function getSolPrice() {
     const now = Date.now();
@@ -52,21 +55,33 @@ async function getSolPrice() {
     solPriceCache.lastAttempt = now;
 
     try {
+        const headers = {};
+        if (JUPITER_API_KEY) {
+            headers['x-api-key'] = JUPITER_API_KEY;
+        }
+
         const response = await axios.get(
-            'https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd',
-            { timeout: 5000 }
+            `${JUPITER_PRICE_URL}?ids=${SOL_MINT}`,
+            {
+                timeout: 5000,
+                headers: Object.keys(headers).length > 0 ? headers : undefined
+            }
         );
-        const price = response.data?.solana?.usd || 0;
+
+        // Jupiter V3 format: { data: { [mint]: { usdPrice } } }
+        const priceData = response.data?.data?.[SOL_MINT] || response.data?.[SOL_MINT];
+        const price = parseFloat(priceData?.usdPrice || priceData?.price) || 0;
+
         if (price > 0) {
             solPriceCache = { price, timestamp: now, lastAttempt: now };
-            console.log(`[PriceService] SOL price: $${price} (cached for 5m)`);
+            console.log(`[PriceService] SOL price: $${price} (via Jupiter, cached for 5m)`);
         }
         return price || solPriceCache.price || 190;
     } catch (e) {
         // On error, keep lastAttempt to prevent cascade
         // Don't spam logs - only log if it's been a while
         if (!solPriceCache.price) {
-            console.error('[PriceService] CoinGecko error:', e.message);
+            console.error('[PriceService] Jupiter error:', e.message);
         }
         return solPriceCache.price || 190; // Fallback to cached or default
     }

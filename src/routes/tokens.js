@@ -63,6 +63,7 @@ const logger = require('../services/logger');
 const cacheControl = require('../middleware/httpCache');
 const unifiedRateLimiter = require('../middleware/unifiedRateLimiter');
 const { indexTokenOnChain, searchGeckoTerminal, quickIndexFromGecko, fetchInitialMarketData } = require('../services/indexer');
+const tokenSearch = require('../services/tokenSearch');
 const { addTokenToMasterWebhook } = require('../services/heliusWebhook');
 const verification = require('../services/verificationService');
 const dataVerification = require('../services/dataVerification');
@@ -2671,35 +2672,31 @@ function init(deps) {
                         } else {
                             let indexed = false;
 
-                            // Strategy 1: Try GeckoTerminal first (faster, has market data)
+                            // Strategy 1: Try Helius/Jupiter first (scalable, no rate limits)
                             try {
-                                const geckoData = await fetchInitialMarketData(search);
-                                if (geckoData && geckoData.priceUsd > 0) {
-                                    // Get metadata from GeckoTerminal token endpoint
-                                    const tokenUrl = `https://api.geckoterminal.com/api/v2/networks/solana/tokens/${search}`;
-                                    const tokenRes = await axios.get(tokenUrl, { timeout: 5000 });
-                                    const attrs = tokenRes.data?.data?.attributes;
+                                const tokenData = await tokenSearch.getTokenByMint(search);
+                                if (tokenData && tokenData.name && tokenData.name !== 'Unknown') {
+                                    // Get market data from Jupiter + Raydium
+                                    const marketData = await fetchInitialMarketData(search);
 
-                                    if (attrs && attrs.name && attrs.symbol) {
-                                        await quickIndexFromGecko({
-                                            mint: search,
-                                            name: attrs.name,
-                                            symbol: attrs.symbol,
-                                            image: attrs.image_url || null,
-                                            priceUsd: geckoData.priceUsd,
-                                            volume24h: geckoData.volume24h,
-                                            marketCap: geckoData.marketCap,
-                                            liquidity: geckoData.liquidity
-                                        });
-                                        indexed = true;
-                                        logger.info(`[Search] Indexed ${search.slice(0,8)} via GeckoTerminal`);
-                                    }
+                                    await quickIndexFromGecko({
+                                        mint: search,
+                                        name: tokenData.name,
+                                        symbol: tokenData.symbol,
+                                        image: tokenData.image || null,
+                                        priceUsd: tokenData.priceUsd || marketData?.priceUsd || 0,
+                                        volume24h: marketData?.volume24h || 0,
+                                        marketCap: marketData?.marketCap || 0,
+                                        liquidity: marketData?.liquidity || 0
+                                    });
+                                    indexed = true;
+                                    logger.info(`[Search] Indexed ${search.slice(0,8)} via Helius/Jupiter`);
                                 }
-                            } catch (geckoErr) {
-                                logger.debug(`[Search] GeckoTerminal lookup failed for ${search.slice(0,8)}: ${geckoErr.message}`);
+                            } catch (heliusErr) {
+                                logger.debug(`[Search] Helius/Jupiter lookup failed for ${search.slice(0,8)}: ${heliusErr.message}`);
                             }
 
-                            // Strategy 2: Fall back to on-chain indexing if GeckoTerminal failed
+                            // Strategy 2: Fall back to on-chain indexing if Helius/Jupiter failed
                             if (!indexed) {
                                 try {
                                     const result = await indexTokenOnChain(search);

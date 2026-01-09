@@ -7,36 +7,72 @@ const { enqueueTokenUpdate } = require('./queue');
 const { snapshotPools } = require('../indexer/tasks/snapshotter');
 const logger = require('./logger');
 const axios = require('axios');
+const tokenSearch = require('./tokenSearch');
 
 const solanaConnection = getSolanaConnection();
 
+/**
+ * Fetch initial market data for a token
+ * Uses Jupiter + Raydium (primary) with GeckoTerminal fallback
+ */
 async function fetchInitialMarketData(mint) {
+    // Try Jupiter + Raydium first (scalable, no rate limits)
+    const data = await tokenSearch.fetchInitialMarketData(mint);
+    if (data && data.priceUsd > 0) {
+        return data;
+    }
+
+    // Fallback to GeckoTerminal if Jupiter fails
     try {
         const url = `https://api.geckoterminal.com/api/v2/networks/solana/tokens/${mint}`;
         const res = await axios.get(url, { timeout: 3000 });
         const attrs = res.data.data.attributes;
         return {
-            priceUsd: parseFloat(attrs.price_usd || 0),  // Keep decimals for price
-            volume24h: Math.floor(parseFloat(attrs.volume_usd?.h24 || 0)),  // Integer
-            change24h: parseFloat(attrs.price_change_percentage?.h24 || 0),  // Keep decimals for percentage
-            change1h: parseFloat(attrs.price_change_percentage?.h1 || 0),  // Keep decimals for percentage
-            change5m: parseFloat(attrs.price_change_percentage?.m5 || 0),  // Keep decimals for percentage
-            marketCap: Math.floor(parseFloat(attrs.fdv_usd || attrs.market_cap_usd || 0)),  // Integer
-            liquidity: Math.floor(parseFloat(attrs.total_reserve_in_usd || 0))  // Integer - total liquidity across pools
+            priceUsd: parseFloat(attrs.price_usd || 0),
+            volume24h: Math.floor(parseFloat(attrs.volume_usd?.h24 || 0)),
+            change24h: parseFloat(attrs.price_change_percentage?.h24 || 0),
+            change1h: parseFloat(attrs.price_change_percentage?.h1 || 0),
+            change5m: parseFloat(attrs.price_change_percentage?.m5 || 0),
+            marketCap: Math.floor(parseFloat(attrs.fdv_usd || attrs.market_cap_usd || 0)),
+            liquidity: Math.floor(parseFloat(attrs.total_reserve_in_usd || 0))
         };
-    } catch (_e) { return null; }
+    } catch (_e) {
+        return null;
+    }
 }
 
 /**
- * Search GeckoTerminal for tokens matching a query string
- * Returns token mints that can be indexed
+ * Search for tokens matching a query string
+ * Uses Jupiter token list (primary) with GeckoTerminal fallback
+ * Scalable solution - no rate limit issues
+ *
  * @param {string} query - Search term (name or symbol)
  * @param {number} limit - Max results to return
  * @returns {Promise<Array<{mint: string, name: string, symbol: string, image: string, priceUsd: number, volume24h: number, marketCap: number}>>}
  */
 async function searchGeckoTerminal(query, limit = 10) {
+    // Try Jupiter/Helius search first (scalable)
     try {
-        // GeckoTerminal search endpoint
+        const results = await tokenSearch.searchTokens(query, limit);
+        if (results.length > 0) {
+            logger.info(`🔍 [TokenSearch] Found ${results.length} results for "${query}" via Jupiter`);
+            return results.map(r => ({
+                mint: r.mint,
+                name: r.name,
+                symbol: r.symbol,
+                image: r.image,
+                priceUsd: r.priceUsd || 0,
+                volume24h: 0, // Will be fetched during indexing
+                marketCap: 0, // Will be fetched during indexing
+                liquidity: 0  // Will be fetched during indexing
+            }));
+        }
+    } catch (e) {
+        logger.debug(`[TokenSearch] Jupiter search failed, trying GeckoTerminal: ${e.message}`);
+    }
+
+    // Fallback to GeckoTerminal
+    try {
         const url = `https://api.geckoterminal.com/api/v2/search/pools?query=${encodeURIComponent(query)}&network=solana&page=1`;
         const res = await axios.get(url, { timeout: 5000 });
 
@@ -90,7 +126,7 @@ async function searchGeckoTerminal(query, limit = 10) {
                         volume24h: Math.floor(parseFloat(attrs.volume_usd?.h24 || 0)),
                         marketCap: Math.floor(parseFloat(tokenAttrs.fdv_usd || attrs.fdv_usd || 0)),
                         liquidity: Math.floor(parseFloat(attrs.reserve_in_usd || 0)),
-                        _matchScore: matchesQuery ? 1 : 0 // Internal scoring for sorting
+                        _matchScore: matchesQuery ? 1 : 0
                     };
 
                     results.push(tokenResult);
@@ -98,19 +134,18 @@ async function searchGeckoTerminal(query, limit = 10) {
             }
         }
 
-        // Sort by match score (tokens that match query first), then by volume
+        // Sort by match score then by volume
         results.sort((a, b) => {
             if (a._matchScore !== b._matchScore) return b._matchScore - a._matchScore;
             return (b.volume24h || 0) - (a.volume24h || 0);
         });
 
-        // Remove internal scoring field
         results.forEach(r => delete r._matchScore);
 
-        logger.info(`🔍 [GeckoSearch] Found ${results.length} results for "${query}"`);
+        logger.info(`🔍 [GeckoSearch] Found ${results.length} results for "${query}" (fallback)`);
         return results;
     } catch (e) {
-        logger.warn(`⚠️ [GeckoSearch] Search failed for "${query}": ${e.message}`);
+        logger.warn(`⚠️ [TokenSearch] All search methods failed for "${query}": ${e.message}`);
         return [];
     }
 }
