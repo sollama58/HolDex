@@ -145,7 +145,7 @@ async function getMarketData(mint) {
 }
 
 // Legacy alias for backward compatibility within this file
-const getDexScreenerData = getMarketData;
+const _getDexScreenerData = getMarketData;
 
 /**
  * Parse rate limit headers from Helius response

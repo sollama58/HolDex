@@ -44,7 +44,7 @@ async function fetchTopRaydiumTokens() {
         for (const pool of data.data.data) {
             // Extract base token (non-SOL/USDC/USDT)
             const baseMint = pool.mintA?.address;
-            const quoteMint = pool.mintB?.address;
+            const _quoteMint = pool.mintB?.address;
 
             // Skip if we've seen this token
             if (!baseMint || seenMints.has(baseMint)) continue;

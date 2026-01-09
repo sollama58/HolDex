@@ -8,7 +8,7 @@ const { queueNewToken } = require('../services/tokenQueue');
 // --- CONSTANTS ---
 const RAYDIUM_PROGRAM_ID = new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
 const PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5DkzonjNwu78hRvfCKubJ14M5uBEwF6P');
-const PENDING_KEY = 'pending_growers'; 
+const _PENDING_KEY = 'pending_growers'; 
 
 // System Addresses to Ignore
 const IGNORED_MINTS = new Set([
@@ -125,7 +125,7 @@ async function processNewPoolTx(signature, connection, db, source) {
             return;
         }
 
-        const redis = getClient();
+        const _redis = getClient();
         
         for (const mint of candidateMints) {
             const ignoreReason = isIgnored(mint);
