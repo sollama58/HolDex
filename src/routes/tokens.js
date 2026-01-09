@@ -28,6 +28,31 @@ const proxyRateLimit = rateLimit({
     legacyHeaders: false,
     keyGenerator: (req) => req.headers['x-forwarded-for'] || req.ip
 });
+
+// SECURITY: Rate limiter for token indexing (prevents RPC abuse via CA search spam)
+// Limits: 10 new token indexing requests per IP per minute
+const INDEX_RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+const INDEX_RATE_LIMIT_MAX = 10; // 10 indexing requests per minute per IP
+
+async function checkIndexingRateLimit(ip) {
+    const redis = getClient();
+    if (!redis) return { allowed: true }; // Allow if Redis unavailable
+
+    const key = `indexing_ratelimit:${ip}`;
+    try {
+        const current = await redis.incr(key);
+        if (current === 1) {
+            await redis.pexpire(key, INDEX_RATE_LIMIT_WINDOW_MS);
+        }
+        if (current > INDEX_RATE_LIMIT_MAX) {
+            const ttl = await redis.pttl(key);
+            return { allowed: false, retryAfter: Math.ceil(ttl / 1000) };
+        }
+        return { allowed: true, remaining: INDEX_RATE_LIMIT_MAX - current };
+    } catch (_e) {
+        return { allowed: true }; // Allow on Redis error
+    }
+}
 const { smartCache, aggregateAndSaveToken } = require('../services/database');
 const { getSolanaConnection } = require('../services/solana'); 
 const config = require('../config/env');
@@ -1289,11 +1314,16 @@ function init(deps) {
                 ]);
 
                 if (!token) {
-                    try {
-                        const indexed = await indexTokenOnChain(mint);
-                        token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
-                        pairs = indexed.pairs || [];
-                    } catch (_e) { /* ignore */ }
+                    // Rate limit indexing to prevent RPC abuse
+                    const clientIp = req.headers['x-forwarded-for'] || req.ip || 'unknown';
+                    const rateCheck = await checkIndexingRateLimit(clientIp);
+                    if (rateCheck.allowed) {
+                        try {
+                            const indexed = await indexTokenOnChain(mint);
+                            token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+                            pairs = indexed.pairs || [];
+                        } catch (_e) { /* ignore */ }
+                    }
                 }
 
                 if (!token) return { success: false, error: "Token not found" };
@@ -1597,12 +1627,21 @@ function init(deps) {
                     // Contract address search - index if not found
                     rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE mint = $1`, [search]);
                     if (rows.length === 0) {
-                        try {
-                            await indexTokenOnChain(search);
-                            rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE mint = $1`, [search]);
-                        } catch (indexErr) {
-                            logger.error(`[PublicSearch] Indexing failed for ${search}: ${indexErr.message}`);
+                        // Rate limit indexing to prevent RPC abuse
+                        const clientIp = req.headers['x-forwarded-for'] || req.ip || 'unknown';
+                        const rateCheck = await checkIndexingRateLimit(clientIp);
+                        if (!rateCheck.allowed) {
+                            logger.warn(`[PublicSearch] Indexing rate limited for IP ${clientIp}`);
+                            // Return empty results instead of error to avoid exposing rate limit info
                             rows = [];
+                        } else {
+                            try {
+                                await indexTokenOnChain(search);
+                                rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE mint = $1`, [search]);
+                            } catch (indexErr) {
+                                logger.error(`[PublicSearch] Indexing failed for ${search}: ${indexErr.message}`);
+                                rows = [];
+                            }
                         }
                     }
                 } else {
@@ -1762,14 +1801,20 @@ function init(deps) {
             ]);
 
             if (!token) {
-                // AUTO-INDEX: Try to index new token on-chain (matches /api/token/:mint behavior)
-                try {
-                    logger.info(`[PublicToken] Auto-indexing new token: ${mint}`);
-                    const indexed = await indexTokenOnChain(mint);
-                    token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
-                    pairs = indexed?.pairs || [];
-                } catch (indexErr) {
-                    logger.warn(`[PublicToken] Auto-index failed for ${mint}: ${indexErr.message}`);
+                // Rate limit indexing to prevent RPC abuse
+                const clientIp = req.headers['x-forwarded-for'] || req.ip || 'unknown';
+                const rateCheck = await checkIndexingRateLimit(clientIp);
+
+                if (rateCheck.allowed) {
+                    // AUTO-INDEX: Try to index new token on-chain (matches /api/token/:mint behavior)
+                    try {
+                        logger.info(`[PublicToken] Auto-indexing new token: ${mint}`);
+                        const indexed = await indexTokenOnChain(mint);
+                        token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+                        pairs = indexed?.pairs || [];
+                    } catch (indexErr) {
+                        logger.warn(`[PublicToken] Auto-index failed for ${mint}: ${indexErr.message}`);
+                    }
                 }
 
                 // Still not found after indexing attempt
@@ -2023,12 +2068,20 @@ function init(deps) {
                     // Contract address search - index if not found
                     rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
                     if (rows.length === 0) {
-                        try {
-                            await indexTokenOnChain(search);
-                            rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
-                        } catch (indexErr) {
-                            logger.error(`[Search] Indexing failed for ${search}: ${indexErr.message}`);
+                        // Rate limit indexing to prevent RPC abuse
+                        const clientIp = req.headers['x-forwarded-for'] || req.ip || 'unknown';
+                        const rateCheck = await checkIndexingRateLimit(clientIp);
+                        if (!rateCheck.allowed) {
+                            logger.warn(`[Search] Indexing rate limited for IP ${clientIp}`);
                             rows = [];
+                        } else {
+                            try {
+                                await indexTokenOnChain(search);
+                                rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
+                            } catch (indexErr) {
+                                logger.error(`[Search] Indexing failed for ${search}: ${indexErr.message}`);
+                                rows = [];
+                            }
                         }
                     }
                 } else {

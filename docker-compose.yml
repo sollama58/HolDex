@@ -31,7 +31,11 @@ services:
     networks:
       - holdex-network
 
-  # WORKER (Background Jobs - Metadata, etc)
+  # WORKER (LEGACY - Background token queue processing)
+  # NOTE: Automatic token discovery is DISABLED. This worker processes
+  # tokens from the token_queue, but nothing pushes to that queue anymore.
+  # Tokens are only added via user CA search in the API.
+  # Consider removing this service if not needed.
   worker:
     build: .
     command: node src/worker.js
@@ -48,7 +52,9 @@ services:
     networks:
       - holdex-network
 
-  # LISTENER (New Token Discovery - Pump.fun/Raydium)
+  # LISTENER (K-Score Analysis Engine)
+  # NOTE: Automatic token discovery is DISABLED. This worker only runs
+  # K-Score analysis loop for existing tokens. See listener_worker.js.
   listener:
     build: .
     command: node src/listener_worker.js

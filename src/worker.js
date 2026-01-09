@@ -9,10 +9,12 @@ const logger = require('./services/logger');
 const metadataUpdater = require('./tasks/metadataUpdater'); 
 
 const QUEUE_KEY = 'token_queue';
+const RETRY_KEY = 'token_queue:retry';
+const MAX_RETRIES = 5;
 let isRunning = false;
 
 // OPTIMIZATION: Explicitly nullify large objects to help GC
-async function processToken(mint) {
+async function processToken(mint, retryCount = 0) {
     const db = getDB();
     const connection = getSolanaConnection();
 
@@ -26,9 +28,19 @@ async function processToken(mint) {
         const hasRealSymbol = meta && meta.symbol && meta.symbol !== 'UNK' && meta.symbol !== 'UNKNOWN';
 
         if (!hasRealName || !hasRealSymbol) {
-            // Metadata not ready - skip this token, it will be retried later
-            logger.warn(`⚠️ Worker: Skipping ${mint.slice(0, 8)} - metadata not ready (name: ${meta?.name}, symbol: ${meta?.symbol})`);
-            return;
+            // Metadata not ready - re-queue for retry if under max retries
+            if (retryCount < MAX_RETRIES) {
+                const redis = getClient();
+                if (redis) {
+                    // Store retry data with incremented count
+                    const retryData = JSON.stringify({ mint, retryCount: retryCount + 1 });
+                    await redis.lpush(RETRY_KEY, retryData);
+                    logger.info(`⏳ Worker: Re-queued ${mint.slice(0, 8)} for retry (${retryCount + 1}/${MAX_RETRIES}) - metadata not ready`);
+                }
+            } else {
+                logger.warn(`⚠️ Worker: Giving up on ${mint.slice(0, 8)} after ${MAX_RETRIES} retries - metadata unavailable (name: ${meta?.name}, symbol: ${meta?.symbol})`);
+            }
+            return { success: false, reason: 'metadata_not_ready' };
         }
 
         let supply = '1000000000';
@@ -132,25 +144,45 @@ async function startWorker() {
             if (!isRunning) return;
             try {
                 // OPTIMIZATION: Process one item at a time to control memory pressure
-                const item = await redis.rpop(QUEUE_KEY);
+                // First check main queue
+                let item = await redis.rpop(QUEUE_KEY);
+                let retryCount = 0;
+
+                // If main queue empty, check retry queue (with delay for metadata to become available)
+                if (!item) {
+                    const retryItem = await redis.rpop(RETRY_KEY);
+                    if (retryItem) {
+                        try {
+                            const retryData = JSON.parse(retryItem);
+                            item = retryData.mint;
+                            retryCount = retryData.retryCount || 0;
+                            // Add delay before retry to give metadata time to propagate
+                            await new Promise(r => setTimeout(r, 3000));
+                        } catch (_e) {
+                            // If parse fails, treat as plain mint address
+                            item = retryItem;
+                        }
+                    }
+                }
+
                 if (item) {
-                    await processToken(item);
-                    
+                    await processToken(item, retryCount);
+
                     // Small delay to allow GC to run if needed
                     if (global.gc) {
                         try { global.gc(); } catch (_e) { /* ignore */ }
                     }
-                    setTimeout(runLoop, 50); 
+                    setTimeout(runLoop, 50);
                 } else {
                     // Backoff when empty
-                    setTimeout(runLoop, 2000); 
+                    setTimeout(runLoop, 2000);
                 }
             } catch (err) {
                 logger.error(`Worker Loop Error: ${err.message}`);
                 setTimeout(runLoop, 5000);
             }
         };
-        
+
         runLoop();
 
     } catch (e) {

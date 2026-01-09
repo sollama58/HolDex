@@ -21,7 +21,8 @@ async function fetchInitialMarketData(mint) {
             change24h: parseFloat(attrs.price_change_percentage?.h24 || 0),  // Keep decimals for percentage
             change1h: parseFloat(attrs.price_change_percentage?.h1 || 0),  // Keep decimals for percentage
             change5m: parseFloat(attrs.price_change_percentage?.m5 || 0),  // Keep decimals for percentage
-            marketCap: Math.floor(parseFloat(attrs.fdv_usd || attrs.market_cap_usd || 0))  // Integer
+            marketCap: Math.floor(parseFloat(attrs.fdv_usd || attrs.market_cap_usd || 0)),  // Integer
+            liquidity: Math.floor(parseFloat(attrs.total_reserve_in_usd || 0))  // Integer - total liquidity across pools
         };
     } catch (_e) { return null; }
 }
@@ -193,6 +194,7 @@ async function indexTokenOnChain(mint, retryCount = 0) {
         const initialChange1h = marketData?.change1h || 0;
         const initialChange5m = marketData?.change5m || 0;
         const initialMcap = marketData?.marketCap || 0;
+        const initialLiquidity = marketData?.liquidity || 0;
 
         // 1. CREATE TOKEN RECORD
         // FIX: Update market data on conflict, but only update identity if it's still "Unknown"
@@ -220,6 +222,7 @@ async function indexTokenOnChain(mint, retryCount = 0) {
                     ELSE tokens.image
                 END,
                 priceUsd = CASE WHEN EXCLUDED.priceUsd > 0 THEN EXCLUDED.priceUsd ELSE tokens.priceUsd END,
+                liquidity = CASE WHEN EXCLUDED.liquidity > 0 THEN EXCLUDED.liquidity ELSE tokens.liquidity END,
                 marketCap = CASE WHEN EXCLUDED.marketCap > 0 THEN EXCLUDED.marketCap ELSE tokens.marketCap END,
                 volume24h = CASE WHEN EXCLUDED.volume24h > 0 THEN EXCLUDED.volume24h ELSE tokens.volume24h END,
                 change24h = CASE WHEN EXCLUDED.priceUsd > 0 THEN EXCLUDED.change24h ELSE tokens.change24h END,
@@ -228,7 +231,7 @@ async function indexTokenOnChain(mint, retryCount = 0) {
                 updated_at = NOW()
             `, [
                 mint, baseData.name, baseData.ticker, baseData.image, supply, decimals,
-                initialPrice, 0, initialMcap, initialVol, initialChange,
+                initialPrice, initialLiquidity, initialMcap, initialVol, initialChange,
                 initialChange1h, initialChange5m, Date.now()
             ]);
             logger.info(`💾 [Indexer] Token record created/updated for ${mint.slice(0, 8)}`);
