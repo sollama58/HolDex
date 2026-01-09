@@ -74,37 +74,50 @@ async function indexTokenOnChain(mint, retryCount = 0) {
         // FIX: Update market data on conflict, but only update identity if it's still "Unknown"
         // Identity fields (name, symbol, image) are signed with sig_identity
         // If already indexed with real data, preserve it. If still "Unknown", update it.
-        await db.run(`
-            INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, change1h, change5m, timestamp)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-            ON CONFLICT(mint) DO UPDATE SET
-            name = CASE
-                WHEN tokens.name IN ('Unknown', 'New Discovery', '') OR tokens.name IS NULL
-                THEN EXCLUDED.name
-                ELSE tokens.name
-            END,
-            symbol = CASE
-                WHEN tokens.symbol IN ('UNKNOWN', 'UNK', 'NEW', '') OR tokens.symbol IS NULL
-                THEN EXCLUDED.symbol
-                ELSE tokens.symbol
-            END,
-            image = CASE
-                WHEN tokens.image IS NULL OR tokens.image = ''
-                THEN EXCLUDED.image
-                ELSE tokens.image
-            END,
-            priceUsd = EXCLUDED.priceUsd,
-            marketCap = EXCLUDED.marketCap,
-            volume24h = EXCLUDED.volume24h,
-            change24h = EXCLUDED.change24h,
-            change1h = EXCLUDED.change1h,
-            change5m = EXCLUDED.change5m,
-            updated_at = NOW()
-        `, [
-            mint, baseData.name, baseData.ticker, baseData.image, supply, decimals,
-            initialPrice, 0, initialMcap, initialVol, initialChange,
-            initialChange1h, initialChange5m, Date.now()
-        ]);
+        try {
+            await db.run(`
+                INSERT INTO tokens (mint, name, symbol, image, supply, decimals, priceUsd, liquidity, marketCap, volume24h, change24h, change1h, change5m, timestamp)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                ON CONFLICT(mint) DO UPDATE SET
+                name = CASE
+                    WHEN tokens.name IN ('Unknown', 'New Discovery', '') OR tokens.name IS NULL
+                    THEN EXCLUDED.name
+                    ELSE tokens.name
+                END,
+                symbol = CASE
+                    WHEN tokens.symbol IN ('UNKNOWN', 'UNK', 'NEW', '') OR tokens.symbol IS NULL
+                    THEN EXCLUDED.symbol
+                    ELSE tokens.symbol
+                END,
+                image = CASE
+                    WHEN tokens.image IS NULL OR tokens.image = ''
+                    THEN EXCLUDED.image
+                    ELSE tokens.image
+                END,
+                priceUsd = EXCLUDED.priceUsd,
+                marketCap = EXCLUDED.marketCap,
+                volume24h = EXCLUDED.volume24h,
+                change24h = EXCLUDED.change24h,
+                change1h = EXCLUDED.change1h,
+                change5m = EXCLUDED.change5m,
+                updated_at = NOW()
+            `, [
+                mint, baseData.name, baseData.ticker, baseData.image, supply, decimals,
+                initialPrice, 0, initialMcap, initialVol, initialChange,
+                initialChange1h, initialChange5m, Date.now()
+            ]);
+            logger.info(`💾 [Indexer] Token record created/updated for ${mint.slice(0, 8)}`);
+        } catch (tokenErr) {
+            logger.error(`❌ [Indexer] Failed to create token record for ${mint}: ${tokenErr.message}`);
+            throw tokenErr; // Can't continue without token record
+        }
+
+        // Verify token exists before adding pools (foreign key constraint)
+        const tokenExists = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
+        if (!tokenExists) {
+            logger.error(`❌ [Indexer] Token record not found after insert for ${mint.slice(0, 8)}`);
+            throw new Error('Token insert verification failed');
+        }
 
         // 2. FIND POOLS
         const pools = await findPoolsOnChain(mint);

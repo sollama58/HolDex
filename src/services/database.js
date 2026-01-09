@@ -721,7 +721,14 @@ async function enableIndexing(db, mint, poolData) {
             poolData.reserve_a || null, poolData.reserve_b || null
         ]);
         await db.run(`INSERT INTO active_trackers (pool_address, priority, last_check) VALUES ($1, 10, 0) ON CONFLICT(pool_address) DO NOTHING`, [poolData.pairAddress]);
-    } catch (_err) { /* ignore */ }
+    } catch (err) {
+        // Log foreign key errors - these indicate token wasn't created first
+        if (err.message && err.message.includes('foreign key')) {
+            logger.error(`[enableIndexing] Foreign key error for ${mint.slice(0,8)}: Token must exist before adding pools`);
+        } else {
+            logger.warn(`[enableIndexing] Pool insert failed for ${mint.slice(0,8)}: ${err.message}`);
+        }
+    }
 }
 
 async function aggregateAndSaveToken(db, mint) {

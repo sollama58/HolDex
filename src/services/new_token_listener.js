@@ -1,6 +1,6 @@
 const { getSolanaConnection } = require('../services/solana');
 const { getDB } = require('../services/database');
-const { indexTokenOnChain } = require('../services/indexer');
+const { queueNewToken } = require('../services/tokenQueue');
 const logger = require('../services/logger');
 const { PublicKey } = require('@solana/web3.js');
 
@@ -106,19 +106,12 @@ async function processNewPoolTx(signature, connection, db, source) {
             }
 
             const exists = await db.get('SELECT mint FROM tokens WHERE mint = $1', [mint]);
-            
+
             if (!exists) {
                 logger.info(`✨ Discovery [${source}]: Found new token ${mint} (Tx: ${signature})`);
-                
-                await db.run(`
-                    INSERT INTO tokens (mint, name, symbol, timestamp, k_score, marketCap, hasCommunityUpdate) 
-                    VALUES ($1, 'New Discovery', 'NEW', $2, 10, 0, FALSE) 
-                    ON CONFLICT (mint) DO NOTHING
-                `, [mint, Date.now()]);
-                
-                indexTokenOnChain(mint).catch(e => 
-                    logger.warn(`Indexing failed for ${mint}: ${e.message}`)
-                );
+
+                // Queue token for processing - will only add to DB once metadata is available
+                await queueNewToken(mint, source);
             }
         }
 

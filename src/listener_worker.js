@@ -9,6 +9,7 @@ const logger = require('./services/logger');
 const { updateSingleToken } = require('./tasks/kScoreUpdater');
 const growerScanner = require('./tasks/growerScanner');
 const newTokenListener = require('./tasks/newTokenListener');
+const { startQueueProcessor, stopQueueProcessor } = require('./services/tokenQueue');
 
 // GLOBAL ERROR HANDLERS
 process.on('uncaughtException', (err) => {
@@ -97,7 +98,11 @@ async function startListenerWorker() {
             indexerService.start();
         }
 
-        // 3. Start New Token Listener (With Delay to let Redis settle)
+        // 3. Start Token Queue Processor (processes new tokens once metadata is available)
+        logger.info("📥 LISTENER: Starting Token Queue Processor...");
+        startQueueProcessor();
+
+        // 4. Start New Token Listener (With Delay to let Redis settle)
         if (newTokenListener && typeof newTokenListener.startNewTokenListener === 'function') {
             logger.info("🛰️ LISTENER: Starting New Token Discovery...");
             setTimeout(() => {
@@ -126,6 +131,7 @@ async function startListenerWorker() {
 
 process.on('SIGINT', () => {
     logger.info("🎧 LISTENER WORKER: Shutting down...");
+    stopQueueProcessor();
     process.exit(0);
 });
 
