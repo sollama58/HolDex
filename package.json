@@ -23,7 +23,8 @@
     "start:calculator": "node src/calculator.js",
     "db:reset": "node scripts/resetDatabase.js",
     "db:reset:dry": "node scripts/resetDatabase.js --dry-run",
-    "db:reset:force": "node scripts/resetDatabase.js --force"
+    "db:reset:force": "node scripts/resetDatabase.js --force",
+    "db:reset:full": "node scripts/resetDatabase.js --force --reinit --clear-redis"
   },
   "dependencies": {
     "@socket.io/redis-adapter": "^8.2.1",
