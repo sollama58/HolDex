@@ -783,9 +783,70 @@
         .holdex-table tr:hover td:first-child { background: rgba(20, 20, 20, 0.95); }
         .img-token { transition: transform 0.2s, border-color 0.2s; }
         .holdex-table tr:hover .img-token { transform: scale(1.05); border-color: #ea580c; }
+
+        /* Announcement Banner */
+        #announcement-banner {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            background: linear-gradient(90deg, #ea580c 0%, #f97316 50%, #fb923c 100%);
+            transform: translateY(-100%);
+            transition: transform 0.3s ease;
+        }
+        #announcement-banner.visible {
+            transform: translateY(0);
+        }
+        #announcement-banner.hidden {
+            display: none;
+        }
+        .announcement-banner-content {
+            max-width: 1800px;
+            margin: 0 auto;
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            color: white;
+        }
+        .announcement-banner-close {
+            background: rgba(0,0,0,0.2);
+            border: none;
+            border-radius: 4px;
+            padding: 4px;
+            cursor: pointer;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+            flex-shrink: 0;
+        }
+        .announcement-banner-close:hover {
+            background: rgba(0,0,0,0.4);
+        }
+        /* Push body content down when banner is visible */
+        body.has-announcement-banner {
+            padding-top: 44px;
+        }
     </style>
 </head>
 <body>
+
+<!-- ANNOUNCEMENT BANNER - Shows at top when active -->
+<div id="announcement-banner" class="hidden">
+    <div class="announcement-banner-content">
+        <div class="flex items-center gap-2">
+            <i data-lucide="megaphone" width="16" class="text-white flex-shrink-0"></i>
+            <span id="announcement-banner-text" class="text-sm font-medium truncate"></span>
+        </div>
+        <button onclick="closeAnnouncementBanner()" class="announcement-banner-close" title="Dismiss">
+            <i data-lucide="x" width="16"></i>
+        </button>
+    </div>
+</div>
 
 <!-- TOKEN POPOVER - Orb Markets inspired, credit: helius.dev -->
 <div id="token-popover" class="token-popover">
@@ -1817,31 +1878,38 @@
                 <h3 class="text-xl font-bold text-white font-sans">How HolDex Works</h3>
             </div>
         </div>
-        
+
         <div class="space-y-6 text-sm text-[#e0e0e0]">
             <div class="flex gap-3">
-                <div class="text-[#ea580c] mt-1"><i data-lucide="radar" width="20"></i></div>
+                <div class="text-[#ea580c] mt-1"><i data-lucide="search" width="20"></i></div>
                 <div>
-                    <h4 class="font-bold text-white mb-1">Auto-Discovery</h4>
-                    <p class="text-[#737373]">We listen to the Solana blockchain. New pools on Raydium & Pump.fun are indexed instantly once they hit significant volume.</p>
+                    <h4 class="font-bold text-white mb-1">Search Any Token</h4>
+                    <p class="text-[#737373]">Search by name, symbol, or paste a CA (Contract Address). We search Jupiter's verified token list and Helius for instant results.</p>
                 </div>
             </div>
             <div class="flex gap-3">
-                <div class="text-[#22c55e] mt-1"><i data-lucide="search" width="20"></i></div>
+                <div class="text-[#22c55e] mt-1"><i data-lucide="plus-circle" width="20"></i></div>
                 <div>
-                    <h4 class="font-bold text-white mb-1">Instant Search</h4>
-                    <p class="text-[#737373]">Paste any CA (Contract Address) into the search bar to force-index a token instantly, regardless of volume.</p>
+                    <h4 class="font-bold text-white mb-1">Add New Tokens</h4>
+                    <p class="text-[#737373]">Paste any CA to instantly index a new token. We fetch metadata from Helius and pricing from Jupiter & Raydium.</p>
+                </div>
+            </div>
+            <div class="flex gap-3">
+                <div class="text-[#3b82f6] mt-1"><i data-lucide="activity" width="20"></i></div>
+                <div>
+                    <h4 class="font-bold text-white mb-1">K-Score Analysis</h4>
+                    <p class="text-[#737373]">Once indexed, tokens get deep on-chain analysis. K-Score measures holder behavior, distribution quality, and longevity.</p>
                 </div>
             </div>
             <div class="flex gap-3">
                 <div class="text-[#fb923c] mt-1"><i data-lucide="shield-check" width="20"></i></div>
                 <div>
                     <h4 class="font-bold text-white mb-1">Community Verification</h4>
-                    <p class="text-[#737373]">Devs can update social links via the Update tab. We verify these on-chain to give the green checkmark.</p>
+                    <p class="text-[#737373]">Devs can update social links via the Update tab to get the green checkmark and unlock full K-Score visibility.</p>
                 </div>
             </div>
         </div>
-        
+
         <button onclick="toggleHowItWorksModal()" class="w-full bg-[#141414] text-[#fb923c] py-3 rounded-lg font-bold text-sm mt-6">Got it</button>
     </div>
 </div>
@@ -1884,6 +1952,10 @@
             <i data-lucide="grid" width="24" class="text-[#ea580c]"></i> Ecosystem
         </h3>
         <div class="space-y-3">
+            <a href="https://alonisthe.dev/ecosystem" target="_blank" class="block bg-[#141414] border border-[#ea580c] p-4 rounded-xl hover:border-[#fb923c] transition group">
+                <div class="font-bold text-[#ea580c] group-hover:text-[#fb923c]">HOME</div>
+                <div class="text-xs text-[#737373]">Ecosystem Hub</div>
+            </a>
             <a href="https://alonisthe.dev/ignition" target="_blank" class="block bg-[#141414] border border-[#252525] p-4 rounded-xl hover:border-[#ea580c] transition group">
                 <div class="font-bold text-white group-hover:text-[#ea580c]">Ignition</div>
                 <div class="text-xs text-[#737373]">Launchpad & Tools</div>
@@ -1895,14 +1967,6 @@
             <a href="https://alonisthe.dev/burns" target="_blank" class="block bg-[#141414] border border-[#252525] p-4 rounded-xl hover:border-[#ea580c] transition group">
                 <div class="font-bold text-white group-hover:text-[#ea580c]">Flywheel</div>
                 <div class="text-xs text-[#737373]">Burn Mechanisms</div>
-            </a>
-            <a href="/track-record.html" class="block bg-[#141414] border border-[#22c55e]/50 p-4 rounded-xl hover:border-[#22c55e] transition group">
-                <div class="font-bold text-[#22c55e] group-hover:text-[#4ade80]">Track Record</div>
-                <div class="text-xs text-[#737373]">K-Score predictions vs reality</div>
-            </a>
-            <a href="/cult-space" class="block bg-[#141414] border border-[#ea580c]/50 p-4 rounded-xl hover:border-[#ea580c] transition group">
-                <div class="font-bold text-[#ea580c] group-hover:text-[#f97316]">The Space</div>
-                <div class="text-xs text-[#737373]">Cult member dashboard</div>
             </a>
         </div>
     </div>
@@ -3417,7 +3481,7 @@
     window.toggleHowItWorksModal = () => toggleModal('how-it-works-modal'); window.closePreview = () => toggleModal('preview-modal');
     window.toggleKScoreModal = () => toggleModal('kscore-modal'); window.toggleInfoModal = () => toggleModal('info-modal');
 
-    // --- ANNOUNCEMENT MODAL ---
+    // --- ANNOUNCEMENT BANNER & MODAL ---
     window.openAnnouncementModal = () => toggleModal('announcement-modal');
     window.closeAnnouncementModal = () => {
         toggleModal('announcement-modal');
@@ -3425,6 +3489,41 @@
         const announcementId = document.getElementById('announcement-modal').dataset.announcementId;
         if (announcementId) {
             localStorage.setItem('holdex_seen_announcement', announcementId);
+        }
+    };
+
+    // Show announcement banner at top of page
+    function showAnnouncementBanner(text, id) {
+        const banner = document.getElementById('announcement-banner');
+        const bannerText = document.getElementById('announcement-banner-text');
+        if (banner && bannerText) {
+            // Strip markdown and limit length for banner
+            let cleanText = text.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\n/g, ' ').trim();
+            if (cleanText.length > 100) {
+                cleanText = cleanText.substring(0, 100) + '...';
+            }
+            bannerText.textContent = cleanText;
+            banner.dataset.announcementId = id;
+            banner.classList.remove('hidden');
+            document.body.classList.add('has-announcement-banner');
+            // Trigger animation
+            setTimeout(() => banner.classList.add('visible'), 10);
+            // Re-init lucide icons for the banner
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+    }
+
+    window.closeAnnouncementBanner = () => {
+        const banner = document.getElementById('announcement-banner');
+        if (banner) {
+            banner.classList.remove('visible');
+            document.body.classList.remove('has-announcement-banner');
+            setTimeout(() => banner.classList.add('hidden'), 300);
+            // Mark as dismissed for this session
+            const announcementId = banner.dataset.announcementId;
+            if (announcementId) {
+                sessionStorage.setItem('holdex_banner_dismissed', announcementId);
+            }
         }
     };
 
@@ -3437,8 +3536,14 @@
             if (data.success && data.announcement && data.announcement.active) {
                 const announcement = data.announcement;
                 const seenId = localStorage.getItem('holdex_seen_announcement');
+                const dismissedId = sessionStorage.getItem('holdex_banner_dismissed');
 
-                // Only show if not already seen
+                // Always show banner if not dismissed this session
+                if (dismissedId !== announcement.id) {
+                    showAnnouncementBanner(announcement.content, announcement.id);
+                }
+
+                // Show modal popup only if not already seen (localStorage persists)
                 if (seenId !== announcement.id) {
                     const contentEl = document.getElementById('announcement-content');
                     const dateEl = document.getElementById('announcement-date');

@@ -20,7 +20,8 @@ const { getClient } = require('./redis');
 // API Configuration
 const HELIUS_API_KEY = config.HELIUS_API_KEY;
 const HELIUS_RPC_URL = 'https://mainnet.helius-rpc.com';
-const JUPITER_TOKEN_API = 'https://tokens.jup.ag';
+// Jupiter Token API V2 - https://dev.jup.ag/docs/tokens/v2/token-information
+const JUPITER_TOKEN_API = 'https://api.jup.ag/tokens/v2';
 const JUPITER_PRICE_URL = 'https://api.jup.ag/price/v3';
 const JUPITER_API_KEY = config.JUPITER_API_KEY;
 
@@ -43,14 +44,26 @@ function getHeliusHeaders() {
 }
 
 /**
+ * Get Jupiter API headers (API key required for V2)
+ */
+function getJupiterHeaders() {
+    const headers = { 'Content-Type': 'application/json' };
+    if (JUPITER_API_KEY) {
+        headers['x-api-key'] = JUPITER_API_KEY;
+    }
+    return headers;
+}
+
+/**
  * Load Jupiter token list (cached for 24h)
- * Contains ~10k verified Solana tokens with metadata
+ * Uses Jupiter Token API V2 - fetches verified tokens
+ * https://dev.jup.ag/docs/tokens/v2/token-information
  */
 async function loadJupiterTokenList() {
     const now = Date.now();
 
     // Return cached if fresh
-    if (jupiterTokenList && (now - jupiterListTimestamp) < JUPITER_LIST_CACHE_TTL * 1000) {
+    if (jupiterTokenList && jupiterTokenList.length > 0 && (now - jupiterListTimestamp) < JUPITER_LIST_CACHE_TTL * 1000) {
         return jupiterTokenList;
     }
 
@@ -58,7 +71,7 @@ async function loadJupiterTokenList() {
         // Try Redis cache first
         const redis = getClient();
         if (redis) {
-            const cached = await redis.get('jupiter:token_list');
+            const cached = await redis.get('jupiter:token_list_v2');
             if (cached) {
                 jupiterTokenList = JSON.parse(cached);
                 jupiterListTimestamp = now;
@@ -67,26 +80,37 @@ async function loadJupiterTokenList() {
             }
         }
 
-        // Fetch from Jupiter
-        logger.info('[TokenSearch] Fetching Jupiter token list...');
-        const response = await axios.get(`${JUPITER_TOKEN_API}/tokens?tags=verified,community`, {
+        // Fetch from Jupiter Token API V2 - /tag endpoint for verified tokens
+        logger.info('[TokenSearch] Fetching Jupiter verified token list (V2 API)...');
+        const response = await axios.get(`${JUPITER_TOKEN_API}/tag?query=verified`, {
+            headers: getJupiterHeaders(),
             timeout: 30000
         });
 
-        if (response.data && Array.isArray(response.data)) {
-            jupiterTokenList = response.data;
+        // V2 returns array of tokens
+        let tokens = response.data?.tokens || response.data;
+        if (tokens && Array.isArray(tokens)) {
+            // Normalize V2 format to match expected structure
+            jupiterTokenList = tokens.map(t => ({
+                address: t.mint || t.address,
+                name: t.name || 'Unknown',
+                symbol: t.symbol || 'UNK',
+                logoURI: t.logo || t.logoURI || t.image || null,
+                decimals: t.decimals || 9,
+                tags: t.tags || ['verified']
+            }));
             jupiterListTimestamp = now;
 
             // Cache in Redis
             if (redis) {
-                await redis.setex('jupiter:token_list', JUPITER_LIST_CACHE_TTL, JSON.stringify(jupiterTokenList));
+                await redis.setex('jupiter:token_list_v2', JUPITER_LIST_CACHE_TTL, JSON.stringify(jupiterTokenList));
             }
 
-            logger.info(`[TokenSearch] Loaded ${jupiterTokenList.length} tokens from Jupiter`);
+            logger.info(`[TokenSearch] Loaded ${jupiterTokenList.length} tokens from Jupiter V2 API`);
             return jupiterTokenList;
         }
 
-        return [];
+        return jupiterTokenList || [];
     } catch (e) {
         logger.warn(`[TokenSearch] Failed to load Jupiter token list: ${e.message}`);
         return jupiterTokenList || [];
@@ -315,13 +339,45 @@ async function getJupiterPricesBatch(mints) {
 }
 
 /**
+ * Search using Jupiter Token API V2 /search endpoint
+ * Supports searching by mint address, symbol, or name
+ * https://dev.jup.ag/docs/tokens/v2/token-information
+ */
+async function searchJupiterV2(query, limit = 10) {
+    try {
+        const response = await axios.get(`${JUPITER_TOKEN_API}/search?query=${encodeURIComponent(query)}`, {
+            headers: getJupiterHeaders(),
+            timeout: 10000
+        });
+
+        // V2 search returns array of tokens
+        let tokens = response.data?.tokens || response.data;
+        if (!tokens || !Array.isArray(tokens)) return [];
+
+        return tokens.slice(0, limit).map(t => ({
+            mint: t.mint || t.address,
+            name: t.name || 'Unknown',
+            symbol: t.symbol || 'UNK',
+            image: t.logo || t.logoURI || t.image || null,
+            decimals: t.decimals || 9,
+            verified: t.tags?.includes('verified') || t.verified || false,
+            source: 'jupiter_v2_search'
+        }));
+    } catch (e) {
+        logger.debug(`[TokenSearch] Jupiter V2 search failed: ${e.message}`);
+        return [];
+    }
+}
+
+/**
  * Main search function - combines all sources
  *
  * Search priority:
  * 1. Check Redis cache
- * 2. Jupiter token list (fast, local)
- * 3. Helius DAS API (if mint address)
- * 4. Enrich with Jupiter prices
+ * 2. Jupiter V2 /search API (primary - supports mint, symbol, name)
+ * 3. Jupiter token list (fallback - local search)
+ * 4. Helius DAS API (fallback for mint addresses)
+ * 5. Enrich with Jupiter prices
  *
  * @param {string} query - Search term (name, symbol, or mint address)
  * @param {number} limit - Max results
@@ -347,15 +403,23 @@ async function searchTokens(query, limit = 10) {
     let results = [];
     const isAddressSearch = query.length >= 32 && query.length <= 44;
 
-    if (isAddressSearch) {
-        // Mint address lookup
-        const token = await getTokenFromHelius(query);
-        if (token && token.name !== 'Unknown') {
-            results = [token];
+    // Try Jupiter V2 /search API first (works for both addresses and names)
+    if (JUPITER_API_KEY) {
+        results = await searchJupiterV2(query, limit);
+    }
+
+    // Fallback strategies if Jupiter V2 search returned nothing
+    if (results.length === 0) {
+        if (isAddressSearch) {
+            // Mint address lookup via Helius
+            const token = await getTokenFromHelius(query);
+            if (token && token.name !== 'Unknown') {
+                results = [token];
+            }
+        } else {
+            // Name/symbol search - use cached Jupiter list
+            results = await searchJupiterList(query, limit);
         }
-    } else {
-        // Name/symbol search - use Jupiter list (fast)
-        results = await searchJupiterList(query, limit);
     }
 
     // Enrich with prices if we have results
