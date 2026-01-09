@@ -56,8 +56,7 @@ function getJupiterHeaders() {
 
 /**
  * Load Jupiter token list (cached for 24h)
- * Uses Jupiter Token API V2 - fetches verified tokens
- * https://dev.jup.ag/docs/tokens/v2/token-information
+ * Tries V2 API first (requires key), falls back to public token list
  */
 async function loadJupiterTokenList() {
     const now = Date.now();
@@ -80,17 +79,32 @@ async function loadJupiterTokenList() {
             }
         }
 
-        // Fetch from Jupiter Token API V2 - /tag endpoint for verified tokens
-        logger.info('[TokenSearch] Fetching Jupiter verified token list (V2 API)...');
-        const response = await axios.get(`${JUPITER_TOKEN_API}/tag?query=verified`, {
-            headers: getJupiterHeaders(),
-            timeout: 30000
-        });
+        let tokens = null;
 
-        // V2 returns array of tokens
-        let tokens = response.data?.tokens || response.data;
-        if (tokens && Array.isArray(tokens)) {
-            // Normalize V2 format to match expected structure
+        // Strategy 1: Try V2 API if we have an API key
+        if (JUPITER_API_KEY) {
+            try {
+                logger.info('[TokenSearch] Fetching Jupiter verified token list (V2 API)...');
+                const response = await axios.get(`${JUPITER_TOKEN_API}/tag?query=verified`, {
+                    headers: getJupiterHeaders(),
+                    timeout: 30000
+                });
+                tokens = response.data?.tokens || response.data;
+            } catch (v2Error) {
+                logger.warn(`[TokenSearch] V2 API failed: ${v2Error.message}, trying public list...`);
+            }
+        }
+
+        // Strategy 2: Fallback to public Jupiter token list (no API key required)
+        if (!tokens || !Array.isArray(tokens) || tokens.length === 0) {
+            logger.info('[TokenSearch] Fetching Jupiter public token list...');
+            const publicListUrl = 'https://token.jup.ag/strict';
+            const response = await axios.get(publicListUrl, { timeout: 30000 });
+            tokens = response.data;
+        }
+
+        if (tokens && Array.isArray(tokens) && tokens.length > 0) {
+            // Normalize format to match expected structure
             jupiterTokenList = tokens.map(t => ({
                 address: t.mint || t.address,
                 name: t.name || 'Unknown',
@@ -106,10 +120,11 @@ async function loadJupiterTokenList() {
                 await redis.setex('jupiter:token_list_v2', JUPITER_LIST_CACHE_TTL, JSON.stringify(jupiterTokenList));
             }
 
-            logger.info(`[TokenSearch] Loaded ${jupiterTokenList.length} tokens from Jupiter V2 API`);
+            logger.info(`[TokenSearch] Loaded ${jupiterTokenList.length} tokens from Jupiter`);
             return jupiterTokenList;
         }
 
+        logger.warn('[TokenSearch] No tokens loaded from Jupiter');
         return jupiterTokenList || [];
     } catch (e) {
         logger.warn(`[TokenSearch] Failed to load Jupiter token list: ${e.message}`);
@@ -123,7 +138,11 @@ async function loadJupiterTokenList() {
  */
 async function searchJupiterList(query, limit = 10) {
     const tokens = await loadJupiterTokenList();
-    if (!tokens.length) return [];
+    if (!tokens.length) {
+        logger.warn('[TokenSearch] Jupiter token list is empty - cannot search');
+        return [];
+    }
+    logger.debug(`[TokenSearch] Searching ${tokens.length} tokens for "${query}"`);
 
     const queryLower = query.toLowerCase();
     const results = [];
@@ -345,9 +364,17 @@ async function getJupiterPricesBatch(mints) {
  * Search using Jupiter Token API V2 /search endpoint
  * Supports searching by mint address, symbol, or name
  * https://dev.jup.ag/docs/tokens/v2/token-information
+ * Note: Requires API key for V2 endpoints
  */
 async function searchJupiterV2(query, limit = 10) {
+    // V2 API requires API key
+    if (!JUPITER_API_KEY) {
+        logger.debug('[TokenSearch] Jupiter V2 search skipped - no API key');
+        return [];
+    }
+
     try {
+        logger.debug(`[TokenSearch] Searching Jupiter V2 for: "${query}"`);
         const response = await axios.get(`${JUPITER_TOKEN_API}/search?query=${encodeURIComponent(query)}`, {
             headers: getJupiterHeaders(),
             timeout: 10000
@@ -355,10 +382,15 @@ async function searchJupiterV2(query, limit = 10) {
 
         // V2 search returns array of tokens
         let tokens = response.data?.tokens || response.data;
-        if (!tokens || !Array.isArray(tokens)) return [];
+        if (!tokens || !Array.isArray(tokens)) {
+            logger.debug(`[TokenSearch] Jupiter V2 returned no tokens array`);
+            return [];
+        }
+
+        logger.debug(`[TokenSearch] Jupiter V2 returned ${tokens.length} raw results`);
 
         // Filter out tokens without valid mint addresses and map to standard format
-        return tokens
+        const results = tokens
             .filter(t => t.mint || t.address) // Must have a valid mint address
             .slice(0, limit)
             .map(t => ({
@@ -370,8 +402,11 @@ async function searchJupiterV2(query, limit = 10) {
                 verified: t.tags?.includes('verified') || t.verified || false,
                 source: 'jupiter_v2_search'
             }));
+
+        logger.debug(`[TokenSearch] Jupiter V2 returning ${results.length} filtered results`);
+        return results;
     } catch (e) {
-        logger.debug(`[TokenSearch] Jupiter V2 search failed: ${e.message}`);
+        logger.warn(`[TokenSearch] Jupiter V2 search failed: ${e.message}`);
         return [];
     }
 }
@@ -393,6 +428,8 @@ async function searchJupiterV2(query, limit = 10) {
 async function searchTokens(query, limit = 10) {
     if (!query || query.length < 2) return [];
 
+    logger.info(`[TokenSearch] Searching for: "${query}" (limit: ${limit})`);
+
     const cacheKey = `search:${query.toLowerCase()}:${limit}`;
     const redis = getClient();
 
@@ -410,22 +447,42 @@ async function searchTokens(query, limit = 10) {
     let results = [];
     const isAddressSearch = query.length >= 32 && query.length <= 44;
 
-    // Try Jupiter V2 /search API first (works for both addresses and names)
-    if (JUPITER_API_KEY) {
-        results = await searchJupiterV2(query, limit);
+    // Strategy 1: Try Jupiter V2 /search API first (requires API key)
+    results = await searchJupiterV2(query, limit);
+    logger.debug(`[TokenSearch] Jupiter V2 returned ${results.length} results`);
+
+    // Strategy 2: For address searches, try Helius DAS API
+    if (results.length === 0 && isAddressSearch) {
+        logger.debug(`[TokenSearch] Trying Helius for address: ${query.slice(0, 8)}...`);
+        const token = await getTokenFromHelius(query);
+        if (token && token.name !== 'Unknown') {
+            results = [token];
+            logger.debug(`[TokenSearch] Helius found token: ${token.name}`);
+        }
     }
 
-    // Fallback strategies if Jupiter V2 search returned nothing
-    if (results.length === 0) {
-        if (isAddressSearch) {
-            // Mint address lookup via Helius
-            const token = await getTokenFromHelius(query);
-            if (token && token.name !== 'Unknown') {
-                results = [token];
-            }
-        } else {
-            // Name/symbol search - use cached Jupiter list
-            results = await searchJupiterList(query, limit);
+    // Strategy 3: For name/symbol searches, use cached Jupiter token list
+    if (results.length === 0 && !isAddressSearch) {
+        logger.debug(`[TokenSearch] Trying Jupiter token list for: "${query}"`);
+        results = await searchJupiterList(query, limit);
+        logger.debug(`[TokenSearch] Jupiter list returned ${results.length} results`);
+    }
+
+    // Strategy 4: For address searches with no results, try Jupiter list too
+    if (results.length === 0 && isAddressSearch) {
+        const tokens = await loadJupiterTokenList();
+        const found = tokens.find(t => t.address === query);
+        if (found) {
+            results = [{
+                mint: found.address,
+                name: found.name,
+                symbol: found.symbol,
+                image: found.logoURI || null,
+                decimals: found.decimals || 9,
+                verified: found.tags?.includes('verified') || false,
+                source: 'jupiter_list'
+            }];
+            logger.debug(`[TokenSearch] Found in Jupiter list: ${found.name}`);
         }
     }
 
