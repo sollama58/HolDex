@@ -2065,6 +2065,8 @@ function init(deps) {
                     const safeSearch = `%${escapeLikePattern(search)}%`;
                     rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) ORDER BY volume24h DESC NULLS LAST LIMIT $2`, [safeSearch, limit]);
 
+                    logger.info(`[PublicSearch] DB search for "${search}": found ${rows.length} results`);
+
                     // Backfill from GeckoTerminal if not enough results
                     if (rows.length < MIN_RESULTS && search.length >= 2) {
                         try {
@@ -2072,21 +2074,46 @@ function init(deps) {
                             const needed = MIN_RESULTS - rows.length;
 
                             // Search GeckoTerminal for more results
+                            logger.info(`[PublicSearch] Need ${needed} more results, searching GeckoTerminal...`);
                             const geckoResults = await searchGeckoTerminal(search, needed + 5);
 
                             // Filter out tokens we already have
                             const newTokens = geckoResults.filter(t => !existingMints.has(t.mint));
+                            logger.info(`[PublicSearch] GeckoTerminal returned ${geckoResults.length} results, ${newTokens.length} are new`);
 
-                            // Quick index new tokens
-                            const indexPromises = newTokens.slice(0, needed).map(token =>
-                                quickIndexFromGecko(token).catch(() => false)
-                            );
-                            await Promise.all(indexPromises);
+                            // Quick index new tokens - wait for all to complete
+                            if (newTokens.length > 0) {
+                                const tokensToIndex = newTokens.slice(0, Math.max(needed, 5));
+                                logger.info(`[PublicSearch] Indexing ${tokensToIndex.length} tokens: ${tokensToIndex.map(t => t.symbol).join(', ')}`);
 
-                            // Re-query to get freshly indexed tokens
-                            rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) ORDER BY volume24h DESC NULLS LAST LIMIT $2`, [safeSearch, limit]);
+                                const indexResults = await Promise.all(
+                                    tokensToIndex.map(token =>
+                                        quickIndexFromGecko(token)
+                                            .then(success => ({ token, success }))
+                                            .catch(err => ({ token, success: false, error: err.message }))
+                                    )
+                                );
 
-                            logger.info(`[PublicSearch] Backfilled "${search}": ${rows.length} results (indexed ${newTokens.length} from GeckoTerminal)`);
+                                const indexed = indexResults.filter(r => r.success).length;
+                                logger.info(`[PublicSearch] Successfully indexed ${indexed}/${tokensToIndex.length} tokens`);
+                            }
+
+                            // Re-query to get freshly indexed tokens - also search by mint in case symbol doesn't match query
+                            const newMints = newTokens.slice(0, 5).map(t => t.mint);
+                            if (newMints.length > 0) {
+                                // Query for both original search AND newly indexed mints
+                                const combinedRows = await db.all(`
+                                    SELECT ${selectFields} FROM tokens
+                                    WHERE (symbol ILIKE $1 OR name ILIKE $1 OR mint = ANY($3))
+                                    ORDER BY volume24h DESC NULLS LAST
+                                    LIMIT $2
+                                `, [safeSearch, limit, newMints]);
+                                rows = combinedRows;
+                            } else {
+                                rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) ORDER BY volume24h DESC NULLS LAST LIMIT $2`, [safeSearch, limit]);
+                            }
+
+                            logger.info(`[PublicSearch] Final results for "${search}": ${rows.length} tokens`);
                         } catch (geckoErr) {
                             logger.warn(`[PublicSearch] GeckoTerminal backfill failed for "${search}": ${geckoErr.message}`);
                         }
@@ -2544,6 +2571,8 @@ function init(deps) {
                     const safeSearch = `%${escapeLikePattern(search)}%`;
                     rows = await db.all(`SELECT * FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) ORDER BY volume24h DESC NULLS LAST LIMIT $2`, [safeSearch, limit]);
 
+                    logger.info(`[Search] DB search for "${search}": found ${rows.length} results`);
+
                     // Backfill from GeckoTerminal if not enough results
                     if (rows.length < MIN_RESULTS && search.length >= 2) {
                         try {
@@ -2551,21 +2580,46 @@ function init(deps) {
                             const needed = MIN_RESULTS - rows.length;
 
                             // Search GeckoTerminal for more results
+                            logger.info(`[Search] Need ${needed} more results, searching GeckoTerminal...`);
                             const geckoResults = await searchGeckoTerminal(search, needed + 5);
 
                             // Filter out tokens we already have
                             const newTokens = geckoResults.filter(t => !existingMints.has(t.mint));
+                            logger.info(`[Search] GeckoTerminal returned ${geckoResults.length} results, ${newTokens.length} are new`);
 
-                            // Quick index new tokens (fast insert, background full indexing)
-                            const indexPromises = newTokens.slice(0, needed).map(token =>
-                                quickIndexFromGecko(token).catch(() => false)
-                            );
-                            await Promise.all(indexPromises);
+                            // Quick index new tokens - wait for all to complete
+                            if (newTokens.length > 0) {
+                                const tokensToIndex = newTokens.slice(0, Math.max(needed, 5));
+                                logger.info(`[Search] Indexing ${tokensToIndex.length} tokens: ${tokensToIndex.map(t => t.symbol).join(', ')}`);
 
-                            // Re-query to get freshly indexed tokens
-                            rows = await db.all(`SELECT * FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) ORDER BY volume24h DESC NULLS LAST LIMIT $2`, [safeSearch, limit]);
+                                const indexResults = await Promise.all(
+                                    tokensToIndex.map(token =>
+                                        quickIndexFromGecko(token)
+                                            .then(success => ({ token, success }))
+                                            .catch(err => ({ token, success: false, error: err.message }))
+                                    )
+                                );
 
-                            logger.info(`[Search] Backfilled "${search}": ${rows.length} results (${newTokens.length} from GeckoTerminal)`);
+                                const indexed = indexResults.filter(r => r.success).length;
+                                logger.info(`[Search] Successfully indexed ${indexed}/${tokensToIndex.length} tokens`);
+                            }
+
+                            // Re-query to get freshly indexed tokens - also search by mint in case symbol doesn't match query
+                            const newMints = newTokens.slice(0, 5).map(t => t.mint);
+                            if (newMints.length > 0) {
+                                // Query for both original search AND newly indexed mints
+                                const combinedRows = await db.all(`
+                                    SELECT * FROM tokens
+                                    WHERE (symbol ILIKE $1 OR name ILIKE $1 OR mint = ANY($3))
+                                    ORDER BY volume24h DESC NULLS LAST
+                                    LIMIT $2
+                                `, [safeSearch, limit, newMints]);
+                                rows = combinedRows;
+                            } else {
+                                rows = await db.all(`SELECT * FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) ORDER BY volume24h DESC NULLS LAST LIMIT $2`, [safeSearch, limit]);
+                            }
+
+                            logger.info(`[Search] Final results for "${search}": ${rows.length} tokens`);
                         } catch (geckoErr) {
                             logger.warn(`[Search] GeckoTerminal backfill failed for "${search}": ${geckoErr.message}`);
                             // Continue with existing results

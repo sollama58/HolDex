@@ -42,6 +42,7 @@ async function searchGeckoTerminal(query, limit = 10) {
 
         const results = [];
         const seenMints = new Set();
+        const queryLower = query.toLowerCase();
 
         if (res.data?.data && Array.isArray(res.data.data)) {
             for (const pool of res.data.data) {
@@ -75,19 +76,36 @@ async function searchGeckoTerminal(query, limit = 10) {
                         continue;
                     }
 
-                    results.push({
+                    // Prioritize tokens that actually match the query in name or symbol
+                    const nameLower = tokenName.toLowerCase();
+                    const symbolLower = tokenSymbol.toLowerCase();
+                    const matchesQuery = nameLower.includes(queryLower) || symbolLower.includes(queryLower);
+
+                    const tokenResult = {
                         mint,
                         name: tokenName,
                         symbol: tokenSymbol,
                         image: tokenAttrs.image_url || null,
-                        priceUsd: parseFloat(tokenAttrs.price_usd || attrs.base_token_price_usd || 0),  // Keep decimals for price
-                        volume24h: Math.floor(parseFloat(attrs.volume_usd?.h24 || 0)),  // Integer
-                        marketCap: Math.floor(parseFloat(tokenAttrs.fdv_usd || attrs.fdv_usd || 0)),  // Integer
-                        liquidity: Math.floor(parseFloat(attrs.reserve_in_usd || 0))  // Integer
-                    });
+                        priceUsd: parseFloat(tokenAttrs.price_usd || attrs.base_token_price_usd || 0),
+                        volume24h: Math.floor(parseFloat(attrs.volume_usd?.h24 || 0)),
+                        marketCap: Math.floor(parseFloat(tokenAttrs.fdv_usd || attrs.fdv_usd || 0)),
+                        liquidity: Math.floor(parseFloat(attrs.reserve_in_usd || 0)),
+                        _matchScore: matchesQuery ? 1 : 0 // Internal scoring for sorting
+                    };
+
+                    results.push(tokenResult);
                 }
             }
         }
+
+        // Sort by match score (tokens that match query first), then by volume
+        results.sort((a, b) => {
+            if (a._matchScore !== b._matchScore) return b._matchScore - a._matchScore;
+            return (b.volume24h || 0) - (a.volume24h || 0);
+        });
+
+        // Remove internal scoring field
+        results.forEach(r => delete r._matchScore);
 
         logger.info(`🔍 [GeckoSearch] Found ${results.length} results for "${query}"`);
         return results;
@@ -155,8 +173,8 @@ async function quickIndexFromGecko(tokenData) {
                 return true;
             }
 
-            logger.debug(`[QuickIndex] Token ${symbol} (${mint.slice(0, 8)}) already has market data, skipping`);
-            return false; // Already has data, skip
+            logger.debug(`[QuickIndex] Token ${symbol} (${mint.slice(0, 8)}) already has market data`);
+            return true; // Token exists, that's success for search purposes
         }
 
         // Insert new token with data from GeckoTerminal
