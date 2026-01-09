@@ -20,7 +20,10 @@
     "prune:data": "node src/scripts/prune_data.js",
     "seed": "node src/scripts/seed_data.js",
     "calculator": "node src/calculator.js",
-    "start:calculator": "node src/calculator.js"
+    "start:calculator": "node src/calculator.js",
+    "db:reset": "node scripts/resetDatabase.js",
+    "db:reset:dry": "node scripts/resetDatabase.js --dry-run",
+    "db:reset:force": "node scripts/resetDatabase.js --force"
   },
   "dependencies": {
     "@socket.io/redis-adapter": "^8.2.1",

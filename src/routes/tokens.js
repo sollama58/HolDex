@@ -1146,12 +1146,23 @@ function init(deps) {
                 }
             }
 
+            // API Keys restore: Match by key_prefix (since key_hash cannot be restored for security)
+            // This allows merging metadata for existing keys while preserving their hashes
             if (Array.isArray(api_keys)) {
                 for (const k of api_keys) {
                     try {
-                        const existing = await db.get('SELECT * FROM api_keys WHERE key = $1', [k.key]);
+                        // Look up by key_prefix since that's what we backup (not the hash)
+                        const keyPrefix = k.key_prefix || k.keyPrefix;
+                        if (!keyPrefix) {
+                            console.warn(`Key Restore: Skipping entry without key_prefix`);
+                            results.keys.skipped++;
+                            continue;
+                        }
+
+                        const existing = await db.get('SELECT * FROM api_keys WHERE key_prefix = $1', [keyPrefix]);
                         if (existing) {
-                            const fields = ['owner', 'tier', 'requests_limit']; 
+                            // Merge metadata for existing keys
+                            const fields = ['owner', 'wallet', 'tier', 'requests_limit'];
                             const sets = [];
                             const vals = [];
                             let idx = 1;
@@ -1163,27 +1174,20 @@ function init(deps) {
                                     vals.push(inputVal);
                                 }
                             }
-                            
+
                             if (sets.length > 0) {
-                                vals.push(existing.key);
-                                await db.run(`UPDATE api_keys SET ${sets.join(', ')} WHERE key = $${idx}`, vals);
+                                vals.push(keyPrefix);
+                                await db.run(`UPDATE api_keys SET ${sets.join(', ')} WHERE key_prefix = $${idx}`, vals);
                                 results.keys.merged++;
                             } else {
                                 results.keys.skipped++;
                             }
-                            continue;
+                        } else {
+                            // Cannot restore new keys without hash - they must be regenerated
+                            // Log this for the admin to know which wallets need new keys
+                            console.warn(`Key Restore: Key ${keyPrefix} needs regeneration (no hash in backup)`);
+                            results.keys.skipped++;
                         }
-                        
-                        const createdAt = k.created_at || k.createdAt || Date.now();
-                        const limit = k.requests_limit || k.requestsLimit || 1000;
-                        const active = (k.is_active !== undefined) ? k.is_active : true;
-
-                        await db.run(`
-                            INSERT INTO api_keys (key, owner, tier, requests_limit, is_active, created_at)
-                            VALUES ($1, $2, $3, $4, $5, $6)
-                        `, [k.key, k.owner || 'Restored User', k.tier || 'free', limit, active, createdAt]);
-                        
-                        results.keys.restored++;
                     } catch (e) { console.error(`Key Restore Error: ${e.message}`); }
                 }
             }
