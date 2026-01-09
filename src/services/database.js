@@ -505,6 +505,19 @@ async function initDB() {
                 `ALTER TABLE participants ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
                 // FIX: Ensure conviction_score is DOUBLE PRECISION (might be INTEGER in old DBs)
                 `ALTER TABLE tokens ALTER COLUMN conviction_score TYPE DOUBLE PRECISION USING conviction_score::DOUBLE PRECISION`,
+                // FIX: Ensure all market data columns are DOUBLE PRECISION (might be INTEGER in old DBs)
+                // This fixes "invalid input syntax for type integer" errors when inserting decimal values
+                `ALTER TABLE tokens ALTER COLUMN liquidity TYPE DOUBLE PRECISION USING liquidity::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN marketcap TYPE DOUBLE PRECISION USING marketcap::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN volume24h TYPE DOUBLE PRECISION USING volume24h::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN priceusd TYPE DOUBLE PRECISION USING priceusd::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN change24h TYPE DOUBLE PRECISION USING change24h::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN change1h TYPE DOUBLE PRECISION USING change1h::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN change5m TYPE DOUBLE PRECISION USING change5m::DOUBLE PRECISION`,
+                `ALTER TABLE tokens ALTER COLUMN k_score TYPE DOUBLE PRECISION USING k_score::DOUBLE PRECISION`,
+                `ALTER TABLE pools ALTER COLUMN price_usd TYPE DOUBLE PRECISION USING price_usd::DOUBLE PRECISION`,
+                `ALTER TABLE pools ALTER COLUMN liquidity_usd TYPE DOUBLE PRECISION USING liquidity_usd::DOUBLE PRECISION`,
+                `ALTER TABLE pools ALTER COLUMN volume_24h TYPE DOUBLE PRECISION USING volume_24h::DOUBLE PRECISION`,
                 // ═══════════════════════════════════════════════════════════
                 // PER-NODE CRYPTOGRAPHIC IDENTITY (Ed25519)
                 // Philosophy: "Don't trust. Verify." - Each node has unique identity
@@ -789,8 +802,8 @@ async function aggregateAndSaveToken(db, mint) {
                     
                     await db.run(`
                         INSERT INTO holders_history (mint, count, timestamp)
-                        VALUES ($1, $2, $3)
-                        ON CONFLICT (mint, timestamp) DO UPDATE SET count = EXCLUDED.count
+                        VALUES ($1, $2::INTEGER, $3)
+                        ON CONFLICT (mint, timestamp) DO UPDATE SET count = EXCLUDED.count::INTEGER
                     `, [mint, Math.floor(holderCount), today]);
                 }
             } catch (e) {
