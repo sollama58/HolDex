@@ -1276,8 +1276,17 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, _decimals = 9, 
         // 0. Try delta analysis first (if snapshots exist and are fresh)
         // OPTIMIZATION: Use cached holder count from DB - avoid expensive fetchTokenHolders
         // NOTE: Delta mode is for NON-WEBHOOK mode only (when we need to poll for updates)
+        // RPC CREDIT OPTIMIZATION: Only do delta (which calls getNewTransactions) for verified tokens
         if (db && !config.USE_WEBHOOKS) {
-            const deltaResult = await deltaConvictionAnalysis(db, mint);
+            // Check if token is community verified before doing delta analysis
+            const tokenVerifyCheck = await db.get(
+                'SELECT hasCommunityUpdate FROM tokens WHERE mint = $1',
+                [mint]
+            );
+            const isVerified = tokenVerifyCheck?.hascommunityupdate || tokenVerifyCheck?.hasCommunityUpdate || false;
+
+            // Only run delta analysis (which calls TransactionHistory API) for verified tokens
+            const deltaResult = isVerified ? await deltaConvictionAnalysis(db, mint) : null;
             if (deltaResult) {
                 // Delta succeeded - use cached holder count from tokens table
                 // This is updated by: webhooks, periodic holder scan, or previous full analysis
@@ -1347,38 +1356,164 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, _decimals = 9, 
         let analyzed = 0;
         const snapshotData = []; // For saving to DB
 
+        // ============================================
+        // RPC CREDIT OPTIMIZATION: Only analyze holders for community-updated tokens
+        // and only once per day per holder (reuse cached classifications)
+        // ============================================
+        // TransactionHistory API is expensive - only use when necessary
+        // For non-verified tokens: use basic holder count only
+        // For verified tokens: full classification, but cache for 24h per holder
+
+        const HOLDER_ANALYSIS_TTL = 24 * 60 * 60 * 1000; // 24 hours - one deep analysis per day
+        const now = Date.now();
+
+        // Check if this token is community verified
+        let isVerifiedToken = false;
+        if (db) {
+            const tokenCheck = await db.get(
+                'SELECT hasCommunityUpdate FROM tokens WHERE mint = $1',
+                [mint]
+            );
+            isVerifiedToken = tokenCheck?.hascommunityupdate || tokenCheck?.hasCommunityUpdate || false;
+        }
+
+        // OPTIMIZATION: If not verified, skip expensive holder transaction analysis
+        // Use simple holder count only (no API calls for classifications)
+        if (!isVerifiedToken && db) {
+            logger.info(`[Conviction] ${mint.slice(0,8)}: Skipping holder analysis (not community verified) - 0 RPC calls`);
+
+            // Try to get cached classifications from previous analysis
+            const cachedSnapshots = await db.all(
+                'SELECT holder, conviction_class, balance FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 20',
+                [mint]
+            );
+
+            if (cachedSnapshots.length > 0) {
+                // Use cached classifications
+                for (const snap of cachedSnapshots) {
+                    switch (snap.conviction_class) {
+                        case 'accumulator': accumulators++; break;
+                        case 'holder': holders++; break;
+                        case 'reducer': reducers++; break;
+                        case 'extractor': extractors++; break;
+                        default: holders++; // Default to holder
+                    }
+                    analyzed++;
+                }
+                const score = analyzed > 0 ? Math.round(((accumulators + holders) / analyzed) * 100) : 50;
+                logger.info(`[Conviction] ${mint.slice(0,8)}: ${score}% from cache (${analyzed} holders, not verified)`);
+
+                return {
+                    score,
+                    analyzed,
+                    accumulators,
+                    holders,
+                    reducers,
+                    extractors,
+                    realHoldersCount,
+                    totalHolders: allHolders.length,
+                    allHolders,
+                    filteredTop50: realCandidates,
+                    poolsFiltered,
+                    skipDeepAnalysis: true
+                };
+            }
+
+            // No cache - use basic estimation (all holders = neutral)
+            return {
+                score: 50,
+                analyzed: 0,
+                accumulators: 0,
+                holders: 0,
+                reducers: 0,
+                extractors: 0,
+                realHoldersCount,
+                totalHolders: allHolders.length,
+                allHolders,
+                filteredTop50: realCandidates,
+                poolsFiltered,
+                skipDeepAnalysis: true
+            };
+        }
+
+        // VERIFIED TOKEN: Perform holder analysis with per-holder caching
+        // Fetch existing snapshots to check which holders need fresh analysis
+        let existingSnapshots = new Map();
+        if (db) {
+            const snapshots = await db.all(
+                'SELECT holder, conviction_class, buy_count, sell_count, net_flow, last_signature, last_tx_timestamp, balance, updated_at FROM holder_snapshots WHERE mint = $1',
+                [mint]
+            );
+            for (const snap of snapshots) {
+                existingSnapshots.set(snap.holder, snap);
+            }
+        }
+
         // OPTIMIZATION: Process holders in parallel batches (5x faster)
+        // But skip API calls for holders already analyzed today
         const BATCH_SIZE = 5;
+        let apiCallsSaved = 0;
+
         for (let i = 0; i < top20.length; i += BATCH_SIZE) {
             const batch = top20.slice(i, i + BATCH_SIZE);
 
             const results = await Promise.allSettled(
                 batch.map(async (holder) => {
+                    // Check if holder was already analyzed today (within TTL)
+                    const cachedSnapshot = existingSnapshots.get(holder.address);
+                    const lastAnalysis = parseInt(cachedSnapshot?.updated_at || 0);
+                    const isRecent = (now - lastAnalysis) < HOLDER_ANALYSIS_TTL;
+
+                    if (cachedSnapshot && isRecent && cachedSnapshot.conviction_class) {
+                        // Use cached data - NO API CALL (saves Helius credits!)
+                        apiCallsSaved++;
+                        return {
+                            holder,
+                            retentionData: {
+                                retention: cachedSnapshot.conviction_class === 'accumulator' ? 1.5 :
+                                           cachedSnapshot.conviction_class === 'holder' ? 1.0 :
+                                           cachedSnapshot.conviction_class === 'reducer' ? 0.7 : 0.3,
+                                buyCount: cachedSnapshot.buy_count || 0,
+                                sellCount: cachedSnapshot.sell_count || 0,
+                                netFlow: cachedSnapshot.net_flow || 0,
+                                lastSignature: cachedSnapshot.last_signature,
+                                lastTxTimestamp: cachedSnapshot.last_tx_timestamp || lastAnalysis
+                            },
+                            classification: cachedSnapshot.conviction_class,
+                            fromCache: true
+                        };
+                    }
+
+                    // Not in cache or expired - fetch from Helius (uses TransactionHistory API)
                     const retentionData = await getHolderRetention(holder.address, mint);
                     const classification = classifyRetention(retentionData);
-                    return { holder, retentionData, classification };
+                    return { holder, retentionData, classification, fromCache: false };
                 })
             );
 
             for (const result of results) {
                 if (result.status === 'fulfilled') {
-                    const { holder, retentionData, classification } = result.value;
+                    const { holder, retentionData, classification, fromCache } = result.value;
 
                     if (classification === 'accumulator') accumulators++;
                     else if (classification === 'holder') holders++;
                     else if (classification === 'reducer') reducers++;
                     else if (classification === 'extractor') extractors++;
 
-                    snapshotData.push({
-                        address: holder.address,
-                        balance: holder.balance,
-                        buyCount: retentionData.buyCount,
-                        sellCount: retentionData.sellCount,
-                        netFlow: retentionData.netFlow,
-                        lastSignature: retentionData.lastSignature,
-                        lastTxTimestamp: retentionData.lastTxTimestamp,  // K-Score v9
-                        convictionClass: classification
-                    });
+                    // Only add to snapshotData if this was a fresh analysis (not from cache)
+                    // This avoids unnecessary DB writes for cached data
+                    if (!fromCache) {
+                        snapshotData.push({
+                            address: holder.address,
+                            balance: holder.balance,
+                            buyCount: retentionData.buyCount,
+                            sellCount: retentionData.sellCount,
+                            netFlow: retentionData.netFlow,
+                            lastSignature: retentionData.lastSignature,
+                            lastTxTimestamp: retentionData.lastTxTimestamp,  // K-Score v9
+                            convictionClass: classification
+                        });
+                    }
 
                     analyzed++;
                 }
@@ -1389,6 +1524,10 @@ async function calculateConvictionAndHolders(mint, priceUsd = 0, _decimals = 9, 
             if (i + BATCH_SIZE < top20.length) {
                 await sleep(200);
             }
+        }
+
+        if (apiCallsSaved > 0) {
+            logger.info(`[Conviction] ${mint.slice(0,8)}: Saved ${apiCallsSaved} TransactionHistory API calls (used 24h cache)`);
         }
 
         if (analyzed === 0) {
