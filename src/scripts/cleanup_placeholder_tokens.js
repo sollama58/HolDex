@@ -39,7 +39,7 @@ async function cleanup() {
     try {
         // Find all placeholder tokens
         const placeholderQuery = `
-            SELECT mint, name, symbol, image, "priceUsd", "marketCap", "volume24h", timestamp
+            SELECT mint, name, symbol, image, priceusd, marketcap, volume24h, timestamp
             FROM tokens
             WHERE
                 name IN ('Unknown', 'New Discovery', '')
@@ -76,7 +76,7 @@ async function cleanup() {
             const mintDisplay = token.mint.slice(0, 8) + '...' + token.mint.slice(-4);
             const nameDisplay = (token.name || 'NULL').slice(0, 18).padEnd(20);
             const symbolDisplay = (token.symbol || 'NULL').slice(0, 10).padEnd(12);
-            const priceDisplay = token.priceUsd ? `$${parseFloat(token.priceUsd).toFixed(6)}` : '$0';
+            const priceDisplay = token.priceusd ? `$${parseFloat(token.priceusd).toFixed(6)}` : '$0';
             const volumeDisplay = token.volume24h ? `$${parseInt(token.volume24h).toLocaleString()}` : '$0';
 
             console.log(
