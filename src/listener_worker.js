@@ -7,7 +7,8 @@ const logger = require('./services/logger');
 
 // --- TASKS ---
 const { updateSingleToken } = require('./tasks/kScoreUpdater');
-const growerScanner = require('./tasks/growerScanner');
+// DISABLED: Grower Scanner automatically adds tokens - tokens are now only added via CA search
+// const growerScanner = require('./tasks/growerScanner');
 
 // ============================================================================
 // TOKEN ADDITION POLICY:
@@ -123,11 +124,11 @@ async function startListenerWorker() {
         //     logger.warn("⚠️ LISTENER: newTokenListener module missing startNewTokenListener function.");
         // }
 
-        // 4. Start Grower Scanner (Market Cap Check)
-        if (growerScanner && typeof growerScanner.start === 'function') {
-            logger.info("🌱 LISTENER: Starting Grower Scanner...");
-            growerScanner.start({ db });
-        }
+        // DISABLED: Grower Scanner automatically adds tokens - tokens are now only added via CA search
+        // if (growerScanner && typeof growerScanner.start === 'function') {
+        //     logger.info("🌱 LISTENER: Starting Grower Scanner...");
+        //     growerScanner.start({ db });
+        // }
 
         // 5. Start K-Score Loop (Background Analysis)
         runKScoreLoop(db).catch(err => {

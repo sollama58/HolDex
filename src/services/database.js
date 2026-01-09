@@ -798,7 +798,11 @@ async function aggregateAndSaveToken(db, mint) {
         // FIX: Added `updated_at = NOW()` to track recent updates properly.
         // FIX: Only update liquidity/volume/price if we have valid data (> 0), otherwise preserve existing
         // FIX: Ensure all numeric values are properly typed to avoid integer overflow errors
-        const params = [totalLiq, totalVol, price, mint];
+        // FIX: Validate all numeric values are finite to prevent PostgreSQL type errors
+        const safeTotalLiq = Number.isFinite(totalLiq) ? totalLiq : 0;
+        const safeTotalVol = Number.isFinite(totalVol) ? totalVol : 0;
+        const safePrice = Number.isFinite(price) ? price : 0;
+        const params = [safeTotalLiq, safeTotalVol, safePrice, mint];
         let query = `UPDATE tokens SET
             liquidity = CASE WHEN $1 > 0 THEN $1::DOUBLE PRECISION ELSE liquidity END,
             volume24h = CASE WHEN $2 > 0 THEN $2::DOUBLE PRECISION ELSE volume24h END,
@@ -807,10 +811,10 @@ async function aggregateAndSaveToken(db, mint) {
             marketCap = CASE WHEN $3 > 0 THEN ($3::DOUBLE PRECISION * CAST(supply AS DOUBLE PRECISION) / POWER(10, COALESCE(decimals, 9))) ELSE marketCap END`;
 
         let idx = 5; // Start at 5 since we use $1-$4 above
-        if (change24h !== null) { query += `, change24h = $${idx++}::DOUBLE PRECISION`; params.push(change24h); }
-        if (change1h !== null) { query += `, change1h = $${idx++}::DOUBLE PRECISION`; params.push(change1h); }
-        if (change5m !== null) { query += `, change5m = $${idx++}::DOUBLE PRECISION`; params.push(change5m); }
-        if (holderCount !== null) { query += `, holders = $${idx++}::INTEGER, last_holder_check = $${idx++}::BIGINT`; params.push(Math.floor(holderCount)); params.push(now); }
+        if (change24h !== null) { query += `, change24h = $${idx++}::DOUBLE PRECISION`; params.push(Number.isFinite(change24h) ? change24h : 0); }
+        if (change1h !== null) { query += `, change1h = $${idx++}::DOUBLE PRECISION`; params.push(Number.isFinite(change1h) ? change1h : 0); }
+        if (change5m !== null) { query += `, change5m = $${idx++}::DOUBLE PRECISION`; params.push(Number.isFinite(change5m) ? change5m : 0); }
+        if (holderCount !== null && Number.isFinite(holderCount)) { query += `, holders = $${idx++}::INTEGER, last_holder_check = $${idx++}::BIGINT`; params.push(Math.floor(holderCount)); params.push(now); }
 
         // Include kscore fields in RETURNING if holders were updated (needed for sig_kscore)
         // Cast conviction_score to DOUBLE PRECISION in case column is still INTEGER

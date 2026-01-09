@@ -3220,15 +3220,16 @@ async function updateSingleToken(deps, mint) {
         }
 
         // Determine holder values based on mode
-        const holdersValue = conviction.preserveHolders
+        // FIX: Ensure all holder values are integers to avoid PostgreSQL type errors
+        const holdersValue = Math.floor(conviction.preserveHolders
             ? (token.holders || conviction.realHoldersCount || 0)
-            : (conviction.realHoldersCount || 0);
-        const realHoldersValue = conviction.preserveHolders
+            : (conviction.realHoldersCount || 0));
+        const realHoldersValue = Math.floor(conviction.preserveHolders
             ? (token.real_holders || conviction.realHoldersCount || 0)
-            : (conviction.realHoldersCount || 0);
-        const totalHoldersValue = conviction.preserveHolders
+            : (conviction.realHoldersCount || 0));
+        const totalHoldersValue = Math.floor(conviction.preserveHolders
             ? (token.total_holders || conviction.totalHolders || 0)
-            : (conviction.totalHolders || 0);
+            : (conviction.totalHolders || 0));
 
         await db.run(`
             UPDATE tokens
@@ -3285,12 +3286,12 @@ async function updateSingleToken(deps, mint) {
         `, [
             smoothedScore,
             updateTimestamp.toString(),
-            conviction.score || 0,
-            conviction.accumulators || 0,
-            conviction.holders || 0,
-            conviction.reducers || 0,
-            conviction.extractors || 0,
-            conviction.analyzed || 0,
+            Math.floor(conviction.score || 0),
+            Math.floor(conviction.accumulators || 0),
+            Math.floor(conviction.holders || 0),
+            Math.floor(conviction.reducers || 0),
+            Math.floor(conviction.extractors || 0),
+            Math.floor(conviction.analyzed || 0),
             holdersValue,
             realHoldersValue,
             totalHoldersValue,
