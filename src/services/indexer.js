@@ -332,4 +332,4 @@ async function indexTokenOnChain(mint, retryCount = 0) {
     }
 }
 
-module.exports = { indexTokenOnChain, searchGeckoTerminal, quickIndexFromGecko };
+module.exports = { indexTokenOnChain, searchGeckoTerminal, quickIndexFromGecko, fetchInitialMarketData };

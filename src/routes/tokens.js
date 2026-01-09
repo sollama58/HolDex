@@ -62,7 +62,7 @@ const { snapshotPools } = require('../indexer/tasks/snapshotter');
 const logger = require('../services/logger');
 const cacheControl = require('../middleware/httpCache');
 const unifiedRateLimiter = require('../middleware/unifiedRateLimiter');
-const { indexTokenOnChain, searchGeckoTerminal, quickIndexFromGecko } = require('../services/indexer');
+const { indexTokenOnChain, searchGeckoTerminal, quickIndexFromGecko, fetchInitialMarketData } = require('../services/indexer');
 const { addTokenToMasterWebhook } = require('../services/heliusWebhook');
 const verification = require('../services/verificationService');
 const dataVerification = require('../services/dataVerification');
@@ -2012,16 +2012,52 @@ function init(deps) {
                         const rateCheck = await checkIndexingRateLimit(clientIp);
                         if (!rateCheck.allowed) {
                             logger.warn(`[PublicSearch] Indexing rate limited for IP ${clientIp}`);
-                            // Return empty results instead of error to avoid exposing rate limit info
                             rows = [];
                         } else {
+                            let indexed = false;
+
+                            // Strategy 1: Try GeckoTerminal first (faster, has market data)
                             try {
-                                await indexTokenOnChain(search);
-                                rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE mint = $1`, [search]);
-                            } catch (indexErr) {
-                                logger.error(`[PublicSearch] Indexing failed for ${search}: ${indexErr.message}`);
-                                rows = [];
+                                const geckoData = await fetchInitialMarketData(search);
+                                if (geckoData && geckoData.priceUsd > 0) {
+                                    // Get metadata from GeckoTerminal token endpoint
+                                    const tokenUrl = `https://api.geckoterminal.com/api/v2/networks/solana/tokens/${search}`;
+                                    const tokenRes = await axios.get(tokenUrl, { timeout: 5000 });
+                                    const attrs = tokenRes.data?.data?.attributes;
+
+                                    if (attrs && attrs.name && attrs.symbol) {
+                                        await quickIndexFromGecko({
+                                            mint: search,
+                                            name: attrs.name,
+                                            symbol: attrs.symbol,
+                                            image: attrs.image_url || null,
+                                            priceUsd: geckoData.priceUsd,
+                                            volume24h: geckoData.volume24h,
+                                            marketCap: geckoData.marketCap,
+                                            liquidity: geckoData.liquidity
+                                        });
+                                        indexed = true;
+                                        logger.info(`[PublicSearch] Indexed ${search.slice(0,8)} via GeckoTerminal`);
+                                    }
+                                }
+                            } catch (geckoErr) {
+                                logger.debug(`[PublicSearch] GeckoTerminal lookup failed for ${search.slice(0,8)}: ${geckoErr.message}`);
                             }
+
+                            // Strategy 2: Fall back to on-chain indexing if GeckoTerminal failed
+                            if (!indexed) {
+                                try {
+                                    const result = await indexTokenOnChain(search);
+                                    if (!result?.skipped) {
+                                        indexed = true;
+                                    }
+                                } catch (indexErr) {
+                                    logger.error(`[PublicSearch] On-chain indexing failed for ${search}: ${indexErr.message}`);
+                                }
+                            }
+
+                            // Re-query after indexing attempts
+                            rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE mint = $1`, [search]);
                         }
                     }
                 } else {
@@ -2050,7 +2086,7 @@ function init(deps) {
                             // Re-query to get freshly indexed tokens
                             rows = await db.all(`SELECT ${selectFields} FROM tokens WHERE (symbol ILIKE $1 OR name ILIKE $1) ORDER BY volume24h DESC NULLS LAST LIMIT $2`, [safeSearch, limit]);
 
-                            logger.info(`[PublicSearch] Backfilled "${search}": ${rows.length} results`);
+                            logger.info(`[PublicSearch] Backfilled "${search}": ${rows.length} results (indexed ${newTokens.length} from GeckoTerminal)`);
                         } catch (geckoErr) {
                             logger.warn(`[PublicSearch] GeckoTerminal backfill failed for "${search}": ${geckoErr.message}`);
                         }
@@ -2457,13 +2493,50 @@ function init(deps) {
                             logger.warn(`[Search] Indexing rate limited for IP ${clientIp}`);
                             rows = [];
                         } else {
+                            let indexed = false;
+
+                            // Strategy 1: Try GeckoTerminal first (faster, has market data)
                             try {
-                                await indexTokenOnChain(search);
-                                rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
-                            } catch (indexErr) {
-                                logger.error(`[Search] Indexing failed for ${search}: ${indexErr.message}`);
-                                rows = [];
+                                const geckoData = await fetchInitialMarketData(search);
+                                if (geckoData && geckoData.priceUsd > 0) {
+                                    // Get metadata from GeckoTerminal token endpoint
+                                    const tokenUrl = `https://api.geckoterminal.com/api/v2/networks/solana/tokens/${search}`;
+                                    const tokenRes = await axios.get(tokenUrl, { timeout: 5000 });
+                                    const attrs = tokenRes.data?.data?.attributes;
+
+                                    if (attrs && attrs.name && attrs.symbol) {
+                                        await quickIndexFromGecko({
+                                            mint: search,
+                                            name: attrs.name,
+                                            symbol: attrs.symbol,
+                                            image: attrs.image_url || null,
+                                            priceUsd: geckoData.priceUsd,
+                                            volume24h: geckoData.volume24h,
+                                            marketCap: geckoData.marketCap,
+                                            liquidity: geckoData.liquidity
+                                        });
+                                        indexed = true;
+                                        logger.info(`[Search] Indexed ${search.slice(0,8)} via GeckoTerminal`);
+                                    }
+                                }
+                            } catch (geckoErr) {
+                                logger.debug(`[Search] GeckoTerminal lookup failed for ${search.slice(0,8)}: ${geckoErr.message}`);
                             }
+
+                            // Strategy 2: Fall back to on-chain indexing if GeckoTerminal failed
+                            if (!indexed) {
+                                try {
+                                    const result = await indexTokenOnChain(search);
+                                    if (!result?.skipped) {
+                                        indexed = true;
+                                    }
+                                } catch (indexErr) {
+                                    logger.error(`[Search] On-chain indexing failed for ${search}: ${indexErr.message}`);
+                                }
+                            }
+
+                            // Re-query after indexing attempts
+                            rows = await db.all(`SELECT * FROM tokens WHERE mint = $1`, [search]);
                         }
                     }
                 } else {
