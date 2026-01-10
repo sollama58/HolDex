@@ -1884,14 +1884,14 @@
                 <div class="text-[#ea580c] mt-1"><i data-lucide="search" width="20"></i></div>
                 <div>
                     <h4 class="font-bold text-white mb-1">Search Any Token</h4>
-                    <p class="text-[#737373]">Search by name, symbol, or paste a CA (Contract Address). We search Jupiter's verified token list and Helius for instant results.</p>
+                    <p class="text-[#737373]">Search by name, symbol for indexed tokens. First time viewing a token? Add it by searching the CA.</p>
                 </div>
             </div>
             <div class="flex gap-3">
                 <div class="text-[#22c55e] mt-1"><i data-lucide="plus-circle" width="20"></i></div>
                 <div>
                     <h4 class="font-bold text-white mb-1">Add New Tokens</h4>
-                    <p class="text-[#737373]">Paste any CA to instantly index a new token. We fetch metadata from Helius and pricing from Jupiter & Raydium.</p>
+                    <p class="text-[#737373]">Paste any CA to instantly index a new token.</p>
                 </div>
             </div>
             <div class="flex gap-3">
@@ -2394,7 +2394,7 @@
         cachedTokens = displayTokens; // Cache for popover
 
         if (displayTokens.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-[#737373] font-mono">No tokens found.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-[#737373] font-mono">No tokens found. First time viewing a token? Paste the CA!</td></tr>`;
             return;
         }
 
