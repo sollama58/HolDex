@@ -77,7 +77,7 @@ function validateEvent(event) {
 
     // Validate timestamp (if present)
     if (event.timestamp !== undefined) {
-        const ts = parseInt(event.timestamp);
+        const ts = parseInt(event.timestamp, 10);
         if (!Number.isFinite(ts) || ts < MIN_TIMESTAMP || ts > MAX_TIMESTAMP) {
             return { valid: false, reason: 'Invalid timestamp' };
         }
@@ -257,7 +257,7 @@ function init(deps) {
                 // VERIFICATION: On-chain transaction validation
                 // For large transfers, verify the transaction exists on-chain
                 // ============================================
-                const hasLargeTransfer = transfers.some(t => parseInt(t.tokenAmount) > CRITICAL_AMOUNT_THRESHOLD);
+                const hasLargeTransfer = transfers.some(t => parseInt(t.tokenAmount, 10) > CRITICAL_AMOUNT_THRESHOLD);
 
                 if (VERIFY_CRITICAL_TX && hasLargeTransfer && txSignature) {
                     const txVerification = await verification.verifyTransaction(txSignature, {

@@ -1132,16 +1132,84 @@
                 <div>
                     <label class="form-label">Mint Address</label>
                     <div class="relative">
-                        <input type="text" id="update-mint" class="form-input" placeholder="Enter Mint Address..." required onblur="fetchTokenForUpdate(this.value)">
+                        <input type="text" id="update-mint" class="form-input" placeholder="Paste or enter Mint Address..." required
+                               oninput="debouncedFetchToken(this.value)"
+                               onpaste="setTimeout(() => fetchTokenForUpdate(this.value), 50)">
                         <div id="mint-check-spinner" class="absolute right-3 top-3 hidden"><i data-lucide="loader-2" class="animate-spin text-[#ea580c]" width="18"></i></div>
                     </div>
+                    <div class="text-[10px] text-[#525252] mt-1">Paste a Solana token mint address to preview</div>
                 </div>
                 
-                <div id="token-preview-info" class="p-4 bg-[#141414] border border-[#252525] rounded-lg hidden flex items-center gap-4 mb-4">
-                    <img id="update-token-img" src="" class="w-12 h-12 rounded-md bg-black object-cover">
-                    <div>
-                        <div class="font-bold text-white text-sm" id="update-token-name">Token</div>
-                        <div class="text-xs text-[#737373] font-mono" id="update-token-ticker">TICKER</div>
+                <!-- Enhanced Token Preview Card -->
+                <div id="token-preview-info" class="hidden mb-4">
+                    <div class="bg-gradient-to-br from-[#141414] to-[#0a0a0a] border border-[#252525] rounded-xl overflow-hidden">
+                        <!-- Token Header -->
+                        <div class="p-4 border-b border-[#252525]">
+                            <div class="flex items-center gap-4">
+                                <div class="relative">
+                                    <img id="update-token-img" src="" class="w-14 h-14 rounded-lg bg-black object-cover border border-[#252525]">
+                                    <div id="update-verified-badge" class="hidden absolute -top-1 -right-1 bg-[#22c55e] rounded-full p-0.5">
+                                        <i data-lucide="check" width="10" class="text-white"></i>
+                                    </div>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <div class="font-bold text-white text-lg truncate" id="update-token-name">Token</div>
+                                    <div class="text-sm text-[#fb923c] font-mono" id="update-token-ticker">$TICKER</div>
+                                </div>
+                                <div class="text-right">
+                                    <div class="text-xs text-[#737373] uppercase">K-Score</div>
+                                    <div class="text-xl font-bold font-mono" id="update-token-kscore">--</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Token Stats Grid -->
+                        <div class="grid grid-cols-3 gap-px bg-[#252525]">
+                            <div class="bg-[#0a0a0a] p-3 text-center">
+                                <div class="text-[10px] text-[#737373] uppercase">Price</div>
+                                <div class="text-sm font-mono text-white" id="update-token-price">--</div>
+                            </div>
+                            <div class="bg-[#0a0a0a] p-3 text-center">
+                                <div class="text-[10px] text-[#737373] uppercase">Market Cap</div>
+                                <div class="text-sm font-mono text-[#fb923c]" id="update-token-mcap">--</div>
+                            </div>
+                            <div class="bg-[#0a0a0a] p-3 text-center">
+                                <div class="text-[10px] text-[#737373] uppercase">Holders</div>
+                                <div class="text-sm font-mono text-[#ea580c]" id="update-token-holders">--</div>
+                            </div>
+                        </div>
+
+                        <!-- Current Description Preview -->
+                        <div id="update-current-desc" class="hidden p-4 border-t border-[#252525]">
+                            <div class="text-[10px] text-[#737373] uppercase mb-2">Current Description</div>
+                            <div class="text-xs text-[#e0e0e0] leading-relaxed" id="update-token-desc-preview">No description</div>
+                        </div>
+
+                        <!-- Mint Address -->
+                        <div class="p-3 bg-[#000000] border-t border-[#252525]">
+                            <div class="flex items-center justify-between">
+                                <span class="text-[10px] text-[#525252] font-mono truncate" id="update-token-mint-display">mint...</span>
+                                <button onclick="copyToClipboard(document.getElementById('update-mint').value)" class="text-[#737373] hover:text-[#fb923c] p-1">
+                                    <i data-lucide="copy" width="12"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Loading State for Token Lookup -->
+                <div id="token-preview-loading" class="hidden mb-4">
+                    <div class="bg-[#141414] border border-[#252525] rounded-xl p-6 flex items-center justify-center gap-3">
+                        <i data-lucide="loader-2" class="text-[#ea580c] animate-spin" width="20"></i>
+                        <span class="text-[#737373]">Looking up token...</span>
+                    </div>
+                </div>
+
+                <!-- Error State for Token Lookup -->
+                <div id="token-preview-error" class="hidden mb-4">
+                    <div class="bg-[#141414] border border-red-900/50 rounded-xl p-4 text-center">
+                        <div class="text-red-400 font-semibold mb-1">Token Not Found</div>
+                        <div class="text-[#737373] text-xs">Check the mint address or <a href="#update" class="text-[#ea580c] hover:underline">add as new token</a></div>
                     </div>
                 </div>
 
@@ -1310,7 +1378,20 @@
 
     <!-- DETAIL VIEW -->
     <div id="view-detail" class="view-section px-2 md:px-0 hidden">
-        <div id="detail-loading" class="text-center py-20 text-[#ea580c] font-mono animate-pulse hidden">Fetching Chain Data...</div>
+        <div id="detail-loading" class="hidden">
+            <div class="bg-[#141414] rounded-xl border border-[#252525] p-8 max-w-lg mx-auto mt-8">
+                <div class="flex flex-col items-center gap-4">
+                    <div class="w-16 h-16 rounded-full bg-[#0a0a0a] border-2 border-[#ea580c] flex items-center justify-center">
+                        <i data-lucide="loader-2" class="text-[#ea580c] animate-spin" width="32"></i>
+                    </div>
+                    <div class="text-[#fb923c] text-lg font-semibold" id="loading-title">Loading Token Data...</div>
+                    <div class="text-[#737373] text-sm text-center" id="loading-subtitle">Fetching on-chain data</div>
+                    <div class="w-full bg-[#0a0a0a] rounded-full h-2 mt-2 overflow-hidden">
+                        <div class="bg-gradient-to-r from-[#ea580c] to-[#fb923c] h-full rounded-full animate-pulse" style="width: 60%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
         <div id="detail-content" style="display: none;">
             
             <div id="detail-banner-container" class="hidden rounded-xl border border-[#252525] mb-4 shadow-lg">
@@ -2212,6 +2293,7 @@
     let currentHolderHistory = [];
     let chartResizeObserver = null;
     let showKScoreOverlay = false;  // Toggle for K-Score overlay
+    let currentNavigationId = 0;  // Track navigation sequence to prevent race conditions
 
     // Socket
     let socket = null;
@@ -2220,6 +2302,30 @@
         let timeoutId;
         return (...args) => { clearTimeout(timeoutId); timeoutId = setTimeout(() => func.apply(null, args), delay); };
     };
+
+    /**
+     * Fetch with timeout - returns { ok, data, error, timedOut }
+     * @param {string} url - URL to fetch
+     * @param {object} options - Fetch options
+     * @param {number} timeoutMs - Timeout in ms (default 15s)
+     */
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+        try {
+            const res = await fetch(url, { ...options, signal: controller.signal });
+            clearTimeout(timeoutId);
+            const data = await res.json();
+            return { ok: res.ok, data, error: null, timedOut: false };
+        } catch (e) {
+            clearTimeout(timeoutId);
+            if (e.name === 'AbortError') {
+                return { ok: false, data: null, error: 'Request timed out', timedOut: true };
+            }
+            return { ok: false, data: null, error: e.message, timedOut: false };
+        }
+    }
 
     window.onload = async () => {
         handleRoute();
@@ -2366,13 +2472,17 @@
             if (isVerifiedFilter) endpoint += '&filter=verified';
             if (searchQuery) endpoint = `${API_URL}/api/tokens/public?search=${encodeURIComponent(searchQuery)}&limit=${currentLimit}`;
 
-            const res = await fetch(endpoint);
-            const data = await res.json();
+            const { ok, data, error, timedOut } = await fetchWithTimeout(endpoint, {}, 20000);
 
-            if (data.success) {
+            if (ok && data?.success) {
                 renderTable(data.tokens);
                 // Ensure pagination respects dynamic limit
                 if(next) next.disabled = data.tokens.length < currentLimit;
+            } else {
+                const errMsg = timedOut
+                    ? 'Request timed out. Please check your connection.'
+                    : (error || 'Failed to load tokens');
+                if (tbody) tbody.innerHTML = `<tr><td colspan="8" class="text-center py-20 text-red-400 font-mono">${escapeHtml(errMsg)}</td></tr>`;
             }
             isInitialLoad = false;
         } catch (e) {
@@ -2476,7 +2586,7 @@
         if (window.innerWidth >= 768) {
             tbody.querySelectorAll('tr[data-token-idx]').forEach(row => {
                 row.addEventListener('mouseenter', (e) => {
-                    const idx = parseInt(row.dataset.tokenIdx);
+                    const idx = parseInt(row.dataset.tokenIdx, 10);
                     if (cachedTokens[idx]) showTokenPopover(e, cachedTokens[idx]);
                 });
                 row.addEventListener('mouseleave', hideTokenPopover);
@@ -2491,11 +2601,13 @@
         document.getElementById('view-detail').classList.remove('hidden');
         document.getElementById('view-detail').classList.add('active');
         document.getElementById('detail-controls').classList.remove('hidden');
-        
+
+        // Increment navigation ID to track this request
+        const navId = ++currentNavigationId;
         currentMint = mint;
         currentHolderHistory = []; // Reset history
         cleanupHolderChart();      // Destroy previous chart instance
-        
+
         if(socket) socket.emit('subscribe', mint);
 
         const loadingDiv = document.getElementById('detail-loading');
@@ -2503,13 +2615,26 @@
         const bannerContainer = document.getElementById('detail-banner-container');
         const bannerImg = document.getElementById('detail-banner-img');
         
-        if (loadingDiv) loadingDiv.classList.remove('hidden');
+        if (loadingDiv) {
+            loadingDiv.classList.remove('hidden');
+            // Reset to default loading state
+            const titleEl = document.getElementById('loading-title');
+            const subtitleEl = document.getElementById('loading-subtitle');
+            if (titleEl) titleEl.innerText = 'Loading Token Data...';
+            if (subtitleEl) subtitleEl.innerText = 'Fetching on-chain data';
+        }
         if (contentDiv) contentDiv.style.display = 'none';
-        if (loadingDiv) loadingDiv.innerHTML = '<span class="text-[#737373]">Fetching Chain Data...</span>';
+        lucide.createIcons();
 
         try {
             const res = await fetch(`${API_URL}/api/token/${mint}/public`);
             const data = await res.json();
+
+            // Race condition check: abort if user navigated elsewhere
+            if (navId !== currentNavigationId) {
+                console.log(`🔄 Navigation superseded (${navId} < ${currentNavigationId}), aborting token render`);
+                return;
+            }
 
             if(data.success) {
                 const t = data.token;
@@ -2530,19 +2655,15 @@
                 // If token is still loading, show dedicated indexing screen and auto-retry
                 if (isLoading) {
                     if (loadingDiv) {
-                        loadingDiv.innerHTML = `
-                            <div class="flex flex-col items-center gap-4 py-8">
-                                <div class="text-4xl animate-spin">⏳</div>
-                                <div class="text-yellow-500 text-lg font-semibold">New Token Indexing...</div>
-                                <div class="text-[#737373] text-sm">Fetching metadata and market data</div>
-                                <div class="text-[#525252] text-xs mt-2">This usually takes 5-10 seconds</div>
-                            </div>
-                        `;
+                        const titleEl = document.getElementById('loading-title');
+                        const subtitleEl = document.getElementById('loading-subtitle');
+                        if (titleEl) titleEl.innerHTML = '⏳ New Token Indexing...';
+                        if (subtitleEl) subtitleEl.innerHTML = 'Fetching metadata and market data<br><span class="text-[#525252] text-xs">This usually takes 5-10 seconds</span>';
                     }
-                    // Auto-retry after 2 seconds
+                    // Auto-retry after 2 seconds (only if still on same navigation)
                     console.log('⏳ Token still indexing, will auto-refresh in 2s...');
                     setTimeout(() => {
-                        if (currentMint === mint) {
+                        if (navId === currentNavigationId && currentMint === mint) {
                             showDetailView(mint);
                         }
                     }, 2000);
@@ -2720,14 +2841,10 @@
             } else if (data.status === 'indexing') {
                 // Handle 202 response - token being indexed (no data yet)
                 if (loadingDiv) {
-                    loadingDiv.innerHTML = `
-                        <div class="flex flex-col items-center gap-4 py-8">
-                            <div class="text-4xl animate-spin">⏳</div>
-                            <div class="text-yellow-500 text-lg font-semibold">New Token Indexing...</div>
-                            <div class="text-[#737373] text-sm">Fetching metadata and market data</div>
-                            <div class="text-[#525252] text-xs mt-2">This usually takes 5-10 seconds</div>
-                        </div>
-                    `;
+                    const titleEl = document.getElementById('loading-title');
+                    const subtitleEl = document.getElementById('loading-subtitle');
+                    if (titleEl) titleEl.innerHTML = '⏳ New Token Indexing...';
+                    if (subtitleEl) subtitleEl.innerHTML = 'Fetching metadata and market data<br><span class="text-[#525252] text-xs">This usually takes 5-10 seconds</span>';
                 }
                 // Auto-retry after 2 seconds
                 setTimeout(() => {
@@ -2735,8 +2852,24 @@
                         showDetailView(mint);
                     }
                 }, 2000);
-            } else { if (loadingDiv) loadingDiv.innerText = 'Token not found.'; }
-        } catch(e) { console.error(e); if (loadingDiv) loadingDiv.innerText = 'Error fetching data.'; }
+            } else {
+                // Token not found - show friendly message
+                if (loadingDiv) {
+                    const titleEl = document.getElementById('loading-title');
+                    const subtitleEl = document.getElementById('loading-subtitle');
+                    if (titleEl) titleEl.innerHTML = '🔍 Token Not Found';
+                    if (subtitleEl) subtitleEl.innerHTML = 'This token may not exist or hasn\'t been indexed yet.<br><a href="#update" class="text-[#ea580c] hover:underline">Add it via Community Update</a>';
+                }
+            }
+        } catch(e) {
+            console.error(e);
+            if (loadingDiv) {
+                const titleEl = document.getElementById('loading-title');
+                const subtitleEl = document.getElementById('loading-subtitle');
+                if (titleEl) titleEl.innerHTML = '❌ Connection Error';
+                if (subtitleEl) subtitleEl.innerHTML = 'Failed to fetch token data. Please try again.<br><button onclick="showDetailView(\'' + mint + '\')" class="text-[#ea580c] hover:underline mt-2">Retry</button>';
+            }
+        }
     }
 
     // --- CHARTING ---
@@ -2883,7 +3016,7 @@
             const data = await res.json();
             if(data.success && data.candles) {
                 let cleanData = data.candles.map(c => {
-                    let open = parseFloat(c.open), high = parseFloat(c.high), low = parseFloat(c.low), close = parseFloat(c.close), time = parseInt(c.time);
+                    let open = parseFloat(c.open), high = parseFloat(c.high), low = parseFloat(c.low), close = parseFloat(c.close), time = parseInt(c.time, 10);
                     if (!time || isNaN(open)) return null;
                     if (currentChartMode === 'mcap') { open *= currentNormalizedSupply; high *= currentNormalizedSupply; low *= currentNormalizedSupply; close *= currentNormalizedSupply; }
                     return { time, open, high, low, close };
@@ -2963,7 +3096,7 @@
                 let ts = h.timestamp;
                 let timeVal;
                 // Parse timestamp robustly
-                if (String(ts).match(/^\d+$/)) ts = parseInt(ts);
+                if (String(ts).match(/^\d+$/)) ts = parseInt(ts, 10);
                 
                 if (typeof ts === 'number') {
                     // Assume MS if > year 2000 in seconds (~946mil) * 1000
@@ -2973,7 +3106,7 @@
                     timeVal = Math.floor(new Date(ts).getTime() / 1000);
                 }
                 
-                return { time: timeVal, value: parseInt(h.count) };
+                return { time: timeVal, value: parseInt(h.count, 10) };
             })
             .filter(x => !isNaN(x.time) && !isNaN(x.value))
             .sort((a,b) => a.time - b.time);
@@ -3031,8 +3164,8 @@
                     const safeAddrJs = escapeJs(h.address || '');
                     const safeClass = escapeHtml(h.class || 'unknown');
                     const safeOrbUrl = sanitizeUrl(h.orbUrl);
-                    const safeBuys = parseInt(h.buys) || 0;
-                    const safeSells = parseInt(h.sells) || 0;
+                    const safeBuys = parseInt(h.buys, 10) || 0;
+                    const safeSells = parseInt(h.sells, 10) || 0;
                     return `
                     <tr class="border-b border-[#252525]/30 hover:bg-[#141414]/50">
                         <td class="px-2 py-2 text-[#737373] font-mono text-xs">${i + 1}</td>
@@ -3110,53 +3243,140 @@
     }
 
     // --- UPDATES & WALLET ---
+
+    // Debounce timer for mint input
+    let mintFetchTimeout = null;
+    window.debouncedFetchToken = (mint) => {
+        if (mintFetchTimeout) clearTimeout(mintFetchTimeout);
+        mintFetchTimeout = setTimeout(() => {
+            if (mint && mint.length >= 32) {
+                fetchTokenForUpdate(mint);
+            }
+        }, 500); // Wait 500ms after typing stops
+    };
+
     window.fetchTokenForUpdate = async (mint) => {
         if(!mint || mint.length < 32) return;
+
+        // Hide all preview states, show loading
+        document.getElementById('token-preview-info').classList.add('hidden');
+        document.getElementById('token-preview-error').classList.add('hidden');
+        document.getElementById('token-preview-loading').classList.remove('hidden');
         document.getElementById('mint-check-spinner').classList.remove('hidden');
 
-        // BUGFIX: Clear all form fields before fetching new token to prevent stale data
+        // Clear all form fields before fetching new token to prevent stale data
         document.getElementById('update-twitter').value = '';
         document.getElementById('update-telegram').value = '';
         document.getElementById('update-website').value = '';
         document.getElementById('update-description').value = '';
-        document.getElementById('update-token-name').innerText = 'Loading...';
-        document.getElementById('update-token-ticker').innerText = '...';
-        document.getElementById('update-token-img').src = 'https://placehold.co/40';
+        document.getElementById('update-banner').value = '';
         currentUpdateTokenData = null;
 
         try {
             const res = await fetch(`${API_URL}/api/token/${mint}/public`);
             const data = await res.json();
             document.getElementById('mint-check-spinner').classList.add('hidden');
+            document.getElementById('token-preview-loading').classList.add('hidden');
+
             if(data.success && data.token) {
                 const t = data.token;
                 currentUpdateTokenData = t;
+
+                // Show preview card
                 document.getElementById('token-preview-info').classList.remove('hidden');
-                // SECURITY: Sanitize image URL
-                document.getElementById('update-token-img').src = sanitizeUrl(t.image) || 'https://placehold.co/40';
+                document.getElementById('token-preview-error').classList.add('hidden');
+
+                // Populate token header
+                document.getElementById('update-token-img').src = sanitizeUrl(t.image) || 'https://placehold.co/56';
                 document.getElementById('update-token-name').innerText = t.name || 'Unknown';
-                // FIX: Use 'symbol' from API (was 'ticker')
-                document.getElementById('update-token-ticker').innerText = t.symbol || t.ticker || 'UNK';
-                // Set form fields (already cleared above, so empty string if not provided)
+                document.getElementById('update-token-ticker').innerText = '$' + (t.symbol || t.ticker || 'UNK');
+
+                // K-Score display with color coding
+                const kScore = t.kScore || t.k_score || 0;
+                const kScoreEl = document.getElementById('update-token-kscore');
+                if (kScoreEl) {
+                    kScoreEl.innerText = kScore > 0 ? kScore.toFixed(0) : '--';
+                    kScoreEl.className = 'text-xl font-bold font-mono ' + (kScore >= 70 ? 'text-[#22c55e]' : kScore >= 50 ? 'text-[#fb923c]' : kScore > 0 ? 'text-[#fca5a5]' : 'text-[#737373]');
+                }
+
+                // Show verified badge if applicable
+                const isVerified = t.verified || t.hasCommunityUpdate || t.hascommunityupdate;
+                const badgeEl = document.getElementById('update-verified-badge');
+                if (badgeEl) {
+                    badgeEl.classList.toggle('hidden', !isVerified);
+                }
+
+                // Populate stats
+                const price = t.priceUsd || 0;
+                const priceEl = document.getElementById('update-token-price');
+                if (priceEl) {
+                    priceEl.innerText = price > 0 ? ((price < 0.01) ? '$' + price.toExponential(2) : '$' + price.toFixed(6)) : '--';
+                }
+
+                const mcap = t.mcap || t.marketCap || 0;
+                const mcapEl = document.getElementById('update-token-mcap');
+                if (mcapEl) {
+                    mcapEl.innerText = mcap > 0 ? '$' + new Intl.NumberFormat('en', {notation:'compact'}).format(mcap) : '--';
+                }
+
+                const holdersEl = document.getElementById('update-token-holders');
+                if (holdersEl) {
+                    holdersEl.innerText = t.holders ? new Intl.NumberFormat('en', {notation:'compact'}).format(t.holders) : '--';
+                }
+
+                // Show current description if exists
+                const descContainer = document.getElementById('update-current-desc');
+                const descPreview = document.getElementById('update-token-desc-preview');
+                if (descContainer && descPreview) {
+                    if (t.description && t.description.trim()) {
+                        descContainer.classList.remove('hidden');
+                        descPreview.innerText = t.description;
+                    } else {
+                        descContainer.classList.add('hidden');
+                    }
+                }
+
+                // Show mint address
+                const mintDisplay = document.getElementById('update-token-mint-display');
+                if (mintDisplay) {
+                    mintDisplay.innerText = mint.slice(0, 8) + '...' + mint.slice(-6);
+                }
+
+                // Pre-fill form fields with existing data
                 document.getElementById('update-twitter').value = t.twitter || '';
                 document.getElementById('update-telegram').value = t.telegram || '';
                 document.getElementById('update-website').value = t.website || '';
                 document.getElementById('update-description').value = t.description || '';
-                if(t.verified || t.hasCommunityUpdate) { document.getElementById('update-cto-warning').classList.remove('hidden'); document.getElementById('update-cto-user').required = true; }
-                else { document.getElementById('update-cto-warning').classList.add('hidden'); document.getElementById('update-cto-user').required = false; }
+                document.getElementById('update-banner').value = t.banner || '';
 
+                // CTO warning for existing verified tokens
+                if(isVerified) {
+                    document.getElementById('update-cto-warning').classList.remove('hidden');
+                    document.getElementById('update-cto-user').required = true;
+                } else {
+                    document.getElementById('update-cto-warning').classList.add('hidden');
+                    document.getElementById('update-cto-user').required = false;
+                }
+
+                // Update character counter
+                const charCount = document.getElementById('char-count');
+                if (charCount) {
+                    charCount.innerText = (t.description || '').length;
+                }
+
+                lucide.createIcons();
                 checkSubmitEligibility();
             } else {
                 // Token not found - show error state
-                document.getElementById('update-token-name').innerText = 'Not Found';
-                document.getElementById('update-token-ticker').innerText = 'N/A';
                 document.getElementById('token-preview-info').classList.add('hidden');
+                document.getElementById('token-preview-error').classList.remove('hidden');
             }
         } catch(e) {
             console.error(e);
             document.getElementById('mint-check-spinner').classList.add('hidden');
-            document.getElementById('update-token-name').innerText = 'Error';
-            document.getElementById('update-token-ticker').innerText = 'N/A';
+            document.getElementById('token-preview-loading').classList.add('hidden');
+            document.getElementById('token-preview-info').classList.add('hidden');
+            document.getElementById('token-preview-error').classList.remove('hidden');
         }
     };
     
@@ -3391,14 +3611,14 @@
                     };
                     const safeTier = escapeHtml(k.tier);
                     const tc = tierColors[k.tier] || tierColors.free;
-                    const usagePct = Math.round((parseInt(k.requests_today) || 0) / (parseInt(k.requests_limit) || 1) * 100);
+                    const usagePct = Math.round((parseInt(k.requests_today, 10) || 0) / (parseInt(k.requests_limit, 10) || 1) * 100);
                     const canUpgrade = k.tier !== 'enterprise' && k.is_active;
                     const nextTier = k.tier === 'free' ? 'pro' : 'enterprise';
                     const nextCost = k.tier === 'free' ? '25K' : '100K';
                     const safeKeyId = escapeJs(k.key_id);
                     const safeKeyPreview = escapeHtml(k.key_preview);
-                    const safeReqToday = (parseInt(k.requests_today) || 0).toLocaleString();
-                    const safeReqLimit = (parseInt(k.requests_limit) || 0).toLocaleString();
+                    const safeReqToday = (parseInt(k.requests_today, 10) || 0).toLocaleString();
+                    const safeReqLimit = (parseInt(k.requests_limit, 10) || 0).toLocaleString();
 
                     return `
                         <div class="bg-black rounded-lg p-3 border ${tc.border}">
@@ -3445,10 +3665,10 @@
                     };
                     const safeTier = escapeHtml(k.tier);
                     const tc = tierColors[k.tier] || tierColors.free;
-                    const usagePct = Math.round((parseInt(k.requests_today) || 0) / (parseInt(k.requests_limit) || 1) * 100);
+                    const usagePct = Math.round((parseInt(k.requests_today, 10) || 0) / (parseInt(k.requests_limit, 10) || 1) * 100);
                     const safeKeyPreview = escapeHtml(k.key_preview);
-                    const safeReqToday = (parseInt(k.requests_today) || 0).toLocaleString();
-                    const safeReqLimit = (parseInt(k.requests_limit) || 0).toLocaleString();
+                    const safeReqToday = (parseInt(k.requests_today, 10) || 0).toLocaleString();
+                    const safeReqLimit = (parseInt(k.requests_limit, 10) || 0).toLocaleString();
 
                     return `
                         <div class="bg-[#141414] rounded-lg p-3 border ${tc.border}">
@@ -3533,7 +3753,7 @@
     };
     window.handleSearch = (e) => { searchQuery = e.target.value; fetchList(); };
     window.copyMint = () => { if(currentMint) navigator.clipboard.writeText(currentMint).then(()=>alert('Mint copied')); };
-    window.changeLimit = (val) => { currentLimit = parseInt(val); currentPage = 1; fetchList(); };
+    window.changeLimit = (val) => { currentLimit = parseInt(val, 10); currentPage = 1; fetchList(); };
     
     // Modal Toggles
     const toggleModal = (id) => { 
@@ -3906,7 +4126,7 @@
                         <td class="px-4 py-3">
                             <span class="text-[#fb923c]">${safeMint.slice(0,4)}...${safeMint.slice(-4)}</span>
                         </td>
-                        <td class="px-4 py-3 text-right text-[#e0e0e0]">${parseInt(t.buyCount) || 0} / ${parseInt(t.sellCount) || 0}</td>
+                        <td class="px-4 py-3 text-right text-[#e0e0e0]">${parseInt(t.buyCount, 10) || 0} / ${parseInt(t.sellCount, 10) || 0}</td>
                         <td class="px-4 py-3 text-right text-[#e0e0e0]">${(parseFloat(t.totalBought) || 0).toFixed(2)}</td>
                         <td class="px-4 py-3 text-right text-[#e0e0e0]">${(parseFloat(t.totalCostSol) || 0).toFixed(4)}</td>
                         <td class="px-4 py-3 text-right text-[#e0e0e0]">${(parseFloat(t.totalProceedsSol) || 0).toFixed(4)}</td>

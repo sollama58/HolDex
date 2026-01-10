@@ -534,7 +534,7 @@ async function getTokenValidation(db, mint) {
                 const verification = {
                     mint,
                     node_id: v.node_id,
-                    verified_at: parseInt(v.verified_at),
+                    verified_at: parseInt(v.verified_at, 10),
                     k_score: v.k_score,
                     signatures_valid: v.signatures_valid
                 };

@@ -801,7 +801,7 @@ async function initDB() {
             // Seed operation costs if empty (GASdf fee structure)
             // Based on φ-ratio efficiency floor: minFee = (cost / 0.236) × 1.2
             const existingCosts = await primaryPool.query('SELECT COUNT(*) as count FROM operation_costs');
-            if (parseInt(existingCosts.rows[0].count) === 0) {
+            if (parseInt(existingCosts.rows[0].count, 10) === 0) {
                 const seedCosts = [
                     // operation_type, base_fee, actual_cost, min_fee, max_discount
                     ['gasdf_submit_standard', 100, 5, 25.42, 0.50],    // Standard submission
@@ -1034,7 +1034,7 @@ async function aggregateAndSaveToken(db, mint) {
         // --- HOLDER CHECK LOGIC ---
         const now = Date.now();
         const tokenRow = await db.get(`SELECT last_holder_check, holders FROM tokens WHERE mint = $1`, [mint]);
-        const lastCheck = parseInt(tokenRow?.last_holder_check || 0);
+        const lastCheck = parseInt(tokenRow?.last_holder_check || 0, 10);
         
         let holderCount = null;
         // Check holders every 30 minutes (with 30s timeout to not block)

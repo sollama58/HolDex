@@ -328,7 +328,7 @@ async function checkTokenConsensus(mint, db) {
         WHERE (approval_status = 'approved' OR is_genesis = TRUE)
           AND status IN ('active', 'degraded')
     `);
-    const totalNodes = parseInt(activeResult.rows[0].count);
+    const totalNodes = parseInt(activeResult.rows[0].count, 10);
 
     // Find median K-Score
     const kScores = verifications.map(v => v.k_score).sort((a, b) => a - b);

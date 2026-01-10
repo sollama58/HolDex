@@ -225,7 +225,7 @@ async function approveNode(db, targetNodeId, approverNodeId, signature) {
             'SELECT COUNT(*) as count FROM node_approvals WHERE node_id = $1',
             [targetNodeId]
         );
-        const currentApprovals = parseInt(approvalCount.rows[0].count);
+        const currentApprovals = parseInt(approvalCount.rows[0].count, 10);
 
         // Update node approval count
         await db.query(
@@ -284,7 +284,7 @@ async function getActiveNodeCount(db) {
         WHERE (approval_status = 'approved' OR is_genesis = TRUE)
           AND status IN ('active', 'degraded')
     `);
-    return parseInt(result.rows[0].count) || 0;
+    return parseInt(result.rows[0].count, 10) || 0;
 }
 
 /**

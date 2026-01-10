@@ -49,8 +49,8 @@ async function trackRpcCall(method, credits = 1, metadata = {}) {
         await pipeline.exec();
 
         // Check if we should alert
-        const hourlyUsage = parseInt(await redis.get(hourKey) || '0');
-        const dailyUsage = parseInt(await redis.get(dayKey) || '0');
+        const hourlyUsage = parseInt(await redis.get(hourKey) || '0', 10);
+        const dailyUsage = parseInt(await redis.get(dayKey) || '0', 10);
 
         const hourlyPercent = hourlyUsage / BUDGET.HOURLY;
         const dailyPercent = dailyUsage / BUDGET.DAILY;
@@ -90,8 +90,8 @@ async function getUsageStats() {
         const hourKey = `rpc:credits:hour:${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}`;
         const dayKey = `rpc:credits:day:${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-        const hourlyUsage = parseInt(await redis.get(hourKey) || '0');
-        const dailyUsage = parseInt(await redis.get(dayKey) || '0');
+        const hourlyUsage = parseInt(await redis.get(hourKey) || '0', 10);
+        const dailyUsage = parseInt(await redis.get(dayKey) || '0', 10);
 
         // Get top methods
         const methodPattern = `rpc:method:*:${hourKey}`;
@@ -99,7 +99,7 @@ async function getUsageStats() {
         const methods = {};
 
         for (const key of methodKeys) {
-            const count = parseInt(await redis.get(key) || '0');
+            const count = parseInt(await redis.get(key) || '0', 10);
             const methodName = key.split(':')[2];
             methods[methodName] = count;
         }

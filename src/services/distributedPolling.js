@@ -555,14 +555,14 @@ async function getNetworkStatus() {
             [currentNodeId]
         );
 
-        const nodesActive = parseInt(nodesResult.rows[0]?.count || 0);
+        const nodesActive = parseInt(nodesResult.rows[0]?.count || 0, 10);
         const totalCredits = parseFloat(creditsResult.rows[0]?.total || 0);
         const myCredits = parseFloat(myResult.rows[0]?.credits || 0);
 
         return {
             mode: 'distributed',
             nodes_active: nodesActive,
-            tasks_pending: parseInt(tasksResult.rows[0]?.count || 0),
+            tasks_pending: parseInt(tasksResult.rows[0]?.count || 0, 10),
             total_credits: totalCredits,
             my_credits: myCredits,
             my_claim_probability: totalCredits > 0 ? myCredits / totalCredits : 0,

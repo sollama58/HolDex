@@ -43,7 +43,7 @@ async function queueKScoreRecalc(mint, options = {}) {
         // Check cooldown unless priority
         if (!priority) {
             const lastRecalc = await redis.get(`kscore:last_recalc:${mint}`);
-            if (lastRecalc && Date.now() - parseInt(lastRecalc) < RECALC_COOLDOWN_MS) {
+            if (lastRecalc && Date.now() - parseInt(lastRecalc, 10) < RECALC_COOLDOWN_MS) {
                 logger.debug(`[KScoreQueue] ${mint.slice(0, 8)} in cooldown, skipping`);
                 return false;
             }

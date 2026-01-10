@@ -141,7 +141,7 @@ async function getOnChainPrice(db, mint, decimals = 9) {
     if (!pools || pools.length === 0) {
         // Fallback to DB price if no pools
         const token = await db.get('SELECT priceusd, price_timestamp FROM tokens WHERE mint = $1', [mint]);
-        const originalTs = parseInt(token?.price_timestamp || 0);
+        const originalTs = parseInt(token?.price_timestamp || 0, 10);
         return {
             priceUsd: token?.priceusd || 0,
             source: 'db_cache',

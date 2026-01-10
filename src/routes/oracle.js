@@ -751,7 +751,7 @@ function init(deps) {
      */
     router.get('/leaderboard', async (req, res) => {
         try {
-            const limit = Math.min(100, parseInt(req.query.limit) || 50);
+            const limit = Math.min(100, parseInt(req.query.limit, 10) || 50);
             const leaderboard = await engine.getLeaderboard(limit);
 
             res.json({

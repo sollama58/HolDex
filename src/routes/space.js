@@ -563,7 +563,7 @@ router.get('/analytics/burns', requireSession(), requireGrant('gasdf_analytics')
                     amount: b.amount,
                     source: b.source,
                     txSignature: b.tx_signature,
-                    createdAt: new Date(parseInt(b.created_at)).toISOString(),
+                    createdAt: new Date(parseInt(b.created_at, 10)).toISOString(),
                     verified: b.verified
                 })),
                 ecosystem: {
@@ -584,7 +584,7 @@ router.get('/analytics/burns', requireSession(), requireGrant('gasdf_analytics')
  */
 router.get('/analytics/leaderboard', requireSession(), requireGrant('gasdf_analytics'), spaceRateLimiter, async (req, res) => {
     try {
-        const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+        const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
 
         const leaderboard = await db.all(`
             SELECT
@@ -890,7 +890,7 @@ router.delete('/admin/grants/:targetWallet',
  */
 router.get('/admin/actions', requireSession(), requireGrant('grants_admin'), spaceRateLimiter, async (req, res) => {
     try {
-        const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+        const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
 
         const actions = await db.all(`
             SELECT id, wallet, action, grant_used, metadata, success, error, created_at

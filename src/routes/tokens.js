@@ -392,7 +392,7 @@ function init(deps) {
      */
     router.get('/token/:mint/audit', cacheControl(30, 60), unifiedRateLimiter, async (req, res) => {
         const { mint } = req.params;
-        const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+        const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
 
         if (!isValidPubkey(mint)) {
             return res.status(400).json({ success: false, error: 'Invalid mint address' });
@@ -463,10 +463,16 @@ function init(deps) {
             return res.status(400).json({ success: false, error: 'Invalid mint address' });
         }
 
+        // SECURITY: Resolution whitelist (valid TradingView resolutions)
+        const VALID_RESOLUTIONS = ['1', '5', '15', '30', '60', '240', 'D', '1D'];
+        if (!VALID_RESOLUTIONS.includes(resolution)) {
+            return res.status(400).json({ success: false, error: 'Invalid resolution parameter' });
+        }
+
         try {
-            const resMinutes = parseInt(resolution === 'D' ? 1440 : resolution);
+            const resMinutes = parseInt(resolution === 'D' || resolution === '1D' ? 1440 : resolution, 10);
             const resMs = resMinutes * 60 * 1000;
-            const cacheKey = `chart:${mint}:${poolAddress || 'best'}:${resolution}:${Math.floor(Date.now() / 10000)}`; 
+            const cacheKey = `chart:${mint}:${poolAddress || 'best'}:${resolution}:${Math.floor(Date.now() / 10000)}`;
 
             const result = await smartCache(cacheKey, 10, async () => {
                 let targetPoolAddress = poolAddress;
@@ -476,8 +482,16 @@ function init(deps) {
                     targetPoolAddress = bestPool.address;
                 }
 
-                const fromMs = parseInt(from) * 1000 || (Date.now() - 24 * 60 * 60 * 1000);
-                const toMs = parseInt(to) * 1000 || Date.now();
+                // SECURITY: Time range validation - cap at 1 year max range
+                const MAX_RANGE_MS = 365 * 24 * 60 * 60 * 1000; // 1 year
+                const now = Date.now();
+                let fromMs = parseInt(from, 10) * 1000 || (now - 24 * 60 * 60 * 1000);
+                let toMs = parseInt(to, 10) * 1000 || now;
+
+                // Clamp to reasonable bounds
+                if (fromMs < now - MAX_RANGE_MS) fromMs = now - MAX_RANGE_MS;
+                if (toMs > now + 60000) toMs = now; // Don't allow future timestamps (with 1min buffer)
+                if (fromMs >= toMs) fromMs = toMs - 24 * 60 * 60 * 1000; // Ensure valid range
 
                 const rows = await db.all(`
                     SELECT timestamp, open, high, low, close, volume FROM candles_1m 
@@ -495,7 +509,7 @@ function init(deps) {
                 const candles = [];
                 let currentCandle = null;
                 for (const r of rows) {
-                    const time = parseInt(String(r.timestamp));
+                    const time = parseInt(String(r.timestamp), 10);
                     const bucketStart = Math.floor(time / resMs) * resMs;
                     if (!currentCandle || currentCandle.timeMs !== bucketStart) {
                         if (currentCandle) {
@@ -560,7 +574,7 @@ function init(deps) {
                 tokenPrice: tokenPrice,
                 treasury: config.TREASURY_WALLET
             });
-        } catch (e) {
+        } catch (_e) {
             // Fallback to hardcoded config if DB lookup fails
             const isAsdfToken = config.FEE_TOKEN_MINT === ASDFASDFA_TOKEN.mint;
             res.json({
@@ -580,8 +594,8 @@ function init(deps) {
 
     // SECURITY: Rate limit balance proxy (M2)
     router.get('/proxy/balance/:wallet', proxyRateLimit, async (req, res) => {
+        const { wallet } = req.params;
         try {
-            const { wallet } = req.params;
             const tokenMint = req.query.tokenMint || config.FEE_TOKEN_MINT;
             if (!isValidPubkey(wallet)) return res.status(400).json({ success: false, error: "Invalid wallet" });
 
@@ -591,7 +605,10 @@ function init(deps) {
                 solanaConnection.getParsedTokenAccountsByOwner(pubKey, { mint: new PublicKey(tokenMint) })
             ]);
             res.json({ success: true, sol: solBalance / 1e9, tokens: tokenAccounts.value.length > 0 ? tokenAccounts.value[0].account.data.parsed.info.tokenAmount.uiAmount : 0 });
-        } catch (_e) { res.status(500).json({ success: false, error: "Failed to fetch balance" }); }
+        } catch (e) {
+            logger.debug(`[Proxy] Balance fetch failed for ${wallet?.slice(0, 8)}: ${e.message}`);
+            res.status(500).json({ success: false, error: "Failed to fetch balance" });
+        }
     });
 
     // SECURITY: Rate limit update requests (M2)
@@ -629,7 +646,10 @@ function init(deps) {
             }
 
             res.json({ success: true, message: "Update queued." });
-        } catch (_e) { res.status(500).json({ success: false, error: "Submission failed" }); }
+        } catch (e) {
+            logger.error(`[Update] Submission failed for ${mint?.slice(0, 8)}: ${e.message}`);
+            res.status(500).json({ success: false, error: "Submission failed" });
+        }
     });
 
     // --- API KEY GENERATION (Wallet-Linked) ---
@@ -646,7 +666,7 @@ function init(deps) {
             if (!verified) return res.status(403).json({ success: false, error: "Invalid Signature" });
 
             const result = await db.get('SELECT COUNT(*) as count FROM api_keys WHERE owner = $1', [wallet]);
-            const count = parseInt(result?.count || 0);
+            const count = parseInt(result?.count || 0, 10);
 
             if (count >= 5) {
                 return res.status(400).json({ success: false, error: "Limit reached (5 Keys). Revoke old keys first." });
@@ -945,12 +965,12 @@ function init(deps) {
                     const cooldownKey = `kscore:cooldown:${mint}`;
                     const lastRun = await redis.get(cooldownKey);
                     if (lastRun) {
-                        const elapsed = Date.now() - parseInt(lastRun);
+                        const elapsed = Date.now() - parseInt(lastRun, 10);
                         const remaining = Math.ceil((3600000 - elapsed) / 60000); // minutes
                         return res.status(429).json({
                             success: false,
                             error: `Rate limited. Try again in ${remaining} min.`,
-                            lastRun: new Date(parseInt(lastRun)).toISOString()
+                            lastRun: new Date(parseInt(lastRun, 10)).toISOString()
                         });
                     }
                     // Set cooldown (1 hour TTL)
@@ -975,12 +995,12 @@ function init(deps) {
                 const cooldownKey = 'kscore:bulk:cooldown';
                 const lastRun = await redis.get(cooldownKey);
                 if (lastRun) {
-                    const elapsed = Date.now() - parseInt(lastRun);
+                    const elapsed = Date.now() - parseInt(lastRun, 10);
                     const remaining = Math.ceil((3600000 - elapsed) / 60000); // minutes
                     return res.status(429).json({
                         success: false,
                         error: `Bulk refresh rate limited. Try again in ${remaining} min.`,
-                        lastRun: new Date(parseInt(lastRun)).toISOString()
+                        lastRun: new Date(parseInt(lastRun, 10)).toISOString()
                     });
                 }
                 // Set cooldown (1 hour TTL)
@@ -1046,7 +1066,7 @@ function init(deps) {
             // SECURITY: Escape LIKE pattern and validate tier
             const VALID_TIERS = ['free', 'pro', 'enterprise'];
             const safeTier = VALID_TIERS.includes(tier) ? tier : 'free';
-            const safeLimit = Math.max(0, Math.min(parseInt(limit) || 1000, 10000000));
+            const safeLimit = Math.max(0, Math.min(parseInt(limit, 10) || 1000, 10000000));
             const safePattern = escapeLikePattern(key_id) + '%';
 
             await db.run(`UPDATE api_keys SET tier = $1, requests_limit = $2 WHERE key_hash LIKE $3 ESCAPE '\\'`, [safeTier, safeLimit, safePattern]);
@@ -1777,7 +1797,7 @@ function init(deps) {
             }
 
             // SECURITY: Validate and clamp days parameter
-            const daysNum = Math.min(Math.max(parseInt(days) || 30, 1), 365);
+            const daysNum = Math.min(Math.max(parseInt(days, 10) || 30, 1), 365);
 
             const kScoreHistory = await db.all(`
                 SELECT date, k_score, conviction_score, holders
@@ -1918,7 +1938,7 @@ function init(deps) {
                 // Token category
                 tokenData.isPumpFun = token.is_pump_fun || false;
                 tokenData.bondingCurveComplete = token.bonding_curve_complete || false;
-                tokenData.launchDate = token.timestamp ? new Date(parseInt(token.timestamp)).toISOString() : null;
+                tokenData.launchDate = token.timestamp ? new Date(parseInt(token.timestamp, 10)).toISOString() : null;
 
                 // Conviction breakdown - only for verified tokens
                 // Holder Role Metals: Diamond (Accumulators), Gold (Holders), Silver (Reducers), Rust (Extractors)
@@ -1987,7 +2007,15 @@ function init(deps) {
     // --- K-SCORE CARD IMAGE (for Twitter/social sharing) ---
     // Styles: holdex (default), asdf, minimal
     // Legacy modes: full=holdex, simple/minimal=minimal, fire=asdf
-    router.get('/token/:mint/card.png', async (req, res) => {
+    // SECURITY: Rate limited due to CPU-intensive image generation
+    const cardRateLimiter = rateLimit({
+        windowMs: 60 * 1000,
+        max: 30, // 30 card generations per minute per IP
+        message: { success: false, error: 'Card generation rate limit exceeded. Try again in a minute.' },
+        keyGenerator: (req) => req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown'
+    });
+
+    router.get('/token/:mint/card.png', cardRateLimiter, async (req, res) => {
         const { mint } = req.params;
         const { style, mode } = req.query;
 
@@ -2138,8 +2166,9 @@ function init(deps) {
     router.get('/tokens/public', cacheControl(5, 15), publicRateLimit, async (req, res) => {
         let { sort = 'volume', page = 1, direction = 'desc', limit = 20, filter, search = '' } = req.query;
         try {
-            limit = Math.min(Math.max(parseInt(limit) || 20, 1), 50);
-            page = Math.max(parseInt(page) || 1, 1);
+            limit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50);
+            // SECURITY: Cap page number to prevent excessive offset-based queries
+            page = Math.min(Math.max(parseInt(page, 10) || 1, 1), 1000);
 
             const redis = getClient();
             const cacheKey = `public:tokens:${sort}:${page}:${direction}:${limit}:${filter || 'all'}:${search}`;
@@ -2451,7 +2480,7 @@ function init(deps) {
             const isLoadingSymbol = !token.symbol || token.symbol === '...' || token.symbol === 'UNK';
             const isLoadingPrice = !token.priceusd || parseFloat(token.priceusd) === 0;
             // Check if token was just indexed (within last 30 seconds) and lacks full data
-            const tokenAge = token.timestamp ? Date.now() - parseInt(token.timestamp) : Infinity;
+            const tokenAge = token.timestamp ? Date.now() - parseInt(token.timestamp, 10) : Infinity;
             const isNewlyIndexed = tokenAge < 30000; // Less than 30 seconds old
             const lacksFullData = !token.image || (!token.holders && token.holders !== 0);
             const isLoading = isLoadingName || isLoadingSymbol || isLoadingPrice || (isNewlyIndexed && lacksFullData);
@@ -2510,7 +2539,7 @@ function init(deps) {
                 // Origin
                 isPumpFun: token.is_pump_fun || false,
                 bondingCurveComplete: token.bonding_curve_complete || false,
-                launchDate: token.timestamp ? new Date(parseInt(token.timestamp)).toISOString() : null,
+                launchDate: token.timestamp ? new Date(parseInt(token.timestamp, 10)).toISOString() : null,
                 hasCommunityUpdate: isVerified,
                 verified: isVerified
             };
@@ -2677,12 +2706,14 @@ function init(deps) {
         let { search = '', sort = 'kscore', page = 1, filter, direction = 'desc', limit = 20 } = req.query;
         try {
             // Validate Limit
-            limit = parseInt(limit);
+            limit = parseInt(limit, 10);
             if (isNaN(limit) || limit < 1) limit = 20;
             if (limit > 100) limit = 100;
-            
-            page = parseInt(page);
+
+            // SECURITY: Cap page number to prevent excessive offset-based queries
+            page = parseInt(page, 10);
             if (isNaN(page) || page < 1) page = 1;
+            if (page > 1000) page = 1000;
 
             const isGenericView = !search && !filter && direction === 'desc' && limit === 20 && page === 1; 
             const cacheKey = `api:tokens:list:${sort}:${page}:${search}:${filter}:${direction}:${limit}`;
@@ -2888,7 +2919,7 @@ function init(deps) {
                         liquidity: r.liquidity || 0,
                         holders: r.holders || 0,
                         hasCommunityUpdate: isVerified,
-                        timestamp: parseInt(r.timestamp),
+                        timestamp: parseInt(r.timestamp, 10),
                         // K-Score only for verified tokens (deep analysis done)
                         // Native tokens get special tier
                         kScore: kScore,
@@ -2946,8 +2977,8 @@ function init(deps) {
         try {
             const options = {
                 db, // Pass DB for pool price fallback
-                maxPages: Math.min(parseInt(req.query.maxPages) || 10, 50),
-                ...(req.query.since && { gtTime: parseInt(req.query.since) })
+                maxPages: Math.min(parseInt(req.query.maxPages, 10) || 10, 50),
+                ...(req.query.since && { gtTime: parseInt(req.query.since, 10) })
             };
 
             const pnl = await calculateWalletPnL(address, options);
@@ -3113,9 +3144,9 @@ function init(deps) {
                     correlations: {
                         kScoreVsSecurity: securityCorr.map(row => ({
                             tier: row.tier,
-                            total: parseInt(row.total),
-                            secure: parseInt(row.secure),
-                            unsafe: parseInt(row.unsafe),
+                            total: parseInt(row.total, 10),
+                            secure: parseInt(row.secure, 10),
+                            unsafe: parseInt(row.unsafe, 10),
                             securePercent: Math.round((row.secure / row.total) * 100)
                         }))
                     },
@@ -3124,7 +3155,7 @@ function init(deps) {
                         current: e.current,
                         first: e.first_score,
                         change: e.current - e.first_score,
-                        dataPoints: parseInt(e.data_points)
+                        dataPoints: parseInt(e.data_points, 10)
                     })),
                     tokens: tierDetails.map(t => {
                         const totalAnalyzed = (t.conviction_accumulators || 0) + (t.conviction_holders || 0) +

@@ -148,7 +148,7 @@ async function getHolderCountFromRPC(mintAddress) {
             const cached = await redis.get(cacheKey);
             if (cached) {
                 logger.debug(`[Holders] Cache hit for ${cleanMint.slice(0, 8)}`);
-                return parseInt(cached);
+                return parseInt(cached, 10);
             }
         }
     } catch (e) {

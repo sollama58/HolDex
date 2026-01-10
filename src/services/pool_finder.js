@@ -54,7 +54,7 @@ async function findPoolsViaGeckoTerminal(mintAddress, retries = 3) {
     } catch (e) {
         if (e.response && e.response.status === 429) {
             // RATE LIMIT HIT
-            const retryAfter = parseInt(e.response.headers['retry-after'] || '10');
+            const retryAfter = parseInt(e.response.headers['retry-after'] || '10', 10);
             const waitTime = (retryAfter + 2) * 1000; // Add buffer
             
             logger.warn(`⚠️ GeckoTerminal 429. Backing off for ${retryAfter}s...`);
