@@ -2505,15 +2505,15 @@
         
         if (loadingDiv) loadingDiv.classList.remove('hidden');
         if (contentDiv) contentDiv.style.display = 'none';
-        if (loadingDiv) loadingDiv.innerText = 'Fetching Chain Data...';
-        
+        if (loadingDiv) loadingDiv.innerHTML = '<span class="text-[#737373]">Fetching Chain Data...</span>';
+
         try {
             const res = await fetch(`${API_URL}/api/token/${mint}/public`);
             const data = await res.json();
 
             if(data.success) {
                 const t = data.token;
-                
+
                 // Handle mixed casing and normalization
                 // This ensures we always get a boolean regardless of 0/1/"true"/"false"
                 const rawStatus = t.verified || t.hasCommunityUpdate || t.has_community_update || t.hascommunityupdate;
@@ -2522,44 +2522,49 @@
                 const ticker = t.symbol || t.ticker || 'UNK';
                 console.log(`🔍 Verified Status for ${ticker}:`, isVerified, `(Raw: ${rawStatus})`);
 
-                // Detect loading state
-                const isLoading = t.isLoading || t.name === 'Loading...' || t.name === 'Unknown' || !t.priceUsd;
+                // Detect loading state - token is still being indexed
+                const isLoading = t.isLoading || t.name === 'Loading...' || t.name === 'Unknown' || !t.priceUsd || ticker === '...';
 
+                // If token is still loading, show dedicated indexing screen and auto-retry
+                if (isLoading) {
+                    if (loadingDiv) {
+                        loadingDiv.innerHTML = `
+                            <div class="flex flex-col items-center gap-4 py-8">
+                                <div class="text-4xl animate-spin">⏳</div>
+                                <div class="text-yellow-500 text-lg font-semibold">New Token Indexing...</div>
+                                <div class="text-[#737373] text-sm">Fetching metadata and market data</div>
+                                <div class="text-[#525252] text-xs mt-2">This usually takes 5-10 seconds</div>
+                            </div>
+                        `;
+                    }
+                    // Auto-retry after 2 seconds
+                    console.log('⏳ Token still indexing, will auto-refresh in 2s...');
+                    setTimeout(() => {
+                        if (currentMint === mint) {
+                            showDetailView(mint);
+                        }
+                    }, 2000);
+                    return; // Don't show partial content
+                }
+
+                // Token is ready - show content
                 const tickerEl = document.getElementById('detail-ticker');
                 const nameEl = document.getElementById('detail-name');
-                if (tickerEl) tickerEl.innerText = ticker === '...' ? '⏳' : ticker;
-                if (nameEl) {
-                    if (t.name === 'Loading...' || !t.name) {
-                        nameEl.innerHTML = '<span class="animate-pulse text-yellow-500">Loading token data...</span>';
-                    } else {
-                        nameEl.innerText = t.name;
-                    }
-                }
+                if (tickerEl) tickerEl.innerText = ticker;
+                if (nameEl) nameEl.innerText = t.name || 'Unknown';
 
                 const price = t.priceUsd || 0;
                 const priceEl = document.getElementById('stat-price');
                 if (priceEl) {
-                    if (price > 0) {
-                        priceEl.innerText = (price < 0.01) ? '$'+price.toExponential(2) : '$'+price.toFixed(6);
-                    } else if (isLoading) {
-                        priceEl.innerHTML = '<span class="animate-pulse text-yellow-500">⏳ Loading...</span>';
-                    } else {
-                        priceEl.innerText = '$0.00';
-                    }
+                    priceEl.innerText = (price < 0.01 && price > 0) ? '$'+price.toExponential(2) : '$'+price.toFixed(6);
                 }
 
                 const mcapEl = document.getElementById('stat-mcap');
                 const mcapVal = t.mcap || t.marketCap || 0;
                 if (mcapEl) {
-                    if (mcapVal > 0) {
-                        mcapEl.innerText = '$' + new Intl.NumberFormat('en', {notation:'compact'}).format(mcapVal);
-                    } else if (isLoading) {
-                        mcapEl.innerHTML = '<span class="animate-pulse text-yellow-500">⏳</span>';
-                    } else {
-                        mcapEl.innerText = '-';
-                    }
+                    mcapEl.innerText = mcapVal > 0 ? '$' + new Intl.NumberFormat('en', {notation:'compact'}).format(mcapVal) : '-';
                 }
-                
+
                 const holdersEl = document.getElementById('stat-holders');
                 if (holdersEl) holdersEl.innerText = formatHolders(t.holders);
                 
@@ -2710,20 +2715,17 @@
                 requestAnimationFrame(() => {
                     initChart(mint, currentPoolAddress);
                 });
-
-                // Auto-refresh if token is still loading (newly indexed)
-                if (isLoading) {
-                    console.log('⏳ Token still loading, will auto-refresh in 3s...');
-                    setTimeout(() => {
-                        if (currentMint === mint) {
-                            showDetailView(mint); // Refresh the view
-                        }
-                    }, 3000);
-                }
             } else if (data.status === 'indexing') {
-                // Handle 202 response - token being indexed
+                // Handle 202 response - token being indexed (no data yet)
                 if (loadingDiv) {
-                    loadingDiv.innerHTML = '<span class="animate-pulse text-yellow-500">⏳ Indexing new token... Please wait.</span>';
+                    loadingDiv.innerHTML = `
+                        <div class="flex flex-col items-center gap-4 py-8">
+                            <div class="text-4xl animate-spin">⏳</div>
+                            <div class="text-yellow-500 text-lg font-semibold">New Token Indexing...</div>
+                            <div class="text-[#737373] text-sm">Fetching metadata and market data</div>
+                            <div class="text-[#525252] text-xs mt-2">This usually takes 5-10 seconds</div>
+                        </div>
+                    `;
                 }
                 // Auto-retry after 2 seconds
                 setTimeout(() => {
