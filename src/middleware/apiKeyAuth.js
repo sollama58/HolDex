@@ -6,6 +6,34 @@ const { hashApiKey } = require('../utils/apiKeyHash');
 // Local memory cache to prevent slamming Redis/DB for key validation
 // Cache valid keys for 60 seconds (keyed by hash)
 const KEY_CACHE = new Map();
+const KEY_CACHE_MAX_SIZE = 1000;
+const KEY_CACHE_TTL = 60000; // 60 seconds
+
+/**
+ * LRU-style eviction for key cache
+ */
+function evictOldestKeyEntries() {
+    if (KEY_CACHE.size <= KEY_CACHE_MAX_SIZE) return;
+    const toDelete = KEY_CACHE.size - KEY_CACHE_MAX_SIZE;
+    let deleted = 0;
+    for (const key of KEY_CACHE.keys()) {
+        if (deleted >= toDelete) break;
+        KEY_CACHE.delete(key);
+        deleted++;
+    }
+}
+
+/**
+ * Periodic cleanup of expired cache entries (every 5 minutes)
+ */
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, data] of KEY_CACHE) {
+        if (now > data.expiry) {
+            KEY_CACHE.delete(key);
+        }
+    }
+}, 5 * 60 * 1000);
 
 /**
  * @param {boolean} required - If true, blocks requests without valid keys.
@@ -45,8 +73,9 @@ const apiKeyAuth = (required = true) => {
                 keyData = {
                     ...record,
                     keyHash,
-                    expiry: now + 60000 // Cache for 60s
+                    expiry: now + KEY_CACHE_TTL
                 };
+                evictOldestKeyEntries();
                 KEY_CACHE.set(keyHash, keyData);
             }
 

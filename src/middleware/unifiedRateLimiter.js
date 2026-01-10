@@ -61,11 +61,20 @@ const unifiedRateLimiter = async (req, res, next) => {
             );
 
             // Fallback: Check legacy plaintext key column
+            // DEPRECATION: Plaintext API keys will be removed on 2025-06-01
             if (!keyRecord) {
                 keyRecord = await db.get(
                     'SELECT wallet, owner, is_active FROM api_keys WHERE key = $1',
                     [apiKey]
                 );
+
+                if (keyRecord) {
+                    // Log warning and set deprecation header
+                    logger.warn(`[UnifiedRateLimiter] DEPRECATION: Plaintext API key used by ${keyRecord.wallet || keyRecord.owner} - will be disabled after 2025-06-01`);
+                    res.setHeader('X-Deprecated', 'plaintext-api-key');
+                    res.setHeader('X-Deprecation-Date', '2025-06-01');
+                    res.setHeader('X-Deprecation-Notice', 'Your API key format is deprecated. Please regenerate your API key before June 1, 2025.');
+                }
             }
 
             if (!keyRecord) {
@@ -214,6 +223,11 @@ const checkOnly = async (req, res, next) => {
             let keyRecord = await db.get('SELECT wallet, owner FROM api_keys WHERE key_hash = $1', [keyHash]);
             if (!keyRecord) {
                 keyRecord = await db.get('SELECT wallet, owner FROM api_keys WHERE key = $1', [apiKey]);
+                // DEPRECATION: Plaintext API keys will be removed on 2025-06-01
+                if (keyRecord) {
+                    res.setHeader('X-Deprecated', 'plaintext-api-key');
+                    res.setHeader('X-Deprecation-Date', '2025-06-01');
+                }
             }
             wallet = keyRecord?.wallet || keyRecord?.owner;
         }

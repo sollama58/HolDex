@@ -47,6 +47,33 @@ const GRANT_REQUIREMENTS = {
 // Memory cache for grants (reduce DB hits)
 const GRANTS_CACHE = new Map();
 const GRANTS_CACHE_TTL = 60000; // 1 minute
+const GRANTS_CACHE_MAX_SIZE = 500;
+
+/**
+ * LRU-style eviction for grants cache
+ */
+function evictOldestGrantEntries() {
+    if (GRANTS_CACHE.size <= GRANTS_CACHE_MAX_SIZE) return;
+    const toDelete = GRANTS_CACHE.size - GRANTS_CACHE_MAX_SIZE;
+    let deleted = 0;
+    for (const key of GRANTS_CACHE.keys()) {
+        if (deleted >= toDelete) break;
+        GRANTS_CACHE.delete(key);
+        deleted++;
+    }
+}
+
+/**
+ * Periodic cleanup of expired grant cache entries (every 5 minutes)
+ */
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, data] of GRANTS_CACHE) {
+        if (now > data.expiry) {
+            GRANTS_CACHE.delete(key);
+        }
+    }
+}, 5 * 60 * 1000);
 
 // ═══════════════════════════════════════════════════════════════
 // SIGNATURE UTILITIES
@@ -154,6 +181,7 @@ async function getGrants(wallet) {
     `, [wallet]);
 
     if (!grant) {
+        evictOldestGrantEntries();
         GRANTS_CACHE.set(cacheKey, { data: null, expiry: Date.now() + GRANTS_CACHE_TTL });
         return null;
     }
@@ -172,6 +200,7 @@ async function getGrants(wallet) {
         return null;
     }
 
+    evictOldestGrantEntries();
     GRANTS_CACHE.set(cacheKey, { data: grant, expiry: Date.now() + GRANTS_CACHE_TTL });
     return grant;
 }

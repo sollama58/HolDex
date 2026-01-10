@@ -1,10 +1,12 @@
 const Redis = require('ioredis');
 const config = require('../config/env');
 const logger = require('./logger');
+const { createCircuitBreaker } = require('../utils/circuitBreaker');
 
 let client = null;
 let subscriber = null;
 let initPromise = null;
+let redisCircuitBreaker = null;
 
 async function connectRedis() {
     if (client) return client;
@@ -34,10 +36,23 @@ async function connectRedis() {
 
             await tempClient.connect();
             logger.info('✅ Redis Connected');
-            
+
+            // Initialize circuit breaker for Redis
+            redisCircuitBreaker = createCircuitBreaker('redis', {
+                threshold: 5,
+                cooldown: 30000,
+                onStateChange: (name, oldState, newState) => {
+                    if (newState === 'open') {
+                        logger.warn(`[Redis] Circuit breaker OPEN - Redis operations will use fallbacks`);
+                    } else if (newState === 'closed') {
+                        logger.info(`[Redis] Circuit breaker CLOSED - Redis recovered`);
+                    }
+                }
+            });
+
             client = tempClient;
             subscriber = client.duplicate();
-            
+
             return client;
         } catch (e) {
             logger.error(`Redis Connection Failed: ${e.message}`);
@@ -57,10 +72,51 @@ function getSubscriber() {
     return subscriber;
 }
 
+/**
+ * Get circuit breaker state for health checks
+ */
+function getCircuitBreakerState() {
+    return redisCircuitBreaker ? redisCircuitBreaker.getState() : null;
+}
+
+/**
+ * Check if Redis is healthy
+ */
+function isHealthy() {
+    if (!client) return false;
+    if (redisCircuitBreaker && redisCircuitBreaker.isOpen) return false;
+    return true;
+}
+
+/**
+ * Execute Redis operation with circuit breaker protection
+ */
+async function executeWithBreaker(operation, fallback = null) {
+    if (!client) {
+        return fallback;
+    }
+
+    if (redisCircuitBreaker && redisCircuitBreaker.isOpen) {
+        return fallback;
+    }
+
+    try {
+        const result = await operation();
+        if (redisCircuitBreaker) redisCircuitBreaker.recordSuccess();
+        return result;
+    } catch (err) {
+        if (redisCircuitBreaker) redisCircuitBreaker.recordFailure(err);
+        return fallback;
+    }
+}
+
 module.exports = {
     connectRedis,
     initRedis: connectRedis, // ALIAS for backwards compatibility
     getClient,
     getRedis: getClient, // ALIAS for backwards compatibility
-    getSubscriber
+    getSubscriber,
+    getCircuitBreakerState,
+    isHealthy,
+    executeWithBreaker
 };

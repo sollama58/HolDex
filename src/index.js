@@ -23,6 +23,7 @@ const spaceRoutes = require('./routes/space');
 const nodesRoutes = require('./routes/nodes');
 const nodeService = require('./services/nodeService');
 const { getOrCreateMasterWebhook } = require('./services/heliusWebhook');
+const { correlationIdMiddleware, requestTimingMiddleware } = require('./middleware/correlationId');
 const fs = require('fs');
 const path = require('path');
 
@@ -93,6 +94,11 @@ app.use(helmet({
 }));
 
 app.use(compression());
+
+// OBSERVABILITY: Correlation ID and request timing middleware
+// Must be early in the middleware chain for accurate timing
+app.use(correlationIdMiddleware);
+app.use(requestTimingMiddleware);
 
 // PRE-LOAD TEMPLATES INTO MEMORY
 // This optimization prevents disk I/O on every page load
@@ -429,6 +435,155 @@ app.get('/cult-space', (req, res) => {
     }
 });
 
+// ============================================
+// HEALTH CHECK ENDPOINTS (Kubernetes-compatible)
+// ============================================
+
+/**
+ * Liveness Probe: /live
+ * Returns 200 if the process is running.
+ * Used by K8s to determine if the container should be restarted.
+ */
+app.get('/live', (_req, res) => {
+    res.status(200).json({
+        status: 'alive',
+        timestamp: new Date().toISOString()
+    });
+});
+
+/**
+ * Readiness Probe: /ready
+ * Returns 200 if the service is ready to accept traffic.
+ * Checks database and Redis connectivity.
+ */
+app.get('/ready', async (_req, res) => {
+    const { isHealthy: isRedisHealthy, getCircuitBreakerState: getRedisCircuitBreaker } = require('./services/redis');
+    const { getAllCircuitBreakerStates } = require('./utils/circuitBreaker');
+
+    const checks = {
+        database: false,
+        redis: false,
+        circuitBreakers: {}
+    };
+
+    // Check database
+    try {
+        const db = getDB();
+        if (db && db.isHealthy && db.isHealthy()) {
+            await db.get('SELECT 1');
+            checks.database = true;
+        } else if (db) {
+            await db.get('SELECT 1');
+            checks.database = true;
+        }
+    } catch (_e) {
+        checks.database = false;
+    }
+
+    // Check Redis
+    checks.redis = isRedisHealthy();
+
+    // Get all circuit breaker states
+    checks.circuitBreakers = getAllCircuitBreakerStates();
+
+    // Determine overall readiness
+    // Service is ready if database is available (Redis is optional)
+    const isReady = checks.database;
+
+    res.status(isReady ? 200 : 503).json({
+        status: isReady ? 'ready' : 'not_ready',
+        timestamp: new Date().toISOString(),
+        checks,
+        degraded: !checks.redis || Object.values(checks.circuitBreakers).some(cb => cb?.state === 'open')
+    });
+});
+
+/**
+ * Comprehensive Health Check: /health
+ * Returns detailed system status for monitoring dashboards.
+ */
+app.get('/health', async (_req, res) => {
+    const { isHealthy: isRedisHealthy, getCircuitBreakerState: getRedisCircuitBreaker } = require('./services/redis');
+    const { getAllCircuitBreakerStates, isSystemDegraded } = require('./utils/circuitBreaker');
+
+    const startTime = Date.now();
+    const health = {
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        checks: {
+            database: { status: 'unknown', latency: null },
+            redis: { status: 'unknown', latency: null }
+        },
+        circuitBreakers: getAllCircuitBreakerStates(),
+        degraded: false
+    };
+
+    // Database health check with latency
+    try {
+        const dbStart = Date.now();
+        const db = getDB();
+        await db.get('SELECT 1');
+        health.checks.database = {
+            status: 'healthy',
+            latency: Date.now() - dbStart,
+            circuitBreaker: db.getCircuitBreakerStates ? db.getCircuitBreakerStates() : null
+        };
+    } catch (e) {
+        health.checks.database = {
+            status: 'unhealthy',
+            error: e.message,
+            latency: null
+        };
+        health.status = 'unhealthy';
+    }
+
+    // Redis health check with latency
+    try {
+        const redisStart = Date.now();
+        const { getClient } = require('./services/redis');
+        const redis = getClient();
+        if (redis) {
+            await redis.ping();
+            health.checks.redis = {
+                status: 'healthy',
+                latency: Date.now() - redisStart,
+                circuitBreaker: getRedisCircuitBreaker()
+            };
+        } else {
+            health.checks.redis = {
+                status: 'unavailable',
+                latency: null
+            };
+            health.degraded = true;
+        }
+    } catch (e) {
+        health.checks.redis = {
+            status: 'unhealthy',
+            error: e.message,
+            latency: null
+        };
+        health.degraded = true;
+    }
+
+    // Check if system is degraded due to circuit breakers
+    if (isSystemDegraded()) {
+        health.degraded = true;
+    }
+
+    // Overall status
+    if (health.checks.database.status !== 'healthy') {
+        health.status = 'unhealthy';
+    } else if (health.degraded) {
+        health.status = 'degraded';
+    }
+
+    health.responseTime = Date.now() - startTime;
+
+    res.status(health.status === 'unhealthy' ? 503 : 200).json(health);
+});
+
 // Handle /about and /update for direct linking (with redirect to hash)
 app.get(['/about', '/update'], (req, res) => {
     try {
@@ -473,7 +628,7 @@ async function startServer() {
         startSnapshotter();
 
         // PriceWorker: Unified price service (Jupiter + Raydium, 0 Helius credits)
-        startPriceWorker({ db: getDB(), broadcast: null });
+        priceWorkerRef = startPriceWorker({ db: getDB(), broadcast: null });
 
         // ARCHITECTURE FIX: kScoreUpdater.start() REMOVED from API
         // K-Score periodic calculations run ONLY on Calculator service to prevent race conditions.
@@ -503,7 +658,7 @@ async function startServer() {
         await nodeService.initializeNode(getDB());
 
         // Start heartbeat interval (every 60 seconds)
-        setInterval(async () => {
+        heartbeatInterval = setInterval(async () => {
             await nodeService.sendHeartbeat(getDB());
             await nodeService.updateNodeStatuses(getDB());
         }, 60 * 1000);
@@ -537,5 +692,91 @@ async function startServer() {
         process.exit(1);
     }
 }
+
+// ============================================
+// GRACEFUL SHUTDOWN HANDLERS
+// ============================================
+let isShuttingDown = false;
+let activeConnections = new Set();
+let heartbeatInterval = null;
+let priceWorkerRef = null;
+
+async function gracefulShutdown(signal) {
+    if (isShuttingDown) {
+        logger.warn(`⚠️ Shutdown: Already in progress, ignoring ${signal}`);
+        return;
+    }
+
+    isShuttingDown = true;
+    logger.info(`🛑 Shutdown: Received ${signal}, starting graceful shutdown...`);
+
+    // 1. Stop accepting new connections
+    server.close((err) => {
+        if (err) {
+            logger.error(`❌ Shutdown: Server close error: ${err.message}`);
+        } else {
+            logger.info('✅ Shutdown: Server stopped accepting connections');
+        }
+    });
+
+    // 2. Clear intervals
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        logger.info('✅ Shutdown: Heartbeat interval cleared');
+    }
+
+    // 3. Stop price worker
+    if (priceWorkerRef && priceWorkerRef.stop) {
+        priceWorkerRef.stop();
+        logger.info('✅ Shutdown: Price worker stopped');
+    }
+
+    // 4. Close active WebSocket connections gracefully
+    const { getIO } = require('./services/socket');
+    const io = getIO();
+    if (io) {
+        io.close(() => {
+            logger.info('✅ Shutdown: WebSocket server closed');
+        });
+    }
+
+    // 5. Send shutdown alert
+    try {
+        await alerting.sendAlert({
+            title: 'HolDex API Shutting Down',
+            message: `Server received ${signal}, gracefully shutting down`,
+            severity: 'WARN',
+            type: 'warning',
+            key: 'shutdown'
+        });
+    } catch (_e) {
+        // Ignore alert errors during shutdown
+    }
+
+    // 6. Wait for existing requests to complete (max 10 seconds)
+    logger.info('⏳ Shutdown: Waiting up to 10s for requests to complete...');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // 7. Final cleanup
+    logger.info('✅ Shutdown: Graceful shutdown complete');
+    process.exit(0);
+}
+
+// Register shutdown handlers
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+    logger.error(`🔥 Uncaught Exception: ${err.message}`);
+    logger.error(err.stack);
+    gracefulShutdown('uncaughtException');
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+    logger.error(`🔥 Unhandled Rejection at: ${promise}, reason: ${reason}`);
+    // Don't exit on unhandled rejections, but log them
+});
 
 startServer();

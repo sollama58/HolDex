@@ -5,14 +5,19 @@ const { getClient } = require('./redis');
 // We require this dynamically inside functions if needed to avoid circular deps,
 // or pass it in. For aggregateAndSaveToken, we need it.
 const { getHolderCountFromRPC } = require('./solana');
-const { signMarket, signKScore } = require('../utils/dataSignature'); 
+const { signMarket, signKScore } = require('../utils/dataSignature');
+const { createCircuitBreaker } = require('../utils/circuitBreaker');
 
 let primaryPool = null;
-let readPool = null; 
+let readPool = null;
 let dbWrapper = null;
 let initPromise = null;
 
 const pendingRequests = new Map();
+
+// Circuit breakers for database connections
+let dbCircuitBreaker = null;
+let readDbCircuitBreaker = null;
 
 async function initDB() {
     if (dbWrapper) return dbWrapper;
@@ -38,19 +43,32 @@ async function initDB() {
                 }
             }
 
-            // SCALABILITY FIX: Reduced max connections from 50 to 10.
-            // With 3 services (API, Worker, Listener) running, 50 * 3 = 150 connections
-            // which exceeds standard Render/Postgres limits (usually 100).
+            // SCALABILITY FIX: Increased max connections to 25 for better throughput.
+            // With 3 services (API, Worker, Listener) running, 25 * 3 = 75 connections
+            // which is within standard Render/Postgres limits (usually 100).
             primaryPool = new Pool({
                 connectionString: config.DATABASE_URL,
                 ssl: sslConfig,
-                max: 10,
+                max: 25,
                 idleTimeoutMillis: 30000,
                 connectionTimeoutMillis: 5000,
                 // FIX: Enable TCP keepalive to prevent "unexpected eof while reading" SSL errors
                 // This keeps idle connections alive and detects dead connections faster
                 keepAlive: true,
                 keepAliveInitialDelayMillis: 10000, // Start keepalive after 10 seconds idle
+            });
+
+            // Initialize circuit breaker for primary database
+            dbCircuitBreaker = createCircuitBreaker('database-primary', {
+                threshold: 5,
+                cooldown: 30000,
+                onStateChange: (name, oldState, newState) => {
+                    if (newState === 'open') {
+                        logger.error(`[Database] Circuit breaker OPEN - database operations will fail`);
+                    } else if (newState === 'closed') {
+                        logger.info(`[Database] Circuit breaker CLOSED - database recovered`);
+                    }
+                }
             });
 
             // Handle pool errors gracefully - don't crash on transient SSL issues
@@ -71,7 +89,7 @@ async function initDB() {
                 readPool = new Pool({
                     connectionString: process.env.READ_DATABASE_URL,
                     ssl: sslConfig,
-                    max: 5,
+                    max: 10,
                     idleTimeoutMillis: 30000,
                     connectionTimeoutMillis: 5000,
                     keepAlive: true,
@@ -84,8 +102,15 @@ async function initDB() {
                         logger.error(`❌ Read DB Pool: Unexpected error: ${err.message}`);
                     }
                 });
+
+                // Initialize circuit breaker for read replica
+                readDbCircuitBreaker = createCircuitBreaker('database-read', {
+                    threshold: 5,
+                    cooldown: 30000
+                });
             } else {
                 readPool = primaryPool;
+                readDbCircuitBreaker = dbCircuitBreaker;
             }
 
             // --- SCHEMA DEFINITIONS ---
@@ -818,13 +843,83 @@ async function initDB() {
             logger.info('⚗️ Harmony: E-Score tables ready (φ = 1.618)');
 
             dbWrapper = {
-                query: (text, params) => (text.trim().toUpperCase().startsWith('SELECT') ? readPool : primaryPool).query(text, params),
-                get: async (text, params) => { const res = await readPool.query(text, params); return res.rows[0]; },
-                all: async (text, params) => { const res = await readPool.query(text, params); return res.rows; },
+                // Query with circuit breaker protection
+                query: async (text, params) => {
+                    const isRead = text.trim().toUpperCase().startsWith('SELECT');
+                    const pool = isRead ? readPool : primaryPool;
+                    const breaker = isRead ? readDbCircuitBreaker : dbCircuitBreaker;
+
+                    if (breaker && breaker.isOpen) {
+                        throw new Error(`Database circuit breaker is open - ${isRead ? 'read' : 'write'} operations blocked`);
+                    }
+
+                    try {
+                        const result = await pool.query(text, params);
+                        if (breaker) breaker.recordSuccess();
+                        return result;
+                    } catch (err) {
+                        if (breaker) breaker.recordFailure(err);
+                        throw err;
+                    }
+                },
+
+                // Get single row with circuit breaker
+                get: async (text, params) => {
+                    if (readDbCircuitBreaker && readDbCircuitBreaker.isOpen) {
+                        throw new Error('Database circuit breaker is open - read operations blocked');
+                    }
+                    try {
+                        const res = await readPool.query(text, params);
+                        if (readDbCircuitBreaker) readDbCircuitBreaker.recordSuccess();
+                        return res.rows[0];
+                    } catch (err) {
+                        if (readDbCircuitBreaker) readDbCircuitBreaker.recordFailure(err);
+                        throw err;
+                    }
+                },
+
+                // Get all rows with circuit breaker
+                all: async (text, params) => {
+                    if (readDbCircuitBreaker && readDbCircuitBreaker.isOpen) {
+                        throw new Error('Database circuit breaker is open - read operations blocked');
+                    }
+                    try {
+                        const res = await readPool.query(text, params);
+                        if (readDbCircuitBreaker) readDbCircuitBreaker.recordSuccess();
+                        return res.rows;
+                    } catch (err) {
+                        if (readDbCircuitBreaker) readDbCircuitBreaker.recordFailure(err);
+                        throw err;
+                    }
+                },
+
+                // Run write operation with circuit breaker
                 // FIX: Return first row if RETURNING clause is used, otherwise return rowCount
                 run: async (text, params) => {
-                    const res = await primaryPool.query(text, params);
-                    return res.rows && res.rows.length > 0 ? res.rows[0] : { rowCount: res.rowCount };
+                    if (dbCircuitBreaker && dbCircuitBreaker.isOpen) {
+                        throw new Error('Database circuit breaker is open - write operations blocked');
+                    }
+                    try {
+                        const res = await primaryPool.query(text, params);
+                        if (dbCircuitBreaker) dbCircuitBreaker.recordSuccess();
+                        return res.rows && res.rows.length > 0 ? res.rows[0] : { rowCount: res.rowCount };
+                    } catch (err) {
+                        if (dbCircuitBreaker) dbCircuitBreaker.recordFailure(err);
+                        throw err;
+                    }
+                },
+
+                // Get circuit breaker states for health checks
+                getCircuitBreakerStates: () => ({
+                    primary: dbCircuitBreaker ? dbCircuitBreaker.getState() : null,
+                    read: readDbCircuitBreaker ? readDbCircuitBreaker.getState() : null
+                }),
+
+                // Check if database is healthy
+                isHealthy: () => {
+                    if (dbCircuitBreaker && dbCircuitBreaker.isOpen) return false;
+                    if (readDbCircuitBreaker && readDbCircuitBreaker.isOpen) return false;
+                    return true;
                 }
             };
 

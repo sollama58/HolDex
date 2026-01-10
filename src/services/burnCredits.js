@@ -48,10 +48,16 @@ const BURN_ADDRESSES = new Set([
 // Cache TTLs
 const HOLDINGS_CACHE_TTL = 10 * 60; // 10 minutes (Redis, seconds)
 const BURNS_RECHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24h (only recheck burns daily)
+const ELIGIBILITY_CACHE_TTL = 5 * 60 * 1000; // 5 minutes for full eligibility check
 
 // In-memory fallback cache (when Redis unavailable)
 const memoryCache = new Map();
 const MEMORY_CACHE_MAX_SIZE = 500; // Max cached wallets
+
+// Eligibility cache for API keys (reduces RPC calls dramatically)
+// Key: walletAddress, Value: { eligible, holdings, burned, usedCalls, remainingCalls, ts }
+const eligibilityCache = new Map();
+const ELIGIBILITY_CACHE_MAX_SIZE = 1000;
 
 /**
  * LRU-style eviction for memory cache
@@ -259,11 +265,26 @@ async function getWalletBurns(walletAddress, db = null, forceRefresh = false) {
 }
 
 /**
+ * Evict oldest entries from eligibility cache (LRU-style)
+ */
+function evictOldestEligibilityEntries() {
+    if (eligibilityCache.size <= ELIGIBILITY_CACHE_MAX_SIZE) return;
+    const toDelete = eligibilityCache.size - ELIGIBILITY_CACHE_MAX_SIZE;
+    let deleted = 0;
+    for (const key of eligibilityCache.keys()) {
+        if (deleted >= toDelete) break;
+        eligibilityCache.delete(key);
+        deleted++;
+    }
+}
+
+/**
  * Check if wallet is eligible for API access
  *
  * Optimized Flow (single DB query for most cases):
- * 1. Check DB for cached holdings + burns + used_calls
- * 2. Only hit RPC/Helius on cache miss
+ * 1. Check eligibility cache first (5 min TTL)
+ * 2. Check DB for cached holdings + burns + used_calls
+ * 3. Only hit RPC/Helius on cache miss
  *
  * @param {Object} connection - Solana connection
  * @param {Object} db - Database instance
@@ -283,6 +304,29 @@ async function checkApiEligibility(connection, db, walletAddress, apiKey = null)
             remainingCalls: Infinity,
             reason: null,
             whitelisted: true
+        };
+    }
+
+    // SCALABILITY: Check eligibility cache first (5 min TTL)
+    // This dramatically reduces RPC calls for frequently-used API keys
+    const cachedEligibility = eligibilityCache.get(walletAddress);
+    if (cachedEligibility && Date.now() - cachedEligibility.ts < ELIGIBILITY_CACHE_TTL) {
+        // Cache hit - but we still need fresh used_calls count from DB
+        const record = await db.get(
+            'SELECT used_calls FROM wallet_credits WHERE wallet = $1',
+            [walletAddress]
+        );
+        const usedCalls = record?.used_calls || 0;
+        const remainingCalls = Math.max(0, cachedEligibility.burned - usedCalls);
+
+        return {
+            eligible: remainingCalls > 0 && cachedEligibility.holdings >= MIN_HOLDINGS,
+            holdings: cachedEligibility.holdings,
+            burned: cachedEligibility.burned,
+            usedCalls,
+            remainingCalls,
+            reason: remainingCalls <= 0 ? 'No calls remaining. Burn more $ASDFASDFA for more calls.' : null,
+            fromCache: true
         };
     }
 
@@ -332,6 +376,14 @@ async function checkApiEligibility(connection, db, walletAddress, apiKey = null)
             reason: 'No calls remaining. Burn more $ASDFASDFA for more calls.'
         };
     }
+
+    // Cache the eligibility result for future requests (5 min TTL)
+    evictOldestEligibilityEntries();
+    eligibilityCache.set(walletAddress, {
+        holdings,
+        burned,
+        ts: Date.now()
+    });
 
     return {
         eligible: true,
@@ -397,6 +449,9 @@ async function getCreditStatus(connection, db, walletAddress) {
 function invalidateCache(walletAddress) {
     // Clear memory cache
     memoryCache.delete(`holdings:${walletAddress}`);
+
+    // Clear eligibility cache
+    eligibilityCache.delete(walletAddress);
 
     // Clear Redis cache
     const redis = getClient();

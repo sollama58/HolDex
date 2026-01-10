@@ -3431,334 +3431,42 @@ async function updateKScores(deps) {
 
         logger.info(`[K-Score] Updating ${tokens.length} verified tokens...`);
 
-        for (const t of tokens) {
-            try {
-                const result = await computeScoreInternal(t.mint, t, false, db);
-                const conviction = result.conviction || {};
-                const burn = result.burn || {};
-                const security = result.security || {};
-                const supply = result.supply || {};
+        // SCALABILITY: Process tokens in parallel batches of 5
+        // This provides ~5x speedup while respecting rate limits
+        const BATCH_SIZE = 5;
+        const BATCH_DELAY = 2000; // 2 seconds between batches
 
-                // Apply EMA smoothing to prevent wild swings
-                const previousScore = t.k_score || 0;
-                const smoothedScore = applyEMA(result.score, previousScore);
+        for (let batchIndex = 0; batchIndex < tokens.length; batchIndex += BATCH_SIZE) {
+            const batch = tokens.slice(batchIndex, batchIndex + BATCH_SIZE);
+            const batchNum = Math.floor(batchIndex / BATCH_SIZE) + 1;
+            const totalBatches = Math.ceil(tokens.length / BATCH_SIZE);
 
-                // Detect token category (PumpFun, bonding curve)
-                const category = await detectTokenCategory(db, t.mint);
+            logger.info(`[K-Score] Processing batch ${batchNum}/${totalBatches} (${batch.length} tokens)`);
 
-                // Calculate initial supply (total supply before burns)
-                const currentSupply = burn.totalSupply || 0;
-                const burnedAmount = burn.burned || 0;
-                const initialSupply = currentSupply + burnedAmount;
-
-                // DATA VALIDATION: Ensure all values are safe before DB write
-                const safeInt = (v, max = 1000000) => Math.max(0, Math.min(max, Math.round(v || 0)));
-                const safeFloat = (v, max = 1e15) => Math.max(0, Math.min(max, v || 0));
-                const safeBool = (v) => v === true;
-
-                // Validate conviction counts don't exceed analyzed count
-                const analyzedCount = safeInt(conviction.analyzed, 100);
-                const validatedConviction = {
-                    score: safeInt(conviction.score, 100),
-                    accumulators: safeInt(conviction.accumulators, analyzedCount),
-                    holders: safeInt(conviction.holders, analyzedCount),
-                    reducers: safeInt(conviction.reducers, analyzedCount),
-                    extractors: safeInt(conviction.extractors, analyzedCount),
-                    analyzed: analyzedCount,
-                    realHoldersCount: safeInt(conviction.realHoldersCount, 10000000)
-                };
-
-                // Generate 8-category signatures (Don't Trust, Verify)
-                const batchUpdateTimestamp = Date.now();
-
-                // ============================================
-                // ON-CHAIN MARKET DATA (Verifiable)
-                // ============================================
-                let batchMarketData = {
-                    priceUsd: t.priceusd || 0,
-                    priceSource: t.price_source || 'db_cache',
-                    priceTimestamp: t.price_timestamp || 0,
-                    pricePool: t.price_pool || null,
-                    mcap: t.marketcap || 0,
-                    mcapCalculated: false,
-                    liquidity: t.liquidity || 0,
-                    liquiditySource: t.liquidity_source || 'unknown',
-                    liquidityTimestamp: t.liquidity_timestamp || 0,
-                    volume24h: t.volume24h || 0,
-                    change24h: t.change24h || 0,
-                    change1h: t.change1h || 0
-                };
-
-                // Get price/mcap/liquidity from Jupiter + Raydium (FREE, INDEPENDENT)
-                const batchPriceNeedsRefresh = !t.price_timestamp ||
-                                              (Date.now() - parseInt(t.price_timestamp || 0) > 60000); // 1 min
-
-                if (batchPriceNeedsRefresh) {
+            // Process batch in parallel
+            const batchResults = await Promise.allSettled(
+                batch.map(async (t) => {
                     try {
-                        const priceData = await getMarketData(t.mint);
-
-                        if (priceData && priceData.priceUsd > 0) {
-                            batchMarketData.priceUsd = priceData.priceUsd;
-                            batchMarketData.priceSource = priceData.source || 'jupiter';
-                            batchMarketData.priceTimestamp = priceData.timestamp;
-                            batchMarketData.pricePool = priceData.pairAddress;
-                            batchMarketData.mcap = priceData.mcap;
-                            batchMarketData.mcapCalculated = true;
-                            batchMarketData.liquidity = priceData.liquidity;
-                            batchMarketData.liquiditySource = priceData.source || 'raydium';
-                            batchMarketData.liquidityTimestamp = priceData.timestamp;
-                            batchMarketData.volume24h = priceData.volume24h || 0;
-                            batchMarketData.change24h = priceData.change24h || 0;
-                            batchMarketData.change1h = priceData.change1h || 0;
-
-                            logger.debug(`[Market] ${t.symbol}: $${priceData.priceUsd.toExponential(2)}, MCap $${(priceData.mcap || 0).toLocaleString()}`);
-                        }
-                    } catch (_e) {
-                        logger.debug(`[Market] ${t.mint.slice(0,8)}: Price fetch failed, using cached`);
+                        await processTokenKScore(t, db, broadcast);
+                        return { mint: t.mint, success: true };
+                    } catch (err) {
+                        logger.warn(`[K-Score] Failed for ${t.mint}: ${err.message}`);
+                        return { mint: t.mint, success: false, error: err.message };
                     }
-                }
+                })
+            );
 
-                // Build complete token object for signing all categories
-                const batchTokenForSigning = {
-                    mint: t.mint,
-                    // Identity
-                    name: t.name || '',
-                    symbol: t.symbol || '',
-                    image: t.image || '',
-                    decimals: t.decimals || 9,
-                    // Security
-                    mint_authority_revoked: safeBool(security.mintAuthorityRevoked),
-                    freeze_authority_revoked: safeBool(security.freezeAuthorityRevoked),
-                    is_mutable_supply: safeBool(supply.isMutable),
-                    hasCommunityUpdate: t.hasCommunityUpdate || t.hascommunityupdate || false,
-                    // LP (from token if available)
-                    lp_burn_pct: t.lp_burn_pct || 0,
-                    lp_locked_pct: t.lp_locked_pct || 0,
-                    lp_status: t.lp_status || 'unknown',
-                    // Supply
-                    supply: t.supply || '0',
-                    initial_supply: initialSupply > 0 ? initialSupply.toString() : t.supply || '0',
-                    burned_amount: safeFloat(burnedAmount),
-                    burned_percent: safeFloat(burn.burnPct, 100),
-                    // K-Score
-                    k_score: smoothedScore,
-                    conviction_score: validatedConviction.score,
-                    conviction_accumulators: validatedConviction.accumulators,
-                    conviction_holders: validatedConviction.holders,
-                    conviction_reducers: validatedConviction.reducers,
-                    conviction_extractors: validatedConviction.extractors,
-                    conviction_analyzed: validatedConviction.analyzed,
-                    holders: validatedConviction.realHoldersCount,
-                    last_k_score_update: batchUpdateTimestamp,
-                    // Market (ON-CHAIN VERIFIED)
-                    priceusd: batchMarketData.priceUsd,
-                    price_source: batchMarketData.priceSource,
-                    price_timestamp: batchMarketData.priceTimestamp,
-                    price_pool: batchMarketData.pricePool,
-                    marketcap: batchMarketData.mcap,
-                    mcap_calculated: batchMarketData.mcapCalculated,
-                    liquidity: batchMarketData.liquidity,
-                    liquidity_source: batchMarketData.liquiditySource,
-                    liquidity_timestamp: batchMarketData.liquidityTimestamp,
-                    // Holders source tracking
-                    holders_source: conviction.isDeltaMode ? 'webhook_cache' : 'helius_rpc',
-                    holders_timestamp: batchUpdateTimestamp,
-                    // Age in days (calculated from creation timestamp)
-                    age_days: t.timestamp > 0 ? (Date.now() - parseInt(t.timestamp)) / 86400000 : 0,
-                    // Origin
-                    is_pump_fun: safeBool(category.isPumpFun),
-                    bonding_curve_complete: safeBool(category.bondingCurveComplete),
-                    timestamp: t.timestamp || 0,
-                    metadata: t.metadata || ''
-                };
-
-                const batchSignatures = signAllCategories(batchTokenForSigning);
-
-                // ============================================
-                // NODE ED25519 SIGNATURE (Distributed Consensus)
-                // ============================================
-                const batchNodePrivateKey = nodeKeys.getNodePrivateKey();
-                const batchCurrentNodeId = nodeService.getNodeId();
-                let batchNodeSigData = { node_id: null, signature: null, timestamp: batchUpdateTimestamp };
-
-                if (batchNodePrivateKey && batchCurrentNodeId) {
-                    const signedBatchKScore = signedWrites.signKScoreUpdate({
-                        mint: t.mint,
-                        k_score: smoothedScore,
-                        d_score: result.breakdown?.diamond || 0,
-                        o_score: result.breakdown?.organic || 0,
-                        l_score: result.breakdown?.longevity || 0,
-                        conviction_score: validatedConviction.score
-                    }, batchCurrentNodeId, batchNodePrivateKey);
-
-                    batchNodeSigData = {
-                        node_id: batchCurrentNodeId,
-                        signature: signedBatchKScore.signature,
-                        timestamp: batchUpdateTimestamp
-                    };
-                }
-
-                await db.run(`
-                    UPDATE tokens
-                    SET k_score = $1,
-                        last_k_score_update = $2,
-                        conviction_score = $3,
-                        conviction_accumulators = $4,
-                        conviction_holders = $5,
-                        conviction_reducers = $6,
-                        conviction_extractors = $7,
-                        conviction_analyzed = $8,
-                        holders = $9,
-                        last_holder_check = $10,
-                        burned_amount = $11,
-                        burned_percent = $12,
-                        initial_supply = $13,
-                        is_pump_fun = $14,
-                        bonding_curve_complete = $15,
-                        mint_authority_revoked = $16,
-                        freeze_authority_revoked = $17,
-                        is_mutable_supply = $18,
-                        sig_identity = $19,
-                        sig_security = $20,
-                        sig_lp = $21,
-                        sig_supply = $22,
-                        sig_kscore = $23,
-                        sig_market = $24,
-                        sig_origin = $25,
-                        sig_full = $26,
-                        chaos_nonce = $27,
-                        priceusd = $28,
-                        marketcap = $29,
-                        price_source = $30,
-                        price_timestamp = $31,
-                        price_pool = $32,
-                        mcap_calculated = $33,
-                        liquidity = $34,
-                        liquidity_source = $35,
-                        liquidity_timestamp = $36,
-                        holders_source = $37,
-                        holders_timestamp = $38,
-                        age_days = $39,
-                        supply_last_check = $40,
-                        volume24h = $41,
-                        change24h = $42,
-                        change1h = $43,
-                        sig_node_id = $44,
-                        sig_node_signature = $45,
-                        sig_node_timestamp = $46,
-                        sig_node_status = $47
-                    WHERE mint = $48
-                `, [
-                    smoothedScore,
-                    batchUpdateTimestamp.toString(),
-                    validatedConviction.score,
-                    validatedConviction.accumulators,
-                    validatedConviction.holders,
-                    validatedConviction.reducers,
-                    validatedConviction.extractors,
-                    validatedConviction.analyzed,
-                    validatedConviction.realHoldersCount,
-                    batchUpdateTimestamp.toString(),
-                    safeFloat(burnedAmount),
-                    safeFloat(burn.burnPct, 100),
-                    initialSupply > 0 ? initialSupply.toString() : null,
-                    safeBool(category.isPumpFun),
-                    safeBool(category.bondingCurveComplete),
-                    safeBool(security.mintAuthorityRevoked),
-                    safeBool(security.freezeAuthorityRevoked),
-                    safeBool(supply.isMutable),
-                    batchSignatures.sig_identity,
-                    batchSignatures.sig_security,
-                    batchSignatures.sig_lp,
-                    batchSignatures.sig_supply,
-                    batchSignatures.sig_kscore,
-                    batchSignatures.sig_market,
-                    batchSignatures.sig_origin,
-                    batchSignatures.sig_full,
-                    batchSignatures.chaos_nonce,
-                    batchMarketData.priceUsd,
-                    batchMarketData.mcap,
-                    batchMarketData.priceSource,
-                    batchMarketData.priceTimestamp ? batchMarketData.priceTimestamp.toString() : null,
-                    batchMarketData.pricePool,
-                    batchMarketData.mcapCalculated,
-                    batchMarketData.liquidity,
-                    batchMarketData.liquiditySource,
-                    batchMarketData.liquidityTimestamp ? batchMarketData.liquidityTimestamp.toString() : null,
-                    conviction.isDeltaMode ? 'webhook_cache' : 'helius_rpc',
-                    batchUpdateTimestamp.toString(),
-                    t.timestamp > 0 ? (Date.now() - parseInt(t.timestamp)) / 86400000 : 0,
-                    batchUpdateTimestamp.toString(),  // supply_last_check = now
-                    batchMarketData.volume24h || 0,
-                    batchMarketData.change24h || 0,
-                    batchMarketData.change1h || 0,
-                    batchNodeSigData.node_id,
-                    batchNodeSigData.signature,
-                    batchNodeSigData.timestamp ? batchNodeSigData.timestamp.toString() : null,
-                    batchNodeSigData.node_id ? 'signed' : 'unsigned',
-                    t.mint
-                ]);
-
-                // Save snapshot for integrity watchdog (self-healing)
-                // CRITICAL: Must include signatures in snapshot, otherwise Watchdog heals with missing sigs
-                // Include holder snapshots for complete integrity (v3 snapshot format)
-                let batchHolderSnapshots = [];
-                try {
-                    batchHolderSnapshots = await db.all(
-                        'SELECT holder, balance FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 20',
-                        [t.mint]
-                    );
-                } catch (_e) {
-                    // Ignore - snapshots may not exist yet
-                }
-                const batchTokenWithSignatures = { ...batchTokenForSigning, ...batchSignatures };
-                await saveSnapshot(t.mint, batchTokenWithSignatures, batchHolderSnapshots);
-
-                // Save holder history snapshot (daily)
-                await saveHolderHistory(db, t.mint, conviction.totalHolders || 0, conviction.realHoldersCount || 0);
-
-                // Save K-Score history snapshot (daily) for credit rating trajectory
-                await saveKScoreHistory(db, t.mint, smoothedScore, conviction.score || 0, conviction.realHoldersCount || 0);
-
-                // Record verification by this node (for decentralized consensus)
-                try {
-                    await nodeService.recordVerification(db, t.mint, smoothedScore, true);
-
-                    // Check for consensus after recording our verification
-                    if (batchCurrentNodeId) {
-                        const consensusResult = await signedWrites.checkTokenConsensus(t.mint, db);
-                        if (consensusResult.hasConsensus) {
-                            await signedWrites.recordConsensus(
-                                t.mint,
-                                consensusResult.k_score,
-                                consensusResult.agreeing,
-                                consensusResult.total,
-                                db
-                            );
-                            logger.info(`[Consensus] ${t.mint.slice(0, 8)}... K=${consensusResult.k_score} (${consensusResult.agreeing}/${consensusResult.total} nodes agree)`);
-                        }
-                    }
-                } catch (_e) {
-                    // Non-critical - continue without recording
-                }
-
-                // Broadcast K-Score update via WebSocket (use smoothed score)
-                if (broadcast) {
-                    broadcast.kscoreUpdate(t.mint, {
-                        kScore: smoothedScore,
-                        symbol: t.symbol,
-                        conviction: conviction.score || 0,
-                        accumulators: conviction.accumulators || 0,
-                        holders: conviction.realHoldersCount || 0,
-                        timestamp: Date.now()
-                    });
-                }
-
-            } catch (err) {
-                logger.warn(`[K-Score] Failed for ${t.mint}: ${err.message}`);
+            // Log batch results
+            const succeeded = batchResults.filter(r => r.status === 'fulfilled' && r.value.success).length;
+            const failed = batch.length - succeeded;
+            if (failed > 0) {
+                logger.warn(`[K-Score] Batch ${batchNum}: ${succeeded} succeeded, ${failed} failed`);
             }
 
-            await sleep(500); // Slower between tokens (conviction is heavy)
+            // Delay between batches to respect rate limits
+            if (batchIndex + BATCH_SIZE < tokens.length) {
+                await sleep(BATCH_DELAY);
+            }
         }
 
         logger.info("[K-Score v5] Cycle complete.");
@@ -3768,6 +3476,331 @@ async function updateKScores(deps) {
     } finally {
         // Reset deep refresh flag
         forceDeepRefreshMode = false;
+    }
+}
+
+/**
+ * Process a single token's K-Score (extracted for batch processing)
+ * @private
+ */
+async function processTokenKScore(t, db, broadcast) {
+    const result = await computeScoreInternal(t.mint, t, false, db);
+    const conviction = result.conviction || {};
+    const burn = result.burn || {};
+    const security = result.security || {};
+    const supply = result.supply || {};
+
+    // Apply EMA smoothing to prevent wild swings
+    const previousScore = t.k_score || 0;
+    const smoothedScore = applyEMA(result.score, previousScore);
+
+    // Detect token category (PumpFun, bonding curve)
+    const category = await detectTokenCategory(db, t.mint);
+
+    // Calculate initial supply (total supply before burns)
+    const currentSupply = burn.totalSupply || 0;
+    const burnedAmount = burn.burned || 0;
+    const initialSupply = currentSupply + burnedAmount;
+
+    // DATA VALIDATION: Ensure all values are safe before DB write
+    const safeInt = (v, max = 1000000) => Math.max(0, Math.min(max, Math.round(v || 0)));
+    const safeFloat = (v, max = 1e15) => Math.max(0, Math.min(max, v || 0));
+    const safeBool = (v) => v === true;
+
+    // Validate conviction counts don't exceed analyzed count
+    const analyzedCount = safeInt(conviction.analyzed, 100);
+    const validatedConviction = {
+        score: safeInt(conviction.score, 100),
+        accumulators: safeInt(conviction.accumulators, analyzedCount),
+        holders: safeInt(conviction.holders, analyzedCount),
+        reducers: safeInt(conviction.reducers, analyzedCount),
+        extractors: safeInt(conviction.extractors, analyzedCount),
+        analyzed: analyzedCount,
+        realHoldersCount: safeInt(conviction.realHoldersCount, 10000000)
+    };
+
+    // Generate 8-category signatures (Don't Trust, Verify)
+    const updateTimestamp = Date.now();
+
+    // ============================================
+    // ON-CHAIN MARKET DATA (Verifiable)
+    // ============================================
+    let marketData = {
+        priceUsd: t.priceusd || 0,
+        priceSource: t.price_source || 'db_cache',
+        priceTimestamp: t.price_timestamp || 0,
+        pricePool: t.price_pool || null,
+        mcap: t.marketcap || 0,
+        mcapCalculated: false,
+        liquidity: t.liquidity || 0,
+        liquiditySource: t.liquidity_source || 'unknown',
+        liquidityTimestamp: t.liquidity_timestamp || 0,
+        volume24h: t.volume24h || 0,
+        change24h: t.change24h || 0,
+        change1h: t.change1h || 0
+    };
+
+    // Get price/mcap/liquidity from Jupiter + Raydium (FREE, INDEPENDENT)
+    const priceNeedsRefresh = !t.price_timestamp ||
+                              (Date.now() - parseInt(t.price_timestamp || 0) > 60000); // 1 min
+
+    if (priceNeedsRefresh) {
+        try {
+            const priceData = await getMarketData(t.mint);
+
+            if (priceData && priceData.priceUsd > 0) {
+                marketData.priceUsd = priceData.priceUsd;
+                marketData.priceSource = priceData.source || 'jupiter';
+                marketData.priceTimestamp = priceData.timestamp;
+                marketData.pricePool = priceData.pairAddress;
+                marketData.mcap = priceData.mcap;
+                marketData.mcapCalculated = true;
+                marketData.liquidity = priceData.liquidity;
+                marketData.liquiditySource = priceData.source || 'raydium';
+                marketData.liquidityTimestamp = priceData.timestamp;
+                marketData.volume24h = priceData.volume24h || 0;
+                marketData.change24h = priceData.change24h || 0;
+                marketData.change1h = priceData.change1h || 0;
+
+                logger.debug(`[Market] ${t.symbol}: $${priceData.priceUsd.toExponential(2)}, MCap $${(priceData.mcap || 0).toLocaleString()}`);
+            }
+        } catch (_e) {
+            logger.debug(`[Market] ${t.mint.slice(0,8)}: Price fetch failed, using cached`);
+        }
+    }
+
+    // Build complete token object for signing all categories
+    const tokenForSigning = {
+        mint: t.mint,
+        // Identity
+        name: t.name || '',
+        symbol: t.symbol || '',
+        image: t.image || '',
+        decimals: t.decimals || 9,
+        // Security
+        mint_authority_revoked: safeBool(security.mintAuthorityRevoked),
+        freeze_authority_revoked: safeBool(security.freezeAuthorityRevoked),
+        is_mutable_supply: safeBool(supply.isMutable),
+        hasCommunityUpdate: t.hasCommunityUpdate || t.hascommunityupdate || false,
+        // LP (from token if available)
+        lp_burn_pct: t.lp_burn_pct || 0,
+        lp_locked_pct: t.lp_locked_pct || 0,
+        lp_status: t.lp_status || 'unknown',
+        // Supply
+        supply: t.supply || '0',
+        initial_supply: initialSupply > 0 ? initialSupply.toString() : t.supply || '0',
+        burned_amount: safeFloat(burnedAmount),
+        burned_percent: safeFloat(burn.burnPct, 100),
+        // K-Score
+        k_score: smoothedScore,
+        conviction_score: validatedConviction.score,
+        conviction_accumulators: validatedConviction.accumulators,
+        conviction_holders: validatedConviction.holders,
+        conviction_reducers: validatedConviction.reducers,
+        conviction_extractors: validatedConviction.extractors,
+        conviction_analyzed: validatedConviction.analyzed,
+        holders: validatedConviction.realHoldersCount,
+        last_k_score_update: updateTimestamp,
+        // Market (ON-CHAIN VERIFIED)
+        priceusd: marketData.priceUsd,
+        price_source: marketData.priceSource,
+        price_timestamp: marketData.priceTimestamp,
+        price_pool: marketData.pricePool,
+        marketcap: marketData.mcap,
+        mcap_calculated: marketData.mcapCalculated,
+        liquidity: marketData.liquidity,
+        liquidity_source: marketData.liquiditySource,
+        liquidity_timestamp: marketData.liquidityTimestamp,
+        // Holders source tracking
+        holders_source: conviction.isDeltaMode ? 'webhook_cache' : 'helius_rpc',
+        holders_timestamp: updateTimestamp,
+        // Age in days (calculated from creation timestamp)
+        age_days: t.timestamp > 0 ? (Date.now() - parseInt(t.timestamp)) / 86400000 : 0,
+        // Origin
+        is_pump_fun: safeBool(category.isPumpFun),
+        bonding_curve_complete: safeBool(category.bondingCurveComplete),
+        timestamp: t.timestamp || 0,
+        metadata: t.metadata || ''
+    };
+
+    const signatures = signAllCategories(tokenForSigning);
+
+    // ============================================
+    // NODE ED25519 SIGNATURE (Distributed Consensus)
+    // ============================================
+    const nodePrivateKey = nodeKeys.getNodePrivateKey();
+    const currentNodeId = nodeService.getNodeId();
+    let nodeSigData = { node_id: null, signature: null, timestamp: updateTimestamp };
+
+    if (nodePrivateKey && currentNodeId) {
+        const signedKScore = signedWrites.signKScoreUpdate({
+            mint: t.mint,
+            k_score: smoothedScore,
+            d_score: result.breakdown?.diamond || 0,
+            o_score: result.breakdown?.organic || 0,
+            l_score: result.breakdown?.longevity || 0,
+            conviction_score: validatedConviction.score
+        }, currentNodeId, nodePrivateKey);
+
+        nodeSigData = {
+            node_id: currentNodeId,
+            signature: signedKScore.signature,
+            timestamp: updateTimestamp
+        };
+    }
+
+    await db.run(`
+        UPDATE tokens
+        SET k_score = $1,
+            last_k_score_update = $2,
+            conviction_score = $3,
+            conviction_accumulators = $4,
+            conviction_holders = $5,
+            conviction_reducers = $6,
+            conviction_extractors = $7,
+            conviction_analyzed = $8,
+            holders = $9,
+            last_holder_check = $10,
+            burned_amount = $11,
+            burned_percent = $12,
+            initial_supply = $13,
+            is_pump_fun = $14,
+            bonding_curve_complete = $15,
+            mint_authority_revoked = $16,
+            freeze_authority_revoked = $17,
+            is_mutable_supply = $18,
+            sig_identity = $19,
+            sig_security = $20,
+            sig_lp = $21,
+            sig_supply = $22,
+            sig_kscore = $23,
+            sig_market = $24,
+            sig_origin = $25,
+            sig_full = $26,
+            chaos_nonce = $27,
+            priceusd = $28,
+            marketcap = $29,
+            price_source = $30,
+            price_timestamp = $31,
+            price_pool = $32,
+            mcap_calculated = $33,
+            liquidity = $34,
+            liquidity_source = $35,
+            liquidity_timestamp = $36,
+            holders_source = $37,
+            holders_timestamp = $38,
+            age_days = $39,
+            supply_last_check = $40,
+            volume24h = $41,
+            change24h = $42,
+            change1h = $43,
+            sig_node_id = $44,
+            sig_node_signature = $45,
+            sig_node_timestamp = $46,
+            sig_node_status = $47
+        WHERE mint = $48
+    `, [
+        smoothedScore,
+        updateTimestamp.toString(),
+        validatedConviction.score,
+        validatedConviction.accumulators,
+        validatedConviction.holders,
+        validatedConviction.reducers,
+        validatedConviction.extractors,
+        validatedConviction.analyzed,
+        validatedConviction.realHoldersCount,
+        updateTimestamp.toString(),
+        safeFloat(burnedAmount),
+        safeFloat(burn.burnPct, 100),
+        initialSupply > 0 ? initialSupply.toString() : null,
+        safeBool(category.isPumpFun),
+        safeBool(category.bondingCurveComplete),
+        safeBool(security.mintAuthorityRevoked),
+        safeBool(security.freezeAuthorityRevoked),
+        safeBool(supply.isMutable),
+        signatures.sig_identity,
+        signatures.sig_security,
+        signatures.sig_lp,
+        signatures.sig_supply,
+        signatures.sig_kscore,
+        signatures.sig_market,
+        signatures.sig_origin,
+        signatures.sig_full,
+        signatures.chaos_nonce,
+        marketData.priceUsd,
+        marketData.mcap,
+        marketData.priceSource,
+        marketData.priceTimestamp ? marketData.priceTimestamp.toString() : null,
+        marketData.pricePool,
+        marketData.mcapCalculated,
+        marketData.liquidity,
+        marketData.liquiditySource,
+        marketData.liquidityTimestamp ? marketData.liquidityTimestamp.toString() : null,
+        conviction.isDeltaMode ? 'webhook_cache' : 'helius_rpc',
+        updateTimestamp.toString(),
+        t.timestamp > 0 ? (Date.now() - parseInt(t.timestamp)) / 86400000 : 0,
+        updateTimestamp.toString(),  // supply_last_check = now
+        marketData.volume24h || 0,
+        marketData.change24h || 0,
+        marketData.change1h || 0,
+        nodeSigData.node_id,
+        nodeSigData.signature,
+        nodeSigData.timestamp ? nodeSigData.timestamp.toString() : null,
+        nodeSigData.node_id ? 'signed' : 'unsigned',
+        t.mint
+    ]);
+
+    // Save snapshot for integrity watchdog (self-healing)
+    let holderSnapshots = [];
+    try {
+        holderSnapshots = await db.all(
+            'SELECT holder, balance FROM holder_snapshots WHERE mint = $1 ORDER BY balance DESC LIMIT 20',
+            [t.mint]
+        );
+    } catch (_e) {
+        // Ignore - snapshots may not exist yet
+    }
+    const tokenWithSignatures = { ...tokenForSigning, ...signatures };
+    await saveSnapshot(t.mint, tokenWithSignatures, holderSnapshots);
+
+    // Save holder history snapshot (daily)
+    await saveHolderHistory(db, t.mint, conviction.totalHolders || 0, conviction.realHoldersCount || 0);
+
+    // Save K-Score history snapshot (daily)
+    await saveKScoreHistory(db, t.mint, smoothedScore, conviction.score || 0, conviction.realHoldersCount || 0);
+
+    // Record verification by this node (for decentralized consensus)
+    try {
+        await nodeService.recordVerification(db, t.mint, smoothedScore, true);
+
+        // Check for consensus after recording our verification
+        if (currentNodeId) {
+            const consensusResult = await signedWrites.checkTokenConsensus(t.mint, db);
+            if (consensusResult.hasConsensus) {
+                await signedWrites.recordConsensus(
+                    t.mint,
+                    consensusResult.k_score,
+                    consensusResult.agreeing,
+                    consensusResult.total,
+                    db
+                );
+                logger.info(`[Consensus] ${t.mint.slice(0, 8)}... K=${consensusResult.k_score} (${consensusResult.agreeing}/${consensusResult.total} nodes agree)`);
+            }
+        }
+    } catch (_e) {
+        // Non-critical - continue without recording
+    }
+
+    // Broadcast K-Score update via WebSocket (use smoothed score)
+    if (broadcast) {
+        broadcast.kscoreUpdate(t.mint, {
+            kScore: smoothedScore,
+            symbol: t.symbol,
+            conviction: conviction.score || 0,
+            accumulators: conviction.accumulators || 0,
+            holders: conviction.realHoldersCount || 0,
+            timestamp: Date.now()
+        });
     }
 }
 
