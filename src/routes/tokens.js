@@ -2446,10 +2446,15 @@ function init(deps) {
             const isNative = isNativeToken(mint);
             const isVerified = token.hasCommunityUpdate || token.hascommunityupdate || false;
 
-            // Detect if token is still loading (placeholder data)
+            // Detect if token is still loading (placeholder data or newly indexed)
             const isLoadingName = !token.name || token.name === 'Loading...' || token.name === 'Unknown';
+            const isLoadingSymbol = !token.symbol || token.symbol === '...' || token.symbol === 'UNK';
             const isLoadingPrice = !token.priceusd || parseFloat(token.priceusd) === 0;
-            const isLoading = isLoadingName || isLoadingPrice;
+            // Check if token was just indexed (within last 30 seconds) and lacks full data
+            const tokenAge = token.timestamp ? Date.now() - parseInt(token.timestamp) : Infinity;
+            const isNewlyIndexed = tokenAge < 30000; // Less than 30 seconds old
+            const lacksFullData = !token.image || (!token.holders && token.holders !== 0);
+            const isLoading = isLoadingName || isLoadingSymbol || isLoadingPrice || (isNewlyIndexed && lacksFullData);
 
             const tokenData = {
                 mint: token.mint,

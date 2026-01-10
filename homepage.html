@@ -2523,7 +2523,9 @@
                 console.log(`🔍 Verified Status for ${ticker}:`, isVerified, `(Raw: ${rawStatus})`);
 
                 // Detect loading state - token is still being indexed
-                const isLoading = t.isLoading || t.name === 'Loading...' || t.name === 'Unknown' || !t.priceUsd || ticker === '...';
+                // Trust the API's isLoading flag first, then check for obvious placeholder values
+                const isLoading = t.isLoading === true || t.name === 'Loading...' || t.name === 'Unknown' || !t.priceUsd || ticker === '...' || ticker === 'UNK';
+                console.log(`🔄 Token loading state: isLoading=${t.isLoading}, name=${t.name}, price=${t.priceUsd}, ticker=${ticker}, result=${isLoading}`);
 
                 // If token is still loading, show dedicated indexing screen and auto-retry
                 if (isLoading) {
