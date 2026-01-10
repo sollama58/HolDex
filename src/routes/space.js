@@ -30,11 +30,155 @@ const {
     isValidWallet,
     VALID_GRANTS,
 } = require('../middleware/spaceAuth');
+const { requireAdminPassword, adminRateLimiter } = require('../middleware/adminAuth');
 const { getHarmonyEngine, harmony } = require('../services/harmonyEngine');
 const config = require('../config/env');
 
 let db = null;
 let logger = null;
+
+// ═══════════════════════════════════════════════════════════════
+// SECURITY: URL Validation
+// ═══════════════════════════════════════════════════════════════
+
+// Allowed domains for API URLs (prevents open redirect/SSRF)
+const ALLOWED_API_DOMAINS = new Set([
+    'holdex-api.onrender.com',
+    'api.holdex.io',
+    'holdex.io',
+    'localhost',
+    '127.0.0.1'
+]);
+
+/**
+ * Validate and sanitize API URL
+ * Prevents open redirect and SSRF vulnerabilities
+ */
+function validateApiUrl(url) {
+    if (!url || typeof url !== 'string') {
+        return { valid: false, url: null };
+    }
+
+    try {
+        const parsed = new URL(url);
+
+        // Only allow HTTPS in production
+        if (config.NODE_ENV === 'production' && parsed.protocol !== 'https:') {
+            return { valid: false, url: null, reason: 'HTTPS required in production' };
+        }
+
+        // Check if domain is whitelisted
+        const hostname = parsed.hostname.toLowerCase();
+        if (!ALLOWED_API_DOMAINS.has(hostname)) {
+            // Allow subdomains of whitelisted domains
+            const isSubdomain = Array.from(ALLOWED_API_DOMAINS).some(domain =>
+                hostname.endsWith(`.${domain}`)
+            );
+            if (!isSubdomain) {
+                return { valid: false, url: null, reason: 'Domain not in whitelist' };
+            }
+        }
+
+        // Return sanitized URL (removes any path traversal attempts)
+        return { valid: true, url: parsed.origin };
+    } catch (_e) {
+        return { valid: false, url: null, reason: 'Invalid URL format' };
+    }
+}
+
+/**
+ * Get validated base URL for card generation
+ */
+function getSecureBaseUrl() {
+    const configUrl = config.API_URL;
+
+    if (configUrl) {
+        const validation = validateApiUrl(configUrl);
+        if (validation.valid) {
+            return validation.url;
+        }
+        // Log warning but don't expose to user
+        logger?.warn(`[Space] SECURITY: Invalid API_URL configured: ${validation.reason}`);
+    }
+
+    // Fallback to default secure URL
+    return 'https://holdex-api.onrender.com';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECURITY: Safe JSON Parsing with Size Limits
+// ═══════════════════════════════════════════════════════════════
+
+const MAX_METADATA_SIZE = 4096; // 4KB max for metadata JSON
+const MAX_JSON_DEPTH = 5;       // Max nesting depth
+
+/**
+ * Safely parse JSON with size and depth limits
+ * Prevents DoS via large or deeply nested payloads
+ */
+function safeParseJSON(str, options = {}) {
+    const { maxSize = MAX_METADATA_SIZE, maxDepth = MAX_JSON_DEPTH } = options;
+
+    if (typeof str !== 'string') {
+        return { success: false, error: 'Not a string' };
+    }
+
+    // Check size limit
+    if (str.length > maxSize) {
+        return { success: false, error: `JSON too large: ${str.length} bytes (max ${maxSize})` };
+    }
+
+    try {
+        const parsed = JSON.parse(str);
+
+        // Check depth
+        if (!checkDepth(parsed, maxDepth)) {
+            return { success: false, error: `JSON nesting too deep (max ${maxDepth} levels)` };
+        }
+
+        return { success: true, data: parsed };
+    } catch (_e) {
+        return { success: false, error: 'Invalid JSON' };
+    }
+}
+
+/**
+ * Check if object depth exceeds limit
+ */
+function checkDepth(obj, maxDepth, currentDepth = 0) {
+    if (currentDepth > maxDepth) return false;
+    if (obj === null || typeof obj !== 'object') return true;
+
+    if (Array.isArray(obj)) {
+        for (const item of obj) {
+            if (!checkDepth(item, maxDepth, currentDepth + 1)) return false;
+        }
+    } else {
+        for (const value of Object.values(obj)) {
+            if (!checkDepth(value, maxDepth, currentDepth + 1)) return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * Parse metadata safely, returning empty object on failure
+ */
+function parseMetadataSafe(metadata) {
+    if (!metadata) return {};
+    if (typeof metadata === 'object') {
+        // Already parsed, but check depth
+        if (!checkDepth(metadata, MAX_JSON_DEPTH)) {
+            return {};
+        }
+        return metadata;
+    }
+    if (typeof metadata === 'string') {
+        const result = safeParseJSON(metadata);
+        return result.success ? result.data : {};
+    }
+    return {};
+}
 
 // ═══════════════════════════════════════════════════════════════
 // RATE LIMITING
@@ -249,7 +393,7 @@ router.get('/dashboard', requireSession(), requireGrant('space_access'), spaceRa
                 leaderboardPosition,
                 recentActions: recentActions.map(a => ({
                     action: a.action,
-                    metadata: typeof a.metadata === 'string' ? JSON.parse(a.metadata) : a.metadata,
+                    metadata: parseMetadataSafe(a.metadata),
                     createdAt: a.created_at,
                     success: a.success
                 }))
@@ -305,10 +449,12 @@ router.post('/card/generate',
 
             const isVerified = token.hascommunityupdate || token.hasCommunityUpdate;
 
-            // Generate card URL
-            const baseUrl = config.API_URL || 'https://holdex-api.onrender.com';
-            const cardUrl = `${baseUrl}/api/token/${mint}/card.png?mode=${mode}`;
-            const shareUrl = `${baseUrl}/k/${mint}?mode=${mode}`;
+            // SECURITY: Use validated base URL to prevent open redirects
+            const baseUrl = getSecureBaseUrl();
+            // Sanitize mode parameter (only allow alphanumeric)
+            const safeMode = /^[a-z0-9]+$/i.test(mode) ? mode : 'full';
+            const cardUrl = `${baseUrl}/api/token/${encodeURIComponent(mint)}/card.png?mode=${safeMode}`;
+            const shareUrl = `${baseUrl}/k/${encodeURIComponent(mint)}?mode=${safeMode}`;
 
             await logAction(req.wallet, 'generate_card', 'card_generator', {
                 mint,
@@ -355,7 +501,7 @@ router.get('/card/history', requireSession(), requireGrant('card_generator'), sp
         res.json({
             success: true,
             data: history.map(h => ({
-                ...JSON.parse(h.metadata),
+                ...parseMetadataSafe(h.metadata),
                 createdAt: h.created_at
             }))
         });
@@ -508,21 +654,9 @@ router.get('/admin/grants', requireSession(), requireGrant('grants_admin'), spac
 /**
  * GET /space/admin/grants/password
  * List all grants using password auth
+ * SECURITY: Uses secure admin auth with brute-force protection
  */
-router.get('/admin/grants/password', spaceRateLimiter, async (req, res) => {
-    // Check admin password
-    const authHeader = req.headers['x-admin-auth'];
-    if (!config.ADMIN_PASSWORD || !authHeader) {
-        return res.status(401).json({ success: false, error: 'Admin password required' });
-    }
-
-    const passwordBuffer = Buffer.from(config.ADMIN_PASSWORD);
-    const authBuffer = Buffer.from(authHeader);
-    if (passwordBuffer.length !== authBuffer.length ||
-        !require('crypto').timingSafeEqual(passwordBuffer, authBuffer)) {
-        return res.status(403).json({ success: false, error: 'Invalid admin password' });
-    }
-
+router.get('/admin/grants/password', adminRateLimiter, requireAdminPassword(), async (req, res) => {
     try {
         const grants = await db.all(`
             SELECT wallet, grants, e_score_boost, granted_by, grant_reason, is_active, created_at, revoked_at
@@ -530,6 +664,8 @@ router.get('/admin/grants/password', spaceRateLimiter, async (req, res) => {
             ORDER BY created_at DESC
             LIMIT 100
         `);
+
+        await logAction('ADMIN_PASSWORD', 'view_grants_password', 'grants_admin', {});
 
         res.json({
             success: true,
@@ -614,52 +750,15 @@ router.post('/admin/grants',
 );
 
 /**
- * Middleware: Check admin password
- */
-function requireAdminPassword(req, res, next) {
-    const authHeader = req.headers['x-admin-auth'];
-
-    if (!config.ADMIN_PASSWORD) {
-        return res.status(503).json({
-            success: false,
-            error: 'Admin password not configured',
-            code: 'NO_ADMIN_PASSWORD'
-        });
-    }
-
-    if (!authHeader) {
-        return res.status(401).json({
-            success: false,
-            error: 'Admin password required',
-            code: 'NO_AUTH'
-        });
-    }
-
-    // Timing-safe comparison
-    const passwordBuffer = Buffer.from(config.ADMIN_PASSWORD);
-    const authBuffer = Buffer.from(authHeader);
-
-    if (passwordBuffer.length !== authBuffer.length ||
-        !require('crypto').timingSafeEqual(passwordBuffer, authBuffer)) {
-        return res.status(403).json({
-            success: false,
-            error: 'Invalid admin password',
-            code: 'INVALID_PASSWORD'
-        });
-    }
-
-    req.wallet = 'ADMIN_PASSWORD';
-    next();
-}
-
-/**
  * POST /space/admin/grants/password
  * Create or update grant using admin password auth
+ * SECURITY: Uses secure admin auth with brute-force protection
  *
  * Body: { targetWallet, grants, reason, eScoreBoost }
  */
 router.post('/admin/grants/password',
-    requireAdminPassword,
+    adminRateLimiter,
+    requireAdminPassword(),
     writeRateLimiter,
     async (req, res) => {
         const { targetWallet, grants, reason, eScoreBoost = 0 } = req.body;
@@ -725,9 +824,11 @@ router.post('/admin/grants/password',
 /**
  * DELETE /space/admin/grants/password/:wallet
  * Revoke grant using admin password auth
+ * SECURITY: Uses secure admin auth with brute-force protection
  */
 router.delete('/admin/grants/password/:targetWallet',
-    requireAdminPassword,
+    adminRateLimiter,
+    requireAdminPassword(),
     writeRateLimiter,
     async (req, res) => {
         const { targetWallet } = req.params;
@@ -805,7 +906,7 @@ router.get('/admin/actions', requireSession(), requireGrant('grants_admin'), spa
                 wallet: a.wallet,
                 action: a.action,
                 grantUsed: a.grant_used,
-                metadata: typeof a.metadata === 'string' ? JSON.parse(a.metadata) : a.metadata,
+                metadata: parseMetadataSafe(a.metadata),
                 success: a.success,
                 error: a.error,
                 createdAt: a.created_at

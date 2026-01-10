@@ -2,16 +2,26 @@ const { getClient } = require('../services/redis');
 const { getDB } = require('../services/database');
 const logger = require('../services/logger');
 const { hashApiKey } = require('../utils/apiKeyHash');
+const crypto = require('crypto');
 
 // Cache key details in memory for 60 seconds to avoid hitting Postgres on every request
 const KEY_CACHE = new Map();
 const KEY_CACHE_MAX_SIZE = 1000; // Max cached API keys (prevents memory leak)
 const KEY_CACHE_TTL = 60000; // 60 seconds
 
-// SECURITY: In-memory fallback rate limiting when Redis is down (H2)
+// SECURITY: In-memory fallback rate limiting when Redis is down
+// Improved for clustered deployment awareness
 const FALLBACK_WINDOW = 60 * 1000; // 1 minute window for fallback
 const FALLBACK_MAX_SIZE = 500; // Max tracked IPs
 const fallbackTracker = new Map(); // Use Map for better cleanup
+
+// SECURITY: Generate instance ID for cluster-aware logging
+const INSTANCE_ID = crypto.randomBytes(4).toString('hex');
+
+// Track when Redis was last available (for alerting on extended outages)
+let lastRedisAvailable = Date.now();
+let redisOutageAlerted = false;
+const REDIS_OUTAGE_ALERT_THRESHOLD = 5 * 60 * 1000; // Alert after 5 minutes of outage
 
 // Clean up expired entries every 5 minutes (prevents memory leak)
 setInterval(() => {
@@ -122,6 +132,13 @@ const rateLimiter = async (req, res, next) => {
             // Prevents race condition where key exists without TTL
             const currentUsage = await redis.eval(RATE_LIMIT_LUA, 1, windowKey, 86400);
 
+            // Track that Redis is available (for fallback mode alerting)
+            lastRedisAvailable = Date.now();
+            if (redisOutageAlerted) {
+                logger.info(`[RateLimiter] Redis connectivity restored (instance ${INSTANCE_ID})`);
+                redisOutageAlerted = false;
+            }
+
             // 4. Async DB Sync (Lazy Update)
             // Update Postgres every 10 requests so Admin Panel stays roughly in sync
             // without choking the DB on every single hit.
@@ -153,17 +170,24 @@ const rateLimiter = async (req, res, next) => {
             // Attach user info to request for downstream use
             req.apiUser = { owner: keyData.owner, tier: keyData.tier };
         } else {
-            // SECURITY: In-memory fallback rate limiting when Redis is down (H2)
-            // Note: Node.js is single-threaded so this is safe, but we optimize
-            // the pattern to minimize the window between read and write
-            logger.warn('Redis unavailable - using in-memory fallback rate limiting');
-
+            // SECURITY: In-memory fallback rate limiting when Redis is down
+            // WARNING: In clustered deployments, each instance tracks separately!
+            // Use very conservative limits to compensate for N instances
             const now = Date.now();
+
+            // Check for extended Redis outage
+            if (now - lastRedisAvailable > REDIS_OUTAGE_ALERT_THRESHOLD && !redisOutageAlerted) {
+                logger.error(`[RateLimiter] ALERT: Redis has been unavailable for ${Math.floor((now - lastRedisAvailable) / 1000)}s - rate limiting is degraded (instance ${INSTANCE_ID})`);
+                redisOutageAlerted = true;
+            }
+
+            logger.warn(`[RateLimiter] Redis unavailable - using fallback rate limiting (instance ${INSTANCE_ID})`);
+
             let tracker = fallbackTracker.get(keyHash);
 
             // Atomic-style: get or create, reset if expired, increment - all in one block
             if (!tracker || now > tracker.resetTime) {
-                tracker = { count: 1, resetTime: now + FALLBACK_WINDOW };
+                tracker = { count: 1, resetTime: now + FALLBACK_WINDOW, instance: INSTANCE_ID };
             } else {
                 tracker.count++;
             }
@@ -171,20 +195,26 @@ const rateLimiter = async (req, res, next) => {
             evictOldestEntries(fallbackTracker, FALLBACK_MAX_SIZE);
             fallbackTracker.set(keyHash, tracker);
 
-            // Apply stricter fallback limit (10% of normal limit)
-            const fallbackLimit = Math.ceil(keyData.requests_limit * 0.1);
+            // SECURITY: Apply VERY strict fallback limit
+            // In a 3-node cluster, each node might allow 3.3%, so total is ~10%
+            // This is intentionally conservative to prevent abuse during Redis outage
+            const CLUSTER_NODES_ESTIMATE = 3; // Assume 3 nodes for safety margin
+            const fallbackLimit = Math.max(1, Math.ceil(keyData.requests_limit * 0.033 / CLUSTER_NODES_ESTIMATE));
+
             if (tracker.count > fallbackLimit) {
-                logger.warn(`[RateLimiter] Fallback limit exceeded for key: ${keyHash.slice(0, 8)}...`);
+                logger.warn(`[RateLimiter] Fallback limit exceeded for key: ${keyHash.slice(0, 8)}... (instance ${INSTANCE_ID})`);
                 return res.status(429).json({
                     success: false,
                     error: 'Rate limit exceeded (degraded mode)',
                     fallback: true,
-                    retryAfter: Math.ceil((tracker.resetTime - now) / 1000)
+                    retryAfter: Math.ceil((tracker.resetTime - now) / 1000),
+                    message: 'Service is operating in degraded mode. Please retry later.'
                 });
             }
 
             res.setHeader('X-RateLimit-Fallback', 'true');
-            res.setHeader('X-RateLimit-Remaining', fallbackLimit - tracker.count);
+            res.setHeader('X-RateLimit-Remaining', Math.max(0, fallbackLimit - tracker.count));
+            res.setHeader('X-RateLimit-Instance', INSTANCE_ID);
             req.apiUser = { owner: keyData.owner, tier: keyData.tier };
         }
 

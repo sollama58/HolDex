@@ -100,19 +100,23 @@ function isValidAmount(amount) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// SECURITY: Webhook HMAC Verification
+// SECURITY: Webhook HMAC Verification with Replay Prevention
 // ═══════════════════════════════════════════════════════════════
 
 const WEBHOOK_SECRET = config.ORACLE_WEBHOOK_SECRET || null;
+const WEBHOOK_TIMESTAMP_MAX_AGE_MS = 5 * 60 * 1000; // 5 minute max age for webhook requests
+const WEBHOOK_REPLAY_WINDOW_SECONDS = 300; // 5 minutes for replay prevention
 
 /**
  * Create canonical JSON for HMAC signing
  * CRITICAL: Key order must match exactly on both sides (GASdf + HolDex)
+ * NOTE: Includes timestamp for replay prevention
  */
 function canonicalBurnPayload(payload) {
     return JSON.stringify({
         amount: payload.amount,
         source: payload.source,
+        timestamp: payload.timestamp,
         txSignature: payload.txSignature,
         wallet: payload.wallet
     });
@@ -124,12 +128,15 @@ function canonicalBurnPayload(payload) {
  */
 function verifyWebhookSignature(payload, signature) {
     if (!WEBHOOK_SECRET) {
-        // If no secret configured, reject all webhooks in production
-        return config.NODE_ENV !== 'production';
+        // SECURITY: Reject all webhooks in production if no secret configured
+        if (config.NODE_ENV === 'production') {
+            return { valid: false, reason: 'Webhook secret not configured in production' };
+        }
+        return { valid: true, reason: 'Development mode - no secret required' };
     }
 
     if (!signature || !signature.startsWith('sha256=')) {
-        return false;
+        return { valid: false, reason: 'Missing or invalid signature format' };
     }
 
     const providedHash = signature.slice(7);
@@ -140,13 +147,57 @@ function verifyWebhookSignature(payload, signature) {
 
     // Timing-safe comparison to prevent timing attacks
     try {
-        return crypto.timingSafeEqual(
+        const isValid = crypto.timingSafeEqual(
             Buffer.from(providedHash, 'hex'),
             Buffer.from(expectedHash, 'hex')
         );
+        return { valid: isValid, reason: isValid ? null : 'Signature mismatch' };
     } catch (_e) {
-        return false;
+        return { valid: false, reason: 'Invalid signature encoding' };
     }
+}
+
+/**
+ * Validate webhook timestamp to prevent replay attacks
+ */
+function validateWebhookTimestamp(timestamp) {
+    if (!timestamp || typeof timestamp !== 'number') {
+        return { valid: false, reason: 'Missing or invalid timestamp' };
+    }
+
+    const now = Date.now();
+    const age = now - timestamp;
+
+    // Reject if timestamp is too old
+    if (age > WEBHOOK_TIMESTAMP_MAX_AGE_MS) {
+        return { valid: false, reason: `Timestamp too old: ${Math.floor(age / 1000)}s (max ${WEBHOOK_TIMESTAMP_MAX_AGE_MS / 1000}s)` };
+    }
+
+    // Reject if timestamp is in the future (clock drift tolerance: 30 seconds)
+    if (timestamp > now + 30000) {
+        return { valid: false, reason: 'Timestamp in the future' };
+    }
+
+    return { valid: true };
+}
+
+/**
+ * Check for replay attacks using Redis (idempotency key)
+ * Returns true if this is a duplicate request
+ */
+async function checkWebhookReplay(txSignature) {
+    const redis = getRedis();
+    if (!redis) {
+        // If Redis is down, log warning but allow request (graceful degradation)
+        // Consider: in high-security mode, you might want to reject instead
+        return { isDuplicate: false, warning: 'Redis unavailable - replay protection degraded' };
+    }
+
+    const key = `oracle:webhook:tx:${txSignature}`;
+    // SETNX returns 1 if key was set (new), 0 if already exists (duplicate)
+    const isNew = await redis.set(key, Date.now().toString(), 'EX', WEBHOOK_REPLAY_WINDOW_SECONDS, 'NX');
+
+    return { isDuplicate: !isNew };
 }
 
 // Cache TTLs
@@ -490,15 +541,29 @@ function init(deps) {
      */
     router.post('/webhook/burns', writeRateLimiter, async (req, res) => {
         try {
-            const { wallet, amount, txSignature, source } = req.body;
+            const { wallet, amount, txSignature, source, timestamp } = req.body;
+            const clientIP = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+
+            // SECURITY: Validate timestamp to prevent replay attacks
+            const timestampValidation = validateWebhookTimestamp(timestamp);
+            if (!timestampValidation.valid) {
+                logger.warn(`[Oracle] SECURITY: Webhook timestamp validation failed from ${clientIP}: ${timestampValidation.reason}`);
+                return res.status(400).json({
+                    success: false,
+                    error: 'Invalid timestamp',
+                    reason: timestampValidation.reason
+                });
+            }
 
             // SECURITY: Verify HMAC signature (prevents forged requests)
             const signature = req.headers['x-holdex-signature'];
-            if (!verifyWebhookSignature(req.body, signature)) {
-                logger.warn(`[Oracle] SECURITY: Invalid webhook signature from ${req.ip}`);
+            const signatureValidation = verifyWebhookSignature(req.body, signature);
+            if (!signatureValidation.valid) {
+                logger.warn(`[Oracle] SECURITY: Invalid webhook signature from ${clientIP}: ${signatureValidation.reason}`);
                 return res.status(401).json({
                     success: false,
-                    error: 'Invalid signature'
+                    error: 'Invalid signature',
+                    reason: signatureValidation.reason
                 });
             }
 
@@ -527,11 +592,25 @@ function init(deps) {
             }
 
             // SECURITY: Validate transaction signature format (Base58, 87-88 chars)
-            if (txSignature && (txSignature.length < 85 || txSignature.length > 90 || !BASE58_ALPHABET.test(txSignature))) {
+            if (!txSignature || txSignature.length < 85 || txSignature.length > 90 || !BASE58_ALPHABET.test(txSignature)) {
                 return res.status(400).json({
                     success: false,
-                    error: 'Invalid transaction signature format'
+                    error: 'Invalid or missing transaction signature'
                 });
+            }
+
+            // SECURITY: Check for replay attacks (duplicate txSignature)
+            const replayCheck = await checkWebhookReplay(txSignature);
+            if (replayCheck.isDuplicate) {
+                logger.warn(`[Oracle] SECURITY: Replay attack detected for tx ${txSignature.slice(0, 8)}... from ${clientIP}`);
+                return res.status(409).json({
+                    success: false,
+                    error: 'Transaction already processed',
+                    code: 'DUPLICATE_TX'
+                });
+            }
+            if (replayCheck.warning) {
+                logger.warn(`[Oracle] ${replayCheck.warning}`);
             }
 
             // Validate source (only accept from known sources)
@@ -546,10 +625,11 @@ function init(deps) {
             const result = await engine.recordContribution(wallet, 'burn', amount, {
                 source,
                 txSignature,
-                details: { receivedAt: Date.now() }
+                timestamp,
+                details: { receivedAt: Date.now(), clientIP }
             });
 
-            logger.info(`[Oracle] Burn recorded: ${wallet.slice(0,8)}... burned ${amount} $ASDF via ${source}`);
+            logger.info(`[Oracle] Burn recorded: ${wallet.slice(0,8)}... burned ${amount} $ASDF via ${source} (tx: ${txSignature.slice(0, 8)}...)`);
 
             res.json({
                 success: true,

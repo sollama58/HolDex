@@ -17,6 +17,39 @@ const router = express.Router();
 const nodeService = require('../services/nodeService');
 const config = require('../config/env');
 
+// ═══════════════════════════════════════════════════════════════
+// SECURITY: Input Validation
+// ═══════════════════════════════════════════════════════════════
+
+// Node ID format: alphanumeric, hyphens, underscores (max 64 chars)
+const NODE_ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
+
+/**
+ * Validate node ID format
+ * Prevents injection and DoS via malformed IDs
+ */
+function isValidNodeId(id) {
+    if (!id || typeof id !== 'string') return false;
+    return NODE_ID_PATTERN.test(id);
+}
+
+/**
+ * Middleware to validate node ID parameter
+ */
+function validateNodeId(req, res, next) {
+    const { id } = req.params;
+
+    if (!isValidNodeId(id)) {
+        return res.status(400).json({
+            success: false,
+            error: 'Invalid node ID format',
+            code: 'INVALID_NODE_ID'
+        });
+    }
+
+    next();
+}
+
 /**
  * GET /api/nodes - List verified nodes only
  * SECURITY: Only nodes with valid signing keys are shown
@@ -85,8 +118,9 @@ router.get('/status', async (req, res) => {
 /**
  * GET /api/nodes/:id/key - Get node's public key for signature verification
  * Philosophy: "Don't trust. Verify." - Anyone can verify node signatures
+ * SECURITY: Validates node ID format before processing
  */
-router.get('/:id/key', async (req, res) => {
+router.get('/:id/key', validateNodeId, async (req, res) => {
     try {
         const db = req.app.get('db');
         const { id } = req.params;
@@ -122,8 +156,9 @@ router.get('/:id/key', async (req, res) => {
 
 /**
  * GET /api/nodes/:id - Get specific node details
+ * SECURITY: Validates node ID format before processing
  */
-router.get('/:id', async (req, res) => {
+router.get('/:id', validateNodeId, async (req, res) => {
     try {
         const db = req.app.get('db');
         const { id } = req.params;

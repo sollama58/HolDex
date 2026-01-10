@@ -99,7 +99,7 @@ function validateEvent(event) {
 /**
  * Validate a single transfer within an event
  * @param {Object} transfer - Transfer object
- * @returns {{valid: boolean, amount?: bigint, reason?: string}}
+ * @returns {{valid: boolean, amount?: number, amountString?: string, reason?: string, overflow?: boolean}}
  */
 function validateTransfer(transfer) {
     if (!transfer || typeof transfer !== 'object') {
@@ -113,17 +113,28 @@ function validateTransfer(transfer) {
             if (amount < 0n || amount > MAX_TOKEN_AMOUNT) {
                 return { valid: false, reason: 'Token amount out of bounds' };
             }
-            // Convert to safe integer for DB storage (cap at Number.MAX_SAFE_INTEGER)
-            const safeAmount = amount > BigInt(Number.MAX_SAFE_INTEGER)
-                ? Number.MAX_SAFE_INTEGER
-                : Number(amount);
-            return { valid: true, amount: safeAmount };
+
+            // SECURITY: Check if amount exceeds safe integer range
+            // If so, log warning but still process (store string representation)
+            if (amount > BigInt(Number.MAX_SAFE_INTEGER)) {
+                // For amounts exceeding safe integer, we store a truncated version
+                // BUT we also return the string representation for accurate logging
+                logger.warn(`[Webhook] PRECISION: Token amount ${amount.toString()} exceeds MAX_SAFE_INTEGER, using capped value`);
+                return {
+                    valid: true,
+                    amount: Number.MAX_SAFE_INTEGER,
+                    amountString: amount.toString(),
+                    overflow: true
+                };
+            }
+
+            return { valid: true, amount: Number(amount), amountString: amount.toString(), overflow: false };
         } catch (_e) {
             return { valid: false, reason: 'Invalid token amount format' };
         }
     }
 
-    return { valid: true, amount: 0 };
+    return { valid: true, amount: 0, amountString: '0', overflow: false };
 }
 
 /**
@@ -343,7 +354,7 @@ function init(deps) {
                     // ============================================
                     // AUDIT: Log significant transfers (async, non-blocking)
                     // ============================================
-                    if (amount > CRITICAL_AMOUNT_THRESHOLD) {
+                    if (amount > CRITICAL_AMOUNT_THRESHOLD || transferValidation.overflow) {
                         // Fire and forget - don't block webhook response
                         verification.logAudit(db, {
                             action: 'transfer',
@@ -353,10 +364,18 @@ function init(deps) {
                                 from: fromUserAccount,
                                 to: toUserAccount,
                                 amount,
+                                // SECURITY: Include original amount string if overflow occurred
+                                amountOriginal: transferValidation.amountString,
+                                precisionLoss: transferValidation.overflow || false,
                                 signature: txSignature
                             },
                             source: 'helius_webhook',
-                            metadata: { timestamp: event.timestamp }
+                            metadata: {
+                                timestamp: event.timestamp,
+                                precisionWarning: transferValidation.overflow
+                                    ? 'Amount exceeded MAX_SAFE_INTEGER, value was capped'
+                                    : null
+                            }
                         }).catch(_e => {}); // Ignore audit failures
                     }
 

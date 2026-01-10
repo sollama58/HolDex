@@ -621,6 +621,11 @@ async function initDB() {
                 `ALTER TABLE participants ADD COLUMN IF NOT EXISTS escore_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
                 `ALTER TABLE participants ADD COLUMN IF NOT EXISTS first_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
                 `ALTER TABLE participants ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`,
+                // ═══════════════════════════════════════════════════════════
+                // SECURITY: Grant signature nonce for unpredictability (v2 signatures)
+                // Prevents signature prediction attacks by adding random entropy
+                // ═══════════════════════════════════════════════════════════
+                `ALTER TABLE access_grants ADD COLUMN IF NOT EXISTS nonce VARCHAR(32) DEFAULT NULL`,
                 // FIX: Ensure conviction_score is DOUBLE PRECISION (might be INTEGER in old DBs)
                 `ALTER TABLE tokens ALTER COLUMN conviction_score TYPE DOUBLE PRECISION USING conviction_score::DOUBLE PRECISION`,
                 // FIX: Ensure all market data columns are DOUBLE PRECISION (might be INTEGER in old DBs)

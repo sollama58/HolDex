@@ -80,9 +80,24 @@ setInterval(() => {
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * Generate HMAC signature for grant integrity
+ * Generate secure random nonce for grant signatures
+ * SECURITY: Adds unpredictability to prevent signature prediction attacks
  */
-function signGrant(wallet, grants, grantedBy, createdAt) {
+function generateGrantNonce() {
+    return crypto.randomBytes(16).toString('hex');
+}
+
+/**
+ * Generate HMAC signature for grant integrity
+ * SECURITY: Includes nonce for unpredictability (v2 signatures)
+ */
+function signGrant(wallet, grants, grantedBy, createdAt, nonce = null) {
+    // v2 signature format includes nonce
+    if (nonce) {
+        const data = `v2:${wallet}:${grants.sort().join(',')}:${grantedBy}:${createdAt}:${nonce}`;
+        return crypto.createHmac('sha256', GRANT_SECRET).update(data).digest('hex');
+    }
+    // v1 signature format (legacy, for backwards compatibility)
     const data = `${wallet}:${grants.sort().join(',')}:${grantedBy}:${createdAt}`;
     return crypto.createHmac('sha256', GRANT_SECRET).update(data).digest('hex');
 }
@@ -105,16 +120,48 @@ function normalizeGrantsArray(grants) {
 
 /**
  * Verify grant signature integrity
+ * SECURITY: Supports both v1 (legacy) and v2 (with nonce) signatures
  */
 function verifyGrantSignature(grant) {
     const grantsArray = normalizeGrantsArray(grant.grants);
-    const expected = signGrant(
+
+    // Try v2 signature first (with nonce)
+    if (grant.nonce) {
+        const expectedV2 = signGrant(
+            grant.wallet,
+            grantsArray,
+            grant.granted_by,
+            grant.created_at,
+            grant.nonce
+        );
+        // Timing-safe comparison
+        try {
+            return crypto.timingSafeEqual(
+                Buffer.from(grant.signature, 'hex'),
+                Buffer.from(expectedV2, 'hex')
+            );
+        } catch (_e) {
+            return false;
+        }
+    }
+
+    // Fall back to v1 signature (legacy, no nonce)
+    const expectedV1 = signGrant(
         grant.wallet,
         grantsArray,
         grant.granted_by,
         grant.created_at
     );
-    return grant.signature === expected;
+
+    // Timing-safe comparison
+    try {
+        return crypto.timingSafeEqual(
+            Buffer.from(grant.signature, 'hex'),
+            Buffer.from(expectedV1, 'hex')
+        );
+    } catch (_e) {
+        return false;
+    }
 }
 
 /**
@@ -226,6 +273,7 @@ async function hasGrant(wallet, grantType) {
 
 /**
  * Create new grant (admin only)
+ * SECURITY: Uses v2 signatures with random nonce for unpredictability
  */
 async function createGrant(wallet, grants, grantedBy, reason = null) {
     // Validate grants
@@ -237,26 +285,28 @@ async function createGrant(wallet, grants, grantedBy, reason = null) {
 
     const db = getDB();
     const createdAt = new Date().toISOString();
-    const signature = signGrant(wallet, grants, grantedBy, createdAt);
+    const nonce = generateGrantNonce(); // Generate random nonce for v2 signature
+    const signature = signGrant(wallet, grants, grantedBy, createdAt, nonce);
 
     await db.run(`
-        INSERT INTO access_grants (wallet, grants, granted_by, grant_reason, signature, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $6)
+        INSERT INTO access_grants (wallet, grants, granted_by, grant_reason, signature, nonce, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
         ON CONFLICT (wallet) DO UPDATE SET
             grants = $2,
             granted_by = $3,
             grant_reason = $4,
             signature = $5,
-            updated_at = $6,
+            nonce = $6,
+            updated_at = $7,
             is_active = TRUE,
             revoked_at = NULL,
             revoked_by = NULL
-    `, [wallet, grants, grantedBy, reason, signature, createdAt]);
+    `, [wallet, grants, grantedBy, reason, signature, nonce, createdAt]);
 
     // Invalidate cache
     GRANTS_CACHE.delete(`grants:${wallet}`);
 
-    return { wallet, grants, grantedBy, createdAt, signature };
+    return { wallet, grants, grantedBy, createdAt, signature, nonce };
 }
 
 /**
