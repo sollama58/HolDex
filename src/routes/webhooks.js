@@ -15,6 +15,7 @@ const config = require('../config/env');
 const { getClient } = require('../services/redis');
 const { isValidSolanaAddress, sanitizeError } = require('../utils/validation');
 const verification = require('../services/verificationService');
+const { queueKScoreRecalc } = require('../services/kscoreQueue');
 
 // Security: Replay attack prevention via Redis (cluster-safe, persistent)
 const REPLAY_WINDOW_SECONDS = 300; // 5 minutes TTL
@@ -199,6 +200,7 @@ function init(deps) {
             const events = Array.isArray(req.body) ? req.body : [req.body];
             let processed = 0;
             let skipped = 0;
+            const tokensWithActivity = new Set(); // Track tokens for K-Score recalc
 
             // ============================================
             // VALIDATION: Check batch size BEFORE processing
@@ -358,8 +360,20 @@ function init(deps) {
                         }).catch(_e => {}); // Ignore audit failures
                     }
 
+                    // Track token for K-Score recalc queue
+                    tokensWithActivity.add(mint);
+
                     processed++;
                 }
+            }
+
+            // Queue tokens with activity for K-Score recalculation
+            // Fire and forget - don't block webhook response
+            if (tokensWithActivity.size > 0) {
+                for (const mint of tokensWithActivity) {
+                    queueKScoreRecalc(mint, { reason: 'webhook_activity' }).catch(() => {});
+                }
+                logger.debug(`[Webhook] Queued ${tokensWithActivity.size} tokens for K-Score recalc`);
             }
 
             if (processed > 0 || skipped > 0) {

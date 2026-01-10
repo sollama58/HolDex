@@ -62,7 +62,7 @@ const { snapshotPools } = require('../indexer/tasks/snapshotter');
 const logger = require('../services/logger');
 const cacheControl = require('../middleware/httpCache');
 const unifiedRateLimiter = require('../middleware/unifiedRateLimiter');
-const { indexTokenOnChain, searchGeckoTerminal, quickIndexFromGecko, fetchInitialMarketData } = require('../services/indexer');
+const { indexTokenOnChain, searchGeckoTerminal, quickIndexFromGecko, fetchInitialMarketData, asyncIndexToken } = require('../services/indexer');
 const tokenSearch = require('../services/tokenSearch');
 const { addTokenToMasterWebhook } = require('../services/heliusWebhook');
 const verification = require('../services/verificationService');
@@ -616,7 +616,8 @@ function init(deps) {
                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
             `, [mint, twitter, website, telegram, banner, finalDescription, Date.now(), signature, userPublicKey]);
 
-            try { await indexTokenOnChain(mint); } catch (_err) { /* ignore */ }
+            // Queue for async indexing (non-blocking)
+            try { await asyncIndexToken(mint); } catch (_err) { /* ignore */ }
 
             // Clear cache after indexing to ensure fresh data on next request
             const redis = getClient();
@@ -1122,7 +1123,8 @@ function init(deps) {
                             const tokenExists = await db.get('SELECT mint FROM tokens WHERE mint = $1', [u.mint]);
                             if (!tokenExists) {
                                 try {
-                                    await indexTokenOnChain(u.mint);
+                                    // Use async indexing for better responsiveness
+                                    await asyncIndexToken(u.mint);
                                 } catch (idxErr) {
                                     console.error(`Auto-index failed for restored token ${u.mint}: ${idxErr.message}`);
                                 }
@@ -1855,9 +1857,11 @@ function init(deps) {
                     const rateCheck = await checkIndexingRateLimit(clientIp);
                     if (rateCheck.allowed) {
                         try {
-                            const indexed = await indexTokenOnChain(mint);
-                            token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
-                            pairs = indexed.pairs || [];
+                            // Use async indexing for better responsiveness
+                            const result = await asyncIndexToken(mint);
+                            if (result.queued || result.status === 'already_indexed') {
+                                token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+                            }
                         } catch (_e) { /* ignore */ }
                     }
                 }
@@ -2200,15 +2204,15 @@ function init(deps) {
                                 logger.debug(`[PublicSearch] GeckoTerminal lookup failed for ${search.slice(0,8)}: ${geckoErr.message}`);
                             }
 
-                            // Strategy 2: Fall back to on-chain indexing if GeckoTerminal failed
+                            // Strategy 2: Fall back to async indexing if GeckoTerminal failed (fast, non-blocking)
                             if (!indexed) {
                                 try {
-                                    const result = await indexTokenOnChain(search);
-                                    if (!result?.skipped) {
+                                    const result = await asyncIndexToken(search);
+                                    if (result.queued || result.status === 'already_indexed') {
                                         indexed = true;
                                     }
                                 } catch (indexErr) {
-                                    logger.error(`[PublicSearch] On-chain indexing failed for ${search}: ${indexErr.message}`);
+                                    logger.error(`[PublicSearch] Async indexing failed for ${search}: ${indexErr.message}`);
                                 }
                             }
 
@@ -2407,12 +2411,26 @@ function init(deps) {
                 const rateCheck = await checkIndexingRateLimit(clientIp);
 
                 if (rateCheck.allowed) {
-                    // AUTO-INDEX: Try to index new token on-chain (matches /api/token/:mint behavior)
+                    // ASYNC-INDEX: Queue token for background indexing (fast, non-blocking)
+                    // This improves API responsiveness by not waiting for RPC calls
                     try {
-                        logger.info(`[PublicToken] Auto-indexing new token: ${mint}`);
-                        const indexed = await indexTokenOnChain(mint);
-                        token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
-                        pairs = indexed?.pairs || [];
+                        logger.info(`[PublicToken] Async-indexing new token: ${mint}`);
+                        const result = await asyncIndexToken(mint);
+
+                        if (result.queued || result.status === 'already_indexed') {
+                            // Check if we have data now (from quick market data fetch)
+                            token = await db.get('SELECT * FROM tokens WHERE mint = $1', [mint]);
+                        }
+
+                        // If still no token data, return 202 Accepted indicating background processing
+                        if (!token) {
+                            return res.status(202).json({
+                                success: true,
+                                status: 'indexing',
+                                message: 'Token queued for indexing. Please retry in a few seconds.',
+                                mint
+                            });
+                        }
                     } catch (indexErr) {
                         logger.warn(`[PublicToken] Auto-index failed for ${mint}: ${indexErr.message}`);
                     }
@@ -2702,15 +2720,15 @@ function init(deps) {
                                 logger.debug(`[Search] Helius/Jupiter lookup failed for ${search.slice(0,8)}: ${heliusErr.message}`);
                             }
 
-                            // Strategy 2: Fall back to on-chain indexing if Helius/Jupiter failed
+                            // Strategy 2: Fall back to async indexing if Helius/Jupiter failed (fast, non-blocking)
                             if (!indexed) {
                                 try {
-                                    const result = await indexTokenOnChain(search);
-                                    if (!result?.skipped) {
+                                    const result = await asyncIndexToken(search);
+                                    if (result.queued || result.status === 'already_indexed') {
                                         indexed = true;
                                     }
                                 } catch (indexErr) {
-                                    logger.error(`[Search] On-chain indexing failed for ${search}: ${indexErr.message}`);
+                                    logger.error(`[Search] Async indexing failed for ${search}: ${indexErr.message}`);
                                 }
                             }
 

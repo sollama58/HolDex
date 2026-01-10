@@ -9,10 +9,10 @@ const config = require('./config/env');
 const logger = require('./services/logger');
 const { initDB, getDB } = require('./services/database');
 const { connectRedis } = require('./services/redis');
-const { startSnapshotter } = require('./indexer/tasks/snapshotter');
+// MOVED TO CALCULATOR: const { startSnapshotter } = require('./indexer/tasks/snapshotter');
 const _kScoreUpdater = require('./tasks/kScoreUpdater');
 const integrityWatchdog = require('./tasks/integrityWatchdog');
-const { startPriceWorker } = require('./tasks/priceWorker');
+// MOVED TO CALCULATOR: const { startPriceWorker } = require('./tasks/priceWorker');
 const alerting = require('./services/alerting');
 // REMOVED: const { startNewTokenListener } = require('./services/new_token_listener'); 
 const { initSocket } = require('./services/socket'); 
@@ -624,11 +624,10 @@ async function startServer() {
             logger.warn('[Webhook] Webhooks disabled (set API_URL or WEBHOOK_URL to enable)');
         }
 
-        // Start Background Tasks
-        startSnapshotter();
-
-        // PriceWorker: Unified price service (Jupiter + Raydium, 0 Helius credits)
-        priceWorkerRef = startPriceWorker({ db: getDB(), broadcast: null });
+        // BACKGROUND TASKS MOVED TO CALCULATOR WORKER
+        // Snapshotter and PriceWorker now run on Calculator service to improve API responsiveness.
+        // The Calculator handles all heavy computation (K-Score, Metadata, Snapshotter, PriceWorker).
+        // This keeps the API server lightweight and focused on request handling.
 
         // ARCHITECTURE FIX: kScoreUpdater.start() REMOVED from API
         // K-Score periodic calculations run ONLY on Calculator service to prevent race conditions.
@@ -699,7 +698,7 @@ async function startServer() {
 let isShuttingDown = false;
 let activeConnections = new Set();
 let heartbeatInterval = null;
-let priceWorkerRef = null;
+// MOVED TO CALCULATOR: let priceWorkerRef = null;
 
 async function gracefulShutdown(signal) {
     if (isShuttingDown) {
@@ -725,11 +724,7 @@ async function gracefulShutdown(signal) {
         logger.info('✅ Shutdown: Heartbeat interval cleared');
     }
 
-    // 3. Stop price worker
-    if (priceWorkerRef && priceWorkerRef.stop) {
-        priceWorkerRef.stop();
-        logger.info('✅ Shutdown: Price worker stopped');
-    }
+    // 3. Price worker now runs on Calculator service (moved for better API responsiveness)
 
     // 4. Close active WebSocket connections gracefully
     const { getIO } = require('./services/socket');

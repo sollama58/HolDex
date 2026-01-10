@@ -399,4 +399,62 @@ async function indexTokenOnChain(mint, retryCount = 0) {
     }
 }
 
-module.exports = { indexTokenOnChain, searchGeckoTerminal, quickIndexFromGecko, fetchInitialMarketData };
+/**
+ * Async index - queues token for background indexing and returns immediately
+ * This is much faster than indexTokenOnChain for API responsiveness
+ * @param {string} mint - Token mint address
+ * @returns {Promise<{queued: boolean, status: string}>}
+ */
+async function asyncIndexToken(mint) {
+    try {
+        // Validate mint address
+        if (!mint || typeof mint !== 'string' || mint.length < 32) {
+            return { queued: false, status: 'invalid_mint' };
+        }
+
+        const db = getDB();
+
+        // Check if token already exists
+        const existing = await db.get('SELECT mint, name, symbol FROM tokens WHERE mint = $1', [mint]);
+        if (existing && existing.name && existing.name !== 'Unknown') {
+            return { queued: false, status: 'already_indexed' };
+        }
+
+        // Try quick market data fetch (fast, no RPC)
+        const marketData = await fetchInitialMarketData(mint);
+
+        if (marketData && marketData.priceUsd > 0) {
+            // Insert basic placeholder with market data - full indexing happens in background
+            await db.run(`
+                INSERT INTO tokens (mint, name, symbol, priceUsd, marketCap, liquidity, volume24h, timestamp, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+                ON CONFLICT(mint) DO UPDATE SET
+                    priceUsd = CASE WHEN COALESCE(tokens.priceUsd, 0) = 0 THEN EXCLUDED.priceUsd ELSE tokens.priceUsd END,
+                    marketCap = CASE WHEN COALESCE(tokens.marketCap, 0) = 0 THEN EXCLUDED.marketCap ELSE tokens.marketCap END,
+                    liquidity = CASE WHEN COALESCE(tokens.liquidity, 0) = 0 THEN EXCLUDED.liquidity ELSE tokens.liquidity END,
+                    volume24h = CASE WHEN COALESCE(tokens.volume24h, 0) = 0 THEN EXCLUDED.volume24h ELSE tokens.volume24h END,
+                    updated_at = NOW()
+            `, [
+                mint,
+                marketData.name || 'Loading...',
+                marketData.symbol || '...',
+                marketData.priceUsd,
+                marketData.mcap || 0,
+                marketData.liquidity || 0,
+                marketData.volume24h || 0,
+                Date.now()
+            ]);
+        }
+
+        // Queue for full background indexing (metadata, pools, supply, etc.)
+        await enqueueTokenUpdate(mint);
+        logger.info(`📥 [AsyncIndex] Queued ${mint.slice(0, 8)} for background indexing`);
+
+        return { queued: true, status: 'queued' };
+    } catch (e) {
+        logger.error(`❌ [AsyncIndex] Failed to queue ${mint}: ${e.message}`);
+        return { queued: false, status: 'error', error: e.message };
+    }
+}
+
+module.exports = { indexTokenOnChain, searchGeckoTerminal, quickIndexFromGecko, fetchInitialMarketData, asyncIndexToken };

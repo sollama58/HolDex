@@ -15,6 +15,8 @@ require('dotenv').config();
 
 const config = require('./config/env');
 const logger = require('./services/logger');
+const { startSnapshotter } = require('./indexer/tasks/snapshotter');
+const { startPriceWorker } = require('./tasks/priceWorker');
 
 // Startup info
 logger.info('='.repeat(50));
@@ -36,6 +38,7 @@ function logHeartbeat() {
 // Graceful shutdown
 let isShuttingDown = false;
 let distributedPollingRef = null; // Set during main()
+let priceWorkerRef = null; // For graceful shutdown
 
 async function shutdown(signal) {
     if (isShuttingDown) return;
@@ -49,6 +52,16 @@ async function shutdown(signal) {
             logger.info('✅ Distributed polling stopped');
         } catch (e) {
             logger.warn(`⚠️ Error stopping distributed polling: ${e.message}`);
+        }
+    }
+
+    // Stop price worker
+    if (priceWorkerRef) {
+        try {
+            priceWorkerRef.stop();
+            logger.info('✅ Price worker stopped');
+        } catch (e) {
+            logger.warn(`⚠️ Error stopping price worker: ${e.message}`);
         }
     }
 
@@ -265,6 +278,16 @@ async function main() {
         metadataUpdater.start(deps);
         logger.info('✅ Metadata Updater Running');
 
+        // 7. Start Snapshotter (moved from API server for better responsiveness)
+        logger.info('📸 Starting Snapshotter...');
+        startSnapshotter();
+        logger.info('✅ Snapshotter Running');
+
+        // 8. Start Price Worker (moved from API server for better responsiveness)
+        logger.info('💰 Starting Price Worker...');
+        priceWorkerRef = startPriceWorker({ db, broadcast: null });
+        logger.info('✅ Price Worker Running');
+
         // ============================================================================
         // TOKEN ADDITION POLICY:
         // Tokens are ONLY added to the database when users search by Contract Address (CA).
@@ -285,7 +308,7 @@ async function main() {
         logger.info('='.repeat(50));
         logger.info('🧠 Calculator Brain ACTIVE');
         logger.info(`   Mode: ${useDistributed ? 'DISTRIBUTED' : 'STANDALONE'}`);
-        logger.info('   Running: K-Score, Metadata');
+        logger.info('   Running: K-Score, Metadata, Snapshotter, PriceWorker');
         logger.info('   Disabled: Grower Scanner (tokens via CA search only)');
         if (useDistributed) {
             logger.info('   Network: Distributed polling enabled');
