@@ -1421,7 +1421,7 @@
                     </div>
                     
                     <div class="text-right cursor-pointer" onclick="toggleKScoreModal()" id="kscore-container">
-                         <div id="stat-kscore" class="text-2xl font-bold text-[#fb923c] font-mono">--</div>
+                         <div id="stat-kscore" class="text-2xl font-bold text-[#fb923c] font-mono"><span class="text-yellow-500 animate-pulse">⏳</span></div>
                          <div class="text-[10px] text-[#737373] uppercase font-bold flex justify-end items-center gap-1">Credit <i data-lucide="help-circle" width="10"></i></div>
                     </div>
                 </div>
@@ -1466,11 +1466,11 @@
             <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
                 <div class="stat-card">
                     <span class="text-[10px] text-[#737373] uppercase font-bold">Price USD</span>
-                    <span id="stat-price" class="stat-value text-white">$0.00</span>
+                    <span id="stat-price" class="stat-value text-white"><span class="text-yellow-500 animate-pulse">⏳</span></span>
                 </div>
                 <div class="stat-card">
                     <span class="text-[10px] text-[#737373] uppercase font-bold">Mkt Cap</span>
-                    <span id="stat-mcap" class="stat-value text-[#ea580c]">$0</span>
+                    <span id="stat-mcap" class="stat-value text-[#ea580c]"><span class="text-yellow-500 animate-pulse">⏳</span></span>
                 </div>
                 <div class="stat-card">
                     <div class="flex justify-between items-center">
@@ -1480,12 +1480,12 @@
                             <button onclick="toggleTopHoldersModal()" class="text-[#737373] hover:text-[#fb923c] p-1" title="Top Holders"><i data-lucide="users" width="12"></i></button>
                         </div>
                     </div>
-                    <span id="stat-holders" class="stat-value text-[#fb923c]">0</span>
+                    <span id="stat-holders" class="stat-value text-[#fb923c]"><span class="text-yellow-500 animate-pulse">⏳</span></span>
                 </div>
                 <div class="stat-card">
                     <div class="flex justify-between">
-                         <div class="flex flex-col"><span class="text-[10px] text-[#737373] uppercase font-bold">5m</span><span id="stat-chg5m" class="text-xs font-mono">-</span></div>
-                         <div class="flex flex-col text-right"><span class="text-[10px] text-[#737373] uppercase font-bold">24h</span><span id="stat-chg24h" class="text-xs font-mono">-</span></div>
+                         <div class="flex flex-col"><span class="text-[10px] text-[#737373] uppercase font-bold">5m</span><span id="stat-chg5m" class="text-xs font-mono"><span class="text-yellow-500 animate-pulse">⏳</span></span></div>
+                         <div class="flex flex-col text-right"><span class="text-[10px] text-[#737373] uppercase font-bold">24h</span><span id="stat-chg24h" class="text-xs font-mono"><span class="text-yellow-500 animate-pulse">⏳</span></span></div>
                     </div>
                 </div>
             </div>
@@ -2521,11 +2521,17 @@
             const isLoading = t.isLoading || t.name === 'Loading...' || t.name === 'Unknown' || (!t.priceusd && !t.priceUsd);
 
             const kScoreDisplay = renderKScore(score, isVerified, t.mint);
-            const formatPct = (v) => (v !== undefined && v !== null && !isNaN(v)) ? `<span class="pill ${v>0?'pill-green':'pill-red'}">${Number(v).toFixed(1)}%</span>` : '-';
-            // Show hourglass for zero values when token is loading
+            // Show loading indicator for missing data when token is loading
+            const loadingIndicator = '<span class="text-yellow-500 animate-pulse">⏳</span>';
+            const formatPct = (v, loading) => {
+                if (v !== undefined && v !== null && !isNaN(v)) {
+                    return `<span class="pill ${v>0?'pill-green':'pill-red'}">${Number(v).toFixed(1)}%</span>`;
+                }
+                return loading ? loadingIndicator : '-';
+            };
             const formatVal = (v, loading) => {
                 if (v && v > 0) return '$'+ new Intl.NumberFormat('en',{notation:'compact'}).format(v);
-                return loading ? '<span class="text-yellow-500 animate-pulse">⏳</span>' : '-';
+                return loading ? loadingIndicator : '-';
             };
 
             // Normalize field names (API returns 'mcap' and 'volume24h')
@@ -2562,13 +2568,13 @@
 
                 <td class="text-right font-mono font-bold hidden md:table-cell">${kScoreDisplay}</td>
                 <!-- Price Removed, replaced with 1h% -->
-                <td class="text-right hidden md:table-cell">${formatPct(change1h)}</td>
-                <td class="text-right hidden md:table-cell">${formatPct(change24h)}</td>
+                <td class="text-right hidden md:table-cell">${formatPct(change1h, isLoading)}</td>
+                <td class="text-right hidden md:table-cell">${formatPct(change24h, isLoading)}</td>
 
                 <td class="text-right font-mono text-[#22c55e] text-xs">${formatVal(volume, isLoading)}</td>
                 <td class="text-right font-mono text-[#fb923c] text-xs">${formatVal(mcap, isLoading)}</td>
 
-                <td class="text-right font-mono text-[#fb923c] text-xs hidden md:table-cell">${formatHolders(t.holders)}</td>
+                <td class="text-right font-mono text-[#fb923c] text-xs hidden md:table-cell">${formatHolders(t.holders, isLoading)}</td>
                 <td class="text-right text-[10px] text-[#737373] font-mono whitespace-nowrap hidden md:table-cell">${timeAgo(t.timestamp)}</td>
             </tr>`;
         }).join('');
@@ -3207,8 +3213,8 @@
     }
 
     // Format holder count - show "+100k" for 100k+
-    function formatHolders(count) {
-        if (!count || count <= 0) return '-';
+    function formatHolders(count, loading = false) {
+        if (!count || count <= 0) return loading ? '<span class="text-yellow-500 animate-pulse">⏳</span>' : '-';
         if (count >= 100000) return '+100k';
         if (count >= 10000) return (count / 1000).toFixed(0) + 'k';
         if (count >= 1000) return (count / 1000).toFixed(1) + 'k';
