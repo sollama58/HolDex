@@ -2155,8 +2155,12 @@
             document.getElementById('popover-credit').textContent = isVerified ? '...' : 'Locked';
         }
 
-        // Stats
-        const formatVal = (v) => v ? '$'+ new Intl.NumberFormat('en',{notation:'compact'}).format(v) : '--';
+        // Stats - show loading indicator for zero values when token is loading
+        const isLoading = token.isLoading || token.name === 'Loading...' || token.name === 'Unknown';
+        const formatVal = (v) => {
+            if (v && v > 0) return '$'+ new Intl.NumberFormat('en',{notation:'compact'}).format(v);
+            return isLoading ? '⏳' : '--';
+        };
         document.getElementById('popover-mcap').textContent = formatVal(token.mcap || token.marketCap || 0);
         document.getElementById('popover-vol').textContent = formatVal(token.volume24h);
 
@@ -2403,9 +2407,16 @@
             const isVerified = t.verified || t.hasCommunityUpdate || t.has_community_update;
             const score = t.kScore || t.k_score || 0;
 
+            // Detect loading state (token being indexed)
+            const isLoading = t.isLoading || t.name === 'Loading...' || t.name === 'Unknown' || (!t.priceusd && !t.priceUsd);
+
             const kScoreDisplay = renderKScore(score, isVerified, t.mint);
             const formatPct = (v) => (v !== undefined && v !== null && !isNaN(v)) ? `<span class="pill ${v>0?'pill-green':'pill-red'}">${Number(v).toFixed(1)}%</span>` : '-';
-            const formatVal = (v) => (v && v > 0) ? '$'+ new Intl.NumberFormat('en',{notation:'compact'}).format(v) : '-';
+            // Show hourglass for zero values when token is loading
+            const formatVal = (v, loading) => {
+                if (v && v > 0) return '$'+ new Intl.NumberFormat('en',{notation:'compact'}).format(v);
+                return loading ? '<span class="text-yellow-500 animate-pulse">⏳</span>' : '-';
+            };
 
             // Normalize field names (API returns 'mcap' and 'volume24h')
             const volume = t.volume24h || t.volume_24h || 0;
@@ -2420,7 +2431,9 @@
             const img = sanitizeUrl(t.image) || `https://placehold.co/40x40/0a0a0a/ea580c?text=${safeTickerChar}`;
             const safeMint = escapeJs(t.mint);
             const safeTicker = escapeHtml(ticker);
-            const safeName = escapeHtml(t.name || 'Unknown');
+            // Show loading state for name
+            const displayName = t.name === 'Loading...' || !t.name ? '<span class="animate-pulse">Loading...</span>' : t.name;
+            const safeName = t.name === 'Loading...' || !t.name ? displayName : escapeHtml(t.name);
 
             return `
             <tr onclick="navigateTo('token/${safeMint}')" data-token-idx="${idx}" class="cursor-pointer group border-b border-[#252525]/30">
@@ -2442,8 +2455,8 @@
                 <td class="text-right hidden md:table-cell">${formatPct(change1h)}</td>
                 <td class="text-right hidden md:table-cell">${formatPct(change24h)}</td>
 
-                <td class="text-right font-mono text-[#22c55e] text-xs">${formatVal(volume)}</td>
-                <td class="text-right font-mono text-[#fb923c] text-xs">${formatVal(mcap)}</td>
+                <td class="text-right font-mono text-[#22c55e] text-xs">${formatVal(volume, isLoading)}</td>
+                <td class="text-right font-mono text-[#fb923c] text-xs">${formatVal(mcap, isLoading)}</td>
 
                 <td class="text-right font-mono text-[#fb923c] text-xs hidden md:table-cell">${formatHolders(t.holders)}</td>
                 <td class="text-right text-[10px] text-[#737373] font-mono whitespace-nowrap hidden md:table-cell">${timeAgo(t.timestamp)}</td>
@@ -2509,17 +2522,43 @@
                 const ticker = t.symbol || t.ticker || 'UNK';
                 console.log(`🔍 Verified Status for ${ticker}:`, isVerified, `(Raw: ${rawStatus})`);
 
+                // Detect loading state
+                const isLoading = t.isLoading || t.name === 'Loading...' || t.name === 'Unknown' || !t.priceUsd;
+
                 const tickerEl = document.getElementById('detail-ticker');
                 const nameEl = document.getElementById('detail-name');
-                if (tickerEl) tickerEl.innerText = ticker;
-                if (nameEl) nameEl.innerText = t.name || 'Unknown';
-                
+                if (tickerEl) tickerEl.innerText = ticker === '...' ? '⏳' : ticker;
+                if (nameEl) {
+                    if (t.name === 'Loading...' || !t.name) {
+                        nameEl.innerHTML = '<span class="animate-pulse text-yellow-500">Loading token data...</span>';
+                    } else {
+                        nameEl.innerText = t.name;
+                    }
+                }
+
                 const price = t.priceUsd || 0;
                 const priceEl = document.getElementById('stat-price');
-                if (priceEl) priceEl.innerText = (price < 0.01 && price > 0) ? '$'+price.toExponential(2) : '$'+price.toFixed(6);
-                
+                if (priceEl) {
+                    if (price > 0) {
+                        priceEl.innerText = (price < 0.01) ? '$'+price.toExponential(2) : '$'+price.toFixed(6);
+                    } else if (isLoading) {
+                        priceEl.innerHTML = '<span class="animate-pulse text-yellow-500">⏳ Loading...</span>';
+                    } else {
+                        priceEl.innerText = '$0.00';
+                    }
+                }
+
                 const mcapEl = document.getElementById('stat-mcap');
-                if (mcapEl) mcapEl.innerText = '$' + new Intl.NumberFormat('en', {notation:'compact'}).format(t.mcap || t.marketCap || 0);
+                const mcapVal = t.mcap || t.marketCap || 0;
+                if (mcapEl) {
+                    if (mcapVal > 0) {
+                        mcapEl.innerText = '$' + new Intl.NumberFormat('en', {notation:'compact'}).format(mcapVal);
+                    } else if (isLoading) {
+                        mcapEl.innerHTML = '<span class="animate-pulse text-yellow-500">⏳</span>';
+                    } else {
+                        mcapEl.innerText = '-';
+                    }
+                }
                 
                 const holdersEl = document.getElementById('stat-holders');
                 if (holdersEl) holdersEl.innerText = formatHolders(t.holders);
@@ -2671,6 +2710,27 @@
                 requestAnimationFrame(() => {
                     initChart(mint, currentPoolAddress);
                 });
+
+                // Auto-refresh if token is still loading (newly indexed)
+                if (isLoading) {
+                    console.log('⏳ Token still loading, will auto-refresh in 3s...');
+                    setTimeout(() => {
+                        if (currentMint === mint) {
+                            showDetailView(mint); // Refresh the view
+                        }
+                    }, 3000);
+                }
+            } else if (data.status === 'indexing') {
+                // Handle 202 response - token being indexed
+                if (loadingDiv) {
+                    loadingDiv.innerHTML = '<span class="animate-pulse text-yellow-500">⏳ Indexing new token... Please wait.</span>';
+                }
+                // Auto-retry after 2 seconds
+                setTimeout(() => {
+                    if (currentMint === mint) {
+                        showDetailView(mint);
+                    }
+                }, 2000);
             } else { if (loadingDiv) loadingDiv.innerText = 'Token not found.'; }
         } catch(e) { console.error(e); if (loadingDiv) loadingDiv.innerText = 'Error fetching data.'; }
     }

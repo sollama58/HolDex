@@ -2446,6 +2446,11 @@ function init(deps) {
             const isNative = isNativeToken(mint);
             const isVerified = token.hasCommunityUpdate || token.hascommunityupdate || false;
 
+            // Detect if token is still loading (placeholder data)
+            const isLoadingName = !token.name || token.name === 'Loading...' || token.name === 'Unknown';
+            const isLoadingPrice = !token.priceusd || parseFloat(token.priceusd) === 0;
+            const isLoading = isLoadingName || isLoadingPrice;
+
             const tokenData = {
                 mint: token.mint,
                 name: token.name,
@@ -2453,6 +2458,8 @@ function init(deps) {
                 ticker: token.symbol,
                 image: token.image,
                 decimals: token.decimals || 9,
+                // Loading state indicator for frontend
+                isLoading,
                 // Market data with provenance
                 priceUsd: parseFloat(token.priceusd) || 0,
                 marketCap: parseFloat(token.marketcap) || 0,

@@ -402,8 +402,14 @@ async function indexTokenOnChain(mint, retryCount = 0) {
 /**
  * Async index - queues token for background indexing and returns immediately
  * This is much faster than indexTokenOnChain for API responsiveness
+ *
+ * Strategy:
+ * 1. Fetch metadata + market data in parallel (fast APIs)
+ * 2. Insert placeholder with whatever data we got
+ * 3. Queue for full background indexing
+ *
  * @param {string} mint - Token mint address
- * @returns {Promise<{queued: boolean, status: string}>}
+ * @returns {Promise<{queued: boolean, status: string, token?: object}>}
  */
 async function asyncIndexToken(mint) {
     try {
@@ -414,43 +420,82 @@ async function asyncIndexToken(mint) {
 
         const db = getDB();
 
-        // Check if token already exists
-        const existing = await db.get('SELECT mint, name, symbol FROM tokens WHERE mint = $1', [mint]);
-        if (existing && existing.name && existing.name !== 'Unknown') {
-            return { queued: false, status: 'already_indexed' };
+        // Check if token already exists with real data
+        const existing = await db.get('SELECT mint, name, symbol, priceusd FROM tokens WHERE mint = $1', [mint]);
+        if (existing && existing.name && existing.name !== 'Unknown' && existing.name !== 'Loading...') {
+            return { queued: false, status: 'already_indexed', token: existing };
         }
 
-        // Try quick market data fetch (fast, no RPC)
-        const marketData = await fetchInitialMarketData(mint);
+        // Fetch metadata and market data in parallel for speed
+        const [tokenInfo, marketData] = await Promise.all([
+            tokenSearch.getTokenByMint(mint).catch(() => null),
+            fetchInitialMarketData(mint).catch(() => null)
+        ]);
 
-        if (marketData && marketData.priceUsd > 0) {
-            // Insert basic placeholder with market data - full indexing happens in background
+        // Build the best data we can from both sources
+        const name = tokenInfo?.name || marketData?.name || null;
+        const symbol = tokenInfo?.symbol || marketData?.symbol || null;
+        const image = tokenInfo?.image || marketData?.image || null;
+        const decimals = tokenInfo?.decimals || 9;
+        const priceUsd = tokenInfo?.priceUsd || marketData?.priceUsd || 0;
+        const marketCap = marketData?.marketCap || marketData?.mcap || 0;
+        const liquidity = marketData?.liquidity || 0;
+        const volume24h = marketData?.volume24h || 0;
+
+        // Only insert if we have at least some identifying data
+        const hasData = name || priceUsd > 0;
+
+        if (hasData) {
+            // Insert with whatever data we have - use special "loading" indicators for missing fields
             await db.run(`
-                INSERT INTO tokens (mint, name, symbol, priceUsd, marketCap, liquidity, volume24h, timestamp, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+                INSERT INTO tokens (mint, name, symbol, image, decimals, priceUsd, marketCap, liquidity, volume24h, timestamp, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
                 ON CONFLICT(mint) DO UPDATE SET
-                    priceUsd = CASE WHEN COALESCE(tokens.priceUsd, 0) = 0 THEN EXCLUDED.priceUsd ELSE tokens.priceUsd END,
-                    marketCap = CASE WHEN COALESCE(tokens.marketCap, 0) = 0 THEN EXCLUDED.marketCap ELSE tokens.marketCap END,
-                    liquidity = CASE WHEN COALESCE(tokens.liquidity, 0) = 0 THEN EXCLUDED.liquidity ELSE tokens.liquidity END,
-                    volume24h = CASE WHEN COALESCE(tokens.volume24h, 0) = 0 THEN EXCLUDED.volume24h ELSE tokens.volume24h END,
+                    name = CASE WHEN tokens.name IS NULL OR tokens.name IN ('Unknown', 'Loading...') THEN EXCLUDED.name ELSE tokens.name END,
+                    symbol = CASE WHEN tokens.symbol IS NULL OR tokens.symbol IN ('UNK', '...') THEN EXCLUDED.symbol ELSE tokens.symbol END,
+                    image = CASE WHEN tokens.image IS NULL OR tokens.image = '' THEN EXCLUDED.image ELSE tokens.image END,
+                    decimals = COALESCE(tokens.decimals, EXCLUDED.decimals),
+                    priceUsd = CASE WHEN COALESCE(tokens.priceUsd, 0) = 0 AND EXCLUDED.priceUsd > 0 THEN EXCLUDED.priceUsd ELSE tokens.priceUsd END,
+                    marketCap = CASE WHEN COALESCE(tokens.marketCap, 0) = 0 AND EXCLUDED.marketCap > 0 THEN EXCLUDED.marketCap ELSE tokens.marketCap END,
+                    liquidity = CASE WHEN COALESCE(tokens.liquidity, 0) = 0 AND EXCLUDED.liquidity > 0 THEN EXCLUDED.liquidity ELSE tokens.liquidity END,
+                    volume24h = CASE WHEN COALESCE(tokens.volume24h, 0) = 0 AND EXCLUDED.volume24h > 0 THEN EXCLUDED.volume24h ELSE tokens.volume24h END,
                     updated_at = NOW()
             `, [
                 mint,
-                marketData.name || 'Loading...',
-                marketData.symbol || '...',
-                marketData.priceUsd,
-                marketData.mcap || 0,
-                marketData.liquidity || 0,
-                marketData.volume24h || 0,
+                name || 'Loading...',
+                symbol || '...',
+                image,
+                decimals,
+                priceUsd,
+                marketCap,
+                liquidity,
+                volume24h,
                 Date.now()
             ]);
+
+            logger.info(`⚡ [AsyncIndex] Quick-indexed ${symbol || mint.slice(0, 8)} (price: $${priceUsd.toFixed(6)})`);
         }
 
-        // Queue for full background indexing (metadata, pools, supply, etc.)
+        // Queue for full background indexing (pools, supply, security checks, etc.)
         await enqueueTokenUpdate(mint);
-        logger.info(`📥 [AsyncIndex] Queued ${mint.slice(0, 8)} for background indexing`);
+        logger.info(`📥 [AsyncIndex] Queued ${mint.slice(0, 8)} for full background indexing`);
 
-        return { queued: true, status: 'queued' };
+        // Return token data for immediate display
+        return {
+            queued: true,
+            status: hasData ? 'indexed' : 'queued',
+            token: hasData ? {
+                mint,
+                name: name || 'Loading...',
+                symbol: symbol || '...',
+                image,
+                priceUsd,
+                marketCap,
+                liquidity,
+                volume24h,
+                isLoading: !name || priceUsd === 0 // Flag for frontend
+            } : null
+        };
     } catch (e) {
         logger.error(`❌ [AsyncIndex] Failed to queue ${mint}: ${e.message}`);
         return { queued: false, status: 'error', error: e.message };
