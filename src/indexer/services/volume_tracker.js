@@ -8,7 +8,7 @@ const _logger = require('../../services/logger');
  * or parses SOL transfers if possible.
  */
 async function getRealVolume(poolAddress, lastSignature, solPrice) {
-    const _connection = getSolanaConnection();
+    const connection = getSolanaConnection();
     let volumeUsd = 0;
     let newLatestSignature = lastSignature;
     let txCount = 0;
@@ -18,7 +18,7 @@ async function getRealVolume(poolAddress, lastSignature, solPrice) {
         const options = { limit: 50 };
         if (lastSignature) options.until = lastSignature;
 
-        const signatures = await retryRPC(c => c.getSignaturesForAddress(pubkey, options));
+        const signatures = await retryRPC(() => connection.getSignaturesForAddress(pubkey, options));
         
         if (signatures.length === 0) {
             return { volumeUsd: 0, latestSignature: lastSignature || null, txCount: 0 };
