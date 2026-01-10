@@ -43,15 +43,17 @@ async function initDB() {
                 }
             }
 
-            // SCALABILITY FIX: Increased max connections to 25 for better throughput.
-            // With 3 services (API, Worker, Listener) running, 25 * 3 = 75 connections
-            // which is within standard Render/Postgres limits (usually 100).
+            // SCALABILITY FIX: Reduced max connections to prevent pool exhaustion
+            // With 3 services (API, Worker, Listener) running, 15 * 3 = 45 connections
+            // This leaves 55% headroom on standard 100-connection limit for spikes
+            // RELIABILITY: Added statement_timeout to prevent runaway queries
             primaryPool = new Pool({
                 connectionString: config.DATABASE_URL,
                 ssl: sslConfig,
-                max: 25,
+                max: 15, // Reduced from 25 to prevent pool exhaustion
                 idleTimeoutMillis: 30000,
-                connectionTimeoutMillis: 5000,
+                connectionTimeoutMillis: 10000, // Increased from 5s for high-load tolerance
+                statement_timeout: 30000, // 30s max query time to prevent hangs
                 // FIX: Enable TCP keepalive to prevent "unexpected eof while reading" SSL errors
                 // This keeps idle connections alive and detects dead connections faster
                 keepAlive: true,
@@ -757,6 +759,20 @@ async function initDB() {
                 `CREATE INDEX IF NOT EXISTS idx_node_approvals_node ON node_approvals (node_id)`,
                 // Node approvals by approver (for approval history)
                 `CREATE INDEX IF NOT EXISTS idx_node_approvals_approver ON node_approvals (approved_by)`,
+                // ═══════════════════════════════════════════════════════════
+                // PERFORMANCE: Additional indexes for RPC credit optimization
+                // These indexes speed up common queries and reduce DB load
+                // ═══════════════════════════════════════════════════════════
+                // Holder snapshots by balance (for top holder queries)
+                `CREATE INDEX IF NOT EXISTS idx_holder_snapshots_balance ON holder_snapshots (mint, balance DESC) WHERE balance > 0`,
+                // Supply history for burn tracking
+                `CREATE INDEX IF NOT EXISTS idx_supply_history_mint ON supply_history (mint, timestamp DESC)`,
+                // Token updates by signature (for duplicate detection)
+                `CREATE INDEX IF NOT EXISTS idx_token_updates_signature ON token_updates (signature) WHERE signature IS NOT NULL`,
+                // Wallet credits for API access lookups
+                `CREATE INDEX IF NOT EXISTS idx_wallet_credits_burned ON wallet_credits (total_burned DESC) WHERE total_burned > 0`,
+                // Candles for price history queries
+                `CREATE INDEX IF NOT EXISTS idx_candles_pool_time ON candles_1m (pool_address, timestamp DESC)`,
             ];
 
             for (const sql of migrations) {
