@@ -527,17 +527,34 @@ async function searchTokens(query, limit = 10) {
         }
     }
 
-    // Enrich with prices if we have results
+    // Enrich with prices and market data if we have results
     if (results.length > 0) {
         const mints = results.map(r => r.mint);
         const prices = await getJupiterPricesBatch(mints);
 
+        // Fetch market data (volume, liquidity) for first few results
+        // Limit to 5 to avoid slowing down search
+        const marketDataPromises = mints.slice(0, 5).map(mint =>
+            fetchInitialMarketData(mint).catch(() => null)
+        );
+        const marketDataResults = await Promise.all(marketDataPromises);
+        const marketDataMap = new Map();
+        mints.slice(0, 5).forEach((mint, i) => {
+            if (marketDataResults[i]) {
+                marketDataMap.set(mint, marketDataResults[i]);
+            }
+        });
+
         results = results.map(token => {
             const price = prices.get(token.mint);
+            const marketData = marketDataMap.get(token.mint);
             return {
                 ...token,
-                priceUsd: price?.priceUsd || 0,
-                change24h: price?.change24h || 0
+                priceUsd: price?.priceUsd || marketData?.priceUsd || 0,
+                change24h: price?.change24h || marketData?.change24h || 0,
+                volume24h: marketData?.volume24h || 0,
+                marketCap: marketData?.marketCap || 0,
+                liquidity: marketData?.liquidity || 0
             };
         });
     }

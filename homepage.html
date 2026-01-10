@@ -2388,7 +2388,9 @@
         if(!tbody) return;
 
         let displayTokens = tokens;
-        if (isZeroVolHidden) { displayTokens = displayTokens.filter(t => (t.volume24h || 0) > 0); }
+        // Don't filter zero-volume tokens when user is actively searching
+        // Newly indexed tokens may not have volume data yet
+        if (isZeroVolHidden && !searchQuery) { displayTokens = displayTokens.filter(t => (t.volume24h || 0) > 0); }
         cachedTokens = displayTokens; // Cache for popover
 
         if (displayTokens.length === 0) {

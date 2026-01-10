@@ -56,15 +56,17 @@ async function searchGeckoTerminal(query, limit = 10) {
         const results = await tokenSearch.searchTokens(query, limit);
         if (results.length > 0) {
             logger.info(`🔍 [TokenSearch] Found ${results.length} results for "${query}" via Jupiter`);
+            // Preserve market data from Jupiter - don't zero it out
+            // This ensures tokens appear in search results even with zero-vol filter
             return results.map(r => ({
                 mint: r.mint,
                 name: r.name,
                 symbol: r.symbol,
                 image: r.image,
                 priceUsd: r.priceUsd || 0,
-                volume24h: 0, // Will be fetched during indexing
-                marketCap: 0, // Will be fetched during indexing
-                liquidity: 0  // Will be fetched during indexing
+                volume24h: r.volume24h || 0,
+                marketCap: r.marketCap || 0,
+                liquidity: r.liquidity || 0
             }));
         }
     } catch (e) {
