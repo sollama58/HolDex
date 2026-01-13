@@ -1,10 +1,14 @@
 const axios = require('axios');
 const logger = require('../services/logger');
-const { broadcastTokenUpdate } = require('../services/socket'); 
+const { broadcastTokenUpdate } = require('../services/socket');
 const { getHolderCountFromRPC } = require('../services/solana');
 const config = require('../config/env');
+const ignitionService = require('../services/ignitionService');
 
 let isRunning = false;
+
+// Ignition check interval (24 hours)
+const IGNITION_CHECK_INTERVAL = 24 * 60 * 60 * 1000;
 
 // OOM FIX: Reduced concurrency to 1 to prevent multiple massive holder arrays (100k+ items) 
 // from existing in memory simultaneously.
@@ -288,6 +292,41 @@ async function processSingleToken(db, t, now) {
             await db.run(finalQuery, finalParams);
         }
 
+        // --- IGNITION INTEGRATION ---
+        // Check if token is registered in Ignition rewards platform
+        // Only check once per day to avoid excessive API calls
+        const ignitionLastCheck = parseInt(t.ignition_last_check || 0);
+        if (ignitionService.isConfigured() && (now - ignitionLastCheck > IGNITION_CHECK_INTERVAL)) {
+            try {
+                const ignitionData = await ignitionService.lookupToken(t.mint);
+                if (ignitionData) {
+                    await db.run(`
+                        UPDATE tokens SET
+                            ignition_registered = $1,
+                            ignition_type = $2,
+                            ignition_fee_share_pct = $3,
+                            ignition_active = $4,
+                            ignition_last_check = $5
+                        WHERE mint = $6
+                    `, [
+                        ignitionData.registered,
+                        ignitionData.type || null,
+                        ignitionData.feeSharePercent || null,
+                        ignitionData.active !== undefined ? ignitionData.active : null,
+                        now,
+                        t.mint
+                    ]);
+
+                    if (ignitionData.registered) {
+                        logger.info(`🔥 [Ignition] ${t.mint.slice(0, 8)} registered as ${ignitionData.type}${ignitionData.feeSharePercent ? ` (${ignitionData.feeSharePercent}% share)` : ''}`);
+                    }
+                }
+            } catch (ignitionErr) {
+                // Non-fatal - don't block metadata updates for Ignition errors
+                logger.debug(`[Ignition] Check failed for ${t.mint.slice(0, 8)}: ${ignitionErr.message}`);
+            }
+        }
+
         // Broadcast (Always broadcast current state)
         if (totalLiquidity > 0) {
             broadcastTokenUpdate(t.mint, {
@@ -322,8 +361,9 @@ async function updateMetadata(deps) {
         // OOM FIX: Reduced LIMIT from 75 to 25 to reduce working set size
         // AGE FIX: Added 'timestamp' to selection to perform comparisons
         // METADATA FIX: Added name, symbol, image to fix placeholder tokens
+        // IGNITION: Added ignition_last_check for rewards platform integration
         let tokens = await db.all(`
-            SELECT mint, name, symbol, image, supply, decimals, holders, last_holder_check, timestamp
+            SELECT mint, name, symbol, image, supply, decimals, holders, last_holder_check, timestamp, ignition_last_check
             FROM tokens
             ORDER BY liquidity DESC, updated_at ASC
             LIMIT 25

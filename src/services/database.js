@@ -604,6 +604,15 @@ async function initDB() {
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_node_signature TEXT DEFAULT NULL`, // Ed25519 signature from the node
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_node_timestamp BIGINT DEFAULT NULL`, // When the node signed
                 `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS sig_node_status TEXT DEFAULT NULL`,    // Node status at time of calculation
+                // ═══════════════════════════════════════════════════════════
+                // IGNITION INTEGRATION: Rewards Sharing Platform
+                // Tracks if token is registered in IGNITION ecosystem
+                // ═══════════════════════════════════════════════════════════
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS ignition_registered BOOLEAN DEFAULT FALSE`, // Is token in Ignition?
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS ignition_type TEXT DEFAULT NULL`,           // 'ignition' or 'robinhood'
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS ignition_fee_share_pct TEXT DEFAULT NULL`,  // Fee share % (robinhood only)
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS ignition_active BOOLEAN DEFAULT NULL`,      // Is fee sharing active?
+                `ALTER TABLE tokens ADD COLUMN IF NOT EXISTS ignition_last_check BIGINT DEFAULT 0`,      // Last Ignition API check
                 // Harmony: Fix operation_costs schema if old version exists
                 // Use DO blocks to safely rename columns only if they exist (prevents errors on fresh DBs)
                 `DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'operation_costs' AND column_name = 'operation') THEN ALTER TABLE operation_costs RENAME COLUMN operation TO operation_type; END IF; END $$`,

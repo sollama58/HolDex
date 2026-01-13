@@ -457,6 +457,51 @@
         }
 
         /* ============================================
+           IGNITION BADGES - Rewards Platform Integration
+           ============================================ */
+        .ignition-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            font-size: 8px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        .ignition-badge-ignition {
+            background: linear-gradient(135deg, rgba(0, 209, 255, 0.2), rgba(0, 209, 255, 0.1));
+            color: #00D1FF;
+            border: 1px solid rgba(0, 209, 255, 0.3);
+            text-shadow: 0 0 8px rgba(0, 209, 255, 0.5);
+        }
+        .ignition-badge-robinhood {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(16, 185, 129, 0.1));
+            color: #10B981;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            text-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+        }
+        .ignition-badge-robinhood.inactive {
+            background: rgba(107, 114, 128, 0.2);
+            color: #6B7280;
+            border: 1px solid rgba(107, 114, 128, 0.3);
+            text-shadow: none;
+        }
+        .ignition-free-upgrade {
+            background: linear-gradient(135deg, rgba(0, 209, 255, 0.15), rgba(16, 185, 129, 0.15));
+            border: 1px solid rgba(0, 209, 255, 0.3);
+            border-radius: 12px;
+            padding: 12px 16px;
+        }
+        .ignition-free-upgrade-title {
+            color: #00D1FF;
+            font-weight: 700;
+            font-size: 14px;
+        }
+
+        /* ============================================
            GLASSMORPHISM MODAL
            ============================================ */
         .modal-overlay {
@@ -1103,6 +1148,18 @@
                 <button onclick="openWalletModal()" class="mt-3 text-xs bg-[#ea580c] text-white px-3 py-2 rounded font-bold">Connect Now</button>
             </div>
             
+            <!-- Ignition Free Upgrade Banner -->
+            <div id="ignition-free-upgrade-banner" class="hidden mb-6 ignition-free-upgrade">
+                <div class="flex items-center gap-3">
+                    <div class="text-2xl">🔥</div>
+                    <div class="flex-1">
+                        <div class="ignition-free-upgrade-title">Free Community Upgrade!</div>
+                        <div class="text-xs text-[#94a3b8]" id="ignition-upgrade-message">This token is registered in the Ignition ecosystem.</div>
+                    </div>
+                    <div id="ignition-badge-display"></div>
+                </div>
+            </div>
+
             <div id="fee-panel" class="hidden mb-6 p-4 border border-[#252525] rounded bg-[#000000]">
                  <div class="text-[#737373] text-xs uppercase font-bold mb-3 border-b border-[#252525] pb-2 flex justify-between">
                      <span>Protocol Fees</span>
@@ -1413,6 +1470,11 @@
                                 <i data-lucide="copy" width="12" class="text-[#737373] cursor-pointer" onclick="copyMint()"></i>
                             </div>
                             
+                            <!-- Ignition Badge (Rewards Sharing Platform) -->
+                            <div id="detail-ignition-badge" class="mt-1 hidden">
+                                <!-- Populated dynamically: IGNITION or ROBINHOOD badge -->
+                            </div>
+
                             <!-- New Badge Section -->
                             <div id="badge-container" class="mt-2">
                                 <!-- Populated dynamically: Verified Badge OR Lock Warning -->
@@ -2102,6 +2164,10 @@
     let userSolBalance = 0;
     let userTokenBalance = 0;
 
+    // Ignition Integration - Free Upgrades
+    let ignitionEligible = false;
+    let ignitionData = null;
+
     // Native tokens - Infrastructure, not rated
     // "K-Score is for the jungle. SOL and USDC are the roads. We don't rate roads."
     const NATIVE_TOKENS = new Set([
@@ -2551,6 +2617,13 @@
             const displayName = t.name === 'Loading...' || !t.name ? '<span class="animate-pulse">Loading...</span>' : t.name;
             const safeName = t.name === 'Loading...' || !t.name ? displayName : escapeHtml(t.name);
 
+            // Ignition badge rendering
+            const ignitionBadge = t.ignition?.registered ? (
+                t.ignition.type === 'ignition'
+                    ? '<span class="ignition-badge ignition-badge-ignition" title="Launched via IGNITION Platform">🔥 IGNITION</span>'
+                    : `<span class="ignition-badge ignition-badge-robinhood ${t.ignition.active === false ? 'inactive' : ''}" title="Robinhood Partner${t.ignition.feeSharePercent ? ` (${t.ignition.feeSharePercent}% share)` : ''}">${t.ignition.active === false ? '⏸' : '🤝'} ${t.ignition.feeSharePercent || ''}%</span>`
+            ) : '';
+
             return `
             <tr onclick="navigateTo('token/${safeMint}')" data-token-idx="${idx}" class="cursor-pointer group border-b border-[#252525]/30">
                 <td class="bg-[#0a0a0a]">
@@ -2560,6 +2633,7 @@
                             <div class="flex items-center gap-1">
                                 <span class="font-bold text-white text-xs truncate font-sans">${safeTicker}</span>
                                 ${isVerified ? '<i data-lucide="shield-check" width="12" class="text-green-500 fill-green-500/20"></i>' : ''}
+                                ${ignitionBadge}
                             </div>
                             <span class="text-[10px] text-[#737373] truncate max-w-[80px]">${safeName}</span>
                         </div>
@@ -2681,6 +2755,22 @@
                 const nameEl = document.getElementById('detail-name');
                 if (tickerEl) tickerEl.innerText = ticker;
                 if (nameEl) nameEl.innerText = t.name || 'Unknown';
+
+                // --- IGNITION BADGE DISPLAY ---
+                const ignitionBadgeEl = document.getElementById('detail-ignition-badge');
+                if (ignitionBadgeEl) {
+                    if (t.ignition?.registered) {
+                        if (t.ignition.type === 'ignition') {
+                            ignitionBadgeEl.innerHTML = '<span class="ignition-badge ignition-badge-ignition" title="Launched via IGNITION Platform">🔥 IGNITION</span>';
+                        } else {
+                            const isActive = t.ignition.active !== false;
+                            ignitionBadgeEl.innerHTML = `<span class="ignition-badge ignition-badge-robinhood ${!isActive ? 'inactive' : ''}" title="Robinhood Partner - ${t.ignition.feeSharePercent || 0}% fee share">${isActive ? '🤝' : '⏸'} ROBINHOOD ${t.ignition.feeSharePercent || 0}%</span>`;
+                        }
+                        ignitionBadgeEl.classList.remove('hidden');
+                    } else {
+                        ignitionBadgeEl.classList.add('hidden');
+                    }
+                }
 
                 const price = t.priceUsd || 0;
                 const priceEl = document.getElementById('stat-price');
@@ -3278,6 +3368,11 @@
         document.getElementById('update-banner').value = '';
         currentUpdateTokenData = null;
 
+        // Reset Ignition state
+        ignitionEligible = false;
+        ignitionData = null;
+        document.getElementById('ignition-free-upgrade-banner').classList.add('hidden');
+
         try {
             const res = await fetch(`${API_URL}/api/token/${mint}/public`);
             const data = await res.json();
@@ -3370,6 +3465,18 @@
                     charCount.innerText = (t.description || '').length;
                 }
 
+                // --- IGNITION ELIGIBILITY CHECK ---
+                // Check if token is registered in Ignition for free upgrade
+                if (t.ignition?.registered) {
+                    // Token data already includes Ignition info from backend
+                    ignitionEligible = true;
+                    ignitionData = t.ignition;
+                    showIgnitionFreeUpgrade(t.ignition);
+                } else {
+                    // Check Ignition API separately if not cached
+                    checkIgnitionEligibility(mint);
+                }
+
                 lucide.createIcons();
                 checkSubmitEligibility();
             } else {
@@ -3386,6 +3493,44 @@
         }
     };
     
+    // --- IGNITION HELPER FUNCTIONS ---
+    async function checkIgnitionEligibility(mint) {
+        try {
+            const res = await fetch(`${API_URL}/api/ignition/check/${mint}`);
+            const data = await res.json();
+            if (data.success && data.eligible) {
+                ignitionEligible = true;
+                ignitionData = data.ignition;
+                showIgnitionFreeUpgrade(data.ignition);
+                checkSubmitEligibility();
+            }
+        } catch (e) {
+            console.debug('[Ignition] Eligibility check failed:', e.message);
+        }
+    }
+
+    function showIgnitionFreeUpgrade(ignition) {
+        const banner = document.getElementById('ignition-free-upgrade-banner');
+        const message = document.getElementById('ignition-upgrade-message');
+        const badgeDisplay = document.getElementById('ignition-badge-display');
+        const feePanel = document.getElementById('fee-panel');
+
+        if (!banner) return;
+
+        if (ignition.type === 'ignition') {
+            message.innerText = 'This token was launched via IGNITION Platform - community upgrade is FREE!';
+            badgeDisplay.innerHTML = '<span class="ignition-badge ignition-badge-ignition">🔥 IGNITION</span>';
+        } else {
+            const shareText = ignition.feeSharePercent ? ` (${ignition.feeSharePercent}% share)` : '';
+            message.innerText = `This token is a Robinhood partner${shareText} - community upgrade is FREE!`;
+            badgeDisplay.innerHTML = '<span class="ignition-badge ignition-badge-robinhood">🤝 ROBINHOOD</span>';
+        }
+
+        banner.classList.remove('hidden');
+        // Hide fee panel when free upgrade is available
+        if (feePanel) feePanel.classList.add('hidden');
+    }
+
     // FETCH FEES & UPDATE BALANCE CHECK
     async function fetchFees() {
         try {
@@ -3451,13 +3596,27 @@
     function checkSubmitEligibility() {
         const btn = document.getElementById('submit-btn');
         if (!btn) return;
-        
+
+        // If Ignition eligible, enable submit regardless of balance
+        if (ignitionEligible && currentUpdateTokenData) {
+            btn.disabled = false;
+            btn.classList.remove('grayscale', 'opacity-50');
+            btn.innerHTML = "🔥 Submit Free";
+            btn.classList.add('border-[#00D1FF]', 'text-[#00D1FF]');
+            btn.classList.remove('border-[#22c55e]', 'text-[#22c55e]');
+            return;
+        }
+
+        // Reset button styling for paid upgrades
+        btn.classList.remove('border-[#00D1FF]', 'text-[#00D1FF]');
+        btn.classList.add('border-[#22c55e]', 'text-[#22c55e]');
+
         const hasSol = userSolBalance >= feeConfig.solFee;
         const hasTokens = userTokenBalance >= feeConfig.tokenFee;
-        
+
         const solBalEl = document.getElementById('user-sol-balance');
         const tokBalEl = document.getElementById('user-token-balance');
-        
+
         if (solBalEl) solBalEl.style.color = hasSol ? '#22c55e' : '#ef4444';
         if (tokBalEl) tokBalEl.style.color = hasTokens ? '#22c55e' : '#ef4444';
 
@@ -3478,36 +3637,72 @@
         e.preventDefault();
         const statusDiv = document.getElementById('update-status');
         if (!walletAddress || !walletProvider) { alert("Please connect wallet first"); return; }
-        
-        // Final Client-Side Balance Check
-        if (userSolBalance < feeConfig.solFee || userTokenBalance < feeConfig.tokenFee) {
-            alert("Insufficient balance for fees.");
-            return;
-        }
 
         statusDiv.innerText = "Initiating..."; statusDiv.classList.remove('hidden');
+        statusDiv.className = "mt-4 text-center text-sm font-mono text-[#ea580c]";
+
         try {
+            // --- IGNITION FREE UPGRADE PATH ---
+            if (ignitionEligible) {
+                statusDiv.innerText = "🔥 Processing Free Ignition Upgrade...";
+
+                const payload = {
+                    mint: document.getElementById('update-mint').value,
+                    twitter: document.getElementById('update-twitter').value,
+                    website: document.getElementById('update-website').value,
+                    telegram: document.getElementById('update-telegram').value,
+                    banner: document.getElementById('update-banner').value,
+                    description: document.getElementById('update-description').value,
+                    signature: null, // No payment signature needed
+                    userPublicKey: walletAddress,
+                    ctoUser: document.getElementById('update-cto-user').value
+                };
+
+                const res = await fetch(`${API_URL}/api/request-update`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const final = await res.json();
+
+                if (final.success) {
+                    const typeLabel = ignitionData?.type === 'ignition' ? 'IGNITION Platform' : 'Robinhood';
+                    statusDiv.innerText = `🔥 Success! Free upgrade via ${typeLabel}!`;
+                    statusDiv.className = "mt-4 text-center text-sm font-mono text-[#00D1FF]";
+                } else {
+                    throw new Error(final.error);
+                }
+                return;
+            }
+
+            // --- PAID UPGRADE PATH ---
+            // Final Client-Side Balance Check
+            if (userSolBalance < feeConfig.solFee || userTokenBalance < feeConfig.tokenFee) {
+                alert("Insufficient balance for fees.");
+                return;
+            }
+
             const bhRes = await fetch(`${API_URL}/api/proxy/blockhash`);
             const bhData = await bhRes.json();
             if(!bhData.success) throw new Error("Network Busy");
-            
-            const fromPubkey = new solanaWeb3.PublicKey(walletAddress); 
-            const toPubkey = new solanaWeb3.PublicKey(feeConfig.treasury); 
+
+            const fromPubkey = new solanaWeb3.PublicKey(walletAddress);
+            const toPubkey = new solanaWeb3.PublicKey(feeConfig.treasury);
             const tokenMintPubkey = new solanaWeb3.PublicKey(feeConfig.tokenMint);
-            
+
             // Helper for ATA
-            const getATA = async (owner, mint) => { 
-                const [addr] = await solanaWeb3.PublicKey.findProgramAddress([owner.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mint.toBytes()], ASSOCIATED_TOKEN_PROGRAM_ID); 
-                return addr; 
+            const getATA = async (owner, mint) => {
+                const [addr] = await solanaWeb3.PublicKey.findProgramAddress([owner.toBytes(), TOKEN_PROGRAM_ID.toBytes(), mint.toBytes()], ASSOCIATED_TOKEN_PROGRAM_ID);
+                return addr;
             };
             const fromTokenAccount = await getATA(fromPubkey, tokenMintPubkey);
             const toTokenAccount = await getATA(toPubkey, tokenMintPubkey);
 
             const transaction = new solanaWeb3.Transaction();
-            
+
             // 1. SOL Transfer
             transaction.add(solanaWeb3.SystemProgram.transfer({ fromPubkey, toPubkey, lamports: Math.round(feeConfig.solFee * solanaWeb3.LAMPORTS_PER_SOL) }));
-            
+
             // 2. Token Transfer
             const decimals = 6; // Assuming 6 for custom token, ideally fetch from chain but hardcode for now based on known mint
             const rawAmount = BigInt(Math.floor(feeConfig.tokenFee * Math.pow(10, decimals)));
@@ -3515,25 +3710,25 @@
             dataLayout[0] = 3; // Transfer instruction
             let remaining = rawAmount;
             for (let i = 0; i < 8; i++) { dataLayout[i + 1] = Number(remaining & 0xFFn); remaining >>= 8n; }
-            
-            const transferIx = new solanaWeb3.TransactionInstruction({ 
-                keys: [{ pubkey: fromTokenAccount, isSigner: false, isWritable: true }, { pubkey: toTokenAccount, isSigner: false, isWritable: true }, { pubkey: fromPubkey, isSigner: true, isWritable: false }], 
-                programId: TOKEN_PROGRAM_ID, 
-                data: dataLayout 
-            }); 
+
+            const transferIx = new solanaWeb3.TransactionInstruction({
+                keys: [{ pubkey: fromTokenAccount, isSigner: false, isWritable: true }, { pubkey: toTokenAccount, isSigner: false, isWritable: true }, { pubkey: fromPubkey, isSigner: true, isWritable: false }],
+                programId: TOKEN_PROGRAM_ID,
+                data: dataLayout
+            });
             transaction.add(transferIx);
 
-            transaction.recentBlockhash = bhData.blockhash; transaction.feePayer = fromPubkey; 
-            
+            transaction.recentBlockhash = bhData.blockhash; transaction.feePayer = fromPubkey;
+
             statusDiv.innerText = "Please Sign in Wallet...";
             const signedTx = await walletProvider.signTransaction(transaction);
             const base64Tx = window.Buffer.from(signedTx.serialize()).toString('base64');
-            
+
             statusDiv.innerText = "Broadcasting...";
             const sendRes = await fetch(`${API_URL}/api/proxy/send-tx`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ signedTx: base64Tx }) });
             const sendData = await sendRes.json();
             if(!sendData.success) throw new Error("Transaction Failed");
-            
+
             statusDiv.innerText = "Verifying...";
             const payload = {
                 mint: document.getElementById('update-mint').value,

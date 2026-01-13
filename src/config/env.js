@@ -196,5 +196,11 @@ module.exports = {
     ORACLE_RATE_LIMIT: parseInt(process.env.ORACLE_RATE_LIMIT) || 100,
 
     // NODE_ENV: Environment mode
-    NODE_ENV: process.env.NODE_ENV || 'development'
+    NODE_ENV: process.env.NODE_ENV || 'development',
+
+    // --- IGNITION INTEGRATION ---
+    // IGNITION_API_URL: Base URL for Ignition rewards platform API
+    // Set this to enable integration with Ignition airdrop/rewards system
+    // Example: https://your-ignition-backend.com/api
+    IGNITION_API_URL: process.env.IGNITION_API_URL || null
 };

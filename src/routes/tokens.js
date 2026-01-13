@@ -68,6 +68,7 @@ const { addTokenToMasterWebhook } = require('../services/heliusWebhook');
 const verification = require('../services/verificationService');
 const dataVerification = require('../services/dataVerification');
 const nodeService = require('../services/nodeService');
+const ignitionService = require('../services/ignitionService');
 
 // Lazy load canvas-based card generator (avoid build failures on workers without native deps)
 let cardGeneratorModule = null;
@@ -592,6 +593,99 @@ function init(deps) {
         }
     });
 
+    // --- IGNITION ELIGIBILITY CHECK ---
+    // Check if a token qualifies for free community upgrade via Ignition
+    router.get('/ignition/check/:mint', proxyRateLimit, async (req, res) => {
+        const { mint } = req.params;
+
+        if (!mint || !isValidPubkey(mint)) {
+            return res.status(400).json({ success: false, error: "Invalid mint address" });
+        }
+
+        try {
+            // First check cached DB value
+            const tokenRecord = await db.get(
+                'SELECT ignition_registered, ignition_type, ignition_fee_share_pct, ignition_active FROM tokens WHERE mint = $1',
+                [mint]
+            );
+
+            if (tokenRecord?.ignition_registered) {
+                return res.json({
+                    success: true,
+                    eligible: true,
+                    cached: true,
+                    ignition: {
+                        registered: true,
+                        type: tokenRecord.ignition_type,
+                        feeSharePercent: tokenRecord.ignition_fee_share_pct,
+                        active: tokenRecord.ignition_active,
+                        badge: tokenRecord.ignition_type === 'ignition' ? 'IGNITION' : 'ROBINHOOD'
+                    },
+                    message: `Free community upgrade available via Ignition ${tokenRecord.ignition_type === 'ignition' ? 'Platform' : 'Robinhood'} program`
+                });
+            }
+
+            // Check Ignition API if configured
+            if (!ignitionService.isConfigured()) {
+                return res.json({
+                    success: true,
+                    eligible: false,
+                    cached: false,
+                    ignition: null,
+                    message: "Ignition integration not configured"
+                });
+            }
+
+            const ignitionData = await ignitionService.lookupToken(mint);
+
+            if (ignitionData?.registered) {
+                // Cache the result in database
+                await db.run(`
+                    UPDATE tokens SET
+                        ignition_registered = TRUE,
+                        ignition_type = $1,
+                        ignition_fee_share_pct = $2,
+                        ignition_active = $3,
+                        ignition_last_check = $4
+                    WHERE mint = $5
+                `, [
+                    ignitionData.type,
+                    ignitionData.feeSharePercent || null,
+                    ignitionData.active !== undefined ? ignitionData.active : null,
+                    Date.now(),
+                    mint
+                ]);
+
+                return res.json({
+                    success: true,
+                    eligible: true,
+                    cached: false,
+                    ignition: {
+                        registered: true,
+                        type: ignitionData.type,
+                        feeSharePercent: ignitionData.feeSharePercent || null,
+                        active: ignitionData.active,
+                        badge: ignitionData.type === 'ignition' ? 'IGNITION' : 'ROBINHOOD'
+                    },
+                    message: `Free community upgrade available via Ignition ${ignitionData.type === 'ignition' ? 'Platform' : 'Robinhood'} program`
+                });
+            }
+
+            // Not registered in Ignition
+            return res.json({
+                success: true,
+                eligible: false,
+                cached: false,
+                ignition: null,
+                message: "Token not registered in Ignition ecosystem"
+            });
+
+        } catch (e) {
+            logger.error(`[Ignition] Check failed for ${mint.slice(0, 8)}: ${e.message}`);
+            res.status(500).json({ success: false, error: "Ignition check failed" });
+        }
+    });
+
     // SECURITY: Rate limit balance proxy (M2)
     router.get('/proxy/balance/:wallet', proxyRateLimit, async (req, res) => {
         const { wallet } = req.params;
@@ -619,19 +713,62 @@ function init(deps) {
             if (!mint || !isValidPubkey(mint)) {
                 return res.status(400).json({ success: false, error: "Invalid mint address" });
             }
-            
-            try { await verifyPayment(signature, userPublicKey); } catch (payErr) { return res.status(402).json({ success: false, error: payErr.message }); }
-            
+
+            // --- IGNITION FREE UPGRADE ---
+            // Tokens registered in Ignition ecosystem get free community upgrades
+            let isFreeUpgrade = false;
+            let ignitionType = null;
+
+            // First check cached DB value
+            const tokenRecord = await db.get('SELECT ignition_registered, ignition_type FROM tokens WHERE mint = $1', [mint]);
+            if (tokenRecord?.ignition_registered) {
+                isFreeUpgrade = true;
+                ignitionType = tokenRecord.ignition_type;
+            } else if (ignitionService.isConfigured()) {
+                // If not cached, check Ignition API directly
+                const ignitionData = await ignitionService.lookupToken(mint);
+                if (ignitionData?.registered) {
+                    isFreeUpgrade = true;
+                    ignitionType = ignitionData.type;
+                    // Update the database for future requests
+                    await db.run(`
+                        UPDATE tokens SET
+                            ignition_registered = TRUE,
+                            ignition_type = $1,
+                            ignition_fee_share_pct = $2,
+                            ignition_active = $3,
+                            ignition_last_check = $4
+                        WHERE mint = $5
+                    `, [
+                        ignitionData.type,
+                        ignitionData.feeSharePercent || null,
+                        ignitionData.active !== undefined ? ignitionData.active : null,
+                        Date.now(),
+                        mint
+                    ]);
+                    logger.info(`🔥 [Ignition] Free upgrade granted for ${mint.slice(0, 8)} (${ignitionData.type})`);
+                }
+            }
+
+            // Skip payment verification for Ignition-registered tokens
+            if (!isFreeUpgrade) {
+                try { await verifyPayment(signature, userPublicKey); } catch (payErr) { return res.status(402).json({ success: false, error: payErr.message }); }
+            }
+
             let finalDescription = description || "";
             if (ctoUser && typeof ctoUser === 'string' && ctoUser.trim().length > 0) {
                 const cleanUser = ctoUser.replace(/^@/, '').trim();
                 finalDescription += `\n\n(CTO by: @${cleanUser})`;
             }
 
+            // For free upgrades, mark the source
+            const payerInfo = isFreeUpgrade ? `ignition:${ignitionType}` : userPublicKey;
+            const signatureInfo = isFreeUpgrade ? `ignition_free_upgrade:${Date.now()}` : signature;
+
             await db.run(`
                 INSERT INTO token_updates (mint, twitter, website, telegram, banner, description, submittedAt, status, signature, payer)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
-            `, [mint, twitter, website, telegram, banner, finalDescription, Date.now(), signature, userPublicKey]);
+            `, [mint, twitter, website, telegram, banner, finalDescription, Date.now(), signatureInfo, payerInfo]);
 
             // Queue for async indexing (non-blocking)
             try { await asyncIndexToken(mint); } catch (_err) { /* ignore */ }
@@ -645,7 +782,10 @@ function init(deps) {
                 } catch (_) { /* ignore cache errors */ }
             }
 
-            res.json({ success: true, message: "Update queued." });
+            const responseMessage = isFreeUpgrade
+                ? `Update queued (free via Ignition ${ignitionType === 'ignition' ? 'Platform' : 'Robinhood'} program)`
+                : "Update queued.";
+            res.json({ success: true, message: responseMessage, freeUpgrade: isFreeUpgrade, ignitionType });
         } catch (e) {
             logger.error(`[Update] Submission failed for ${mint?.slice(0, 8)}: ${e.message}`);
             res.status(500).json({ success: false, error: "Submission failed" });
@@ -1968,6 +2108,22 @@ function init(deps) {
                 // Supply change tracking
                 tokenData.supplyChange24h = token.supply_change_24h || 0;
                 tokenData.supplyLastCheck = token.supply_last_check || 0;
+
+                // --- IGNITION REWARDS PLATFORM ---
+                // Display if token is registered in Ignition ecosystem
+                if (token.ignition_registered) {
+                    tokenData.ignition = {
+                        registered: true,
+                        type: token.ignition_type, // 'ignition' or 'robinhood'
+                        rewardsSharing: token.ignition_type === 'ignition' || (token.ignition_type === 'robinhood' && token.ignition_active),
+                        feeSharePercent: token.ignition_fee_share_pct || null,
+                        active: token.ignition_active,
+                        badge: token.ignition_type === 'ignition' ? 'IGNITION' : 'ROBINHOOD',
+                        badgeColor: token.ignition_type === 'ignition' ? '#00D1FF' : (token.ignition_active ? '#10B981' : '#6B7280')
+                    };
+                } else {
+                    tokenData.ignition = null;
+                }
 
                 // --- NORMALIZE UPDATED STATUS ---
                 // Force boolean conversion for frontend consistency
