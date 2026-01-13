@@ -597,19 +597,24 @@ function init(deps) {
     // Check if a token qualifies for free community upgrade via Ignition
     router.get('/ignition/check/:mint', proxyRateLimit, async (req, res) => {
         const { mint } = req.params;
+        logger.info(`🔥 [Ignition] Check request for ${mint?.slice(0, 8) || 'undefined'}`);
 
         if (!mint || !isValidPubkey(mint)) {
+            logger.warn(`🔥 [Ignition] Invalid mint address: ${mint}`);
             return res.status(400).json({ success: false, error: "Invalid mint address" });
         }
 
         try {
             // First check cached DB value
+            logger.info(`🔥 [Ignition] Checking DB cache for ${mint.slice(0, 8)}`);
             const tokenRecord = await db.get(
                 'SELECT ignition_registered, ignition_type, ignition_fee_share_pct, ignition_active FROM tokens WHERE mint = $1',
                 [mint]
             );
+            logger.info(`🔥 [Ignition] DB result for ${mint.slice(0, 8)}: ${JSON.stringify(tokenRecord)}`);
 
             if (tokenRecord?.ignition_registered) {
+                logger.info(`🔥 [Ignition] Found cached registration for ${mint.slice(0, 8)} (${tokenRecord.ignition_type})`);
                 return res.json({
                     success: true,
                     eligible: true,
@@ -626,7 +631,11 @@ function init(deps) {
             }
 
             // Check Ignition API if configured
-            if (!ignitionService.isConfigured()) {
+            const isConfigured = ignitionService.isConfigured();
+            logger.info(`🔥 [Ignition] Service configured: ${isConfigured}`);
+
+            if (!isConfigured) {
+                logger.info(`🔥 [Ignition] Service not configured - returning not eligible`);
                 return res.json({
                     success: true,
                     eligible: false,
@@ -636,9 +645,12 @@ function init(deps) {
                 });
             }
 
+            logger.info(`🔥 [Ignition] Calling Ignition API for ${mint.slice(0, 8)}`);
             const ignitionData = await ignitionService.lookupToken(mint);
+            logger.info(`🔥 [Ignition] API response for ${mint.slice(0, 8)}: ${JSON.stringify(ignitionData)}`);
 
             if (ignitionData?.registered) {
+                logger.info(`🔥 [Ignition] Token ${mint.slice(0, 8)} is registered as ${ignitionData.type} - caching to DB`);
                 // Cache the result in database
                 await db.run(`
                     UPDATE tokens SET
@@ -656,6 +668,7 @@ function init(deps) {
                     mint
                 ]);
 
+                logger.info(`🔥 [Ignition] Returning eligible=true for ${mint.slice(0, 8)}`);
                 return res.json({
                     success: true,
                     eligible: true,
@@ -672,6 +685,7 @@ function init(deps) {
             }
 
             // Not registered in Ignition
+            logger.info(`🔥 [Ignition] Token ${mint.slice(0, 8)} is NOT registered in Ignition`);
             return res.json({
                 success: true,
                 eligible: false,
@@ -681,7 +695,8 @@ function init(deps) {
             });
 
         } catch (e) {
-            logger.error(`[Ignition] Check failed for ${mint.slice(0, 8)}: ${e.message}`);
+            logger.error(`🔥 [Ignition] Check FAILED for ${mint.slice(0, 8)}: ${e.message}`);
+            logger.error(`🔥 [Ignition] Stack trace: ${e.stack}`);
             res.status(500).json({ success: false, error: "Ignition check failed" });
         }
     });
@@ -708,9 +723,12 @@ function init(deps) {
     // SECURITY: Rate limit update requests (M2)
     router.post('/request-update', proxyRateLimit, async (req, res) => {
         const { mint, twitter, website, telegram, banner, description, signature, userPublicKey, ctoUser } = req.body;
+        logger.info(`🔥 [Update] Request received for ${mint?.slice(0, 8) || 'undefined'}, signature: ${signature ? 'provided' : 'null'}`);
+
         try {
             // SECURITY: Validate mint address properly
             if (!mint || !isValidPubkey(mint)) {
+                logger.warn(`🔥 [Update] Invalid mint address: ${mint}`);
                 return res.status(400).json({ success: false, error: "Invalid mint address" });
             }
 
@@ -720,13 +738,20 @@ function init(deps) {
             let ignitionType = null;
 
             // First check cached DB value
+            logger.info(`🔥 [Update] Checking Ignition eligibility for ${mint.slice(0, 8)}`);
             const tokenRecord = await db.get('SELECT ignition_registered, ignition_type FROM tokens WHERE mint = $1', [mint]);
+            logger.info(`🔥 [Update] DB record for ${mint.slice(0, 8)}: ${JSON.stringify(tokenRecord)}`);
+
             if (tokenRecord?.ignition_registered) {
+                logger.info(`🔥 [Update] Found cached Ignition registration - granting free upgrade`);
                 isFreeUpgrade = true;
                 ignitionType = tokenRecord.ignition_type;
             } else if (ignitionService.isConfigured()) {
                 // If not cached, check Ignition API directly
+                logger.info(`🔥 [Update] No cached registration, checking Ignition API`);
                 const ignitionData = await ignitionService.lookupToken(mint);
+                logger.info(`🔥 [Update] Ignition API result: ${JSON.stringify(ignitionData)}`);
+
                 if (ignitionData?.registered) {
                     isFreeUpgrade = true;
                     ignitionType = ignitionData.type;
@@ -748,11 +773,18 @@ function init(deps) {
                     ]);
                     logger.info(`🔥 [Ignition] Free upgrade granted for ${mint.slice(0, 8)} (${ignitionData.type})`);
                 }
+            } else {
+                logger.info(`🔥 [Update] Ignition service not configured`);
             }
+
+            logger.info(`🔥 [Update] Final eligibility for ${mint.slice(0, 8)}: isFreeUpgrade=${isFreeUpgrade}, ignitionType=${ignitionType}`);
 
             // Skip payment verification for Ignition-registered tokens
             if (!isFreeUpgrade) {
+                logger.info(`🔥 [Update] Not free - verifying payment for ${mint.slice(0, 8)}`);
                 try { await verifyPayment(signature, userPublicKey); } catch (payErr) { return res.status(402).json({ success: false, error: payErr.message }); }
+            } else {
+                logger.info(`🔥 [Update] FREE upgrade - skipping payment verification for ${mint.slice(0, 8)}`);
             }
 
             let finalDescription = description || "";

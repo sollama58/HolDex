@@ -3467,13 +3467,16 @@
 
                 // --- IGNITION ELIGIBILITY CHECK ---
                 // Check if token is registered in Ignition for free upgrade
+                console.log('[Ignition] Token data from API:', { mint: mint.slice(0, 8), ignition: t.ignition });
                 if (t.ignition?.registered) {
                     // Token data already includes Ignition info from backend
+                    console.log('[Ignition] Found registration in token data:', t.ignition);
                     ignitionEligible = true;
                     ignitionData = t.ignition;
                     showIgnitionFreeUpgrade(t.ignition);
                 } else {
                     // Check Ignition API separately if not cached
+                    console.log('[Ignition] No cached registration, checking API endpoint...');
                     checkIgnitionEligibility(mint);
                 }
 
@@ -3495,27 +3498,41 @@
     
     // --- IGNITION HELPER FUNCTIONS ---
     async function checkIgnitionEligibility(mint) {
+        console.log('[Ignition] checkIgnitionEligibility called for:', mint?.slice(0, 8));
         try {
-            const res = await fetch(`${API_URL}/api/ignition/check/${mint}`);
+            const url = `${API_URL}/api/ignition/check/${mint}`;
+            console.log('[Ignition] Fetching:', url);
+            const res = await fetch(url);
+            console.log('[Ignition] Response status:', res.status);
             const data = await res.json();
+            console.log('[Ignition] API response:', JSON.stringify(data, null, 2));
+
             if (data.success && data.eligible) {
+                console.log('[Ignition] Token IS eligible for free upgrade!', data.ignition);
                 ignitionEligible = true;
                 ignitionData = data.ignition;
                 showIgnitionFreeUpgrade(data.ignition);
                 checkSubmitEligibility();
+            } else {
+                console.log('[Ignition] Token NOT eligible:', data.message);
             }
         } catch (e) {
-            console.debug('[Ignition] Eligibility check failed:', e.message);
+            console.error('[Ignition] Eligibility check FAILED:', e.message, e);
         }
     }
 
     function showIgnitionFreeUpgrade(ignition) {
+        console.log('[Ignition] showIgnitionFreeUpgrade called with:', ignition);
         const banner = document.getElementById('ignition-free-upgrade-banner');
         const message = document.getElementById('ignition-upgrade-message');
         const badgeDisplay = document.getElementById('ignition-badge-display');
         const feePanel = document.getElementById('fee-panel');
 
-        if (!banner) return;
+        if (!banner) {
+            console.error('[Ignition] Banner element not found!');
+            return;
+        }
+        console.log('[Ignition] Banner element found:', banner);
 
         if (ignition.type === 'ignition') {
             message.innerText = 'This token was launched via IGNITION Platform - community upgrade is FREE!';
@@ -3526,9 +3543,14 @@
             badgeDisplay.innerHTML = '<span class="ignition-badge ignition-badge-robinhood">🤝 ROBINHOOD</span>';
         }
 
+        console.log('[Ignition] Showing banner...');
         banner.classList.remove('hidden');
         // Hide fee panel when free upgrade is available
-        if (feePanel) feePanel.classList.add('hidden');
+        if (feePanel) {
+            console.log('[Ignition] Hiding fee panel');
+            feePanel.classList.add('hidden');
+        }
+        console.log('[Ignition] Free upgrade UI updated successfully');
     }
 
     // FETCH FEES & UPDATE BALANCE CHECK
@@ -3597,8 +3619,11 @@
         const btn = document.getElementById('submit-btn');
         if (!btn) return;
 
+        console.log('[Ignition] checkSubmitEligibility called:', { ignitionEligible, hasTokenData: !!currentUpdateTokenData });
+
         // If Ignition eligible, enable submit regardless of balance
         if (ignitionEligible && currentUpdateTokenData) {
+            console.log('[Ignition] Enabling FREE submit button!');
             btn.disabled = false;
             btn.classList.remove('grayscale', 'opacity-50');
             btn.innerHTML = "🔥 Submit Free";
@@ -3636,6 +3661,8 @@
     window.submitUpdate = async (e) => {
         e.preventDefault();
         const statusDiv = document.getElementById('update-status');
+        console.log('[Ignition] submitUpdate called, ignitionEligible:', ignitionEligible, 'ignitionData:', ignitionData);
+
         if (!walletAddress || !walletProvider) { alert("Please connect wallet first"); return; }
 
         statusDiv.innerText = "Initiating..."; statusDiv.classList.remove('hidden');
@@ -3644,6 +3671,7 @@
         try {
             // --- IGNITION FREE UPGRADE PATH ---
             if (ignitionEligible) {
+                console.log('[Ignition] Taking FREE upgrade path');
                 statusDiv.innerText = "🔥 Processing Free Ignition Upgrade...";
 
                 const payload = {
@@ -3657,6 +3685,7 @@
                     userPublicKey: walletAddress,
                     ctoUser: document.getElementById('update-cto-user').value
                 };
+                console.log('[Ignition] Submitting free upgrade payload:', payload);
 
                 const res = await fetch(`${API_URL}/api/request-update`, {
                     method: 'POST',
@@ -3664,15 +3693,20 @@
                     body: JSON.stringify(payload)
                 });
                 const final = await res.json();
+                console.log('[Ignition] Server response:', final);
 
                 if (final.success) {
                     const typeLabel = ignitionData?.type === 'ignition' ? 'IGNITION Platform' : 'Robinhood';
                     statusDiv.innerText = `🔥 Success! Free upgrade via ${typeLabel}!`;
                     statusDiv.className = "mt-4 text-center text-sm font-mono text-[#00D1FF]";
+                    console.log('[Ignition] Free upgrade SUCCESS!');
                 } else {
+                    console.error('[Ignition] Free upgrade FAILED:', final.error);
                     throw new Error(final.error);
                 }
                 return;
+            } else {
+                console.log('[Ignition] Taking PAID upgrade path (ignitionEligible is false)');
             }
 
             // --- PAID UPGRADE PATH ---

@@ -39,17 +39,22 @@ const MEMORY_CACHE_TTL = 60000; // 1 minute
  * @returns {Object} Ignition registration data or null
  */
 async function lookupToken(mint) {
+    logger.info(`🔥 [Ignition] lookupToken called for ${mint?.slice(0, 8) || 'undefined'}`);
+
     if (!IGNITION_API_URL) {
+        logger.info(`🔥 [Ignition] API URL not configured, returning null`);
         return null; // Ignition integration not configured
     }
 
     if (!mint || typeof mint !== 'string' || mint.length < 32) {
+        logger.warn(`🔥 [Ignition] Invalid mint address: ${mint}`);
         return null;
     }
 
     // Check memory cache first
     const memoryCached = memoryCache.get(mint);
     if (memoryCached && Date.now() - memoryCached.timestamp < MEMORY_CACHE_TTL) {
+        logger.info(`🔥 [Ignition] Memory cache hit for ${mint.slice(0, 8)}: ${JSON.stringify(memoryCached.data)}`);
         return memoryCached.data;
     }
 
@@ -60,6 +65,7 @@ async function lookupToken(mint) {
             const cached = await redis.get(`ignition:${mint}`);
             if (cached) {
                 const data = JSON.parse(cached);
+                logger.info(`🔥 [Ignition] Redis cache hit for ${mint.slice(0, 8)}: ${JSON.stringify(data)}`);
                 memoryCache.set(mint, { data, timestamp: Date.now() });
                 return data;
             }
@@ -67,6 +73,7 @@ async function lookupToken(mint) {
     }
 
     // Fetch from Ignition API
+    logger.info(`🔥 [Ignition] Cache miss - fetching from API: ${IGNITION_API_URL}/token-lookup/${mint}`);
     try {
         const response = await axios.get(
             `${IGNITION_API_URL}/token-lookup/${mint}`,
@@ -74,7 +81,9 @@ async function lookupToken(mint) {
         );
 
         const data = response.data;
+        logger.info(`🔥 [Ignition] API response for ${mint.slice(0, 8)}: ${JSON.stringify(data)}`);
         const result = normalizeIgnitionResponse(data);
+        logger.info(`🔥 [Ignition] Normalized result for ${mint.slice(0, 8)}: ${JSON.stringify(result)}`);
 
         // Cache the result
         if (redis) {
@@ -89,6 +98,7 @@ async function lookupToken(mint) {
     } catch (e) {
         if (e.response?.status === 404) {
             // Token not found - cache negative result
+            logger.info(`🔥 [Ignition] Token ${mint.slice(0, 8)} not found in Ignition (404)`);
             const notFound = { registered: false, type: null, mint };
             if (redis) {
                 try {
@@ -100,11 +110,11 @@ async function lookupToken(mint) {
         }
 
         if (e.response?.status === 429) {
-            logger.warn('[Ignition] Rate limited - backing off');
+            logger.warn('🔥 [Ignition] Rate limited - backing off');
             await new Promise(r => setTimeout(r, 5000));
         }
 
-        logger.debug(`[Ignition] Lookup failed for ${mint.slice(0, 8)}: ${e.message}`);
+        logger.error(`🔥 [Ignition] Lookup FAILED for ${mint.slice(0, 8)}: ${e.message}`);
         return null;
     }
 }
@@ -358,7 +368,9 @@ async function invalidateCache(mint) {
  * @returns {boolean}
  */
 function isConfigured() {
-    return !!IGNITION_API_URL;
+    const configured = !!IGNITION_API_URL;
+    logger.debug(`[Ignition] isConfigured check: ${configured} (URL: ${IGNITION_API_URL ? IGNITION_API_URL.slice(0, 30) + '...' : 'not set'})`);
+    return configured;
 }
 
 // ============================================
