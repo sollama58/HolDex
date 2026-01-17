@@ -135,6 +135,9 @@ async function fetchAccountsForProgram(conn, programId, mintAddress) {
  *
  * OPTIMIZATION: 5-minute Redis cache to reduce RPC calls
  * Saves ~50-100 calls/hour from website traffic
+ *
+ * UPDATED: Now fetches up to 100 pages (100k holders) for accurate counts
+ * Most memecoins have < 50k holders, so this covers 99% of cases
  */
 async function getHolderCountFromRPC(mintAddress) {
     if (!mintAddress) return 0;
@@ -169,9 +172,10 @@ async function getHolderCountFromRPC(mintAddress) {
                 'Authorization': `Bearer ${config.HELIUS_API_KEY}`
             };
 
-            // Paginate through holders (cap at 10 pages = 10k holders for efficiency)
-            // Large tokens (USDT/USDC) have millions - sampling top 10k is sufficient
-            const MAX_PAGES = 10;
+            // Paginate through ALL holders (up to 100 pages = 100k holders)
+            // This ensures accurate counts for most memecoins
+            // Very large tokens (USDT/USDC with millions) will cap at 100k
+            const MAX_PAGES = 100;
             let page = 0;
 
             while (page < MAX_PAGES) {
@@ -202,7 +206,12 @@ async function getHolderCountFromRPC(mintAddress) {
 
                 cursor = data.result.cursor;
                 page++;
-                if (!cursor) break;
+                if (!cursor) break; // No more pages - we have the complete count
+            }
+
+            // Log if we hit the cap (indicates very large token)
+            if (page >= MAX_PAGES && cursor) {
+                logger.info(`[Holders] ${cleanMint.slice(0, 8)}: Hit ${MAX_PAGES * 1000} holder limit (has more)`);
             }
 
             if (count > 0) {

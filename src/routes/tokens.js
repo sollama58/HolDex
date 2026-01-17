@@ -2534,6 +2534,15 @@ function init(deps) {
                 const rank = kScore !== null ? getKRank(kScore, r.mint) : null;
                 const credit = kScore !== null ? getCreditRating(kScore, r.mint) : null;
 
+                // Detect if token is still loading (recently indexed, missing core data)
+                const tokenAge = r.timestamp ? Date.now() - parseInt(r.timestamp, 10) : Infinity;
+                const isNewlyIndexed = tokenAge < 90000; // Less than 90 seconds old
+                const lacksHolders = !r.holders || r.holders === 0;
+                const lacksPrice = !r.priceusd && !r.priceUsd;
+                const lacksMarketCap = !r.marketcap && !r.marketCap;
+                const isLoadingName = !r.name || r.name === 'Loading...' || r.name === 'Unknown';
+                const isLoading = isLoadingName || lacksPrice || (isNewlyIndexed && (lacksHolders || lacksMarketCap));
+
                 return {
                     mint: r.mint,
                     name: r.name,
@@ -2541,6 +2550,8 @@ function init(deps) {
                     // Aliases for frontend compatibility
                     ticker: r.symbol,
                     image: r.image,
+                    // Loading state for frontend
+                    isLoading,
                     // Price fields (both names for compatibility)
                     price: r.priceusd || r.priceUsd || 0,
                     priceUsd: r.priceusd || r.priceUsd || 0,
@@ -2667,10 +2678,28 @@ function init(deps) {
             const isLoadingName = !token.name || token.name === 'Loading...' || token.name === 'Unknown';
             const isLoadingSymbol = !token.symbol || token.symbol === '...' || token.symbol === 'UNK';
             const isLoadingPrice = !token.priceusd || parseFloat(token.priceusd) === 0;
-            // Check if token was just indexed (within last 30 seconds) and lacks full data
+
+            // Check if token was just indexed and still lacks core data
+            // This ensures we show loading screen until full indexing completes
             const tokenAge = token.timestamp ? Date.now() - parseInt(token.timestamp, 10) : Infinity;
-            const isNewlyIndexed = tokenAge < 30000; // Less than 30 seconds old
-            const lacksFullData = !token.image || (!token.holders && token.holders !== 0);
+            const isNewlyIndexed = tokenAge < 90000; // Less than 90 seconds old (allow time for full indexing)
+
+            // Core data that should be present after full indexing:
+            // - holders: From Helius getTokenAccounts
+            // - supply: From on-chain token mint
+            // - decimals: From on-chain token mint
+            // - marketcap: Calculated from price * supply
+            // - pools: At least one pool for chart data
+            const lacksHolders = !token.holders || token.holders === 0;
+            const lacksSupply = !token.supply || token.supply === '0' || token.supply === 0;
+            const lacksDecimals = token.decimals === null || token.decimals === undefined;
+            const lacksMarketCap = !token.marketcap || parseFloat(token.marketcap) === 0;
+            const lacksPools = !pairs || pairs.length === 0;
+            const lacksFullData = lacksHolders || lacksSupply || lacksDecimals || lacksMarketCap || lacksPools;
+
+            // Token is loading if:
+            // 1. Missing basic metadata (name/symbol/price), OR
+            // 2. Newly indexed AND missing core on-chain data (holders/supply/mcap/pools)
             const isLoading = isLoadingName || isLoadingSymbol || isLoadingPrice || (isNewlyIndexed && lacksFullData);
 
             const tokenData = {

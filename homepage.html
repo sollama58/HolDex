@@ -2584,6 +2584,9 @@
             const score = t.kScore || t.k_score || 0;
 
             // Detect loading state (token being indexed)
+            // Check API flag first, then fallback to placeholder detection
+            const lacksHolders = !t.holders || t.holders === 0;
+            const lacksMarketCap = !t.mcap && !t.marketCap && !t.marketcap;
             const isLoading = t.isLoading || t.name === 'Loading...' || t.name === 'Unknown' || (!t.priceusd && !t.priceUsd);
 
             const kScoreDisplay = renderKScore(score, isVerified, t.mint);
@@ -2728,17 +2731,35 @@
                 console.log(`🔍 Verified Status for ${ticker}:`, isVerified, `(Raw: ${rawStatus})`);
 
                 // Detect loading state - token is still being indexed
-                // Trust the API's isLoading flag first, then check for obvious placeholder values
+                // Trust the API's isLoading flag first (it checks for holders/supply/mcap/pools)
+                // Then check for obvious placeholder values as fallback
+                const lacksHolders = !t.holders || t.holders === 0;
+                const lacksMarketCap = !t.mcap && !t.marketCap;
+                const lacksPools = !t.pairs || t.pairs.length === 0;
                 const isLoading = t.isLoading === true || t.name === 'Loading...' || t.name === 'Unknown' || !t.priceUsd || ticker === '...' || ticker === 'UNK';
-                console.log(`🔄 Token loading state: isLoading=${t.isLoading}, name=${t.name}, price=${t.priceUsd}, ticker=${ticker}, result=${isLoading}`);
+                console.log(`🔄 Token loading state: isLoading=${t.isLoading}, name=${t.name}, price=${t.priceUsd}, ticker=${ticker}, holders=${t.holders}, mcap=${t.mcap || t.marketCap}, pools=${t.pairs?.length || 0}, result=${isLoading}`);
 
                 // If token is still loading, show dedicated indexing screen and auto-retry
                 if (isLoading) {
                     if (loadingDiv) {
                         const titleEl = document.getElementById('loading-title');
                         const subtitleEl = document.getElementById('loading-subtitle');
-                        if (titleEl) titleEl.innerHTML = '⏳ New Token Indexing...';
-                        if (subtitleEl) subtitleEl.innerHTML = 'Fetching metadata and market data<br><span class="text-[#525252] text-xs">This usually takes 5-10 seconds</span>';
+                        if (titleEl) titleEl.innerHTML = '⏳ Indexing Token...';
+
+                        // Show what's being fetched based on what's missing
+                        let statusText = 'Fetching on-chain data';
+                        if (!t.name || t.name === 'Loading...' || t.name === 'Unknown') {
+                            statusText = 'Fetching token metadata';
+                        } else if (!t.priceUsd) {
+                            statusText = 'Fetching price data';
+                        } else if (lacksMarketCap) {
+                            statusText = 'Calculating market cap';
+                        } else if (lacksPools) {
+                            statusText = 'Discovering trading pools';
+                        } else if (lacksHolders) {
+                            statusText = 'Analyzing holder distribution';
+                        }
+                        if (subtitleEl) subtitleEl.innerHTML = `${statusText}<br><span class="text-[#525252] text-xs">This usually takes 5-15 seconds</span>`;
                     }
                     // Auto-retry after 2 seconds (only if still on same navigation)
                     console.log('⏳ Token still indexing, will auto-refresh in 2s...');
