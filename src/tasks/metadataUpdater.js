@@ -10,12 +10,17 @@ let isRunning = false;
 // Ignition check interval (24 hours)
 const IGNITION_CHECK_INTERVAL = 24 * 60 * 60 * 1000;
 
-// OOM FIX: Reduced concurrency to 1 to prevent multiple massive holder arrays (100k+ items) 
-// from existing in memory simultaneously.
-const BATCH_SIZE = 1; 
-const BATCH_DELAY_MS = 1000; 
+// GeckoTerminal rate limiting (~30 req/min free tier)
+// With 1 call/token for most tokens, we can process ~28 tokens/min
+let geckoRateLimitedUntil = 0;
+const GECKO_CALL_DELAY_MS = 2200; // ~27 req/min, safely under limit
+
+// ============================================
+// GECKO TERMINAL API
+// ============================================
 
 async function fetchGeckoTerminalData(mintAddress) {
+    if (Date.now() < geckoRateLimitedUntil) return null;
     try {
         const url = `https://api.geckoterminal.com/api/v2/networks/solana/tokens/${mintAddress}/pools?page=1`;
         const response = await axios.get(url, { timeout: 5000 });
@@ -23,30 +28,65 @@ async function fetchGeckoTerminalData(mintAddress) {
         return response.data.data;
     } catch (e) {
         if (e.response && e.response.status === 429) {
-            // logger.warn("⚠️ GeckoTerminal Rate Limit");
-            await new Promise(r => setTimeout(r, 10000)); 
+            const retryAfter = parseInt(e.response.headers['retry-after'] || '10', 10);
+            geckoRateLimitedUntil = Date.now() + (retryAfter + 2) * 1000;
+            logger.debug(`[MetadataUpdater] GeckoTerminal 429 (pools), backing off ${retryAfter}s`);
         }
         return null;
     }
 }
 
 async function fetchTokenDetails(mintAddress) {
+    if (Date.now() < geckoRateLimitedUntil) return null;
     try {
         const url = `https://api.geckoterminal.com/api/v2/networks/solana/tokens/${mintAddress}`;
         const response = await axios.get(url, { timeout: 5000 });
         if (!response.data || !response.data.data) return null;
         return response.data.data;
-    } catch (_e) { return null; }
+    } catch (e) {
+        if (e.response && e.response.status === 429) {
+            const retryAfter = parseInt(e.response.headers['retry-after'] || '10', 10);
+            geckoRateLimitedUntil = Date.now() + (retryAfter + 2) * 1000;
+            logger.debug(`[MetadataUpdater] GeckoTerminal 429 (details), backing off ${retryAfter}s`);
+        }
+        return null;
+    }
 }
+
+// ============================================
+// TOKEN PROCESSING
+// ============================================
 
 async function processSingleToken(db, t, now) {
     try {
-        let poolsData = await fetchGeckoTerminalData(t.mint);
-        let tokenDetails = await fetchTokenDetails(t.mint);
+        // Smart API call selection:
+        // - fetchTokenDetails (1 call): holder count, FDV, metadata — the core value
+        // - fetchGeckoTerminalData (1 call): pool timestamps, pool table upserts
+        //   Only needed when token has no creation timestamp (first-time pool discovery).
+        //   PriceWorker already handles price/volume/liquidity from Jupiter/Raydium.
+        const needsPoolDiscovery = !t.timestamp || parseInt(t.timestamp) === 0;
+
+        let poolsData = null;
+        let tokenDetails = null;
+        let apiCallCount = 0;
+
+        if (needsPoolDiscovery) {
+            // New token: need both calls (parallel)
+            [poolsData, tokenDetails] = await Promise.all([
+                fetchGeckoTerminalData(t.mint),
+                fetchTokenDetails(t.mint)
+            ]);
+            apiCallCount = 2;
+        } else {
+            // Existing token: only need details for holder count + FDV
+            tokenDetails = await fetchTokenDetails(t.mint);
+            apiCallCount = 1;
+        }
+
+        // Track whether we received any API data (for updated_at logic)
+        const gotApiData = poolsData !== null || tokenDetails !== null;
 
         // --- 0. CHECK FOR PLACEHOLDER METADATA AND UPDATE IF POSSIBLE ---
-        // Tokens may be stuck with "New Discovery" or "Unknown" names if metadata
-        // wasn't available when they were first indexed
         const placeholderNames = ['Unknown', 'New Discovery', '', null, undefined];
         const placeholderSymbols = ['UNK', 'UNKNOWN', 'NEW', '', null, undefined];
         const hasPlaceholderName = placeholderNames.includes(t.name);
@@ -59,7 +99,6 @@ async function processSingleToken(db, t, now) {
             const newSymbol = attr.symbol;
             const newImage = attr.image_url;
 
-            // Only update if we have real values from GeckoTerminal
             const hasRealName = newName && !placeholderNames.includes(newName);
             const hasRealSymbol = newSymbol && !placeholderSymbols.includes(newSymbol);
 
@@ -92,13 +131,12 @@ async function processSingleToken(db, t, now) {
             }
         }
 
-        // --- 1. HOLDER COUNT LOGIC (OPTIMIZED) ---
+        // --- 1. HOLDER COUNT LOGIC ---
         let holderCount = t.holders || 0;
         let foundNewData = false;
         let didCheckRpc = false;
 
-        // Strategy A: GeckoTerminal (Free/Cheap)
-        // If Gecko gives us data, we use it and consider it "checked"
+        // Strategy A: GeckoTerminal (free)
         if (tokenDetails && tokenDetails.attributes) {
             if (tokenDetails.attributes.holder_count || tokenDetails.attributes.holders_count) {
                 const geckoHolders = parseInt(tokenDetails.attributes.holder_count || tokenDetails.attributes.holders_count);
@@ -109,26 +147,24 @@ async function processSingleToken(db, t, now) {
             }
         }
 
-        // Strategy B: RPC Direct Check (Expensive - Limited to once per 24h)
-        // MEMORY FIX: Only run this if explicitly enabled in ENV
+        // Strategy B: RPC Direct Check (expensive - limited to once per 24h, env-gated)
         const lastCheck = parseInt(t.last_holder_check || 0);
         const msSinceCheck = now - lastCheck;
         const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
         if (config.ENABLE_RPC_HOLDER_CHECK && !foundNewData && msSinceCheck > ONE_DAY_MS) {
-            // logger.info(`🔍 RPC Holder Scan for ${t.mint} (Last check: ${Math.floor(msSinceCheck / 3600000)}h ago)`);
             try {
                 const rpcHolders = await getHolderCountFromRPC(t.mint);
                 if (rpcHolders > 0) {
                     holderCount = rpcHolders;
                 }
-                didCheckRpc = true; // Mark as checked so we update timestamp
+                didCheckRpc = true;
             } catch (_e) {
-                // Ignore RPC errors, try again next cycle or wait
+                // Ignore RPC errors, try again next cycle
             }
         }
 
-        // --- 2. PREPARE DATA ---
+        // --- 2. POOL DATA (only when pool discovery needed) ---
         let totalVolume24h = 0;
         let totalLiquidity = 0;
         let bestPrice = 0;
@@ -136,15 +172,13 @@ async function processSingleToken(db, t, now) {
         let bestChange1h = null;
         let bestChange5m = null;
         let maxLiquidity = -1;
-        let earliestPoolTime = null; 
+        let earliestPoolTime = null;
 
-        // If pools exist, calculate stats
         if (poolsData && poolsData.length > 0) {
             for (const poolData of poolsData) {
                 const attr = poolData.attributes;
                 const rel = poolData.relationships;
 
-                // --- TRACK AGE ---
                 if (attr.pool_created_at) {
                     const createdAt = new Date(attr.pool_created_at).getTime();
                     if (!earliestPoolTime || createdAt < earliestPoolTime) {
@@ -154,10 +188,10 @@ async function processSingleToken(db, t, now) {
 
                 const address = attr.address;
                 const dexId = rel?.dex?.data?.id || 'unknown';
-                const price = parseFloat(attr.base_token_price_usd || 0);  // Keep decimals for price
-                const liqUsd = Math.floor(parseFloat(attr.reserve_in_usd || 0));  // Integer
-                const vol24h = Math.floor(parseFloat(attr.volume_usd?.h24 || 0));  // Integer
-                
+                const price = parseFloat(attr.base_token_price_usd || 0);
+                const liqUsd = Math.floor(parseFloat(attr.reserve_in_usd || 0));
+                const vol24h = Math.floor(parseFloat(attr.volume_usd?.h24 || 0));
+
                 let tokenA = rel?.base_token?.data?.id || null;
                 let tokenB = rel?.quote_token?.data?.id || null;
 
@@ -165,7 +199,7 @@ async function processSingleToken(db, t, now) {
                 if (tokenB && tokenB.includes('solana_')) tokenB = tokenB.replace('solana_', '');
 
                 if (!tokenA) tokenA = t.mint;
-                if (!tokenB) tokenB = 'So11111111111111111111111111111111111111112'; 
+                if (!tokenB) tokenB = 'So11111111111111111111111111111111111111112';
 
                 totalVolume24h += vol24h;
                 totalLiquidity += liqUsd;
@@ -173,7 +207,7 @@ async function processSingleToken(db, t, now) {
                 if (liqUsd > maxLiquidity) {
                     maxLiquidity = liqUsd;
                     bestPrice = price;
-                    
+
                     const parseChange = (val) => (val !== undefined && val !== null) ? parseFloat(val) : null;
                     bestChange24h = parseChange(attr.price_change_percentage?.h24);
                     bestChange1h = parseChange(attr.price_change_percentage?.h1);
@@ -186,53 +220,50 @@ async function processSingleToken(db, t, now) {
                             address, mint, dex, price_usd, liquidity_usd, volume_24h, created_at, token_a, token_b
                         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                         ON CONFLICT(address) DO UPDATE SET
-                            price_usd = EXCLUDED.price_usd,
-                            liquidity_usd = EXCLUDED.liquidity_usd,
-                            volume_24h = EXCLUDED.volume_24h
+                            price_usd = CASE WHEN EXCLUDED.price_usd > 0 THEN EXCLUDED.price_usd ELSE pools.price_usd END,
+                            liquidity_usd = CASE WHEN EXCLUDED.liquidity_usd > 0 THEN EXCLUDED.liquidity_usd ELSE pools.liquidity_usd END,
+                            volume_24h = CASE WHEN EXCLUDED.volume_24h > 0 THEN EXCLUDED.volume_24h ELSE pools.volume_24h END
                     `, [address, t.mint, dexId, price, liqUsd, vol24h, now, tokenA, tokenB]);
                 } catch (poolErr) {
-                    // Ignore foreign key errors - token may have been deleted
                     if (!poolErr.message.includes('foreign key')) {
                         throw poolErr;
                     }
                 }
             }
         }
-        
+
         // --- 3. MARKET CAP LOGIC ---
         let marketCap = 0;
-        
+
         // A. Try direct FDV from Gecko
         if (tokenDetails && tokenDetails.attributes) {
-            marketCap = Math.floor(parseFloat(tokenDetails.attributes.fdv_usd || tokenDetails.attributes.market_cap_usd || 0));  // Integer
+            marketCap = Math.floor(parseFloat(tokenDetails.attributes.fdv_usd || tokenDetails.attributes.market_cap_usd || 0));
         }
 
-        // B. Fallback: Manual Calculation
+        // B. Fallback: Manual Calculation (only if we had pool data with a price)
         if (marketCap === 0 && bestPrice > 0) {
-            const decimals = t.decimals || 9; 
+            const decimals = t.decimals || 9;
             let rawSupply = parseFloat(t.supply || '0');
-            
+
             if (rawSupply === 0 && tokenDetails?.attributes?.total_supply) {
                 rawSupply = parseFloat(tokenDetails.attributes.total_supply);
             }
-            if (rawSupply === 0) rawSupply = 1000000000 * Math.pow(10, decimals); 
+            if (rawSupply === 0) rawSupply = 1000000000 * Math.pow(10, decimals);
 
             const divisor = Math.pow(10, decimals);
             const supply = rawSupply / divisor;
-            marketCap = Math.floor(supply * bestPrice);  // Integer
+            marketCap = Math.floor(supply * bestPrice);
         }
 
-        // Explicitly clear large objects
+        // Clear large objects
         poolsData = null;
         tokenDetails = null;
 
         // --- 4. CONSTRUCT QUERY ---
-        // FIX: Only update fields that have valid data (> 0), never overwrite good data with null/0
         const finalParams = [];
         const updateParts = [];
         let idx = 1;
 
-        // Only update each field if it has valid data
         if (totalVolume24h > 0) {
             updateParts.push(`volume24h = $${idx++}`); finalParams.push(Math.floor(totalVolume24h));
         }
@@ -246,29 +277,23 @@ async function processSingleToken(db, t, now) {
             updateParts.push(`liquidity = $${idx++}`); finalParams.push(Math.floor(totalLiquidity));
         }
 
-        // Only update change percentages if we have valid price data
         if (bestPrice > 0) {
             if (bestChange24h !== null) { updateParts.push(`change24h = $${idx++}`); finalParams.push(bestChange24h); }
             if (bestChange1h !== null) { updateParts.push(`change1h = $${idx++}`); finalParams.push(bestChange1h); }
             if (bestChange5m !== null) { updateParts.push(`change5m = $${idx++}`); finalParams.push(bestChange5m); }
         }
 
-        // FIX: Only update timestamp if it's missing (0) or if we found an OLDER timestamp (earlier creation).
-        // Never overwrite an old timestamp with a newer one.
         if (earliestPoolTime && earliestPoolTime > 0) {
             const currentTs = parseInt(t.timestamp) || 0;
             if (currentTs === 0 || earliestPoolTime < currentTs) {
                 updateParts.push(`timestamp = $${idx++}`); finalParams.push(earliestPoolTime);
             }
         }
-        
-        // Update Holders if we found new data OR if we performed a valid RPC check
-        // FIX: Only update if holderCount > 0 to avoid overwriting good data with 0
+
         if ((foundNewData || didCheckRpc) && holderCount > 0) {
             updateParts.push(`holders = $${idx++}`);
             finalParams.push(Math.floor(holderCount));
 
-            // Update the check timestamp so we don't spam RPC
             updateParts.push(`last_holder_check = $${idx++}`);
             finalParams.push(now);
 
@@ -279,12 +304,16 @@ async function processSingleToken(db, t, now) {
                 ON CONFLICT(mint, timestamp) DO UPDATE SET count = EXCLUDED.count
             `, [t.mint, Math.floor(holderCount), today]);
         } else if (foundNewData || didCheckRpc) {
-            // Still update the check timestamp even if we got 0, to avoid repeated checks
             updateParts.push(`last_holder_check = $${idx++}`);
             finalParams.push(now);
         }
 
-        updateParts.push(`updated_at = CURRENT_TIMESTAMP`);
+        // Only bump updated_at if we actually received API data.
+        // If Gecko was rate-limited (returned null), leave updated_at alone
+        // so this token stays near the front of the queue for retry.
+        if (gotApiData) {
+            updateParts.push(`updated_at = CURRENT_TIMESTAMP`);
+        }
 
         if (updateParts.length > 0) {
             const finalQuery = `UPDATE tokens SET ${updateParts.join(', ')} WHERE mint = $${idx}`;
@@ -293,8 +322,6 @@ async function processSingleToken(db, t, now) {
         }
 
         // --- IGNITION INTEGRATION ---
-        // Check if token is registered in Ignition rewards platform
-        // Only check once per day to avoid excessive API calls
         const ignitionLastCheck = parseInt(t.ignition_last_check || 0);
         if (ignitionService.isConfigured() && (now - ignitionLastCheck > IGNITION_CHECK_INTERVAL)) {
             try {
@@ -322,12 +349,11 @@ async function processSingleToken(db, t, now) {
                     }
                 }
             } catch (ignitionErr) {
-                // Non-fatal - don't block metadata updates for Ignition errors
                 logger.debug(`[Ignition] Check failed for ${t.mint.slice(0, 8)}: ${ignitionErr.message}`);
             }
         }
 
-        // Broadcast (Always broadcast current state)
+        // Broadcast current state
         if (totalLiquidity > 0) {
             broadcastTokenUpdate(t.mint, {
                 priceUsd: bestPrice,
@@ -339,16 +365,23 @@ async function processSingleToken(db, t, now) {
                 updatedAt: now
             });
         } else if (holderCount > 0) {
-             broadcastTokenUpdate(t.mint, {
+            broadcastTokenUpdate(t.mint, {
                 holders: holderCount,
                 updatedAt: now
             });
         }
 
+        return apiCallCount;
+
     } catch (err) {
         logger.error(`Token Update Failed [${t.mint}]: ${err.message}`);
+        return 0;
     }
 }
+
+// ============================================
+// MAIN CYCLE
+// ============================================
 
 async function updateMetadata(deps) {
     if (isRunning) return;
@@ -357,33 +390,60 @@ async function updateMetadata(deps) {
     const now = Date.now();
 
     try {
-        // Fetch tokens that haven't been updated recently or need holder checks
-        // OOM FIX: Reduced LIMIT from 75 to 25 to reduce working set size
-        // AGE FIX: Added 'timestamp' to selection to perform comparisons
-        // METADATA FIX: Added name, symbol, image to fix placeholder tokens
-        // IGNITION: Added ignition_last_check for rewards platform integration
+        // Tiered token selection:
+        //   Verified tokens (hascommunityupdate): refresh every 2 minutes
+        //   Active tokens (volume > 1000):        refresh every 10 minutes
+        //   All other tokens:                     refresh every 30 minutes
+        //
+        // Verified tokens get priority in ordering so they're always processed first.
+        // With ~28 tokens/min throughput (1 Gecko call per token):
+        //   - 50 verified tokens cycle every ~2-4 min
+        //   - 100 active tokens cycle every ~10-15 min
+        //   - 350 dormant tokens cycle every ~30-45 min
         let tokens = await db.all(`
-            SELECT mint, name, symbol, image, supply, decimals, holders, last_holder_check, timestamp, ignition_last_check
+            SELECT mint, name, symbol, image, supply, decimals, holders,
+                   last_holder_check, timestamp, ignition_last_check
             FROM tokens
-            ORDER BY liquidity DESC, updated_at ASC
-            LIMIT 25
+            WHERE updated_at IS NULL
+               OR (hascommunityupdate = TRUE AND updated_at < NOW() - INTERVAL '2 minutes')
+               OR (COALESCE(volume24h, 0) > 1000 AND updated_at < NOW() - INTERVAL '10 minutes')
+               OR updated_at < NOW() - INTERVAL '30 minutes'
+            ORDER BY
+                CASE WHEN hascommunityupdate = TRUE THEN 0 ELSE 1 END,
+                updated_at ASC NULLS FIRST
+            LIMIT 50
         `);
-        
+
         if (tokens && tokens.length > 0) {
-            // Process serially or in small batches
-            for (let i = 0; i < tokens.length; i += BATCH_SIZE) {
-                const batch = tokens.slice(i, i + BATCH_SIZE);
-                await Promise.all(batch.map(t => processSingleToken(db, t, now)));
-                if (i + BATCH_SIZE < tokens.length) {
-                    await new Promise(r => setTimeout(r, BATCH_DELAY_MS));
+            logger.info(`[MetadataUpdater] Processing ${tokens.length} due tokens`);
+
+            let totalCalls = 0;
+            let processed = 0;
+
+            for (const t of tokens) {
+                // If GeckoTerminal is rate limited, wait for the lockout to expire
+                // rather than burning through tokens with no data
+                if (Date.now() < geckoRateLimitedUntil) {
+                    const waitTime = geckoRateLimitedUntil - Date.now();
+                    logger.debug(`[MetadataUpdater] Rate limited, waiting ${Math.ceil(waitTime / 1000)}s`);
+                    await new Promise(r => setTimeout(r, waitTime));
+                }
+
+                const callsMade = await processSingleToken(db, t, now);
+                totalCalls += callsMade;
+                processed++;
+
+                // Rate limit: delay proportional to API calls made
+                // 1 call → 2.2s, 2 calls → 4.4s, 0 calls (rate limited) → no delay
+                if (callsMade > 0) {
+                    await new Promise(r => setTimeout(r, callsMade * GECKO_CALL_DELAY_MS));
                 }
             }
-        }
-        
-        // OOM FIX: Explicitly nullify the large array to help GC
-        tokens = null;
 
-        // OOM FIX: Manual GC Trigger (if available)
+            logger.info(`[MetadataUpdater] Done: ${processed} tokens, ${totalCalls} API calls`);
+        }
+
+        tokens = null;
         if (global.gc) {
             try { global.gc(); } catch (_e) { /* ignore */ }
         }
@@ -396,7 +456,10 @@ async function updateMetadata(deps) {
 }
 
 function start(deps) {
-    setInterval(() => updateMetadata(deps), 60 * 1000);
+    // Check every 5 seconds for due tokens; isRunning mutex prevents overlap.
+    // Cycles run back-to-back when there are tokens to process, with only
+    // a 5s gap between batches of 50.
+    setInterval(() => updateMetadata(deps), 5000);
     setTimeout(() => updateMetadata(deps), 5000);
 }
 

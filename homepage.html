@@ -980,9 +980,6 @@
                 <button id="filter-verified" onclick="toggleVerifiedFilter()" class="filter-toggle" title="Show only Verified">
                     <i data-lucide="shield-check" width="14"></i> Verified
                 </button>
-                <button id="filter-zerovol" onclick="toggleZeroVolFilter()" class="filter-toggle active" title="Hide 0 Volume">
-                    <i data-lucide="bar-chart-2" width="14"></i> >$0 Vol
-                </button>
                 
                 <!-- LIMIT SELECTOR -->
                 <select id="limit-select" onchange="changeLimit(this.value)" class="limit-select" title="Tokens per page">
@@ -2147,7 +2144,6 @@
     let currentPage = 1;
     let currentLimit = 20; // Correctly initialized
     let isVerifiedFilter = false;
-    let isZeroVolHidden = true; 
     let currentMint = null;
     let walletAddress = null;
     let walletProvider = null; 
@@ -2568,9 +2564,6 @@
         if(!tbody) return;
 
         let displayTokens = tokens;
-        // Don't filter zero-volume tokens when user is actively searching
-        // Newly indexed tokens may not have volume data yet
-        if (isZeroVolHidden && !searchQuery) { displayTokens = displayTokens.filter(t => (t.volume24h || 0) > 0); }
         cachedTokens = displayTokens; // Cache for popover
 
         if (displayTokens.length === 0) {
@@ -3997,7 +3990,6 @@
         fetchList();
     };
     window.toggleVerifiedFilter = () => { isVerifiedFilter=!isVerifiedFilter; document.getElementById('filter-verified').classList.toggle('active'); fetchList(); };
-    window.toggleZeroVolFilter = () => { isZeroVolHidden=!isZeroVolHidden; document.getElementById('filter-zerovol').classList.toggle('active'); fetchList(); };
     window.handleManualRefresh = () => fetchList();
     window.clearSearch = () => {
         const searchInput = document.getElementById('search');

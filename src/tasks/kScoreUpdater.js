@@ -3314,6 +3314,17 @@ async function updateSingleToken(deps, mint) {
             }
         }
 
+        // Calculate mcap from supply × price if price source didn't provide it
+        if ((!marketData.mcap || marketData.mcap <= 0) && marketData.priceUsd > 0) {
+            const decimals = token.decimals || 9;
+            const rawSupply = parseFloat(token.supply || '0');
+            if (rawSupply > 0) {
+                const tokenSupply = rawSupply / Math.pow(10, decimals);
+                marketData.mcap = Math.floor(tokenSupply * marketData.priceUsd);
+                marketData.mcapCalculated = true;
+            }
+        }
+
         // Build complete token object for signing all categories
         const tokenForSigning = {
             mint,
@@ -3449,22 +3460,22 @@ async function updateSingleToken(deps, mint) {
                 sig_origin = $27,
                 sig_full = $28,
                 chaos_nonce = $29,
-                priceusd = $30,
-                marketcap = $31,
-                price_source = $32,
-                price_timestamp = $33,
-                price_pool = $34,
-                mcap_calculated = $35,
-                liquidity = $36,
-                liquidity_source = $37,
-                liquidity_timestamp = $38,
+                priceusd = CASE WHEN $30::numeric > 0 THEN $30 ELSE priceusd END,
+                marketcap = CASE WHEN $31::numeric > 0 THEN $31 ELSE marketcap END,
+                price_source = CASE WHEN $30::numeric > 0 THEN $32 ELSE price_source END,
+                price_timestamp = CASE WHEN $30::numeric > 0 THEN $33 ELSE price_timestamp END,
+                price_pool = CASE WHEN $30::numeric > 0 THEN COALESCE($34, price_pool) ELSE price_pool END,
+                mcap_calculated = CASE WHEN $31::numeric > 0 THEN $35 ELSE mcap_calculated END,
+                liquidity = CASE WHEN $36::numeric > 0 THEN $36 ELSE liquidity END,
+                liquidity_source = CASE WHEN $36::numeric > 0 THEN $37 ELSE liquidity_source END,
+                liquidity_timestamp = CASE WHEN $36::numeric > 0 THEN $38 ELSE liquidity_timestamp END,
                 holders_source = $39,
                 holders_timestamp = $40,
                 age_days = $41,
                 supply_last_check = $42,
-                volume24h = $43,
-                change24h = $44,
-                change1h = $45,
+                volume24h = CASE WHEN $43::numeric > 0 THEN $43 ELSE volume24h END,
+                change24h = CASE WHEN $30::numeric > 0 THEN COALESCE($44, change24h) ELSE change24h END,
+                change1h = CASE WHEN $30::numeric > 0 THEN COALESCE($45, change1h) ELSE change1h END,
                 sig_node_id = $46,
                 sig_node_signature = $47,
                 sig_node_timestamp = $48,
@@ -3725,7 +3736,8 @@ async function processTokenKScore(t, db, broadcast) {
         reducers: safeInt(conviction.reducers, analyzedCount),
         extractors: safeInt(conviction.extractors, analyzedCount),
         analyzed: analyzedCount,
-        realHoldersCount: safeInt(conviction.realHoldersCount, 10000000)
+        realHoldersCount: safeInt(conviction.realHoldersCount, 10000000),
+        totalHolders: safeInt(conviction.totalHolders, 10000000)
     };
 
     // Generate 8-category signatures (Don't Trust, Verify)
@@ -3775,6 +3787,17 @@ async function processTokenKScore(t, db, broadcast) {
             }
         } catch (_e) {
             logger.debug(`[Market] ${t.mint.slice(0,8)}: Price fetch failed, using cached`);
+        }
+    }
+
+    // Calculate mcap from supply × price if price source didn't provide it
+    if ((!marketData.mcap || marketData.mcap <= 0) && marketData.priceUsd > 0) {
+        const decimals = t.decimals || 9;
+        const rawSupply = parseFloat(t.supply || '0');
+        if (rawSupply > 0) {
+            const tokenSupply = rawSupply / Math.pow(10, decimals);
+            marketData.mcap = Math.floor(tokenSupply * marketData.priceUsd);
+            marketData.mcapCalculated = true;
         }
     }
 
@@ -3869,45 +3892,47 @@ async function processTokenKScore(t, db, broadcast) {
             conviction_extractors = $7,
             conviction_analyzed = $8,
             holders = $9,
-            last_holder_check = $10,
-            burned_amount = $11,
-            burned_percent = $12,
-            initial_supply = $13,
-            is_pump_fun = $14,
-            bonding_curve_complete = $15,
-            mint_authority_revoked = $16,
-            freeze_authority_revoked = $17,
-            is_mutable_supply = $18,
-            sig_identity = $19,
-            sig_security = $20,
-            sig_lp = $21,
-            sig_supply = $22,
-            sig_kscore = $23,
-            sig_market = $24,
-            sig_origin = $25,
-            sig_full = $26,
-            chaos_nonce = $27,
-            priceusd = $28,
-            marketcap = $29,
-            price_source = $30,
-            price_timestamp = $31,
-            price_pool = $32,
-            mcap_calculated = $33,
-            liquidity = $34,
-            liquidity_source = $35,
-            liquidity_timestamp = $36,
-            holders_source = $37,
-            holders_timestamp = $38,
-            age_days = $39,
-            supply_last_check = $40,
-            volume24h = $41,
-            change24h = $42,
-            change1h = $43,
-            sig_node_id = $44,
-            sig_node_signature = $45,
-            sig_node_timestamp = $46,
-            sig_node_status = $47
-        WHERE mint = $48
+            real_holders = $10,
+            total_holders = $11,
+            last_holder_check = $12,
+            burned_amount = $13,
+            burned_percent = $14,
+            initial_supply = $15,
+            is_pump_fun = $16,
+            bonding_curve_complete = $17,
+            mint_authority_revoked = $18,
+            freeze_authority_revoked = $19,
+            is_mutable_supply = $20,
+            sig_identity = $21,
+            sig_security = $22,
+            sig_lp = $23,
+            sig_supply = $24,
+            sig_kscore = $25,
+            sig_market = $26,
+            sig_origin = $27,
+            sig_full = $28,
+            chaos_nonce = $29,
+            priceusd = CASE WHEN $30::numeric > 0 THEN $30 ELSE priceusd END,
+            marketcap = CASE WHEN $31::numeric > 0 THEN $31 ELSE marketcap END,
+            price_source = CASE WHEN $30::numeric > 0 THEN $32 ELSE price_source END,
+            price_timestamp = CASE WHEN $30::numeric > 0 THEN $33 ELSE price_timestamp END,
+            price_pool = CASE WHEN $30::numeric > 0 THEN COALESCE($34, price_pool) ELSE price_pool END,
+            mcap_calculated = CASE WHEN $31::numeric > 0 THEN $35 ELSE mcap_calculated END,
+            liquidity = CASE WHEN $36::numeric > 0 THEN $36 ELSE liquidity END,
+            liquidity_source = CASE WHEN $36::numeric > 0 THEN $37 ELSE liquidity_source END,
+            liquidity_timestamp = CASE WHEN $36::numeric > 0 THEN $38 ELSE liquidity_timestamp END,
+            holders_source = $39,
+            holders_timestamp = $40,
+            age_days = $41,
+            supply_last_check = $42,
+            volume24h = CASE WHEN $43::numeric > 0 THEN $43 ELSE volume24h END,
+            change24h = CASE WHEN $30::numeric > 0 THEN COALESCE($44, change24h) ELSE change24h END,
+            change1h = CASE WHEN $30::numeric > 0 THEN COALESCE($45, change1h) ELSE change1h END,
+            sig_node_id = $46,
+            sig_node_signature = $47,
+            sig_node_timestamp = $48,
+            sig_node_status = $49
+        WHERE mint = $50
     `, [
         smoothedScore,
         updateTimestamp.toString(),
@@ -3918,6 +3943,8 @@ async function processTokenKScore(t, db, broadcast) {
         validatedConviction.extractors,
         validatedConviction.analyzed,
         validatedConviction.realHoldersCount,
+        validatedConviction.realHoldersCount,
+        validatedConviction.totalHolders,
         updateTimestamp.toString(),
         safeFloat(burnedAmount),
         safeFloat(burn.burnPct, 100),
